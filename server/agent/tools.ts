@@ -1,0 +1,217 @@
+import { getProvider } from "../providers/index.js";
+import {
+  routedCancelled,
+  routedLiveStatus,
+  routedPnr,
+  routedSchedule,
+  routedStationSearch,
+  routedTrainInfo,
+  getLastRailwayLog,
+} from "../railway/router.js";
+import { getWallet } from "../wallet.js";
+import type { ClassCode } from "../providers/types.js";
+import { isForbiddenMoneyTool } from "./context.js";
+
+export type ToolName =
+  | "searchStations"
+  | "searchTrains"
+  | "getTrainInfo"
+  | "getTimetable"
+  | "getLiveStatus"
+  | "getAvailability"
+  | "getFare"
+  | "getCancelledTrains"
+  | "checkPNR"
+  | "getMyBookings"
+  | "getWallet";
+
+export type ToolResult = {
+  ok: boolean;
+  tool: ToolName;
+  summary: string;
+  data: unknown;
+  provider: string | null;
+};
+
+function providerOf(): string | null {
+  return getLastRailwayLog()?.railwayProvider ?? null;
+}
+
+export async function executeTool(
+  tool: ToolName,
+  args: {
+    query?: string;
+    origin?: string;
+    destination?: string;
+    date?: string;
+    trainNumber?: string;
+    classCode?: string;
+    passengers?: number;
+    pnr?: string;
+  },
+): Promise<ToolResult> {
+  if (isForbiddenMoneyTool(tool)) {
+    return {
+      ok: false,
+      tool: tool as ToolName,
+      summary: "Wallet/booking AI se nahi ho sakti. Confirm & Book button use karo.",
+      data: null,
+      provider: null,
+    };
+  }
+  try {
+    if (tool === "searchStations") {
+      const q = (args.query ?? "").trim();
+      if (!q) return { ok: false, tool, summary: "Station naam chahiye.", data: null, provider: null };
+      const res = await routedStationSearch(q);
+      return {
+        ok: res.stations.length > 0,
+        tool,
+        summary: res.needChoice
+          ? `${res.city ?? q} mein ${res.stations.length} stations.`
+          : res.stations[0]
+            ? `${res.stations[0].name} (${res.stations[0].code})`
+            : "Station nahi mila.",
+        data: res,
+        provider: res.provider,
+      };
+    }
+    if (tool === "searchTrains") {
+      if (!args.origin || !args.destination || !args.date) {
+        return { ok: false, tool, summary: "Origin, destination aur date chahiye.", data: null, provider: null };
+      }
+      const trains = await getProvider().searchTrains({
+        from: args.origin,
+        to: args.destination,
+        date: args.date,
+      });
+      return {
+        ok: trains.length > 0,
+        tool,
+        summary: trains.length ? `${trains.length} trains mili.` : "Is date pe trains nahi mili.",
+        data: { trains: trains.slice(0, 12).map((t) => ({ number: t.number, name: t.name, departure: t.departure, arrival: t.arrival })) },
+        provider: providerOf(),
+      };
+    }
+    if (tool === "getLiveStatus") {
+      if (!args.trainNumber) return { ok: false, tool, summary: "Train number chahiye.", data: null, provider: null };
+      const routed = await routedLiveStatus(args.trainNumber, args.date);
+      if (!routed.live) {
+        return { ok: false, tool, summary: "Live status unavailable.", data: null, provider: routed.provider };
+      }
+      const live = routed.live as { trainNumber?: string; trainName?: string; status?: string; currentStation?: string | null; nextStation?: string | null; delayMinutes?: number | null };
+      const delay = live.delayMinutes != null ? `, delay ${live.delayMinutes} min` : "";
+      return {
+        ok: true,
+        tool,
+        summary: `${live.trainNumber ?? args.trainNumber} ${live.trainName ?? ""} — ${live.status ?? "status nahi"}${live.currentStation ? `, last ${live.currentStation}` : ""}${delay}`.trim(),
+        data: live,
+        provider: routed.provider,
+      };
+    }
+    if (tool === "getTimetable" || tool === "getTrainInfo") {
+      if (!args.trainNumber) return { ok: false, tool, summary: "Train number chahiye.", data: null, provider: null };
+      if (tool === "getTrainInfo") {
+        const info = await routedTrainInfo(args.trainNumber);
+        return {
+          ok: Boolean(info.info),
+          tool,
+          summary: info.info ? `${info.info.trainNumber} ${info.info.trainName}` : "Train info nahi mili.",
+          data: info.info,
+          provider: info.provider,
+        };
+      }
+      const routed = await routedSchedule(args.trainNumber);
+      const stops = routed.schedule && "stops" in routed.schedule ? routed.schedule.stops ?? [] : [];
+      const name = routed.schedule && "trainName" in routed.schedule ? routed.schedule.trainName : "";
+      return {
+        ok: Boolean(routed.schedule),
+        tool,
+        summary: routed.schedule ? `${args.trainNumber} ${name} — ${stops.length} stops.` : "Timetable nahi mili.",
+        data: routed.schedule,
+        provider: routed.provider,
+      };
+    }
+    if (tool === "getAvailability") {
+      if (!args.trainNumber || !args.date || !args.origin || !args.destination || !args.classCode) {
+        return { ok: false, tool, summary: "Train, date, stations aur class chahiye.", data: null, provider: null };
+      }
+      const row = await getProvider().getAvailability(
+        args.trainNumber,
+        args.date,
+        args.origin,
+        args.destination,
+        args.classCode as ClassCode,
+      );
+      if (row.status === "UNKNOWN") {
+        return { ok: false, tool, summary: "Availability unavailable.", data: row, provider: providerOf() };
+      }
+      return {
+        ok: true,
+        tool,
+        summary: `${args.trainNumber} ${args.classCode}: ${row.status}${row.seats != null ? ` · ${row.seats} seats` : ""}${row.fare > 0 ? ` · ₹${row.fare}` : ""}`,
+        data: row,
+        provider: providerOf(),
+      };
+    }
+    if (tool === "getFare") {
+      if (!args.trainNumber || !args.date || !args.origin || !args.destination || !args.classCode) {
+        return { ok: false, tool, summary: "Train, date, stations aur class chahiye.", data: null, provider: null };
+      }
+      const fare = await getProvider().getFare(
+        args.trainNumber,
+        args.date,
+        args.origin,
+        args.destination,
+        args.classCode as ClassCode,
+        args.passengers ?? 1,
+      );
+      if (!fare.railwayAvailable && fare.baseFare <= 0) {
+        return { ok: false, tool, summary: "Fare unavailable.", data: fare, provider: providerOf() };
+      }
+      return {
+        ok: true,
+        tool,
+        summary: `${args.trainNumber} ${args.classCode}: ticket ₹${fare.baseFare}, service ₹${fare.serviceFee}, total ₹${fare.total}`,
+        data: fare,
+        provider: providerOf(),
+      };
+    }
+    if (tool === "getCancelledTrains") {
+      const list = await routedCancelled();
+      if (!list) return { ok: false, tool, summary: "Cancelled list unavailable.", data: null, provider: "railkit" };
+      const full = (list.fully ?? []).length;
+      const part = (list.partial ?? []).length;
+      return { ok: true, tool, summary: `Fully cancelled ${full}, partial ${part}.`, data: list, provider: "railkit" };
+    }
+    if (tool === "checkPNR") {
+      if (!args.pnr) return { ok: false, tool, summary: "PNR number chahiye.", data: null, provider: null };
+      const remote = await routedPnr(args.pnr);
+      if (remote) {
+        return { ok: true, tool, summary: `PNR ${remote.pnr} provider se mila.`, data: remote, provider: "railkit" };
+      }
+      const local = await getProvider().getBooking(args.pnr);
+      if (local) {
+        return { ok: true, tool, summary: `PNR ${args.pnr} local booking se mila.`, data: { booking: local }, provider: "local" };
+      }
+      return { ok: false, tool, summary: "PNR unavailable.", data: null, provider: "railkit" };
+    }
+    if (tool === "getMyBookings") {
+      const bookings = await getProvider().listBookings();
+      return {
+        ok: true,
+        tool,
+        summary: bookings.length ? `${bookings.length} bookings.` : "Koi booking nahi.",
+        data: { count: bookings.length, ids: bookings.slice(0, 8).map((b) => b.id) },
+        provider: "local",
+      };
+    }
+    if (tool === "getWallet") {
+      const wallet = getWallet();
+      return { ok: true, tool, summary: `Wallet ₹${wallet.balance}.`, data: { balance: wallet.balance }, provider: "local" };
+    }
+    return { ok: false, tool, summary: "Unknown tool.", data: null, provider: null };
+  } catch {
+    return { ok: false, tool, summary: "Tool failed.", data: null, provider: null };
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "framework": "vite",
+  "buildCommand": "npx vite build",
+  "outputDirectory": "dist",
+  "installCommand": "npm install",
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "Permissions-Policy", "value": "microphone=(self)" },
+        { "key": "Feature-Policy", "value": "microphone 'self'" }
+      ]
+    }
+  ],
+  "functions": {
+    "api/[[...path]].ts": { "maxDuration": 30 },
+    "api/admin/[[...path]].ts": { "maxDuration": 30 }
+  },
+  "rewrites": [
+    { "source": "/((?!api/).*)", "destination": "/index.html" }
+  ]
+}

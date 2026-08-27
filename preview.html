@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>RailBook — AI preview</title>
+  <style>
+    :root {
+      --navy: #0b1f3a; --paper: #f4f0e8; --line: #e6dfd4; --saffron: #c24e1d;
+      --gold: #c8962e; --gold-soft: #f3e4bc; --muted: #5d6672; --ink: #16181b;
+      --green: #0d6b43; --green-soft: #e4f4ec; --red: #b42318;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; }
+    body { font-family: "Segoe UI", system-ui, sans-serif; background: #d9d2c5; color: var(--ink); }
+    button, input, select { font: inherit; color: inherit; }
+    button { cursor: pointer; border: 0; background: none; }
+    .stage {
+      max-width: 480px; margin: 0 auto; min-height: 100dvh; background: var(--paper);
+      display: flex; flex-direction: column;
+      box-shadow: 0 0 0 1px rgba(11,31,58,.06), 0 24px 80px rgba(11,31,58,.18);
+    }
+    .topbar {
+      background: var(--navy); color: #fff; padding: 12px 16px;
+      display: flex; align-items: center; gap: 8px; font-weight: 600; min-height: 56px;
+    }
+    .logo { width: 28px; height: 28px; border-radius: 8px; background: #122a4c; display: grid; place-items: center; }
+    .spacer { flex: 1; }
+    .demo { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: #f3e4bc;
+      border: 1px solid rgba(243,228,188,.25); padding: 4px 8px; border-radius: 999px; }
+    .prog { background: var(--navy); display: flex; padding: 0 16px 12px; font-size: 11px;
+      letter-spacing: .06em; text-transform: uppercase; color: rgba(255,255,255,.35); }
+    .prog span { flex: 1; text-align: center; }
+    .prog .on { color: var(--gold-soft); }
+    .thread { flex: 1; overflow: auto; padding: 12px 16px 8px; }
+    .hero { text-align: center; padding: 36px 8px 12px; }
+    .hero h1 { font-family: Georgia, serif; font-size: 32px; margin: 8px 0 6px; }
+    .hero p { color: var(--muted); margin: 0 0 18px; }
+    .starters { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+    .starter, .chip {
+      border: 1px solid var(--line); background: #fff; border-radius: 999px;
+      padding: 8px 12px; font-size: 13px; font-weight: 600; color: var(--navy);
+    }
+    .msg { margin: 10px 0 16px; }
+    .msg.user { display: flex; justify-content: flex-end; }
+    .msg.user p {
+      background: var(--navy); color: #fff; border-radius: 16px 16px 4px 16px;
+      padding: 10px 14px; max-width: 85%; margin: 0; font-size: 14px;
+    }
+    .kicker { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; }
+    .bot p { margin: 0 0 10px; font-size: 15px; white-space: pre-wrap; }
+    .card {
+      width: 100%; text-align: left; background: #fff; border: 1px solid var(--line);
+      border-radius: 18px; padding: 12px; margin: 8px 0;
+    }
+    .card.rec { border-color: #e2c56a; }
+    .tnum { font-weight: 700; color: var(--navy); }
+    .tname { font-family: Georgia, serif; font-size: 18px; margin: 2px 0 8px; }
+    .times { display: flex; justify-content: space-between; font-size: 20px; font-weight: 650; margin: 6px 0; }
+    .muted { color: var(--muted); font-size: 13px; }
+    .choose { color: var(--saffron); font-weight: 700; font-size: 13px; margin-top: 6px; }
+    .rec-pill { display: inline-block; background: var(--gold-soft); color: #6b4e08; font-size: 12px; font-weight: 700; padding: 4px 8px; border-radius: 999px; margin-bottom: 6px; }
+    .class-pill {
+      display: flex; flex-direction: column; gap: 2px; width: 100%; text-align: left;
+      background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 12px; margin: 6px 0;
+    }
+    .class-pill.off { opacity: .5; }
+    .chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0; }
+    .form { background: #fff; border: 1px solid var(--line); border-radius: 16px; padding: 12px; }
+    .form label { display: block; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin: 8px 0 4px; }
+    .form input, .form select { width: 100%; min-height: 44px; border: 1px solid var(--line); border-radius: 12px; padding: 0 10px; background: #fbfaf7; }
+    .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .btn { min-height: 48px; border-radius: 14px; padding: 0 16px; font-weight: 700; width: 100%; margin-top: 8px; }
+    .btn.primary { background: var(--saffron); color: #fff; }
+    .btn.navy { background: var(--navy); color: #fff; }
+    .summary { background: #fff; border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
+    .row { display: flex; justify-content: space-between; padding: 10px 12px; border-top: 1px solid var(--line); font-size: 14px; }
+    .row:first-child { border-top: 0; }
+    .row b { font-weight: 700; }
+    .composer { display: flex; gap: 8px; padding: 8px 12px 0; align-items: center; }
+    .composer input { flex: 1; min-height: 48px; border: 1px solid var(--line); border-radius: 16px; padding: 0 14px; }
+    .mic, .send {
+      width: 52px; height: 52px; border-radius: 16px; background: var(--navy); color: #fff;
+      font-size: 18px; flex-shrink: 0; position: relative; display: grid; place-items: center;
+    }
+    .mic.live { background: var(--saffron); }
+    .hint { text-align: center; font-size: 12px; color: var(--muted); padding: 6px 12px 14px; }
+    .hint.live { color: var(--saffron); font-weight: 600; }
+    .mock { display: inline-block; background: var(--gold-soft); color: #6b4e08; font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; padding: 4px 8px; border-radius: 999px; }
+    .pnr { font-family: ui-monospace, Menlo, monospace; font-size: 22px; letter-spacing: .1em; margin: 8px 0; }
+  </style>
+</head>
+<body>
+<div class="stage">
+  <header class="topbar">
+    <div class="logo">🚆</div> RailBook
+    <div class="spacer"></div>
+    <span class="demo">Demo</span>
+  </header>
+  <div class="prog"><span id="p0" class="on">Journey</span><span id="p1">Train</span><span id="p2">Passengers</span><span id="p3">Payment</span></div>
+  <div class="thread" id="thread">
+    <section class="hero" id="hero">
+      <div style="font-size:40px">🚆</div>
+      <h1>RailBook</h1>
+      <p>Aap bas boliye. Booking hum sambhal lenge.</p>
+      <div class="starters">
+        <button class="starter" data-q="Mujhe Delhi se Amritsar kal jana hai 2 logon ke liye">Kal Delhi se Amritsar 2 logon ke liye.</button>
+        <button class="starter" data-q="Delhi">Delhi</button>
+        <button class="starter" data-q="Delhi se Amritsar">Delhi se Amritsar</button>
+        <button class="starter" data-q="kal">kal</button>
+        <button class="starter" data-q="Confirmed seat chahiye">Confirmed seat chahiye</button>
+      </div>
+    </section>
+  </div>
+  <form class="composer" id="form">
+    <input id="inp" placeholder="Kahan se kahan jaana hai?" autocomplete="off" />
+    <button type="button" class="mic" id="mic" title="Tap to speak">🎙️</button>
+    <button type="submit" class="send">➤</button>
+  </form>
+  <div class="hint" id="hint">🎙️ बोलकर बताएं · ✍️ Type करें</div>
+</div>
+<script>
+const STATIONS = {
+  delhi: {code:"NDLS", city:"Delhi"}, "new delhi":{code:"NDLS", city:"Delhi"}, dilli:{code:"NDLS", city:"Delhi"},
+  amritsar:{code:"ASR", city:"Amritsar"}, asr:{code:"ASR", city:"Amritsar"},
+  chandigarh:{code:"CDG", city:"Chandigarh"}, ludhiana:{code:"LDH", city:"Ludhiana"},
+  mumbai:{code:"BCT", city:"Mumbai"}, jalandhar:{code:"JUC", city:"Jalandhar"}
+};
+const NAMES = Object.keys(STATIONS).sort((a,b)=>b.length-a.length);
+
+const ctx = { from:null, to:null, date:null, pax:1, lastAsked:null, train:null, klass:null, phase:"idle" };
+const today = new Date(2026,7,19);
+
+function ymd(d){ return d.toISOString().slice(0,10); }
+function addDays(n){ const d=new Date(today); d.setDate(d.getDate()+n); return d; }
+function fmt(d){ return d.toLocaleDateString("en-IN",{day:"numeric", month:"short"}); }
+function parseDate(t){
+  if (/\baaj\b/.test(t)) return addDays(0);
+  if (/\bkal\b/.test(t) && !/parso/.test(t)) return addDays(1);
+  if (/\bparso\b/.test(t)) return addDays(2);
+  const m = t.match(/\b(\d{1,2})(?:st|nd|rd|th)?\s*(aug(?:ust)?)\b/);
+  if (m) return new Date(2026,7,Number(m[1]));
+  const sl = t.match(/\b(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?\b/);
+  if (sl) return new Date(sl[3]?Number(sl[3]):2026, Number(sl[2])-1, Number(sl[1]));
+  return null;
+}
+function findSt(t){
+  const hits=[];
+  for (const n of NAMES) if (new RegExp("\\b"+n+"\\b").test(t)) hits.push(STATIONS[n]);
+  const u=[]; for (const s of hits) if (!u.some(x=>x.code===s.code)) u.push(s);
+  return u;
+}
+function understand(text){
+  const t = text.toLowerCase().replace(/[?.!,]/g," ").replace(/\s+/g," ").trim();
+  const out = { intent:"NONE" };
+  if (/pnr|mera pnr/.test(t)) { out.intent="PNR"; return out; }
+  if (/wallet|balance kitna|paise/.test(t)) { out.intent="WALLET"; return out; }
+  if (/meri booking|bookings dikhao/.test(t)) { out.intent="BOOKINGS"; return out; }
+  const corr = t.match(/(.+?)\s+nahi[,\s]+(.+)/);
+  if (corr) {
+    out.correction = true;
+    const right = corr[2];
+    const rs = findSt(right)[0]; const rd = parseDate(right);
+    if (rs && ctx.from && ctx.from.city.toLowerCase()===corr[1].trim()) out.from = rs;
+    else if (rs) out.to = rs;
+    if (rd) out.date = rd;
+    const px = right.match(/(\d+)/); if (/passenger|log/.test(right) && px) out.pax = +px[1];
+    return out;
+  }
+  const pair = t.match(/([a-z ]+?)\s+se\s+([a-z ]+?)(?:\s|$)/);
+  if (pair) {
+    const a = STATIONS[pair[1].replace(/\b(mujhe|kal|aaj|main)\b/g,"").trim()];
+    const b = STATIONS[pair[2].trim().split(" ")[0]];
+    if (a && b) { out.from=a; out.to=b; }
+  }
+  const sts = findSt(t);
+  if (!out.from && !out.to && sts.length===1) {
+    const s = sts[0];
+    if (/jana hai|jaana|ke liye/.test(t) && !/se nikal|se jana/.test(t)) out.to = s;
+    else if (ctx.lastAsked==="from") out.from = s;
+    else if (ctx.lastAsked==="to") out.to = s;
+    else if (!ctx.from) out.from = s;
+    else if (!ctx.to) out.to = s;
+  }
+  if (sts.length>=2 && !out.from) { out.from=sts[0]; out.to=sts[1]; }
+  const dt = parseDate(t); if (dt) out.date = dt;
+  const px = t.match(/(\d+)\s*(?:logon|log|ticket|passengers?)/) || (ctx.lastAsked==="passengers" && /^(\d+)$/.test(t) ? [0,t] : null);
+  if (px) out.pax = +px[1];
+  if (/do ticket|2 ticket/.test(t)) out.pax = 2;
+  if (/fastest/.test(t)) out.intent = "FASTEST";
+  if (/cheapest|sasti/.test(t)) out.intent = "CHEAPEST";
+  if (/3ac|3a/.test(t)) out.klass = "3A";
+  if (/sleeper|\bsl\b/.test(t)) out.klass = "SL";
+  if (/book kar|yes, book/.test(t)) out.intent = "BOOK";
+  return out;
+}
+
+const $ = id => document.getElementById(id);
+const thread = $("thread");
+function setP(n){ [0,1,2,3].forEach(i => $("p"+i).className = i<=n ? "on":""); }
+function esc(s){ return String(s).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
+function addUser(t){ $("hero")?.remove(); thread.insertAdjacentHTML("beforeend", `<div class="msg user"><p>${esc(t)}</p></div>`); }
+function addBot(html){ thread.insertAdjacentHTML("beforeend", `<div class="msg bot"><div class="kicker">RailBook</div>${html}</div>`); thread.scrollTop = thread.scrollHeight; }
+
+function ask(slot){
+  ctx.lastAsked = slot;
+  if (slot==="from") return "Kahan se jana hai?";
+  if (slot==="to") return "Kahan jana hai?";
+  if (slot==="date") return "Kis date ko travel karna hai?";
+  return "Aur kya help chahiye?";
+}
+
+function searchUI(){
+  setP(1); ctx.phase="results"; ctx.lastAsked="train";
+  addBot(`<p>Bilkul 👍 ${ctx.from.city} → ${ctx.to.city}, ${fmt(ctx.date)}${ctx.pax>1?", "+ctx.pax+" passengers":""}. Trains check karta hoon.</p>
+    <p>2 trains mil gayi hain. Best options:</p>
+    <button class="card rec" data-act="fast">
+      <div class="rec-pill">⚡ Fastest</div>
+      <div class="tnum">12013</div><div class="tname">Amritsar Shatabdi</div>
+      <div class="times"><span>16:30</span><span class="muted">6h</span><span>22:30</span></div>
+      <div class="muted">AC Chair Car — ✅ Available · Mock data</div>
+      <div class="choose">Choose this train</div>
+    </button>
+    <button class="card" data-act="cheap">
+      <div class="rec-pill">💰 Cheapest</div>
+      <div class="tnum">12716</div><div class="tname">Sachkhand Express</div>
+      <div class="times"><span>13:00</span><span class="muted">7h</span><span>20:00</span></div>
+      <div class="muted">SL ₹420 · 3A ₹1,120 · Mock data</div>
+    </button>`);
+}
+
+function classUI(train){
+  ctx.train = train; ctx.lastAsked="class"; setP(1);
+  const shat = train==="12013";
+  addBot(`<p>${train} select ho gayi.</p>
+    <p>Is train mein available classes:</p>
+    ${shat
+      ? `<button class="class-pill" data-act="cls" data-c="CC">🟢 CC — Available<span class="muted">₹1,250 · Mock</span></button>
+         <button class="class-pill off">🔴 3A — Not Available</button>
+         <button class="class-pill" data-act="cls" data-c="SL">🟢 SL — Available<span class="muted">₹450 · Mock</span></button>`
+      : `<button class="class-pill" data-act="cls" data-c="SL">🟢 SL — Available<span class="muted">₹420 · Mock</span></button>
+         <button class="class-pill" data-act="cls" data-c="3A">🟢 3A — Available<span class="muted">₹1,120 · 6 seats · Mock</span></button>
+         <button class="class-pill off">🔴 2A — Not Available</button>`}
+    <p>Aap kaunsi class mein book karna chahenge?</p>`);
+}
+
+function paxUI(){
+  setP(2); ctx.lastAsked=null; ctx.phase="pax";
+  addBot(`<p>Passenger details fill kar dijiye.</p>
+    <div class="form">
+      <b>Passenger 1</b>
+      <label>Name</label><input id="n1" placeholder="As on ID" />
+      <div class="pair"><div><label>Age</label><input id="a1" value="28" /></div>
+      <div><label>Gender</label><select><option>Female</option><option>Male</option></select></div></div>
+      <label>Berth preference</label><select><option>Lower</option><option>Window</option></select>
+      <hr style="border:0;border-top:1px solid var(--line);margin:12px 0">
+      <b>Passenger 2</b>
+      <label>Name</label><input placeholder="As on ID" />
+      <div class="pair"><div><label>Age</label><input /></div>
+      <div><label>Gender</label><select><option>Select</option><option>Male</option></select></div></div>
+      <button class="btn primary" type="button" id="cont">Continue</button>
+    </div>`);
+  $("cont").onclick = fareUI;
+}
+
+function fareUI(){
+  setP(3); ctx.phase="fare";
+  addBot(`<p>Sab details ready hain. ₹2,550 mein booking confirm karun?</p>
+    <div class="summary">
+      <div class="row"><span>Route</span><b>${ctx.from.city} → ${ctx.to.city}</b></div>
+      <div class="row"><span>Date</span><b>${fmt(ctx.date)}</b></div>
+      <div class="row"><span>Train</span><b>${ctx.train} · ${ctx.klass||"CC"}</b></div>
+      <div class="row"><span>Passengers</span><b>${ctx.pax}</b></div>
+      <div class="row"><span>Total</span><b>₹2,550</b></div>
+    </div>
+    <p class="muted">Wallet ₹5,000 · Mock / demo — bina confirm ke book nahi.</p>
+    <button class="btn primary" data-act="pay">Yes, Book It</button>`);
+}
+
+function handle(text){
+  addUser(text);
+  const n = understand(text);
+  if (n.intent==="PNR") { addBot("<p>PNR number kya hai? Ya bookings kholun.</p><div class='chips'><button class='chip' data-q='meri bookings dikhao'>My Bookings</button></div>"); ctx.lastAsked="pnr"; return; }
+  if (n.intent==="WALLET") { addBot("<p>Wallet balance ₹5,000 (demo).</p><button class='btn navy'>Add Money</button>"); return; }
+  if (n.intent==="BOOKINGS") { addBot("<p>Is device par abhi koi confirmed booking nahi hai. Pehle journey book karein.</p>"); return; }
+
+  if (n.from) ctx.from = n.from;
+  if (n.to) ctx.to = n.to;
+  if (n.date) ctx.date = n.date;
+  if (n.pax) ctx.pax = n.pax;
+
+  if (n.klass && ctx.train) {
+    if (ctx.train==="12013" && n.klass==="3A") {
+      addBot("<p>3A mein seat available nahi hai.<br>CC mein seats available hain. Kya CC try karein?</p><div class='chips'><button class='chip' data-act='cls' data-c='CC'>Haan, CC</button></div>");
+      return;
+    }
+    ctx.klass = n.klass; paxUI(); return;
+  }
+  if (n.intent==="FASTEST" && ctx.from && ctx.to && ctx.date) { classUI("12013"); return; }
+  if (n.intent==="CHEAPEST" && ctx.from && ctx.to) { classUI("12716"); return; }
+  if (n.intent==="BOOK") {
+    if (ctx.phase!=="fare") { addBot("<p>Pehle fare confirm. Bina confirm ke book nahi hogi.</p>"); return; }
+    addBot(`<p>🎉 Booking Confirmed!</p><div class="mock">Mock / demo booking</div><div class="pnr">MOCK1948201</div><p class="muted">${ctx.from.city} → ${ctx.to.city} · ${fmt(ctx.date)} · PNR mock provider ne diya.</p>`);
+    return;
+  }
+
+  if (!ctx.from) { addBot(`<p>${ask("from")}</p>`); return; }
+  if (!ctx.to) { addBot(`<p>${ask("to")}</p>`); return; }
+  if (!ctx.date) { addBot(`<p>${ask("date")}</p><div class="chips"><button class="chip" data-q="aaj">Aaj</button><button class="chip" data-q="kal">Kal</button><button class="chip" data-q="parso">Parso</button></div>`); return; }
+  if (ctx.phase==="idle" || ctx.phase==="ask") searchUI();
+}
+
+thread.addEventListener("click", e => {
+  const q = e.target.closest("[data-q]"); if (q) { handle(q.dataset.q); return; }
+  const a = e.target.closest("[data-act]"); if (!a) return;
+  if (a.dataset.act==="fast") classUI("12013");
+  if (a.dataset.act==="cheap") classUI("12716");
+  if (a.dataset.act==="cls") { ctx.klass=a.dataset.c; paxUI(); }
+  if (a.dataset.act==="pay") handle("Yes, Book It");
+});
+$("form").onsubmit = e => { e.preventDefault(); const v=$("inp").value.trim(); if(!v) return; $("inp").value=""; handle(v); };
+$("mic").onclick = () => {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) { addBot("<p>Is browser mein voice input available nahi hai. Aap type karke bhi booking kar sakte hain.</p>"); return; }
+  const r = new SR(); r.lang="hi-IN";
+  $("mic").classList.add("live"); $("hint").className="hint live"; $("hint").textContent="Sun raha hoon…";
+  r.onresult = ev => handle(ev.results[0][0].transcript);
+  r.onend = () => { $("mic").classList.remove("live"); $("hint").className="hint"; $("hint").textContent="🎙️ बोलकर बताएं · ✍️ Type करें"; };
+  r.start();
+};
+</script>
+</body>
+</html>
