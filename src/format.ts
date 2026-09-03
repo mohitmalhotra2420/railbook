@@ -2,9 +2,21 @@ export function pad(n: number): string {
   return String(n).padStart(2, "0");
 }
 
+const IST_YMD = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Asia/Kolkata",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
+/** India-first: chips/"aaj"/"kal" follow IST on every device. */
 export function todayYmd(): string {
   const d = new Date();
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  try {
+    return IST_YMD.format(d);
+  } catch {
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  }
 }
 
 export function addDays(ymd: string, days: number): string {

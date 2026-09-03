@@ -51,7 +51,7 @@ export type BookingAction =
   | { type: "SWAP_ENDS" }
   | { type: "SET_DATE"; date: string }
   | { type: "SET_PASSENGER_COUNT"; count: number }
-  | { type: "SEARCH_START" }
+  | { type: "SEARCH_START"; date?: string }
   | {
       type: "SEARCH_SUCCESS";
       trains: TrainResult[];
@@ -198,6 +198,9 @@ export function bookingReducer(
     case "SEARCH_START":
       return {
         ...state,
+        // Board always reflects the date actually being searched — no mismatched chips/cards.
+        date: action.date || state.date,
+        dateProvided: action.date ? true : state.dateProvided,
         searching: true,
         flow: "SEARCHING",
         screen: "results",

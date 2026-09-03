@@ -130,6 +130,8 @@ export function TrainBoard() {
     return state.trains.filter((t) => {
       if (needle && !t.name.toLowerCase().includes(needle) && !t.number.includes(needle)) return false;
       if (klass && t.classes.length && !t.classes.some((c) => c.code === klass)) return false;
+      // Invariant: never render a train dated differently from the selected date.
+      if (state.date && t.date !== state.date) return false;
       return true;
     });
   }, [state.trains, q, klass]);

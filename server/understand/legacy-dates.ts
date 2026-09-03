@@ -222,8 +222,20 @@ export function parseDatePhrase(
   return {};
 }
 
+const IST_YMD = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Asia/Kolkata",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
+/** India-first: "aaj"/"kal" always follow IST, whatever the server clock (UTC) says. */
 export function todayYmdFrom(now: Date): string {
-  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  try {
+    return IST_YMD.format(now);
+  } catch {
+    return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  }
 }
 
 export { todayYmd };

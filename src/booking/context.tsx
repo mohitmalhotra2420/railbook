@@ -87,7 +87,7 @@ export function BookingProvider({ children }: { children: ReactNode }) {
 
   const runSearch = useCallback(
     async (from: Station, to: Station, date: string) => {
-      dispatch({ type: "SEARCH_START" });
+      dispatch({ type: "SEARCH_START", date });
       try {
         const res = await api.search(from.code, to.code, date);
         if (res.empty || res.trains.length === 0) {

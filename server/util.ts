@@ -11,8 +11,20 @@ export function formatYmd(d: Date): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
+const IST_YMD = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Asia/Kolkata",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
+/** India-first: "today" always follows IST, whatever the server clock (UTC) says. */
 export function todayYmd(): string {
-  return formatYmd(new Date());
+  try {
+    return IST_YMD.format(new Date());
+  } catch {
+    return formatYmd(new Date());
+  }
 }
 
 export function isPastDate(date: string): boolean {
