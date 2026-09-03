@@ -186,6 +186,8 @@ function systemPrompt(today: string, state: AutoAgentState, protocol: "tools" | 
     `- Availability: "12014 CC · AVAILABLE 45 seats · ₹510" using only tool numbers. Mention the class and date.`,
     `- If data came from a provider snapshot, you may add "(provider snapshot)".`,
     `- End with a helpful next step or a question when something is missing.`,
+    `- Never write "fetching…", "let me check" or describe a tool call you have not made. If a fact is needed, call the tool in this same turn and answer only after the result arrives.`,
+    `- Write amounts as plain digits without spaces or separators, e.g. ₹2925 (not ₹2,925 / ₹2 925).`,
     ``,
     `CURRENT BOOKING STATE (from earlier turns; trust it, do not re-ask what is already known):`,
     JSON.stringify(known),
@@ -438,10 +440,20 @@ export function groundingIssues(reply: string, ev: Evidence, toolsRan: boolean):
   for (const m of text.matchAll(/\b(\d{5})\b/g)) {
     if (!ev.trainNumbers.has(m[1])) issues.push(`train ${m[1]} not in tool evidence`);
   }
-  for (const m of text.matchAll(/(?:₹|rs\.?|inr)\s?([\d,]+(?:\.\d+)?)/gi)) {
-    const n = m[1].replace(/,/g, "");
-    const rounded = String(Math.round(Number(n)));
-    if (!ev.numbers.has(n) && !ev.numbers.has(rounded)) issues.push(`amount ₹${n} not in tool evidence`);
+  // Amounts: tolerate Indian/Western grouping and models that put a thin space or comma inside a number
+  // ("₹2 925", "₹2,925", "₹2.925" for 2925) — but the joined number itself must be in the evidence.
+  for (const m of text.matchAll(/(?:₹|rs\.?|inr)\s?(\d[\d,.\u202f\u00a0 ]*\d|\d)/gi)) {
+    const raw = m[1];
+    const candidates = new Set<string>();
+    candidates.add(raw.replace(/[,\u202f\u00a0 ]/g, "").replace(/\.(\d{3})$/, "$1"));
+    candidates.add(raw.replace(/[,\u202f\u00a0 ]/g, ""));
+    candidates.add(raw.split(/[\s\u202f\u00a0]/)[0].replace(/,/g, ""));
+    for (const c of Array.from(candidates)) {
+      const num = Number(c);
+      if (Number.isFinite(num)) candidates.add(String(Math.round(num)));
+    }
+    const ok = Array.from(candidates).some((c) => c && ev.numbers.has(c));
+    if (!ok) issues.push(`amount ₹${raw.trim()} not in tool evidence`);
   }
   for (const m of text.matchAll(/(?:available|avl|rac|wl|waitlist)[^\d\n]{0,12}(\d{1,4})\b|\b(\d{1,4})\s*(?:seats?|berths?|सीट)/gi)) {
     const n = m[1] ?? m[2];
@@ -842,6 +854,10 @@ export async function runAutonomousAgent(req: AutoAgentRequest): Promise<AutoAge
     if (candidateReply) {
       const ev = buildEvidence(results, allowedText, state);
       const issues = groundingIssues(candidateReply, ev, results.length > 0);
+      // "Fetching…" / "let me check" narration without an actual tool call = a promise the model cannot keep.
+      if (/\b(fetching|checking|let me (?:fetch|check|look)|ek (?:second|minute|pal)|abhi (?:check|dekh)(?:ta|ti|te) hoon)\b/i.test(candidateReply) && !issues.length) {
+        issues.push("narrated a tool call instead of making it");
+      }
       if (!issues.length) {
         reply = candidateReply;
         break;

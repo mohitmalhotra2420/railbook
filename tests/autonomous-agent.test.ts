@@ -432,6 +432,13 @@ describe("autonomous agent — NVIDIA tool loop over real adapters", () => {
     expect(seen2[0].messages[0].content).toContain("Today is 2026-09-03");
   });
 
+  it("guard: grouped amounts (₹2,925 / ₹2 925) are accepted when 2925 is in evidence; ₹2999 is not", () => {
+    const ev = { trainNumbers: new Set(["12426"]), numbers: new Set(["975", "2925", "75", "3000", "3"]), codes: new Set<string>() };
+    expect(groundingIssues("12426 3A: ₹975 × 3 = ₹2,925 + ₹75 = ₹3,000", ev, true)).toEqual([]);
+    expect(groundingIssues("total ₹2 925 hai", ev, true)).toEqual([]);
+    expect(groundingIssues("total ₹2999 hai", ev, true)).toEqual(["amount ₹2999 not in tool evidence"]);
+  });
+
   it("21. searchTrains with city names: ambiguous 'Delhi' → needChoice for slot 'to', resolved origin kept, no trains invented", async () => {
     const date = tomorrow();
     scriptNvidia([
