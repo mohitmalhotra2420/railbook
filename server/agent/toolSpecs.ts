@@ -38,7 +38,7 @@ export const AUTO_TOOLS = [
     function: {
       name: "searchStations",
       description:
-        "Resolve a city/station name (Hindi, English or Hinglish, e.g. 'Ludhiana', 'दिल्ली', 'Jammu') to official Indian Railways station codes via the live railway API. ALWAYS call this before searchTrains when you only know a city name. If needChoice=true, ask the user which station.",
+        "Resolve a city/station name (Hindi, English or Hinglish, e.g. 'Ludhiana', 'दिल्ली', 'Jammu') to official Indian Railways station codes via the live railway API. Use it when the user asks about stations in a city, or when searchTrains reported needChoice. For a normal journey search you can pass city names straight into searchTrains.",
       parameters: {
         type: "object",
         properties: { query: { type: "string", description: "City or station name spoken by the user" } },
@@ -51,12 +51,12 @@ export const AUTO_TOOLS = [
     function: {
       name: "searchTrains",
       description:
-        "Live train search between two station CODES for a date. Returns the real list of trains with departure/arrival times. Requires codes from searchStations, and a journey date in YYYY-MM-DD that the user actually said (never assume today).",
+        "Live train search for a date. Returns the real list of trains with departure/arrival times and classes. `from`/`to` accept a station code (ASR) OR the city/station name exactly as the user said it (\"Amritsar\", \"दिल्ली\") — the server resolves names via the live station API. If the result says needChoice, ask the user which station and search again with that code. Requires a journey date in YYYY-MM-DD that the user actually gave (never assume today).",
       parameters: {
         type: "object",
         properties: {
-          from: { type: "string", description: "Origin station code, e.g. ASR" },
-          to: { type: "string", description: "Destination station code, e.g. LDH" },
+          from: { type: "string", description: "Origin station code or city name, e.g. ASR or Amritsar" },
+          to: { type: "string", description: "Destination station code or city name, e.g. LDH or Ludhiana" },
           date: { type: "string", description: "Journey date YYYY-MM-DD" },
         },
         required: ["from", "to", "date"],

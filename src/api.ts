@@ -121,7 +121,7 @@ export const api = {
         from?: Station;
         to?: Station;
         date?: string;
-        stationChoice?: { city: string; stations: Station[] };
+        stationChoice?: { slot?: "from" | "to"; city: string; stations: Station[] };
         selectTrain?: string;
         openWallet?: boolean;
         openBookings?: boolean;
@@ -134,6 +134,7 @@ export const api = {
       protocol: "tools" | "json" | null;
       rounds: number;
       latencyMs: number;
+      llmMs: number[];
       failureReason: string | null;
       confirmBook: false;
     }>("/api/agent/auto", {

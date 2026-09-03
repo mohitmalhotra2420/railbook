@@ -640,7 +640,7 @@ export function Concierge() {
     ].slice(-12);
     const tools = res.toolsUsed.map((t) => `${t.name}${t.ok ? "" : "✗"}${t.provider ? `@${t.provider}` : ""}`).join(", ");
     setLastDbg(
-      `Agent · ${res.source === "ai" ? res.modelUsed ?? "nvidia" : "evidence-summary"} · ${res.protocol ?? "-"} · ${res.rounds}r · ${(res.latencyMs / 1000).toFixed(1)}s${tools ? ` · tools: ${tools}` : ""}`,
+      `Agent · ${res.source === "ai" ? res.modelUsed ?? "nvidia" : `evidence-summary (${res.failureReason ?? "model"})`} · ${res.protocol ?? "-"} · ${res.rounds}r · ${(res.latencyMs / 1000).toFixed(1)}s · llm ${(res.llmMs ?? []).map((ms) => (ms / 1000).toFixed(1)).join("+")}s${tools ? ` · tools: ${tools}` : ""}`,
     );
 
     // Mirror real tool output into the booking state so TrainBoard / class / fare screens stay in sync.
@@ -676,7 +676,7 @@ export function Concierge() {
 
     const blocks: Block[] = [];
     if (ui.stationChoice?.stations?.length) {
-      const slot: "from" | "to" = !journeyRef.current.from && !state.from ? "from" : "to";
+      const slot: "from" | "to" = ui.stationChoice.slot ?? (!journeyRef.current.from && !state.from ? "from" : "to");
       stationPickRef.current = { slot, stations: ui.stationChoice.stations };
       setLastAsked(slot);
       blocks.push({ type: "stations", options: ui.stationChoice.stations, slot });

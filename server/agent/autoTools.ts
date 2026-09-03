@@ -13,6 +13,7 @@ import {
   routedStationSearch,
   routedTrainInfo,
 } from "../railway/router.js";
+import { getStation } from "../data/stations.js";
 import { getWallet } from "../wallet.js";
 import { isPastDate } from "../util.js";
 import type { ClassCode, Station, TrainResult } from "../providers/types.js";
@@ -80,6 +81,28 @@ function fail(name: string, reason: string, started: number, extra: Record<strin
   };
 }
 
+type EndResolution =
+  | { kind: "station"; station: Station; provider: string | null }
+  | { kind: "choice"; city: string; stations: Station[]; provider: string | null }
+  | { kind: "none"; query: string; provider: string | null };
+
+/**
+ * Accepts a station code OR a city/station name and resolves it through the live station search.
+ * Never guesses: ambiguous cities come back as a choice, unknown names as `none`.
+ */
+async function resolveEnd(raw: string): Promise<EndResolution> {
+  const q = raw.trim();
+  const upper = q.toUpperCase();
+  const local = /^[A-Z]{2,5}$/.test(upper) ? getStation(upper) : undefined;
+  if (local) return { kind: "station", station: local, provider: "local" };
+  const res = await routedStationSearch(q);
+  const exact = res.stations.find((s) => s.code.toUpperCase() === upper);
+  if (exact) return { kind: "station", station: exact, provider: res.provider };
+  if (res.needChoice && res.stations.length > 1) return { kind: "choice", city: res.city ?? q, stations: res.stations.slice(0, 8), provider: res.provider };
+  if (res.stations.length >= 1) return { kind: "station", station: res.stations[0], provider: res.provider };
+  return { kind: "none", query: q, provider: res.provider };
+}
+
 export async function runAutoTool(name: string, rawArgs: unknown): Promise<AutoToolResult> {
   const started = Date.now();
   const args = (rawArgs && typeof rawArgs === "object" ? rawArgs : {}) as Record<string, unknown>;
@@ -125,17 +148,44 @@ export async function runAutoTool(name: string, rawArgs: unknown): Promise<AutoT
       }
 
       case "searchTrains": {
-        const from = code(args.from ?? args.origin);
-        const to = code(args.to ?? args.destination);
+        const fromRaw = str(args.from ?? args.origin);
+        const toRaw = str(args.to ?? args.destination);
         const date = ymd(args.date);
-        if (!from || !to) return fail(tool, "from and to station codes required (use searchStations first)", started);
-        if (from === to) return fail(tool, "from and to must differ", started);
+        if (!fromRaw || !toRaw) return fail(tool, "from and to required (station code or city name)", started);
         if (!date) return fail(tool, "date required in YYYY-MM-DD — ask the user, never assume today", started);
         if (isPastDate(date)) return fail(tool, `date ${date} is in the past — ask the user for today or a future date`, started, { date });
+        const [fromRes, toRes] = await Promise.all([resolveEnd(fromRaw), resolveEnd(toRaw)]);
+        for (const [slot, r, raw] of [
+          ["from", fromRes, fromRaw],
+          ["to", toRes, toRaw],
+        ] as const) {
+          if (r.kind === "choice") {
+            return {
+              name: tool,
+              ok: false,
+              payload: {
+                ok: false,
+                needChoice: true,
+                slot,
+                city: r.city,
+                stations: r.stations.map((s) => ({ code: s.code, name: s.name })),
+                error: `"${raw}" has several stations — ask the user which one, then search again with the code`,
+              },
+              provider: r.provider,
+              latencyMs: Date.now() - started,
+              ui: { stationChoice: { slot, city: r.city, stations: r.stations } },
+            };
+          }
+          if (r.kind === "none") return fail(tool, `no station found for "${raw}" — ask the user to rephrase or give the station code`, started, { slot });
+        }
+        if (fromRes.kind !== "station" || toRes.kind !== "station") return fail(tool, "station resolution failed", started);
+        const from = fromRes.station.code;
+        const to = toRes.station.code;
+        if (from === to) return fail(tool, "from and to resolve to the same station — ask the user", started, { from, to });
         const trains = await getProvider().searchTrains({ from, to, date });
         const provider = providerOf();
-        const fromSt = trains[0]?.from ?? { code: from, name: from, city: from };
-        const toSt = trains[0]?.to ?? { code: to, name: to, city: to };
+        const fromSt = trains[0]?.from ?? fromRes.station;
+        const toSt = trains[0]?.to ?? toRes.station;
         return {
           name: tool,
           ok: true,
@@ -143,6 +193,8 @@ export async function runAutoTool(name: string, rawArgs: unknown): Promise<AutoT
             ok: true,
             from,
             to,
+            fromName: fromSt.name,
+            toName: toSt.name,
             date,
             count: trains.length,
             provider,
