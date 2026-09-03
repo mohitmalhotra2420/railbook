@@ -183,7 +183,8 @@ function systemPrompt(today: string, state: AutoAgentState, protocol: "tools" | 
     ``,
     `STYLE`,
     `- Short and concrete. Lists: one train per line as "12014 AMRITSAR SHTABDI · 04:55 → 06:57 · 2h 02m · CC EC". Show at most 6 trains and say how many more are on screen.`,
-    `- Availability: "12014 CC · AVAILABLE 45 seats · ₹510" using only tool numbers. Mention the class and date.`,
+    `- Availability: "12014 CC · AVAILABLE 45 seats · ₹510 per passenger" using only tool numbers. Mention the class and date.`,
+    `- Never do arithmetic on fares (no ×passengers, no adding fees). Any total must come from getFare (grandTotal). If the user asks for a total, call getFare.`,
     `- If data came from a provider snapshot, you may add "(provider snapshot)".`,
     `- End with a helpful next step or a question when something is missing.`,
     `- Never write "fetching…", "let me check" or describe a tool call you have not made. If a fact is needed, call the tool in this same turn and answer only after the result arrives.`,
@@ -524,7 +525,7 @@ function evidenceSummary(results: AutoToolResult[]): string | null {
       }
       case "getAvailability": {
         const count = p.seats ?? p.rac ?? p.waitlist;
-        lines.push(`${p.trainNumber} ${p.classCode} (${p.date}): ${p.status}${count != null ? ` ${count}` : ""}${p.railwayFare ? ` · ₹${p.railwayFare}` : ""}.`);
+        lines.push(`${p.trainNumber} ${p.classCode} (${p.date}): ${p.status}${count != null ? ` ${count}` : ""}${p.railwayFarePerPassenger ? ` · ₹${p.railwayFarePerPassenger} per passenger` : ""}.`);
         break;
       }
       case "getFare": {
