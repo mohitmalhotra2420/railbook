@@ -21,14 +21,13 @@ if (!token) {
   console.error("FAIL: VERCEL_TOKEN missing");
   process.exit(1);
 }
-if (!railkitKey) {
-  console.error("FAIL: RAILKIT_API_KEY missing");
-  process.exit(1);
-}
 if (!railcoreKey) {
   console.error("FAIL: RAILCORE_API_KEY missing");
   process.exit(1);
 }
+// RAILKIT_API_KEY is only required locally when it is missing on Vercel;
+// otherwise the stored value below is kept untouched.
+
 
 const headers = {
   Authorization: `Bearer ${token}`,
@@ -97,6 +96,10 @@ async function upsertEnv(key, value, type) {
 await upsertEnv("RAILWAY_PROVIDER", "railcore", "plain");
 await upsertEnv("RAILCORE_API_KEY", railcoreKey, "encrypted");
 if (!byKey.RAILKIT_API_KEY) {
+  if (!railkitKey) {
+    console.error("FAIL: RAILKIT_API_KEY missing locally and on Vercel — add it to .env");
+    process.exit(1);
+  }
   await upsertEnv("RAILKIT_API_KEY", railkitKey, "encrypted");
 } else {
   envActions.push({ op: "keep", key: "RAILKIT_API_KEY", ok: true });
