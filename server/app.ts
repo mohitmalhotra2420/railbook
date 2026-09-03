@@ -28,6 +28,8 @@ import { addMoney, credit, debit, getWallet } from "./wallet.js";
 import { isPastDate } from "./util.js";
 import { runUnderstand } from "./understand/index.js";
 import { runAgent } from "./agent/run.js";
+import { runAutonomousAgent } from "./agent/autonomous.js";
+import { railcoreBlockState } from "./railway/railcore.js";
 import { getNvidiaCatalog, publicNvidiaPayload, refreshNvidiaCatalog } from "./understand/nvidia.js";
 import { answerFromEvidence, compactScheduleEvidence, shouldGroundFact } from "./understand/ground.js";
 import { todayYmdFrom } from "./understand/legacy-dates.js";
@@ -62,11 +64,16 @@ export function createApp() {
 
   app.get("/api/health", (_req, res) => {
     const p = getProvider();
+    const block = railcoreBlockState();
     res.json({
       ok: true,
       provider: p.id,
       mock: p.mock,
       fallback: railcoreIsPrimary() ? "railkit" : null,
+      railcore: block.blocked
+        ? { blocked: true, reason: block.reason, until: new Date(block.until).toISOString() }
+        : { blocked: false },
+      agent: { auto: (process.env.AGENT_AUTO ?? "1").trim() !== "0", model: env.agentModel },
     });
   });
 
@@ -165,6 +172,31 @@ export function createApp() {
         latencyMs: result.latencyMs,
         failureReason: result.failureReason,
       });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  /**
+   * Autonomous agent: NVIDIA model decides which railway tools to call, the server runs them
+   * against RailCore/RailKit, and the reply is checked against tool evidence before it is sent.
+   * Never books. Never charges. Falls back (fallback:true) when the model is unusable.
+   */
+  app.post("/api/agent/auto", async (req, res, next) => {
+    try {
+      const text = String(req.body?.text ?? "").trim();
+      if (!text) {
+        res.status(400).json({ error: "text is required." });
+        return;
+      }
+      const result = await runAutonomousAgent({
+        text,
+        history: Array.isArray(req.body?.history) ? req.body.history : [],
+        state: req.body?.state ?? null,
+        now: typeof req.body?.now === "string" ? req.body.now : undefined,
+        model: typeof req.body?.model === "string" ? req.body.model : undefined,
+      });
+      res.json({ ...result, confirmBook: false });
     } catch (err) {
       next(err);
     }

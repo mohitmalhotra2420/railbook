@@ -84,6 +84,18 @@ export function Concierge() {
   });
   const handleTextRef = useRef<(text: string) => void>(() => undefined);
   const lastFactTrainRef = useRef<string | null>(null);
+  /** Autonomous agent memory: compact server-side state + last few chat turns. */
+  const agentStateRef = useRef<unknown>(null);
+  const agentHistoryRef = useRef<{ role: "user" | "assistant"; content: string }[]>([]);
+  const agentDisabledRef = useRef<boolean>(
+    (() => {
+      try {
+        return localStorage.getItem("railbookAgentAuto") === "0";
+      } catch {
+        return false;
+      }
+    })(),
+  );
   const saved = loadTravellers();
 
   const voice = useVoiceInput(
@@ -576,6 +588,116 @@ export function Concierge() {
     return { searched: false, prefs: turn.prefs };
   }
 
+  /**
+   * One turn of the autonomous agent. Returns true when the turn was fully handled.
+   * Returns false (→ legacy deterministic flow) when the server says `fallback:true`
+   * or the request itself failed. Nothing here books or charges.
+   */
+  async function runAutonomousTurn(text: string): Promise<boolean> {
+    const seedState =
+      agentStateRef.current ??
+      {
+        origin: state.from,
+        destination: state.to,
+        date: state.dateProvided ? state.date || null : null,
+        passengers: state.paxProvided ? state.passengerCount : null,
+        classCode: state.selectedClass?.code ?? null,
+        selectedTrain: state.selectedTrain ? { number: state.selectedTrain.number, name: state.selectedTrain.name } : null,
+        lastTrains: state.trains.slice(0, 15).map((t) => ({
+          number: t.number,
+          name: t.name,
+          dep: t.departure,
+          arr: t.arrival,
+          classes: t.classes.map((c) => c.code),
+        })),
+        lastSearch: state.from && state.to && state.date ? { from: state.from.code, to: state.to.code, date: state.date } : null,
+        turn: 0,
+      };
+    setThinking(true);
+    let res: Awaited<ReturnType<typeof api.agentAuto>>;
+    try {
+      res = await api.agentAuto({
+        text,
+        history: agentHistoryRef.current.slice(-10),
+        state: seedState,
+        now: new Date().toISOString(),
+      });
+    } catch {
+      setThinking(false);
+      return false;
+    }
+    setThinking(false);
+    if (!res || res.fallback || !res.ok || !res.reply) {
+      setLastDbg(`Agent fallback · ${res?.failureReason ?? "request_failed"} → deterministic flow`);
+      return false;
+    }
+    agentStateRef.current = res.state;
+    agentHistoryRef.current = [
+      ...agentHistoryRef.current,
+      { role: "user" as const, content: text },
+      { role: "assistant" as const, content: res.reply },
+    ].slice(-12);
+    const tools = res.toolsUsed.map((t) => `${t.name}${t.ok ? "" : "✗"}${t.provider ? `@${t.provider}` : ""}`).join(", ");
+    setLastDbg(
+      `Agent · ${res.source === "ai" ? res.modelUsed ?? "nvidia" : "evidence-summary"} · ${res.protocol ?? "-"} · ${res.rounds}r · ${(res.latencyMs / 1000).toFixed(1)}s${tools ? ` · tools: ${tools}` : ""}`,
+    );
+
+    // Mirror real tool output into the booking state so TrainBoard / class / fare screens stay in sync.
+    const ui = res.ui ?? {};
+    if (ui.from) {
+      setFrom(ui.from);
+      journeyRef.current.from = ui.from;
+    }
+    if (ui.to) {
+      setTo(ui.to);
+      journeyRef.current.to = ui.to;
+    }
+    if (ui.date && ui.date !== state.date) {
+      setDate(ui.date);
+      journeyRef.current.date = ui.date;
+      journeyRef.current.dateProvided = true;
+    }
+    const st = (res.state ?? {}) as { passengers?: number | null; origin?: Station | null; destination?: Station | null; date?: string | null };
+    if (st.passengers && st.passengers !== state.passengerCount) setPassengerCount(st.passengers);
+    if (!ui.from && st.origin && st.origin.code !== state.from?.code) {
+      setFrom(st.origin);
+      journeyRef.current.from = st.origin;
+    }
+    if (!ui.to && st.destination && st.destination.code !== state.to?.code) {
+      setTo(st.destination);
+      journeyRef.current.to = st.destination;
+    }
+    if (!ui.date && st.date && st.date !== state.date) {
+      setDate(st.date);
+      journeyRef.current.date = st.date;
+      journeyRef.current.dateProvided = true;
+    }
+
+    const blocks: Block[] = [];
+    if (ui.stationChoice?.stations?.length) {
+      const slot: "from" | "to" = !journeyRef.current.from && !state.from ? "from" : "to";
+      stationPickRef.current = { slot, stations: ui.stationChoice.stations };
+      setLastAsked(slot);
+      blocks.push({ type: "stations", options: ui.stationChoice.stations, slot });
+    }
+    setMessages((m) => [...m, { id: newId(), role: "assistant", text: res.reply!, blocks: blocks.length ? blocks : undefined }]);
+
+    if (ui.trains?.length && ui.from && ui.to && ui.date) {
+      // Real provider trains: open the TrainBoard with exactly this list (no second search).
+      lastFactTrainRef.current = ui.trains[0]?.number ?? lastFactTrainRef.current;
+      pendingResults.current = prefs;
+      setLastAsked("train");
+      await searchRoute(ui.from, ui.to, ui.date);
+    }
+    if (ui.selectTrain) {
+      const pick = (ui.trains ?? state.trains).find((t) => t.number === ui.selectTrain);
+      if (pick) await onChooseTrain(pick);
+    }
+    if (ui.openWallet) go("wallet");
+    if (ui.openBookings) go("bookings");
+    return true;
+  }
+
   async function handleText(text: string, asUser = true) {
     const trimmed = text.trim();
     if (!trimmed) return;
@@ -607,6 +729,11 @@ export function Concierge() {
     }
     if (asUser) {
       setMessages((m) => [...m, { id: newId(), role: "user", text: trimmed }]);
+    }
+    // ── Autonomous agent first: NVIDIA picks the railway tools, server runs them, reply is evidence-checked.
+    if (!agentDisabledRef.current) {
+      const handled = await runAutonomousTurn(trimmed);
+      if (handled) return;
     }
     const userDateKnown = Boolean(state.trains.length || state.selectedTrain || state.previewFare);
     let extraction: NluResult | undefined;
@@ -694,6 +821,8 @@ export function Concierge() {
     setPrefs({});
     setDraft("");
     setSeenSession(state.sessionId);
+    agentStateRef.current = null;
+    agentHistoryRef.current = [];
   }, [state.sessionId, seenSession]);
 
   useEffect(() => {

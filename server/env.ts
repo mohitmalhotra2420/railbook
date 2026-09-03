@@ -48,6 +48,13 @@ export const env = {
   get nvidiaModel() {
     return (process.env.NVIDIA_MODEL ?? "").trim() || NVIDIA_DEFAULT_MODEL;
   },
+  /** Model for the autonomous tool-calling agent. Defaults to NVIDIA_MODEL. */
+  get agentModel() {
+    return (process.env.AGENT_MODEL ?? "").trim() || this.nvidiaModel;
+  },
+  get agentAutoEnabled() {
+    return (process.env.AGENT_AUTO ?? "1").trim() !== "0";
+  },
   get aiRequestTimeoutMs() {
     const n = Number(process.env.AI_REQUEST_TIMEOUT_MS ?? 7000);
     if (!Number.isFinite(n)) return 7000;

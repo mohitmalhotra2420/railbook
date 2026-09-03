@@ -42,8 +42,49 @@ const KNOWN_CLASS: ClassCode[] = ["1A", "2A", "3A", "3E", "SL", "CC", "EC", "2S"
 
 let fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis);
 
+/**
+ * Circuit breaker. RailCore's plan has a small daily quota (300 req/day, 20/min).
+ * Once the API says the quota is gone, calling it again is pure latency; we remember the
+ * block window (from the API's own headers) and route straight to the RailKit fallback.
+ * The `provider` field in responses stays truthful (`railkit_fallback`), nothing is invented.
+ */
+let blockedUntil = 0;
+let blockedReason = "";
+
+export function resetRailcoreBlock(): void {
+  blockedUntil = 0;
+  blockedReason = "";
+}
+
+export function railcoreBlockState(): { blocked: boolean; until: number; reason: string } {
+  const blocked = Date.now() < blockedUntil;
+  return { blocked, until: blocked ? blockedUntil : 0, reason: blocked ? blockedReason : "" };
+}
+
+function noteRateLimit(res: Response): void {
+  const now = Date.now();
+  if (res.status === 402) {
+    blockedUntil = now + 30 * 60_000;
+    blockedReason = "railcore_credits_exhausted";
+    return;
+  }
+  if (res.status !== 429) return;
+  const dayRemaining = res.headers.get("x-railcore-ratelimit-day-remaining");
+  const dayReset = Number(res.headers.get("x-railcore-ratelimit-day-reset"));
+  if (dayRemaining === "0" && Number.isFinite(dayReset) && dayReset > 0) {
+    blockedUntil = Math.min(dayReset * 1000, now + 6 * 3_600_000);
+    blockedReason = "railcore_daily_limit";
+    return;
+  }
+  const retry = Number(res.headers.get("retry-after"));
+  const seconds = Number.isFinite(retry) && retry > 0 ? Math.min(retry, 120) : 10;
+  blockedUntil = now + seconds * 1000;
+  blockedReason = "railcore_rate_limited";
+}
+
 export function setRailcoreFetch(next: typeof fetch | null): void {
   fetchImpl = next ?? globalThis.fetch.bind(globalThis);
+  resetRailcoreBlock();
 }
 
 export function resetRailcoreBookings(): void {
@@ -82,6 +123,9 @@ export async function railcoreRequest(path: string, query: Record<string, string
   if (!key) {
     return { ok: false, status: 0, json: { error: { message: "RAILCORE_API_KEY missing" } }, latencyMs: 0 };
   }
+  if (Date.now() < blockedUntil) {
+    return { ok: false, status: 429, json: { error: { message: blockedReason || "railcore_blocked" } }, latencyMs: 0 };
+  }
   const url = new URL(path.startsWith("http") ? path : `${RAILCORE_BASE_URL}${path}`);
   for (const [k, v] of Object.entries(query)) {
     if (v == null || v === "") continue;
@@ -102,6 +146,7 @@ export async function railcoreRequest(path: string, query: Record<string, string
     } catch {
       json = { error: { message: "invalid_json" } };
     }
+    if (res.status === 429 || res.status === 402) noteRateLimit(res);
     return { ok: res.ok, status: res.status, json, latencyMs: Date.now() - started };
   } catch {
     return { ok: false, status: 0, json: { error: { message: "network" } }, latencyMs: Date.now() - started };

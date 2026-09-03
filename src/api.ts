@@ -104,6 +104,40 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  agentAuto: (body: {
+    text: string;
+    history: { role: "user" | "assistant"; content: string }[];
+    state: unknown;
+    now: string;
+  }) =>
+    request<{
+      ok: boolean;
+      fallback: boolean;
+      reply: string | null;
+      ui: {
+        trains?: TrainResult[];
+        from?: Station;
+        to?: Station;
+        date?: string;
+        stationChoice?: { city: string; stations: Station[] };
+        selectTrain?: string;
+        openWallet?: boolean;
+        openBookings?: boolean;
+      };
+      state: unknown;
+      toolsUsed: { name: string; ok: boolean; provider: string | null; latencyMs: number }[];
+      source: "ai" | "evidence" | "none";
+      grounded: boolean;
+      modelUsed: string | null;
+      protocol: "tools" | "json" | null;
+      rounds: number;
+      latencyMs: number;
+      failureReason: string | null;
+      confirmBook: false;
+    }>("/api/agent/auto", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
   agent: (body: unknown) =>
     request<{
       nlu: NluResult;
