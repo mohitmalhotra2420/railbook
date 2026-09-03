@@ -5,7 +5,7 @@ import { setProvider } from "../server/providers/index";
 import { resetFallbackProvider, clearScheduleCache } from "../server/railway/router";
 import { setRailcoreFetch, resetRailcoreBlock, railcoreBlockState, railcoreRequest } from "../server/railway/railcore";
 import { setRailkitSdk } from "../server/railway/railkit";
-import { cleanToolName, emptyAutoState, groundingIssues, resetAgentProtocol, runAutonomousAgent } from "../server/agent/autonomous";
+import { cleanToolName, emptyAutoState, groundingIssues, resetAgentProtocol, runAutonomousAgent, toPlainText } from "../server/agent/autonomous";
 import { runAutoTool } from "../server/agent/autoTools";
 
 const NVIDIA_URL = "https://integrate.api.nvidia.com/v1/chat/completions";
@@ -437,6 +437,18 @@ describe("autonomous agent — NVIDIA tool loop over real adapters", () => {
     expect(groundingIssues("12426 3A: ₹975 × 3 = ₹2,925 + ₹75 = ₹3,000", ev, true)).toEqual([]);
     expect(groundingIssues("total ₹2 925 hai", ev, true)).toEqual([]);
     expect(groundingIssues("total ₹2999 hai", ev, true)).toEqual(["amount ₹2999 not in tool evidence"]);
+  });
+
+  it("toPlainText strips markdown but keeps every fact", () => {
+    const md = "**AMRITSAR SHTABDI (12014) – 8 stops**\n\n| Stop | Station | Arr | Dep |\n|---|---|---|---|\n| 1 | Amritsar Jn (ASR) | – | 04:55 |\n| 5 | Ludhiana Jn (LDH) | 06:57 | 07:02 |\n\n- Fare: ₹975 *per person*\n### Total ₹2925";
+    const txt = toPlainText(md);
+    expect(txt).not.toMatch(/[*|#]/);
+    expect(txt).toContain("AMRITSAR SHTABDI (12014) – 8 stops");
+    expect(txt).toContain("1 · Amritsar Jn (ASR) · — · 04:55");
+    expect(txt).toContain("5 · Ludhiana Jn (LDH) · 06:57 · 07:02");
+    expect(txt).toContain("• Fare: ₹975 per person");
+    expect(txt).toContain("Total ₹2925");
+    expect(toPlainText("04:55 → 06:57 · 2h 02m · CC EC")).toBe("04:55 → 06:57 · 2h 02m · CC EC");
   });
 
   it("21. searchTrains with city names: ambiguous 'Delhi' → needChoice for slot 'to', resolved origin kept, no trains invented", async () => {

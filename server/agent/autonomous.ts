@@ -394,6 +394,35 @@ function parseJsonProtocol(content: string): { calls: ParsedCall[]; reply: strin
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// Plain-text normalisation (the chat bubble renders raw text, not markdown)
+// ────────────────────────────────────────────────────────────────────────────
+
+/** Convert light markdown (bold, headings, tables, bullets) into clean plain text. Pure formatting — no facts touched. */
+export function toPlainText(md: string): string {
+  const lines = md.replace(/\r/g, "").split("\n");
+  const out: string[] = [];
+  for (const raw of lines) {
+    let line = raw.replace(/\s+$/, "");
+    if (/^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/.test(line)) continue; // table separator row
+    if (/^\s*\|.*\|\s*$/.test(line)) {
+      const cells = line.trim().slice(1, -1).split("|").map((c) => c.trim().replace(/^[–—-]$/, "—"));
+      line = cells.filter((c) => c.length).join(" · ");
+    }
+    line = line.replace(/^\s*#{1,6}\s+/, "");
+    line = line.replace(/\*\*(.+?)\*\*/g, "$1").replace(/__(.+?)__/g, "$1");
+    line = line.replace(/(^|[\s(])\*(?!\s)([^*\n]+?)\*(?=[\s).,!?:;]|$)/g, "$1$2").replace(/(^|[\s(])_(?!\s)([^_\n]+?)_(?=[\s).,!?:;]|$)/g, "$1$2");
+    line = line.replace(/^\s*[-*•]\s+/, "• ");
+    line = line.replace(/`([^`]+)`/g, "$1");
+    out.push(line);
+  }
+  return out
+    .join("\n")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // Grounding guard
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -885,7 +914,7 @@ export async function runAutonomousAgent(req: AutoAgentRequest): Promise<AutoAge
   function finish(ungrounded: string | null, issues: string[]): AutoAgentResponse {
     const latencyMs = Date.now() - startedAll;
     if (reply) {
-      return base({ ok: true, reply, source: "ai", grounded: true, toolsUsed, modelUsed, protocol, rounds, latencyMs, failureReason: null });
+      return base({ ok: true, reply: toPlainText(reply), source: "ai", grounded: true, toolsUsed, modelUsed, protocol, rounds, latencyMs, failureReason: null });
     }
     // Model failed (guard / timeout / error) — fall back to a deterministic summary of REAL tool output.
     const summary = evidenceSummary(results);
