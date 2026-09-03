@@ -139,7 +139,13 @@ export function pickStations(query: string, hits: Station[]): StationPick {
     const inCity = hits.filter((s) => group.includes(s.code.toUpperCase()) && scoreStation(q, s) >= 40);
     const unique = new Map(inCity.map((s) => [s.code.toUpperCase(), s]));
     if (unique.size >= 2) {
-      return { kind: "ambiguous", stations: [...unique.values()], city: q };
+      // Show EVERY relevant station the lookup API returned — known group
+      // members are only an ordering hint (best first), never a filter.
+      // Agra City, Sarai Rohilla, Raja ki Mandi… must not disappear.
+      const extra = hits
+        .filter((s) => !unique.has(s.code.toUpperCase()) && scoreStation(q, s) > 0)
+        .sort((a, b) => scoreStation(q, b) - scoreStation(q, a) || a.code.localeCompare(b.code));
+      return { kind: "ambiguous", stations: [...unique.values(), ...extra], city: q };
     }
     if (unique.size === 1) {
       const only = [...unique.values()][0];
@@ -160,7 +166,7 @@ export function pickStations(query: string, hits: Station[]): StationPick {
   const top = scored[0];
   const second = scored[1];
   if (second && top.score < 90 && second.score >= 60 && top.score - second.score < 12) {
-    return { kind: "ambiguous", stations: ranked.slice(0, 6), city: q };
+    return { kind: "ambiguous", stations: ranked, city: q };
   }
   return { kind: "single", station: top.s, stations: ranked };
 }

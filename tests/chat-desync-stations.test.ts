@@ -152,3 +152,68 @@ describe("chat stations resolve via the railway API", () => {
     }
   });
 });
+
+describe("picker shows every station the lookup API returns", () => {
+  const AGRA_HITS = {
+    success: true,
+    data: {
+      results: [
+        { station_code: "AGC", station_name: "AGRA CANTT", city: "Agra", confidence: 0.95 },
+        { station_code: "AF", station_name: "AGRA FORT", city: "Agra", confidence: 0.9 },
+        { station_code: "AGA", station_name: "AGRA CITY", city: "Agra", confidence: 0.85 },
+        { station_code: "RKM", station_name: "RAJA KI MANDI", city: "Agra", confidence: 0.8 },
+        { station_code: "IDH", station_name: "IDGAH AGRA JN", city: "Agra", confidence: 0.75 },
+      ],
+    },
+  };
+
+  function stationsApp() {
+    process.env.RAILWAY_PROVIDER = "railcore";
+    process.env.RAILCORE_API_KEY = "rk_live_test_secret";
+    setRailcoreFetch(async (input) => {
+      if (String(input).includes("/stations/search")) return jsonResponse(200, AGRA_HITS);
+      return jsonResponse(404, { success: false });
+    });
+    return createApp();
+  }
+
+  it("Agra: city group members first, but AGA/RKM/IDH are NOT dropped", async () => {
+    const res = await request(stationsApp()).get("/api/stations").query({ q: "Agra" });
+    expect(res.status).toBe(200);
+    expect(res.body.needChoice).toBe(true);
+    const codes = res.body.stations.map((s: { code: string }) => s.code);
+    expect(codes).toEqual(expect.arrayContaining(["AGC", "AF", "AGA", "RKM", "IDH"]));
+    expect(codes.indexOf("AGC")).toBeLessThan(codes.indexOf("AGA")); // ranked first
+    expect(res.body.stations).toHaveLength(5);
+  });
+
+  it("chat picker block receives the full API list (nothing curated away)", async () => {
+    const res = await request(stationsApp()).post("/api/agent").send({
+      text: "agra se delhi jaana hai",
+      now: NOW_IST_NIGHT.toISOString(),
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.missingFields).toContain("date");
+  });
+
+  it("irrelevant lookalikes still stay out (Kochi KFX protection intact)", async () => {
+    process.env.RAILWAY_PROVIDER = "railcore";
+    process.env.RAILCORE_API_KEY = "rk_live_test_secret";
+    setRailcoreFetch(async () =>
+      jsonResponse(200, {
+        success: true,
+        data: {
+          results: [
+            { station_code: "ERS", station_name: "ERNAKULAM JN", city: "Kochi", confidence: 0.95 },
+            { station_code: "ERN", station_name: "ERNAKULAM TOWN", city: "Kochi", confidence: 0.9 },
+            { station_code: "KFX", station_name: "KOCHEWAHI", city: null, confidence: 0.7 },
+          ],
+        },
+      }),
+    );
+    const res = await request(createApp()).get("/api/stations").query({ q: "Kochi" });
+    const codes = res.body.stations.map((s: { code: string }) => s.code);
+    expect(codes).toContain("ERS");
+    expect(codes).not.toContain("KFX");
+  });
+});

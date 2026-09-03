@@ -7,7 +7,7 @@ import { api } from "../api";
 import { useBooking } from "../booking/context";
 import { validatePassengers } from "../booking/state";
 import { loadTravellers } from "../data/travellers";
-import { availabilityLabel, formatShortDate, inr, newId, todayYmd } from "../format";
+import { availabilityLabel, formatShortDate, inr, newId } from "../format";
 import { BERTH_BY_CLASS, CLASS_LABELS, isBookable, type ClassAvailability, type ClassCode, type Passenger, type Station, type TrainResult } from "../types";
 
 import type { ChatMessage } from "../conversation/types";
@@ -23,7 +23,7 @@ import { speakGuide } from "../voice/speakGuide";
 import { isStationPickInterrupt } from "../ai/agent";
 import { formatGoesToAnswer, formatScheduleCompare, type CompareSchedule } from "../ai/compare";
 import { matchOfferedStation } from "../ai/stationPick";
-import { looksLikeChatQuery, onUtterance } from "../conversation/bus";
+import { onUtterance } from "../conversation/bus";
 
 const PROBE_CLASSES: ClassCode[] = ["SL", "3A", "2A", "1A", "CC", "2S"];
 
@@ -54,7 +54,7 @@ function progressStep(flow: string): number {
 
 export function Concierge() {
   const booking = useBooking();
-  const { state, wallet, go, setFrom, setTo, setDate, setPassengerCount, searchRoute, showResults, selectTrain, selectClass, selectSeat, updatePassenger, goReview, confirm, retrieve } = booking;
+  const { state, wallet, go, setFrom, setTo, setDate, setPassengerCount, searchRoute, selectTrain, selectClass, selectSeat, updatePassenger, goReview, confirm, retrieve } = booking;
   const [prefs, setPrefs] = useState<Prefs>({});
   const [lastAsked, setLastAsked] = useState<DialogSlot>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -84,18 +84,6 @@ export function Concierge() {
   });
   const handleTextRef = useRef<(text: string) => void>(() => undefined);
   const lastFactTrainRef = useRef<string | null>(null);
-  /** Autonomous agent memory: compact server-side state + last few chat turns. */
-  const agentStateRef = useRef<unknown>(null);
-  const agentHistoryRef = useRef<{ role: "user" | "assistant"; content: string }[]>([]);
-  const agentDisabledRef = useRef<boolean>(
-    (() => {
-      try {
-        return localStorage.getItem("railbookAgentAuto") === "0";
-      } catch {
-        return false;
-      }
-    })(),
-  );
   const saved = loadTravellers();
 
   const voice = useVoiceInput(
@@ -588,152 +576,6 @@ export function Concierge() {
     return { searched: false, prefs: turn.prefs };
   }
 
-  /**
-   * Which turns go to the autonomous agent. Mid-booking form steps (passenger details, fare review,
-   * payment) and bare "haan/nahi" answers to a pending class/seat prompt stay with the deterministic
-   * flow, which owns those screens; anything that reads like a question still goes to the agent.
-   */
-  function shouldUseAgent(text: string): boolean {
-    if (agentDisabledRef.current) return false;
-    const t = text.toLowerCase();
-    const formStep =
-      state.flow === "PASSENGERS_PENDING" || state.flow === "FARE_REVIEW" || state.flow === "PAYMENT_PENDING" || state.flow === "BOOKING_PENDING";
-    if (formStep && !looksLikeChatQuery(text)) return false;
-    const bareYesNo = /^(haan|han|ha|yes|ok|okay|theek|thik|nahi|no|na|hmm|hm)\b[\s.!]*$/.test(t) || t.split(/\s+/).length <= 2 && /^(haan|yes|ok|theek)\s+(hai|ji|bhai)$/.test(t);
-    if (bareYesNo && (state.selectedTrain || state.selectedClass || lastAsked === "class" || lastAsked === "seat")) return false;
-    return true;
-  }
-
-  /**
-   * One turn of the autonomous agent. Returns true when the turn was fully handled.
-   * Returns false (→ legacy deterministic flow) when the server says `fallback:true`
-   * or the request itself failed. Nothing here books or charges.
-   */
-  async function runAutonomousTurn(text: string): Promise<boolean> {
-    // Seed = live booking state (what the user sees) merged over the agent's memory from earlier turns,
-    // so chips/TrainBoard taps and agent turns never drift apart.
-    const prev = (agentStateRef.current ?? {}) as {
-      origin?: Station | null;
-      destination?: Station | null;
-      date?: string | null;
-      passengers?: number | null;
-      classCode?: string | null;
-      selectedTrain?: { number: string; name: string } | null;
-      lastTrains?: unknown[];
-      lastSearch?: unknown;
-      turn?: number;
-    };
-    const liveFrom = journeyRef.current.from ?? state.from;
-    const liveTo = journeyRef.current.to ?? state.to;
-    const liveDate = journeyRef.current.dateProvided || state.dateProvided ? journeyRef.current.date || state.date || null : null;
-    const seedState = {
-      origin: liveFrom ?? prev.origin ?? null,
-      destination: liveTo ?? prev.destination ?? null,
-      date: liveDate ?? prev.date ?? null,
-      passengers: state.paxProvided ? state.passengerCount : prev.passengers ?? null,
-      classCode: state.selectedClass?.code ?? prev.classCode ?? null,
-      selectedTrain: state.selectedTrain ? { number: state.selectedTrain.number, name: state.selectedTrain.name } : prev.selectedTrain ?? null,
-      lastTrains: state.trains.length
-        ? state.trains.slice(0, 15).map((t) => ({
-            number: t.number,
-            name: t.name,
-            dep: t.departure,
-            arr: t.arrival,
-            classes: t.classes.map((c) => c.code),
-          }))
-        : prev.lastTrains ?? [],
-      lastSearch:
-        state.trains.length && state.from && state.to && state.date
-          ? { from: state.from.code, to: state.to.code, date: state.date }
-          : prev.lastSearch ?? null,
-      turn: prev.turn ?? 0,
-    };
-    setThinking(true);
-    let res: Awaited<ReturnType<typeof api.agentAuto>>;
-    try {
-      res = await api.agentAuto({
-        text,
-        history: agentHistoryRef.current.slice(-10),
-        state: seedState,
-        now: new Date().toISOString(),
-        today: todayYmd(),
-      });
-    } catch {
-      setThinking(false);
-      return false;
-    }
-    setThinking(false);
-    if (!res || res.fallback || !res.ok || !res.reply) {
-      setLastDbg(`Agent fallback · ${res?.failureReason ?? "request_failed"} → deterministic flow`);
-      return false;
-    }
-    agentStateRef.current = res.state;
-    agentHistoryRef.current = [
-      ...agentHistoryRef.current,
-      { role: "user" as const, content: text },
-      { role: "assistant" as const, content: res.reply },
-    ].slice(-12);
-    const tools = res.toolsUsed.map((t) => `${t.name}${t.ok ? "" : "✗"}${t.provider ? `@${t.provider}` : ""}`).join(", ");
-    setLastDbg(
-      `Agent · ${res.source === "ai" ? res.modelUsed ?? "nvidia" : `evidence-summary (${res.failureReason ?? "model"})`} · ${res.protocol ?? "-"} · ${res.rounds}r · ${(res.latencyMs / 1000).toFixed(1)}s · llm ${(res.llmMs ?? []).map((ms) => (ms / 1000).toFixed(1)).join("+")}s${tools ? ` · tools: ${tools}` : ""}`,
-    );
-
-    // Mirror real tool output into the booking state so TrainBoard / class / fare screens stay in sync.
-    const ui = res.ui ?? {};
-    if (ui.from) {
-      setFrom(ui.from);
-      journeyRef.current.from = ui.from;
-    }
-    if (ui.to) {
-      setTo(ui.to);
-      journeyRef.current.to = ui.to;
-    }
-    if (ui.date && ui.date !== state.date) {
-      setDate(ui.date);
-      journeyRef.current.date = ui.date;
-      journeyRef.current.dateProvided = true;
-    }
-    const st = (res.state ?? {}) as { passengers?: number | null; origin?: Station | null; destination?: Station | null; date?: string | null };
-    if (st.passengers && st.passengers !== state.passengerCount) setPassengerCount(st.passengers);
-    if (!ui.from && st.origin && st.origin.code !== state.from?.code) {
-      setFrom(st.origin);
-      journeyRef.current.from = st.origin;
-    }
-    if (!ui.to && st.destination && st.destination.code !== state.to?.code) {
-      setTo(st.destination);
-      journeyRef.current.to = st.destination;
-    }
-    if (!ui.date && st.date && st.date !== state.date) {
-      setDate(st.date);
-      journeyRef.current.date = st.date;
-      journeyRef.current.dateProvided = true;
-    }
-
-    const blocks: Block[] = [];
-    if (ui.stationChoice?.stations?.length) {
-      const slot: "from" | "to" = ui.stationChoice.slot ?? (!journeyRef.current.from && !state.from ? "from" : "to");
-      stationPickRef.current = { slot, stations: ui.stationChoice.stations };
-      setLastAsked(slot);
-      blocks.push({ type: "stations", options: ui.stationChoice.stations, slot });
-    }
-    setMessages((m) => [...m, { id: newId(), role: "assistant", text: res.reply!, blocks: blocks.length ? blocks : undefined }]);
-
-    if (ui.trains && ui.from && ui.to && ui.date) {
-      // Real provider trains from the agent's own tool call: open the TrainBoard with exactly this list (no second search).
-      lastFactTrainRef.current = ui.trains[0]?.number ?? lastFactTrainRef.current;
-      pendingResults.current = prefs;
-      setLastAsked("train");
-      showResults(ui.from, ui.to, ui.date, ui.trains, ui.recommendations ?? []);
-    }
-    if (ui.selectTrain) {
-      const pick = (ui.trains ?? state.trains).find((t) => t.number === ui.selectTrain);
-      if (pick) await onChooseTrain(pick);
-    }
-    if (ui.openWallet) go("wallet");
-    if (ui.openBookings) go("bookings");
-    return true;
-  }
-
   async function handleText(text: string, asUser = true) {
     const trimmed = text.trim();
     if (!trimmed) return;
@@ -765,11 +607,6 @@ export function Concierge() {
     }
     if (asUser) {
       setMessages((m) => [...m, { id: newId(), role: "user", text: trimmed }]);
-    }
-    // ── Autonomous agent first: NVIDIA picks the railway tools, server runs them, reply is evidence-checked.
-    if (shouldUseAgent(trimmed)) {
-      const handled = await runAutonomousTurn(trimmed);
-      if (handled) return;
     }
     const userDateKnown = Boolean(state.trains.length || state.selectedTrain || state.previewFare);
     let extraction: NluResult | undefined;
@@ -857,8 +694,6 @@ export function Concierge() {
     setPrefs({});
     setDraft("");
     setSeenSession(state.sessionId);
-    agentStateRef.current = null;
-    agentHistoryRef.current = [];
   }, [state.sessionId, seenSession]);
 
   useEffect(() => {
@@ -1389,7 +1224,7 @@ function BlockView({
   }
   if (block.type === "stations") {
     return (
-      <div className="inline-chips">
+      <div className="inline-chips station-chips">
         {block.options.map((o) => (
           <button key={o.code} onClick={() => onStation?.(block.slot, o)}>
             {o.name} ({o.code})

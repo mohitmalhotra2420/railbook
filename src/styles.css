@@ -1383,3 +1383,10 @@ h2 { font-size: 17px; }
 .cl-s2 { background: #e2e8f0; border-color: #cbd5e1; }
 .cl-gen { background: #f1f5f9; border-color: #cbd5e1; }
 .cl-other { background: #f8fafc; border-color: #e2e8f0; }
+
+/* Station picker chips: full API list, scrollable when long */
+.station-chips {
+  max-height: 240px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
