@@ -717,10 +717,9 @@ async function executeCall(call: ParsedCall, state: AutoAgentState): Promise<Aut
 export async function runAutonomousAgent(req: AutoAgentRequest): Promise<AutoAgentResponse> {
   const startedAll = Date.now();
   const nowRaw = req.now ? new Date(req.now) : new Date();
-  // Vercel functions run in UTC; Indian Railways dates are IST. Shift the instant so that local
-  // getters yield IST components on any server timezone (offset delta = 330 min − server offset).
-  const instant = Number.isNaN(nowRaw.getTime()) ? new Date() : nowRaw;
-  const now = new Date(instant.getTime() + (330 + instant.getTimezoneOffset()) * 60_000);
+  const now = Number.isNaN(nowRaw.getTime()) ? new Date() : nowRaw;
+  // todayYmdFrom is IST-pinned (Asia/Kolkata) whatever the server clock says; the client's own
+  // calendar date wins when supplied so the chat and the date picker can never disagree.
   const today = req.today && /^\d{4}-\d{2}-\d{2}$/.test(req.today) ? req.today : todayYmdFrom(now);
   const state = normaliseState(req.state);
   state.turn += 1;
