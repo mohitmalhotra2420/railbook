@@ -155,6 +155,8 @@ export async function runAutoTool(name: string, rawArgs: unknown): Promise<AutoT
         if (!date) return fail(tool, "date required in YYYY-MM-DD — ask the user, never assume today", started);
         if (isPastDate(date)) return fail(tool, `date ${date} is in the past — ask the user for today or a future date`, started, { date });
         const [fromRes, toRes] = await Promise.all([resolveEnd(fromRaw), resolveEnd(toRaw)]);
+        const resolvedFrom = fromRes.kind === "station" ? fromRes.station : undefined;
+        const resolvedTo = toRes.kind === "station" ? toRes.station : undefined;
         for (const [slot, r, raw] of [
           ["from", fromRes, fromRaw],
           ["to", toRes, toRaw],
@@ -169,11 +171,12 @@ export async function runAutoTool(name: string, rawArgs: unknown): Promise<AutoT
                 slot,
                 city: r.city,
                 stations: r.stations.map((s) => ({ code: s.code, name: s.name })),
+                resolved: { from: resolvedFrom?.code ?? null, to: resolvedTo?.code ?? null },
                 error: `"${raw}" has several stations — ask the user which one, then search again with the code`,
               },
               provider: r.provider,
               latencyMs: Date.now() - started,
-              ui: { stationChoice: { slot, city: r.city, stations: r.stations } },
+              ui: { stationChoice: { slot, city: r.city, stations: r.stations }, from: resolvedFrom, to: resolvedTo, date },
             };
           }
           if (r.kind === "none") return fail(tool, `no station found for "${raw}" — ask the user to rephrase or give the station code`, started, { slot });

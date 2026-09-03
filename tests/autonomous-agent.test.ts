@@ -431,6 +431,28 @@ describe("autonomous agent — NVIDIA tool loop over real adapters", () => {
     await runAutonomousAgent({ text: "Ludhiana se Delhi", now: "2026-09-03T19:30:00.000Z", today: "2026-09-03" });
     expect(seen2[0].messages[0].content).toContain("Today is 2026-09-03");
   });
+
+  it("21. searchTrains with city names: ambiguous 'Delhi' → needChoice for slot 'to', resolved origin kept, no trains invented", async () => {
+    const date = tomorrow();
+    scriptNvidia([
+      () =>
+        assistant({
+          content: null,
+          tool_calls: [{ id: "c1", type: "function", function: { name: "searchTrains", arguments: JSON.stringify({ from: "Ludhiana", to: "Delhi", date }) } }],
+        }),
+      () => assistant({ content: "Delhi ke kaunse station se? NEW DELHI (NDLS), DELHI JN (DLI) ya H NIZAMUDDIN (NZM)?" }),
+    ]);
+    const res = await runAutonomousAgent({ text: "Ludhiana se Delhi kal", now: new Date().toISOString() });
+    expect(res.ok).toBe(true);
+    expect(res.toolsUsed).toEqual([expect.objectContaining({ name: "searchTrains", ok: false })]);
+    expect(res.ui.stationChoice?.slot).toBe("to");
+    expect(res.ui.stationChoice?.stations.map((s) => s.code)).toContain("NDLS");
+    expect(res.ui.trains).toBeUndefined();
+    expect(res.state.origin?.code).toBe("LDH");
+    expect(res.state.destination).toBeNull();
+    expect(res.state.date).toBe(date);
+    expect(res.state.lastTrains).toEqual([]);
+  });
 });
 
 describe("RailCore circuit breaker", () => {

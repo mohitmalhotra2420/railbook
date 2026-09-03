@@ -580,7 +580,23 @@ function mergeDeterministicSlots(state: AutoAgentState, text: string, now: Date)
 
 function applyToolToState(state: AutoAgentState, call: ParsedCall, result: AutoToolResult, ui: AutoAgentUi): void {
   if (!result.ok) {
-    if (result.ui?.stationChoice) ui.stationChoice = result.ui.stationChoice;
+    if (result.ui?.stationChoice) {
+      // Partial resolution is still real data: remember the end that did resolve so the
+      // follow-up (station chip tap) can search straight away.
+      ui.stationChoice = result.ui.stationChoice;
+      if (result.ui.from) {
+        state.origin = result.ui.from;
+        ui.from = result.ui.from;
+      }
+      if (result.ui.to) {
+        state.destination = result.ui.to;
+        ui.to = result.ui.to;
+      }
+      if (result.ui.date) {
+        state.date = result.ui.date;
+        ui.date = result.ui.date;
+      }
+    }
     return;
   }
   if (call.name === "searchTrains" && result.ui?.trains) {

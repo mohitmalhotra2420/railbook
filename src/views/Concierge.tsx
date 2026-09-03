@@ -594,25 +594,44 @@ export function Concierge() {
    * or the request itself failed. Nothing here books or charges.
    */
   async function runAutonomousTurn(text: string): Promise<boolean> {
-    const seedState =
-      agentStateRef.current ??
-      {
-        origin: state.from,
-        destination: state.to,
-        date: state.dateProvided ? state.date || null : null,
-        passengers: state.paxProvided ? state.passengerCount : null,
-        classCode: state.selectedClass?.code ?? null,
-        selectedTrain: state.selectedTrain ? { number: state.selectedTrain.number, name: state.selectedTrain.name } : null,
-        lastTrains: state.trains.slice(0, 15).map((t) => ({
-          number: t.number,
-          name: t.name,
-          dep: t.departure,
-          arr: t.arrival,
-          classes: t.classes.map((c) => c.code),
-        })),
-        lastSearch: state.from && state.to && state.date ? { from: state.from.code, to: state.to.code, date: state.date } : null,
-        turn: 0,
-      };
+    // Seed = live booking state (what the user sees) merged over the agent's memory from earlier turns,
+    // so chips/TrainBoard taps and agent turns never drift apart.
+    const prev = (agentStateRef.current ?? {}) as {
+      origin?: Station | null;
+      destination?: Station | null;
+      date?: string | null;
+      passengers?: number | null;
+      classCode?: string | null;
+      selectedTrain?: { number: string; name: string } | null;
+      lastTrains?: unknown[];
+      lastSearch?: unknown;
+      turn?: number;
+    };
+    const liveFrom = journeyRef.current.from ?? state.from;
+    const liveTo = journeyRef.current.to ?? state.to;
+    const liveDate = journeyRef.current.dateProvided || state.dateProvided ? journeyRef.current.date || state.date || null : null;
+    const seedState = {
+      origin: liveFrom ?? prev.origin ?? null,
+      destination: liveTo ?? prev.destination ?? null,
+      date: liveDate ?? prev.date ?? null,
+      passengers: state.paxProvided ? state.passengerCount : prev.passengers ?? null,
+      classCode: state.selectedClass?.code ?? prev.classCode ?? null,
+      selectedTrain: state.selectedTrain ? { number: state.selectedTrain.number, name: state.selectedTrain.name } : prev.selectedTrain ?? null,
+      lastTrains: state.trains.length
+        ? state.trains.slice(0, 15).map((t) => ({
+            number: t.number,
+            name: t.name,
+            dep: t.departure,
+            arr: t.arrival,
+            classes: t.classes.map((c) => c.code),
+          }))
+        : prev.lastTrains ?? [],
+      lastSearch:
+        state.trains.length && state.from && state.to && state.date
+          ? { from: state.from.code, to: state.to.code, date: state.date }
+          : prev.lastSearch ?? null,
+      turn: prev.turn ?? 0,
+    };
     setThinking(true);
     let res: Awaited<ReturnType<typeof api.agentAuto>>;
     try {
