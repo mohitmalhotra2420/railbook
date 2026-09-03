@@ -150,8 +150,8 @@ export const api = {
       };
       provider?: string;
     }>(
-      `/api/trains/${encodeURIComponent(number)}/coach-position${
-        station ? `?station=${encodeURIComponent(station)}` : ""
+      `/api/coach-position?number=${encodeURIComponent(number)}${
+        station ? `&station=${encodeURIComponent(station)}` : ""
       }`,
     ),
   trainHistory: (number: string, date: string) =>

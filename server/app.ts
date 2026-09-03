@@ -394,18 +394,36 @@ export function createApp() {
     }
   });
 
-  app.get("/api/trains/:number/coach-position", async (req, res, next) => {
+  async function coachPositionReply(trainNumber: string, station: string, res: express.Response) {
+    const routed = await routedCoachPosition(
+      trainNumber,
+      /^[A-Z]{2,6}$/.test(station.trim().toUpperCase()) ? station.trim().toUpperCase() : undefined,
+    );
+    if (!routed.coachPosition) {
+      res.status(404).json({ error: "Coach position provider se nahi aayi. Main fake layout nahi dikhaunga." });
+      return;
+    }
+    res.json({ coachPosition: routed.coachPosition, provider: routed.provider });
+  }
+
+  // Flat route: Vercel serverless routing sirf 1-segment /api/* paths function tak
+  // pahunchata hai (isi liye /api/live, /api/schedule bhi flat hain).
+  app.get("/api/coach-position", async (req, res, next) => {
     try {
-      const station = String(req.query.station ?? "").trim().toUpperCase();
-      const routed = await routedCoachPosition(
-        String(req.params.number),
-        /^[A-Z]{2,6}$/.test(station) ? station : undefined,
-      );
-      if (!routed.coachPosition) {
-        res.status(404).json({ error: "Coach position provider se nahi aayi. Main fake layout nahi dikhaunga." });
+      const number = String(req.query.number ?? "").trim();
+      if (!/^[0-9]{4,6}$/.test(number)) {
+        res.status(400).json({ error: "Valid train number is required." });
         return;
       }
-      res.json({ coachPosition: routed.coachPosition, provider: routed.provider });
+      await coachPositionReply(number, String(req.query.station ?? ""), res);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.get("/api/trains/:number/coach-position", async (req, res, next) => {
+    try {
+      await coachPositionReply(String(req.params.number), String(req.query.station ?? ""), res);
     } catch (err) {
       next(err);
     }

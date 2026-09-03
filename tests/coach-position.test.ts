@@ -67,12 +67,31 @@ describe("RailCore coach position", () => {
     process.env.RAILCORE_API_KEY = "rk_live_test_secret";
     setRailcoreFetch(async () => jsonResponse(200, REAL_SHAPE));
     const app = createApp();
-    const res = await request(app).get("/api/trains/12014/coach-position").query({ station: "LDH" });
+    // Flat route — Vercel serverless only routes 1-segment /api/* paths.
+    const res = await request(app).get("/api/coach-position").query({ number: "12014", station: "LDH" });
     expect(res.status).toBe(200);
     expect(res.body.provider).toBe("railcore");
     expect(res.body.coachPosition.trainNumber).toBe("12014");
     expect(res.body.coachPosition.coaches).toHaveLength(4);
     expect(JSON.stringify(res.body)).not.toMatch(/rk_live_test_secret|RAILCORE_API_KEY/i);
+  });
+
+  it("flat route rejects an invalid train number", async () => {
+    process.env.RAILWAY_PROVIDER = "railcore";
+    process.env.RAILCORE_API_KEY = "rk_live_test_secret";
+    const app = createApp();
+    const res = await request(app).get("/api/coach-position").query({ number: "12AB" });
+    expect(res.status).toBe(400);
+  });
+
+  it("deep route (local dev) serves the same payload", async () => {
+    process.env.RAILWAY_PROVIDER = "railcore";
+    process.env.RAILCORE_API_KEY = "rk_live_test_secret";
+    setRailcoreFetch(async () => jsonResponse(200, REAL_SHAPE));
+    const app = createApp();
+    const res = await request(app).get("/api/trains/12014/coach-position").query({ station: "LDH" });
+    expect(res.status).toBe(200);
+    expect(res.body.provider).toBe("railcore");
   });
 
   it("API endpoint answers 404 honestly when provider has no composition", async () => {
