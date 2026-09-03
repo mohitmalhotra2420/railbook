@@ -169,10 +169,11 @@ async function resolveUnresolvedStations(nlu: NluResult): Promise<NluResult> {
     nlu.unresolvedTo ? routedStationSearch(nlu.unresolvedTo) : Promise.resolve(null),
   ]);
   for (const [side, hit] of [["from", fromHit], ["to", toHit]] as const) {
-    // Only trust a LIVE provider hit that is a single, unambiguous match.
+    // Only trust a LIVE RailCore hit that the ranked picker called unambiguous
+    // (stations[0] is its best match — same contract /api/stations serves).
     // Ambiguous cities (Delhi…) and local-fallback guesses stay unresolved
     // so the client picker asks instead of guessing.
-    if (!hit || hit.needChoice || hit.stations.length !== 1) continue;
+    if (!hit || hit.needChoice || !hit.stations.length) continue;
     if (hit.provider !== "railcore") continue;
     const st = hit.stations[0];
     if (side === "from" && !nlu.from) {
