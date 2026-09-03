@@ -1333,3 +1333,53 @@ h2 { font-size: 17px; }
   background: linear-gradient(180deg, transparent, #fff 22%);
   border-top: 1px solid #edf0f2;
 }
+
+/* ── Coach position diagram ─────────────────────────────── */
+.coach-strip {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 12px 2px 8px;
+  scrollbar-width: thin;
+}
+.coach-box {
+  flex: 0 0 auto;
+  min-width: 54px;
+  padding: 8px 6px;
+  border-radius: 10px;
+  border: 1.5px solid #d8e0ea;
+  background: #f6f9fc;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+}
+.coach-box.engine {
+  background: var(--navy, #0b1f3a);
+  color: #fff;
+  border-color: var(--navy, #0b1f3a);
+  min-width: 62px;
+}
+.coach-name {
+  font-weight: 800;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.coach-class {
+  font-size: 10px;
+  font-weight: 700;
+  opacity: 0.75;
+  text-transform: uppercase;
+}
+.cl-a1 { background: #f3e8ff; border-color: #d8b4fe; }
+.cl-a2 { background: #dcfce7; border-color: #86efac; }
+.cl-a3 { background: #ffedd5; border-color: #fdba74; }
+.cl-e3 { background: #fef3c7; border-color: #fcd34d; }
+.cl-ea { background: #fef9c3; border-color: #fde047; }
+.cl-ec { background: #fef9c3; border-color: #fde047; }
+.cl-cc { background: #dbeafe; border-color: #93c5fd; }
+.cl-sl { background: #ccfbf1; border-color: #5eead4; }
+.cl-s2 { background: #e2e8f0; border-color: #cbd5e1; }
+.cl-gen { background: #f1f5f9; border-color: #cbd5e1; }
+.cl-other { background: #f8fafc; border-color: #e2e8f0; }

@@ -273,6 +273,54 @@ export async function trainSchedule(number: string): Promise<RailcoreSchedule | 
   };
 }
 
+export type RailcoreCoach = {
+  name: string;
+  classCode: string;
+  positionFromEngine: number | null;
+  sequence: number | null;
+};
+
+export type RailcoreCoachPosition = {
+  trainNumber: string;
+  stationCode: string | null;
+  coaches: RailcoreCoach[];
+};
+
+export async function coachPosition(number: string, stationCode?: string): Promise<RailcoreCoachPosition | null> {
+  const started = Date.now();
+  const query: Record<string, string | undefined> = {};
+  if (stationCode) query.stationCode = stationCode;
+  const res = await railcoreRequest(`/trains/${encodeURIComponent(number)}/coach-position`, query);
+  logCall("coachPosition", started, res.ok, res.ok ? null : failReason(res.json));
+  if (!res.ok) return null;
+  const d = asObj(unwrap(res.json));
+  const rows = Array.isArray(d.coach_position) ? d.coach_position : [];
+  const coaches = rows
+    .map((row) => {
+      const c = asObj(row);
+      const name = String(c.coach_name ?? "").trim().toUpperCase();
+      if (!name) return null;
+      return {
+        name,
+        classCode: String(c.class_code ?? "").trim().toUpperCase() || "—",
+        positionFromEngine: typeof c.position_from_engine === "number" ? c.position_from_engine : null,
+        sequence: typeof c.sequence === "number" ? c.sequence : null,
+      };
+    })
+    .filter((c): c is RailcoreCoach => Boolean(c))
+    .sort(
+      (a, b) =>
+        (a.positionFromEngine ?? Number.MAX_SAFE_INTEGER) - (b.positionFromEngine ?? Number.MAX_SAFE_INTEGER) ||
+        a.name.localeCompare(b.name),
+    );
+  if (!coaches.length) return null;
+  return {
+    trainNumber: String(d.train_number ?? number),
+    stationCode: stationCode ? stationCode.toUpperCase() : null,
+    coaches,
+  };
+}
+
 export async function cancelledTrains(): Promise<null> {
   return null;
 }

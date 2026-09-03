@@ -47,6 +47,36 @@ function cellFor(train: TrainResult, code: ClassCode): ClassAvailability | undef
   return train.classes.find((c) => c.code === code);
 }
 
+type CoachRow = { name: string; classCode: string; positionFromEngine: number | null };
+
+type CoachSheet = {
+  trainNumber: string;
+  trainName: string;
+  stationCode: string | null;
+  loading: boolean;
+  coaches: CoachRow[];
+  counts: { classCode: string; count: number }[];
+  error: string | null;
+};
+
+function coachClassToken(classCode: string): string {
+  const map: Record<string, string> = {
+    "1A": "a1",
+    "2A": "a2",
+    "3A": "a3",
+    "3E": "e3",
+    EA: "ea",
+    EC: "ec",
+    CC: "cc",
+    SL: "sl",
+    "2S": "s2",
+    GS: "gen",
+    GEN: "gen",
+    UR: "gen",
+  };
+  return map[classCode.toUpperCase()] ?? "other";
+}
+
 export function needsSeatRefresh(train: TrainResult): boolean {
   if (!train.classes.length) return true;
   return train.classes.some((c) => c.status === "UNKNOWN" || (c.status === "AVAILABLE" && c.seats == null && !c.fare));
@@ -75,7 +105,7 @@ export function TrainBoard() {
   const [klass, setKlass] = useState<ClassCode | null>(null);
   const [q, setQ] = useState("");
   const [loadingNos, setLoadingNos] = useState<string[]>([]);
-  const [sheet, setSheet] = useState<{ title: string; body: string } | null>(null);
+  const [coachSheet, setCoachSheet] = useState<CoachSheet | null>(null);
   const [routeSheet, setRouteSheet] = useState<RouteSheetData | null>(null);
   const [pickedNo, setPickedNo] = useState<string | null>(null);
   const [hint, setHint] = useState<ReactNode>(
@@ -299,11 +329,48 @@ export function TrainBoard() {
     }
   }
 
-  function openCoach(train: TrainResult) {
-    setSheet({
-      title: `${train.number} coach position`,
-      body: "Coach position diagram provider payload mein reliably nahi aata. Main fake layout nahi dikhaunga.",
+  async function openCoach(train: TrainResult) {
+    const station = train.from.code;
+    setCoachSheet({
+      trainNumber: train.number,
+      trainName: train.name,
+      stationCode: station,
+      loading: true,
+      coaches: [],
+      counts: [],
+      error: null,
     });
+    try {
+      const res = await api.trainCoachPosition(train.number, station);
+      const coaches: CoachRow[] = res.coachPosition.coaches.map((c) => ({
+        name: c.name,
+        classCode: c.classCode,
+        positionFromEngine: c.positionFromEngine,
+      }));
+      const byClass = new Map<string, number>();
+      for (const c of coaches) byClass.set(c.classCode, (byClass.get(c.classCode) ?? 0) + 1);
+      setCoachSheet({
+        trainNumber: res.coachPosition.trainNumber || train.number,
+        trainName: train.name,
+        stationCode: res.coachPosition.stationCode || station,
+        loading: false,
+        coaches,
+        counts: [...byClass.entries()]
+          .map(([classCode, count]) => ({ classCode, count }))
+          .sort((a, b) => b.count - a.count || a.classCode.localeCompare(b.classCode)),
+        error: null,
+      });
+    } catch {
+      setCoachSheet({
+        trainNumber: train.number,
+        trainName: train.name,
+        stationCode: station,
+        loading: false,
+        coaches: [],
+        counts: [],
+        error: "Coach position provider se nahi aayi. Main fake layout nahi dikhaunga.",
+      });
+    }
   }
 
   const nowLabel = new Date().toLocaleString("en-GB", {
@@ -583,7 +650,7 @@ export function TrainBoard() {
                   onClick={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
-                    openCoach(train);
+                    void openCoach(train);
                   }}
                 >
                   🪑 Coach
@@ -597,15 +664,62 @@ export function TrainBoard() {
 
       {routeSheet && <RouteTimeline data={routeSheet} onClose={() => setRouteSheet(null)} />}
 
-      {sheet && (
-        <div className="sheet-backdrop" onClick={() => setSheet(null)}>
+      {coachSheet && (
+        <div className="sheet-backdrop" onClick={() => setCoachSheet(null)}>
           <div className="sheet" onClick={(e) => e.stopPropagation()}>
             <div className="grab" />
-            <h2>{sheet.title}</h2>
-            <p className="lede" style={{ whiteSpace: "pre-wrap", marginTop: 8 }}>
-              {sheet.body}
+            <h2>{coachSheet.trainNumber} coach position</h2>
+            <p className="lede" style={{ marginTop: 2 }}>
+              {coachSheet.trainName}
+              {coachSheet.stationCode ? ` · ${coachSheet.stationCode} par composition` : ""}
             </p>
-            <button className="btn navy" style={{ marginTop: 16 }} onClick={() => setSheet(null)}>
+            {coachSheet.loading && (
+              <>
+                <div className="skel" style={{ height: 64, marginTop: 12 }} />
+                <p className="lede" style={{ marginTop: 8 }}>
+                  Coach layout load ho raha hai…
+                </p>
+              </>
+            )}
+            {!coachSheet.loading && coachSheet.error && (
+              <p className="lede" style={{ whiteSpace: "pre-wrap", marginTop: 8 }}>
+                {coachSheet.error}
+              </p>
+            )}
+            {!coachSheet.loading && !coachSheet.error && coachSheet.coaches.length > 0 && (
+              <>
+                <div
+                  className="coach-strip"
+                  role="img"
+                  aria-label={`Engine ke baad ${coachSheet.coaches.length} coaches`}
+                >
+                  <div className="coach-box engine">
+                    <span className="coach-name">ENGINE</span>
+                    <span className="coach-class">🚂</span>
+                  </div>
+                  {coachSheet.coaches.map((c, i) => (
+                    <div
+                      key={`${c.name}-${i}`}
+                      className={`coach-box cl-${coachClassToken(c.classCode)}`}
+                      title={
+                        c.positionFromEngine != null ? `Engine se position ${c.positionFromEngine}` : c.name
+                      }
+                    >
+                      <span className="coach-name">{c.name}</span>
+                      <span className="coach-class">{c.classCode}</span>
+                    </div>
+                  ))}
+                </div>
+                <p className="lede" style={{ marginTop: 10, fontSize: 12 }}>
+                  {coachSheet.coaches.length} coaches · engine se order mein ·{" "}
+                  {coachSheet.counts.map((x) => `${x.classCode} ×${x.count}`).join(", ")}
+                </p>
+                <p className="lede" style={{ fontSize: 11, opacity: 0.7 }}>
+                  Provider snapshot (RailCore). Platform par actual racking alag ho sakti hai.
+                </p>
+              </>
+            )}
+            <button className="btn navy" style={{ marginTop: 16 }} onClick={() => setCoachSheet(null)}>
               Close
             </button>
           </div>

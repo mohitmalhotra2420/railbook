@@ -13,10 +13,12 @@ import {
 import {
   RailCoreProvider,
   isUsableLive,
+  coachPosition as railcoreCoachPosition,
   liveTrainStatus as railcoreLive,
   searchRailcoreStationsResult,
   trainInfo as railcoreTrainInfo,
   trainSchedule as railcoreSchedule,
+  type RailcoreCoachPosition,
   type RailcoreLiveStatus,
   type RailcoreSchedule,
 } from "./railcore.js";
@@ -209,6 +211,31 @@ export async function routedTrainInfo(number: string): Promise<{
     info: fb ? { trainNumber: fb.trainNumber, trainName: fb.trainName, runningDays: [] } : null,
     provider: fb ? "railkit" : "none",
   };
+}
+
+export type RoutedCoachPosition = {
+  coachPosition: RailcoreCoachPosition | null;
+  provider: ServedProvider;
+};
+
+/**
+ * Coach composition is RailCore-only (`GET /v1/trains/:n/coach-position`).
+ * RailKit has no such endpoint, so a failed/empty primary call stays honestly
+ * empty instead of showing an invented layout.
+ */
+export async function routedCoachPosition(number: string, stationCode?: string): Promise<RoutedCoachPosition> {
+  const started = Date.now();
+  if (railcoreIsPrimary() && env.railcoreApiKey) {
+    const primary = await railcoreCoachPosition(number, stationCode);
+    if (primary) {
+      logServed("railcore", "coachPosition", started, true);
+      return { coachPosition: primary, provider: "railcore" };
+    }
+    logServed("none", "coachPosition", started, false, "railcore_unavailable");
+    return { coachPosition: null, provider: "none" };
+  }
+  logServed("none", "coachPosition", started, false, "coach_position_unsupported");
+  return { coachPosition: null, provider: "none" };
 }
 
 export async function routedPnr(pnr: string): Promise<PnrLookup | null> {

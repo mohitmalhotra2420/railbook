@@ -136,6 +136,24 @@ export const api = {
         stops?: { code: string; name: string; arrival: string; departure: string; day?: string }[];
       };
     }>(`/api/schedule?number=${encodeURIComponent(number)}`),
+  trainCoachPosition: (number: string, station?: string) =>
+    request<{
+      coachPosition: {
+        trainNumber: string;
+        stationCode: string | null;
+        coaches: {
+          name: string;
+          classCode: string;
+          positionFromEngine: number | null;
+          sequence: number | null;
+        }[];
+      };
+      provider?: string;
+    }>(
+      `/api/trains/${encodeURIComponent(number)}/coach-position${
+        station ? `?station=${encodeURIComponent(station)}` : ""
+      }`,
+    ),
   trainHistory: (number: string, date: string) =>
     request<{
       history: {

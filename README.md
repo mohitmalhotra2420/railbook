@@ -13,6 +13,7 @@ The default **production railway provider is RailCore** (`RAILWAY_PROVIDER=railc
 - Demo bookings are labelled **Mock / demo booking**.
 - Mock PNRs always start with `MOCK`.
 - Nothing is marked confirmed until the provider returns success.
+- Coach position/composition RailCore `GET /v1/trains/:number/coach-position` se aati hai (RailCore-only; RailKit isme fallback nahi). Na aaye to UI honestly kehta hai — fake layout kabhi nahi banata.
 - Connecting a licensed/authorized railway API later should only require a new adapter under `server/providers/` plus server-side env vars.
 
 This project does **not** scrape IRCTC, call unofficial APIs, or invent production PNRs.

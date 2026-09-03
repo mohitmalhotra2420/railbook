@@ -16,6 +16,7 @@ import {
   railcoreIsPrimary,
   routedCancelled,
   routedClassBoard,
+  routedCoachPosition,
   routedLiveStatus,
   routedPnr,
   routedSchedule,
@@ -388,6 +389,23 @@ export function createApp() {
         },
         provider: routed.provider,
       });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.get("/api/trains/:number/coach-position", async (req, res, next) => {
+    try {
+      const station = String(req.query.station ?? "").trim().toUpperCase();
+      const routed = await routedCoachPosition(
+        String(req.params.number),
+        /^[A-Z]{2,6}$/.test(station) ? station : undefined,
+      );
+      if (!routed.coachPosition) {
+        res.status(404).json({ error: "Coach position provider se nahi aayi. Main fake layout nahi dikhaunga." });
+        return;
+      }
+      res.json({ coachPosition: routed.coachPosition, provider: routed.provider });
     } catch (err) {
       next(err);
     }
