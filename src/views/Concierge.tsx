@@ -23,7 +23,7 @@ import { speakGuide } from "../voice/speakGuide";
 import { isStationPickInterrupt } from "../ai/agent";
 import { formatGoesToAnswer, formatScheduleCompare, type CompareSchedule } from "../ai/compare";
 import { matchOfferedStation } from "../ai/stationPick";
-import { onUtterance } from "../conversation/bus";
+import { looksLikeChatQuery, onUtterance } from "../conversation/bus";
 
 const PROBE_CLASSES: ClassCode[] = ["SL", "3A", "2A", "1A", "CC", "2S"];
 
@@ -589,6 +589,22 @@ export function Concierge() {
   }
 
   /**
+   * Which turns go to the autonomous agent. Mid-booking form steps (passenger details, fare review,
+   * payment) and bare "haan/nahi" answers to a pending class/seat prompt stay with the deterministic
+   * flow, which owns those screens; anything that reads like a question still goes to the agent.
+   */
+  function shouldUseAgent(text: string): boolean {
+    if (agentDisabledRef.current) return false;
+    const t = text.toLowerCase();
+    const formStep =
+      state.flow === "PASSENGERS_PENDING" || state.flow === "FARE_REVIEW" || state.flow === "PAYMENT_PENDING" || state.flow === "BOOKING_PENDING";
+    if (formStep && !looksLikeChatQuery(text)) return false;
+    const bareYesNo = /^(haan|han|ha|yes|ok|okay|theek|thik|nahi|no|na|hmm|hm)\b[\s.!]*$/.test(t) || t.split(/\s+/).length <= 2 && /^(haan|yes|ok|theek)\s+(hai|ji|bhai)$/.test(t);
+    if (bareYesNo && (state.selectedTrain || state.selectedClass || lastAsked === "class" || lastAsked === "seat")) return false;
+    return true;
+  }
+
+  /**
    * One turn of the autonomous agent. Returns true when the turn was fully handled.
    * Returns false (→ legacy deterministic flow) when the server says `fallback:true`
    * or the request itself failed. Nothing here books or charges.
@@ -751,7 +767,7 @@ export function Concierge() {
       setMessages((m) => [...m, { id: newId(), role: "user", text: trimmed }]);
     }
     // ── Autonomous agent first: NVIDIA picks the railway tools, server runs them, reply is evidence-checked.
-    if (!agentDisabledRef.current) {
+    if (shouldUseAgent(trimmed)) {
       const handled = await runAutonomousTurn(trimmed);
       if (handled) return;
     }
