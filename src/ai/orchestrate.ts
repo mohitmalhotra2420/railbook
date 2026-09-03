@@ -320,7 +320,7 @@ export function planTurn(input: TurnInput): AssistantTurn {
       return {
         text: `Bilkul 👍 ${city(from)} → ${city(to)}, ${formatShortDate(date)}. Trains check karta hoon.`,
         prefs,
-        apply,
+        apply: { ...apply, date },
         search: true,
         ask: "train",
       };
@@ -371,7 +371,7 @@ export function planTurn(input: TurnInput): AssistantTurn {
           `${formatShortDate(date!)} ke liye availability update ho gayi hai.`,
         ),
         prefs,
-        apply,
+        apply: { ...apply, date },
         search: true,
         clearForDate: true,
       };
@@ -599,7 +599,7 @@ export function planTurn(input: TurnInput): AssistantTurn {
       return {
         text: `Bilkul 👍 ${city(from)} → ${city(to)}, ${formatShortDate(date)}${(passengerCount ?? 1) > 1 ? `, ${passengerCount} passengers` : ""}. Trains check karta hoon.`,
         prefs,
-        apply,
+        apply: { ...apply, date },
         search: true,
         ask: "train",
       };

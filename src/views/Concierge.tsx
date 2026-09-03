@@ -115,6 +115,14 @@ export function Concierge() {
     const from = turn.apply?.from ?? state.from;
     const to = turn.apply?.to ?? state.to;
     const date = turn.apply?.date ?? state.date;
+    // Keep the picker's journey snapshot in sync with the latest spoken slots —
+    // a stale date here used to search old dates after a station pick.
+    journeyRef.current = {
+      from,
+      to,
+      date: date || journeyRef.current.date,
+      dateProvided: Boolean(date) || journeyRef.current.dateProvided,
+    };
 
     if (turn.cancelled) {
       setBusy(true);

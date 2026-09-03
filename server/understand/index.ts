@@ -6,6 +6,7 @@ import { enqueueGeminiShadow } from "./shadow.js";
 import type { Extraction } from "./schema.js";
 import { isOutOfDomain } from "./domain.js";
 import { routeRailwayIntent } from "./toolRoute.js";
+import { routedStationSearch, type StationSearchResult } from "../railway/router.js";
 
 export interface UnderstandRequest {
   text: string;
@@ -115,6 +116,13 @@ function mapExtraction(ex: Extraction, now: Date, lastAsked: DialogSlot, known: 
   if (routed.kind && toolIntents.has(routed.kind) && (intent === "SEARCH_TRAIN" || intent === "NONE" || intent === "BOOK_TRAIN")) {
     intent = routed.kind;
   }
+  // Deterministic rule-based parsing beats the LLM guess for dates it understands
+  // (e.g. "saturday" — the model has miscounted the weekday before).
+  const STATUS_LIKE = new Set<string>(["LIVE_TRAIN_STATUS", "TRAIN_HISTORY"]);
+  if (spoken && !STATUS_LIKE.has(intent)) {
+    const detDate = parseDatePhrase(spoken, now, { allowDayOnly: lastAsked === "date" }).date;
+    if (detDate) date = detDate;
+  }
   const originOnly = Boolean(from && !to && known.to && /(?:से|\bse\b)/.test(spoken.toLowerCase()));
   const destOnly = Boolean(to && !from && known.from && /(jana|jaana|जाना)/.test(spoken.toLowerCase()) && !/(?:से|\bse\b)/.test(spoken.toLowerCase()));
   return {
@@ -147,6 +155,35 @@ function classFromText(raw: string | null): NluResult["classCodes"] {
   if (/chair|\bcc\b/.test(t)) return ["CC"];
   if (/2s|sitting/.test(t)) return ["2S"];
   return undefined;
+}
+
+/**
+ * Chat stations must come from the railway API, not local guesses.
+ * A single confident hit is attached directly; ambiguous names stay
+ * unresolved so the client shows the API-backed picker.
+ */
+async function resolveUnresolvedStations(nlu: NluResult): Promise<NluResult> {
+  if (!nlu.unresolvedFrom && !nlu.unresolvedTo) return nlu;
+  const [fromHit, toHit]: (StationSearchResult | null)[] = await Promise.all([
+    nlu.unresolvedFrom ? routedStationSearch(nlu.unresolvedFrom) : Promise.resolve(null),
+    nlu.unresolvedTo ? routedStationSearch(nlu.unresolvedTo) : Promise.resolve(null),
+  ]);
+  for (const [side, hit] of [["from", fromHit], ["to", toHit]] as const) {
+    // Only trust a LIVE provider hit that is a single, unambiguous match.
+    // Ambiguous cities (Delhi…) and local-fallback guesses stay unresolved
+    // so the client picker asks instead of guessing.
+    if (!hit || hit.needChoice || hit.stations.length !== 1) continue;
+    if (hit.provider !== "railcore") continue;
+    const st = hit.stations[0];
+    if (side === "from" && !nlu.from) {
+      nlu.from = st;
+      nlu.unresolvedFrom = undefined;
+    } else if (side === "to" && !nlu.to) {
+      nlu.to = st;
+      nlu.unresolvedTo = undefined;
+    }
+  }
+  return nlu;
 }
 
 function pack(
@@ -218,6 +255,7 @@ export async function runUnderstand(req: UnderstandRequest): Promise<UnderstandR
     if (!nlu.passengerCount && deterministic.passengerCount) {
       nlu.passengerCount = deterministic.passengerCount;
     }
+    await resolveUnresolvedStations(nlu);
     if (
       nlu.from ||
       nlu.to ||
@@ -239,7 +277,7 @@ export async function runUnderstand(req: UnderstandRequest): Promise<UnderstandR
     }
   }
 
-  return pack(deterministic, known, {
+  return pack(await resolveUnresolvedStations(deterministic), known, {
     source: "nlu",
     provider: llm.provider,
     modelUsed: llm.modelUsed,
