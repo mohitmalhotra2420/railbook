@@ -1,6 +1,7 @@
 import { getProvider } from "../providers/index.js";
 import {
   routedCancelled,
+  routedCoachPosition,
   routedLiveStatus,
   routedPnr,
   routedSchedule,
@@ -18,6 +19,7 @@ export type ToolName =
   | "getTrainInfo"
   | "getTimetable"
   | "getLiveStatus"
+  | "getCoachPosition"
   | "getAvailability"
   | "getFare"
   | "getCancelledTrains"
@@ -106,6 +108,24 @@ export async function executeTool(
         tool,
         summary: `${live.trainNumber ?? args.trainNumber} ${live.trainName ?? ""} — ${live.status ?? "status nahi"}${live.currentStation ? `, last ${live.currentStation}` : ""}${delay}`.trim(),
         data: live,
+        provider: routed.provider,
+      };
+    }
+    if (tool === "getCoachPosition") {
+      if (!args.trainNumber) return { ok: false, tool, summary: "Coach position ke liye 5-digit train number chahiye.", data: null, provider: null };
+      const routed = await routedCoachPosition(args.trainNumber);
+      if (!routed.coachPosition) {
+        return { ok: false, tool, summary: "Coach position provider se nahi aayi — main fake layout nahi bataunga.", data: null, provider: routed.provider };
+      }
+      const coaches = routed.coachPosition.coaches;
+      const byClass = new Map<string, number>();
+      for (const c of coaches) byClass.set(c.classCode, (byClass.get(c.classCode) ?? 0) + 1);
+      const counts = [...byClass.entries()].map(([k, v]) => `${k}×${v}`).join(", ");
+      return {
+        ok: true,
+        tool,
+        summary: `Train ${routed.coachPosition.trainNumber} mein ${coaches.length} coaches hain (engine se): ${coaches.map((c) => c.name).join(", ")}${counts ? ` — ${counts}` : ""}.`,
+        data: routed.coachPosition,
         provider: routed.provider,
       };
     }

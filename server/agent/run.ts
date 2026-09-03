@@ -79,7 +79,9 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
 
   let reply: string | null = null;
   let toolOk: boolean | null = null;
-  if (tool && tool !== "searchTrains") {
+  if (tool === "getCoachPosition" && !trainNo) {
+    reply = "Kaunsi train ki coach position? 5-digit train number boliye.";
+  } else if (tool && tool !== "searchTrains") {
     const result = await executeTool(tool as ToolName, {
       query: req.text,
       origin: ctx.origin?.code,
@@ -98,6 +100,8 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
     }
   } else if (follow === "live" && !trainNo) {
     reply = "Train number kya hai? 5-digit number boliye.";
+  } else if (follow === "coach" && !trainNo) {
+    reply = "Kaunsi train ki coach position? 5-digit train number boliye.";
   } else if (follow === "fare" && (!ctx.selectedTrainNumber || !ctx.classCode || !ctx.date || !ctx.origin || !ctx.destination)) {
     reply = "Fare ke liye train, class aur date chahiye. Jo missing hai woh batao — main figure invent nahi karunga.";
   } else if (follow === "availability" && (!ctx.selectedTrainNumber || !ctx.classCode || !ctx.date)) {

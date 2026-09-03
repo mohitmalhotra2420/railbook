@@ -9,6 +9,7 @@ import { planTurn } from "../src/ai/orchestrate";
 import { initialBooking } from "../src/booking/state";
 
 const NOW = new Date(2026, 7, 21);
+const FUTURE = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
 
 function blank() {
   return { ...initialBooking("2026-08-21"), date: "" };
@@ -37,7 +38,7 @@ describe("RailCore adapter (mocked HTTP)", () => {
     process.env.RAILKIT_API_KEY = "";
     setProvider(null);
     const app = createApp();
-    const res = await request(app).get("/api/trains").query({ from: "ASR", to: "LDH", date: "2026-08-23" });
+    const res = await request(app).get("/api/trains").query({ from: "ASR", to: "LDH", date: FUTURE });
     expect(res.body.trains).toEqual([]);
     expect(res.body.empty).toBe(true);
   });
@@ -113,7 +114,7 @@ describe("RailCore adapter (mocked HTTP)", () => {
     );
     setProvider(null);
     const app = createApp();
-    const res = await request(app).get("/api/trains").query({ from: "ASR", to: "LDH", date: "2026-08-23" });
+    const res = await request(app).get("/api/trains").query({ from: "ASR", to: "LDH", date: FUTURE });
     expect(res.body.trains).toHaveLength(1);
     expect(res.body.trains[0].number).toBe("12014");
     expect(res.body.trains[0].departure).toBe("04:55");

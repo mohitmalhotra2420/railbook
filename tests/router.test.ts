@@ -12,6 +12,7 @@ import { planTurn } from "../src/ai/orchestrate";
 import { initialBooking } from "../src/booking/state";
 
 const NOW = new Date(2026, 7, 21);
+const FUTURE = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
 
 function blank() {
   return { ...initialBooking("2026-08-21"), date: "" };
@@ -159,7 +160,7 @@ describe("RailCore HTTP + RailKit fallback", () => {
     );
     setProvider(null);
     const app = createApp();
-    const res = await request(app).get("/api/trains").query({ from: "ASR", to: "LDH", date: "2026-08-23" });
+    const res = await request(app).get("/api/trains").query({ from: "ASR", to: "LDH", date: FUTURE });
     expect(res.body.trains).toHaveLength(1);
     expect(res.body.trains[0].number).toBe("12014");
     expect(res.body.trains.some((t: { number: string }) => t.number === "99999")).toBe(false);
@@ -386,7 +387,7 @@ describe("RailCore HTTP + RailKit fallback", () => {
     setRailkitSdk(failingSdk() as never);
     setProvider(null);
     const app = createApp();
-    const trains = await request(app).get("/api/trains").query({ from: "ASR", to: "LDH", date: "2026-08-23" });
+    const trains = await request(app).get("/api/trains").query({ from: "ASR", to: "LDH", date: FUTURE });
     expect(trains.body.trains).toEqual([]);
     const live = await request(app).get("/api/live").query({ number: "12014" });
     expect(live.status).toBe(404);
@@ -414,7 +415,7 @@ describe("RailCore HTTP + RailKit fallback", () => {
     };
     try {
       const app = createApp();
-      await request(app).get("/api/trains").query({ from: "ASR", to: "LDH", date: "2026-08-23" });
+      await request(app).get("/api/trains").query({ from: "ASR", to: "LDH", date: FUTURE });
     } finally {
       console.info = orig;
     }
@@ -533,7 +534,7 @@ describe("cluster station train filter", () => {
     });
     setProvider(null);
     const app = createApp();
-    const res = await request(app).get("/api/trains").query({ from: "LDH", to: "DLI", date: "2026-08-23" });
+    const res = await request(app).get("/api/trains").query({ from: "LDH", to: "DLI", date: FUTURE });
     const numbers = (res.body.trains as { number: string }[]).map((t) => t.number);
     expect(numbers).toContain("11058");
     expect(numbers).not.toContain("12014");
@@ -571,7 +572,7 @@ describe("cluster station train filter", () => {
     });
     setProvider(null);
     const app = createApp();
-    const res = await request(app).get("/api/trains").query({ from: "BEAS", to: "NDLS", date: "2026-08-23" });
+    const res = await request(app).get("/api/trains").query({ from: "BEAS", to: "NDLS", date: FUTURE });
     expect(res.body.trains).toEqual([]);
   });
 });

@@ -241,6 +241,26 @@ export function TrainBoard() {
   }
 
   async function handleVoice(text: string) {
+    // Coach position voice intent — works right on the train list.
+    if (/\bcoach|कोच|डिब्बा/i.test(text)) {
+      const pool = trains.length ? trains : state.trains;
+      const byNum = text.match(/\b(\d{5})\b/)?.[1];
+      const spoken =
+        (byNum ? pool.find((t) => t.number === byNum) : undefined) || matchTrainBySpeech(text, pool);
+      const target =
+        spoken ||
+        (pickedNo ? pool.find((t) => t.number === pickedNo) : undefined) ||
+        (pool.length === 1 ? pool[0] : undefined);
+      if (target) {
+        setHint(fieldPrompt("COACH", `${target.number} ${target.name} — coach position`));
+        speakGuide(`${target.number} ki coach position dikha raha hoon.`);
+        void openCoach(target);
+        return;
+      }
+      go("home");
+      emitUtterance(text);
+      return;
+    }
     if (looksLikeChatQuery(text)) {
       go("home");
       emitUtterance(text);

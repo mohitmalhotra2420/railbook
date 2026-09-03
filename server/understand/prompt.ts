@@ -10,10 +10,11 @@ Off-topic / jailbreak → intent=OUT_OF_DOMAIN.
 Return ONLY a JSON object. No markdown. You never book a ticket. The app runs tools after your decision.
 
 JSON shape:
-{"intent":"SEARCH_TRAIN","origin":string|null,"destination":string|null,"date":string|null,"dateIso":"YYYY-MM-DD"|null,"passengers":number|null,"class":string|null,"trainNumber":string|null,"tool":string|null,"selectionIndex":number|null,"contextAction":"preserve"|"update"|"interrupt"|"resume"|"new","preferences":{"train":"fastest"|"cheapest"|"best"|null,"time":"morning"|"afternoon"|"evening"|"night"|null,"seat":string|null,"quota":string|null},"corrections":[{"field":"origin"|"destination"|"date"|"passengers"|"class","value":string}],"missingFields":string[],"confidence":0-1,"clarificationNeeded":boolean,"suggestedAction":"searchTrains"|"getAvailability"|"getFare"|"getLiveStatus"|"getCancelledTrains"|"checkPNR"|"getWallet"|"getMyBookings"|"compareTrains"|"selectTrain"|"updateBookingState"|"none"}
+{"intent":"SEARCH_TRAIN","origin":string|null,"destination":string|null,"date":string|null,"dateIso":"YYYY-MM-DD"|null,"passengers":number|null,"class":string|null,"trainNumber":string|null,"tool":string|null,"selectionIndex":number|null,"contextAction":"preserve"|"update"|"interrupt"|"resume"|"new","preferences":{"train":"fastest"|"cheapest"|"best"|null,"time":"morning"|"afternoon"|"evening"|"night"|null,"seat":string|null,"quota":string|null},"corrections":[{"field":"origin"|"destination"|"date"|"passengers"|"class","value":string}],"missingFields":string[],"confidence":0-1,"clarificationNeeded":boolean,"suggestedAction":"searchTrains"|"getAvailability"|"getFare"|"getLiveStatus"|"getCoachPosition"|"getCancelledTrains"|"checkPNR"|"getWallet"|"getMyBookings"|"compareTrains"|"selectTrain"|"updateBookingState"|"none"}
 
 Intent / tool rules:
 - "12014 abhi kaha hai" / "kitni late" / "live status" → LIVE_TRAIN_STATUS, tool=getLiveStatus, trainNumber, dateIso=null.
+- "12014 ki coach position" / "coach batao" / "dibba layout" → COACH_POSITION, tool=getCoachPosition, trainNumber, dateIso=null.
 - "12014 cancel hai" / "cancelled trains" → CANCELLED_TRAINS, tool=getCancelledTrains. Never UNKNOWN.
 - "CC/SL/RAC/WL kya hota hai" / "SL aur CC mein difference" → GENERAL_RAILWAY_KNOWLEDGE, tool=none. No live API.
 - "12014 mein CC available" → CHECK_AVAILABILITY, tool=getAvailability, class=CC.

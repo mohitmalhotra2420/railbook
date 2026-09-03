@@ -8,6 +8,7 @@ export type AgentToolName =
   | "getTrainInfo"
   | "getTimetable"
   | "getLiveStatus"
+  | "getCoachPosition"
   | "getAvailability"
   | "getFare"
   | "getCancelledTrains"
@@ -60,6 +61,7 @@ export type FollowUp =
   | "fare"
   | "availability"
   | "live"
+  | "coach"
   | "timetable"
   | "cancelled"
   | "pnr"
@@ -91,6 +93,7 @@ export function classifyFollowUp(text: string): FollowUp {
   ) {
     return "live";
   }
+  if (/\b(coach(?:es)?\s*(?:position|layout|composition)?|dibba|dabba)\b/.test(t) || /कोच|डिब्बा/.test(text)) return "coach";
   if (/\b(timetable|time table|schedule|ka time)\b/.test(t)) return "timetable";
   if (/\b(fare|kitna padega|kitna lagega|price|kitna fare)\b/.test(t) || /किराया|कितना पड़ेगा/.test(text)) return "fare";
   if (
@@ -177,6 +180,7 @@ export function bookingInProgress(ctx: AgentContext): boolean {
 }
 
 export function decideTool(follow: FollowUp, ctx: AgentContext, nluIntent?: string): AgentToolName {
+  if (follow === "coach" || nluIntent === "COACH_POSITION") return "getCoachPosition";
   if (follow === "live" || nluIntent === "LIVE_TRAIN_STATUS") return "getLiveStatus";
   if (follow === "timetable" || nluIntent === "TRAIN_SCHEDULE") return "getTimetable";
   if (follow === "cancelled" || nluIntent === "CANCELLED_TRAINS") return "getCancelledTrains";
@@ -237,6 +241,9 @@ export function factReplyUnavailable(kind: FollowUp | AgentToolName): string {
   }
   if (kind === "pnr" || kind === "checkPNR") {
     return "PNR status abhi available nahi hai.";
+  }
+  if (kind === "coach" || kind === "getCoachPosition") {
+    return "Coach position abhi provider se nahi aayi. Main fake layout nahi bataunga.";
   }
   if (kind === "timetable" || kind === "getTimetable" || kind === "getTrainInfo") {
     return "Timetable abhi provider se nahi mili.";

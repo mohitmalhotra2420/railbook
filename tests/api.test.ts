@@ -7,12 +7,13 @@ import { setProvider } from "../server/providers/index";
 import { MockRailwayProvider } from "../server/providers/mock";
 
 const app = createApp();
+const FUTURE = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
 
 async function bookable() {
   const res = await request(app).get("/api/trains").query({
     from: "ASR",
     to: "NDLS",
-    date: "2026-08-24",
+    date: FUTURE,
   });
   for (const t of res.body.trains) {
     const c = t.classes.find((x: { status: string }) =>
@@ -21,7 +22,7 @@ async function bookable() {
     if (c) {
       return {
         trainNumber: t.number as string,
-        date: "2026-08-24",
+        date: FUTURE,
         from: "ASR",
         to: "NDLS",
         classCode: c.code as string,
@@ -51,7 +52,7 @@ describe("HTTP API", () => {
     const res = await request(app).get("/api/trains").query({
       from: "LDH",
       to: "NDLS",
-      date: "2026-08-24",
+      date: FUTURE,
     });
     expect(res.status).toBe(200);
     expect(res.body.trains.length).toBeGreaterThan(0);
@@ -62,7 +63,7 @@ describe("HTTP API", () => {
     const res = await request(app).get("/api/trains").query({
       from: "LDH",
       to: "TVC",
-      date: "2026-08-24",
+      date: FUTURE,
     });
     expect(res.status).toBe(200);
     expect(res.body.trains).toEqual([]);
@@ -124,7 +125,7 @@ describe("HTTP API", () => {
   it("rejects invalid passenger payloads", async () => {
     const res = await request(app).post("/api/bookings").send({
       trainNumber: "12014",
-      date: "2026-08-24",
+      date: FUTURE,
       from: "ASR",
       to: "NDLS",
       classCode: "CC",

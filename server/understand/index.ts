@@ -94,11 +94,13 @@ function mapExtraction(ex: Extraction, now: Date, lastAsked: DialogSlot, known: 
   if (ex.suggestedAction === "getAvailability") intent = "CHECK_AVAILABILITY";
   if (ex.suggestedAction === "getFare") intent = "CHECK_FARE";
   if (ex.suggestedAction === "getLiveStatus") intent = "LIVE_TRAIN_STATUS";
+  if (ex.suggestedAction === "getCoachPosition") intent = "COACH_POSITION";
   if (ex.suggestedAction === "getCancelledTrains") intent = "CANCELLED_TRAINS";
   if (ex.suggestedAction === "compareTrains") intent = "COMPARE_TRAINS";
   if (ex.suggestedAction === "selectTrain") intent = "SELECT_TRAIN";
   const toolIntents = new Set([
     "LIVE_TRAIN_STATUS",
+    "COACH_POSITION",
     "CANCELLED_TRAINS",
     "CHECK_AVAILABILITY",
     "CHECK_FARE",

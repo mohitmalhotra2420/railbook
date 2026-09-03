@@ -3,6 +3,8 @@ import request from "supertest";
 import { createApp } from "../server/app";
 import { coachPosition, resetRailcoreBookings, setRailcoreFetch } from "../server/railway/railcore";
 import { routedCoachPosition } from "../server/railway/router";
+import { executeTool } from "../server/agent/tools";
+import { routeRailwayIntent } from "../server/understand/toolRoute";
 import { setProvider } from "../server/providers/index";
 
 afterEach(() => {
@@ -127,5 +129,74 @@ describe("RailCore coach position", () => {
     const routed = await routedCoachPosition("12014", "LDH");
     expect(routed.coachPosition).toBeNull();
     expect(routed.provider).toBe("none");
+  });
+});
+
+describe("Coach position voice/chat intent", () => {
+  it("routes Hindi/English/Hinglish coach phrases to getCoachPosition", () => {
+    expect(routeRailwayIntent("12014 ka coach position batao")).toMatchObject({
+      kind: "COACH_POSITION",
+      tool: "getCoachPosition",
+      trainNumber: "12014",
+    });
+    expect(routeRailwayIntent("coach dikhao")).toMatchObject({ kind: "COACH_POSITION", tool: "getCoachPosition" });
+    expect(routeRailwayIntent("13006 ki coaches batao")).toMatchObject({
+      kind: "COACH_POSITION",
+      tool: "getCoachPosition",
+      trainNumber: "13006",
+    });
+    expect(routeRailwayIntent("12926 की कोच पोजिशन")).toMatchObject({
+      kind: "COACH_POSITION",
+      tool: "getCoachPosition",
+      trainNumber: "12926",
+    });
+  });
+
+  it("does not hijack live status or timetable phrasing", () => {
+    expect(routeRailwayIntent("12014 kahan hai").kind).toBe("LIVE_TRAIN_STATUS");
+    expect(routeRailwayIntent("12014 ka timetable").kind).toBe("TRAIN_SCHEDULE");
+  });
+
+  it("agent tool returns an honest composition summary", async () => {
+    process.env.RAILWAY_PROVIDER = "railcore";
+    process.env.RAILCORE_API_KEY = "rk_live_test_secret";
+    setRailcoreFetch(async (input) => {
+      expect(String(input)).toContain("/coach-position");
+      return jsonResponse(200, REAL_SHAPE);
+    });
+    const out = await executeTool("getCoachPosition", { trainNumber: "12014" });
+    expect(out.ok).toBe(true);
+    expect(out.provider).toBe("railcore");
+    expect(out.summary).toContain("4 coaches");
+    expect(out.summary).toContain("E2");
+    expect(out.summary).toContain("EC×2");
+  });
+
+  it("agent tool asks for the train number instead of guessing", async () => {
+    const out = await executeTool("getCoachPosition", {});
+    expect(out.ok).toBe(false);
+    expect(out.summary).toMatch(/train number/i);
+  });
+
+  it("/api/agent answers 'coach position batao' with a real composition", async () => {
+    process.env.RAILWAY_PROVIDER = "railcore";
+    process.env.RAILCORE_API_KEY = "rk_live_test_secret";
+    setRailcoreFetch(async () => jsonResponse(200, REAL_SHAPE));
+    const app = createApp();
+    const res = await request(app).post("/api/agent").send({ text: "12014 ki coach position batao" });
+    expect(res.status).toBe(200);
+    expect(res.body.tool).toBe("getCoachPosition");
+    expect(res.body.toolOk).toBe(true);
+    expect(res.body.reply).toContain("coaches");
+    expect(JSON.stringify(res.body)).not.toMatch(/rk_live_test_secret/i);
+  });
+
+  it("/api/agent asks for the number when none is spoken", async () => {
+    process.env.RAILWAY_PROVIDER = "railcore";
+    process.env.RAILCORE_API_KEY = "rk_live_test_secret";
+    const app = createApp();
+    const res = await request(app).post("/api/agent").send({ text: "coach position batao" });
+    expect(res.status).toBe(200);
+    expect(res.body.reply).toMatch(/train number/i);
   });
 });

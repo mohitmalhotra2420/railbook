@@ -10,6 +10,8 @@ import { planTurn } from "../src/ai/orchestrate";
 import { initialBooking } from "../src/booking/state";
 
 const NOW = new Date(2026, 7, 21);
+const FUTURE = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
+const FUTURE_DMY = ymdToDmy(FUTURE);
 
 function blank() {
   return { ...initialBooking("2026-08-21"), date: "" };
@@ -29,7 +31,7 @@ describe("RailKit provider (mocked SDK)", () => {
     process.env.RAILKIT_API_KEY = "";
     setProvider(null);
     const app = createApp();
-    const res = await request(app).get("/api/trains").query({ from: "ASR", to: "LDH", date: "2026-08-24" });
+    const res = await request(app).get("/api/trains").query({ from: "ASR", to: "LDH", date: FUTURE });
     expect(res.status).toBe(200);
     expect(res.body.trains).toEqual([]);
     expect(res.body.empty).toBe(true);
@@ -43,7 +45,7 @@ describe("RailKit provider (mocked SDK)", () => {
       searchTrainBetweenStations: async (from, to, date) => {
         expect(from).toBe("ASR");
         expect(to).toBe("LDH");
-        expect(date).toBe("24-08-2026");
+        expect(date).toBe(FUTURE_DMY);
         return {
           success: true,
           data: [
@@ -67,7 +69,7 @@ describe("RailKit provider (mocked SDK)", () => {
     });
     setProvider(null);
     const app = createApp();
-    const res = await request(app).get("/api/trains").query({ from: "ASR", to: "LDH", date: "2026-08-24" });
+    const res = await request(app).get("/api/trains").query({ from: "ASR", to: "LDH", date: FUTURE });
     expect(res.status).toBe(200);
     expect(res.body.trains).toHaveLength(1);
     expect(res.body.trains[0].number).toBe("12498");
@@ -462,7 +464,7 @@ describe("Advance-plan payload mapping", () => {
         searchTrainBetweenStations: async (from: string, to: string, date?: string) => {
           expect(from).toBe("ASR");
           expect(to).toBe("LDH");
-          expect(date).toBe("23-08-2026");
+          expect(date).toBe(FUTURE_DMY);
           return {
             success: true,
             data: [
@@ -485,7 +487,7 @@ describe("Advance-plan payload mapping", () => {
     );
     setProvider(null);
     const app = createApp();
-    const res = await request(app).get("/api/trains").query({ from: "ASR", to: "LDH", date: "2026-08-23" });
+    const res = await request(app).get("/api/trains").query({ from: "ASR", to: "LDH", date: FUTURE });
     expect(res.status).toBe(200);
     expect(res.body.trains).toHaveLength(1);
     expect(res.body.trains[0].number).toBe("12014");
@@ -799,7 +801,7 @@ describe("provider / NVIDIA safety", () => {
     setRailkitSdk(failingSdk() as never);
     setProvider(null);
     const app = createApp();
-    const res = await request(app).get("/api/trains").query({ from: "ASR", to: "LDH", date: "2026-08-23" });
+    const res = await request(app).get("/api/trains").query({ from: "ASR", to: "LDH", date: FUTURE });
     expect(res.body.trains).toEqual([]);
     expect(res.body.empty).toBe(true);
   });

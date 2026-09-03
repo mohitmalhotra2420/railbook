@@ -35,6 +35,7 @@ export type UserIntent =
   | "HELP"
   | "SUPPORT"
   | "LIVE_TRAIN_STATUS"
+  | "COACH_POSITION"
   | "TRAIN_SCHEDULE"
   | "LIVE_AT_STATION"
   | "CANCELLED_TRAINS"

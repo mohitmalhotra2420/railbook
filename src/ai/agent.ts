@@ -9,6 +9,7 @@ export type AgentToolName =
   | "getTrainInfo"
   | "getTimetable"
   | "getLiveStatus"
+  | "getCoachPosition"
   | "getAvailability"
   | "getFare"
   | "getCancelledTrains"
@@ -198,6 +199,7 @@ export function bookingInProgress(ctx: AgentContext): boolean {
 }
 
 export function decideTool(follow: FollowUp, ctx: AgentContext, nluIntent?: string): AgentToolName {
+  if (follow === "coach" || nluIntent === "COACH_POSITION") return "getCoachPosition";
   if (follow === "live" || nluIntent === "LIVE_TRAIN_STATUS") return "getLiveStatus";
   if (follow === "timetable" || nluIntent === "TRAIN_SCHEDULE") return "getTimetable";
   if (follow === "cancelled" || nluIntent === "CANCELLED_TRAINS") return "getCancelledTrains";
@@ -258,6 +260,9 @@ export function factReplyUnavailable(kind: FollowUp | AgentToolName): string {
   }
   if (kind === "pnr" || kind === "checkPNR") {
     return "PNR status abhi available nahi hai.";
+  }
+  if (kind === "coach" || kind === "getCoachPosition") {
+    return "Coach position abhi provider se nahi aayi. Main fake layout nahi bataunga.";
   }
   if (kind === "timetable" || kind === "getTimetable" || kind === "getTrainInfo") {
     return "Timetable abhi provider se nahi mili.";

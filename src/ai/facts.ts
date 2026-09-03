@@ -43,6 +43,7 @@ export function isTrainFactAsk(text: string): boolean {
 export const FACT_INTENTS = new Set([
   "COMPARE_TRAINS",
   "TRAIN_SCHEDULE",
+  "COACH_POSITION",
   "LIVE_TRAIN_STATUS",
   "TRAIN_HISTORY",
   "CHECK_AVAILABILITY",

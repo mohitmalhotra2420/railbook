@@ -47,6 +47,7 @@ export type UserIntent =
   | "HELP"
   | "SUPPORT"
   | "LIVE_TRAIN_STATUS"
+  | "COACH_POSITION"
   | "TRAIN_SCHEDULE"
   | "LIVE_AT_STATION"
   | "CANCELLED_TRAINS"
@@ -509,6 +510,7 @@ function extractIntentKind(t: string): UserIntent {
   if (routed.kind === "SELECT_TRAIN") return "SELECT_TRAIN";
   if (routed.kind === "CANCELLED_TRAINS") return "CANCELLED_TRAINS";
   if (routed.kind === "LIVE_TRAIN_STATUS") return "LIVE_TRAIN_STATUS";
+  if (routed.kind === "COACH_POSITION") return "COACH_POSITION";
   if (routed.kind === "VIEW_BOOKINGS") return "VIEW_BOOKINGS";
   if (routed.kind === "CHECK_PNR") return "CHECK_PNR";
   if (routed.kind === "VIEW_WALLET") return "VIEW_WALLET";

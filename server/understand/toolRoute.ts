@@ -2,6 +2,7 @@
 
 export type RoutedTool =
   | "getLiveStatus"
+  | "getCoachPosition"
   | "getTimetable"
   | "getAvailability"
   | "getFare"
@@ -17,6 +18,7 @@ export type RoutedTool =
 
 export type RoutedKind =
   | "LIVE_TRAIN_STATUS"
+  | "COACH_POSITION"
   | "TRAIN_SCHEDULE"
   | "CHECK_AVAILABILITY"
   | "CHECK_FARE"
@@ -71,6 +73,12 @@ export function routeRailwayIntent(text: string): { kind: RoutedKind; tool: Rout
   }
   if (/\b(cancel(?:led)? trains?|radd trains?|cancel list|kaunsi train cancel|रद्द ट्रेन)\b/.test(t)) {
     return { kind: "CANCELLED_TRAINS", tool: "getCancelledTrains" };
+  }
+  if (
+    /\b(coach(?:es)?\s*(?:position|layout|composition)?|dibba|dabba)\b/.test(t) ||
+    /कोच|डिब्बा/.test(text)
+  ) {
+    return { kind: "COACH_POSITION", tool: "getCoachPosition", trainNumber };
   }
   if (
     /\b(live status|running status|kahan hai|kaha hai|abhi kahan|kitni late|kitna late|track train)\b/.test(t) ||
