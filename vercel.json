@@ -7,16 +7,41 @@
     {
       "source": "/(.*)",
       "headers": [
-        { "key": "Permissions-Policy", "value": "microphone=(self)" },
-        { "key": "Feature-Policy", "value": "microphone 'self'" }
+        {
+          "key": "Permissions-Policy",
+          "value": "microphone=(self)"
+        },
+        {
+          "key": "Feature-Policy",
+          "value": "microphone 'self'"
+        }
       ]
     }
   ],
   "functions": {
-    "api/[[...path]].ts": { "maxDuration": 30 },
-    "api/admin/[[...path]].ts": { "maxDuration": 30 }
+    "api/[[...path]].ts": {
+      "maxDuration": 30
+    },
+    "api/admin/[[...path]].ts": {
+      "maxDuration": 30
+    }
   },
   "rewrites": [
-    { "source": "/((?!api/).*)", "destination": "/index.html" }
+    {
+      "source": "/api/admin/models/refresh",
+      "destination": "/api/admin/models/refresh"
+    },
+    {
+      "source": "/api/admin/:path*",
+      "destination": "/api/admin/[[...path]]"
+    },
+    {
+      "source": "/api/:path*",
+      "destination": "/api/[[...path]]"
+    },
+    {
+      "source": "/((?!api/).*)",
+      "destination": "/index.html"
+    }
   ]
 }
