@@ -14,6 +14,7 @@ import type {
   BookingRecord,
   ClassAvailability,
   Meta,
+  Recommendation,
   Station,
   TrainResult,
   WalletState,
@@ -41,6 +42,8 @@ interface BookingCtx {
   setPassengerCount: (n: number) => void;
   search: () => Promise<void>;
   searchRoute: (from: Station, to: Station, date: string) => Promise<void>;
+  /** Show an already-fetched provider result (e.g. from the autonomous agent) without a second search. */
+  showResults: (from: Station, to: Station, date: string, trains: TrainResult[], recommendations: Recommendation[]) => void;
   patchTrain: (trainNumber: string, classes: ClassAvailability[]) => void;
   selectTrain: (t: TrainResult) => void;
   selectTrainAndClass: (t: TrainResult, k: ClassAvailability) => void;
@@ -105,6 +108,18 @@ export function BookingProvider({ children }: { children: ReactNode }) {
           error: err instanceof Error ? err.message : "Search failed.",
         });
       }
+    },
+    [],
+  );
+
+  const showResults = useCallback(
+    (from: Station, to: Station, date: string, trains: TrainResult[], recommendations: Recommendation[]) => {
+      dispatch({ type: "SET_FROM", station: from });
+      dispatch({ type: "SET_TO", station: to });
+      dispatch({ type: "SET_DATE", date });
+      dispatch({ type: "SEARCH_START" });
+      if (trains.length === 0) dispatch({ type: "SEARCH_EMPTY", date });
+      else dispatch({ type: "SEARCH_SUCCESS", trains, recommendations });
     },
     [],
   );
@@ -301,6 +316,7 @@ export function BookingProvider({ children }: { children: ReactNode }) {
       setPassengerCount: (count) => dispatch({ type: "SET_PASSENGER_COUNT", count }),
       search,
       searchRoute: runSearch,
+      showResults,
       patchTrain: (trainNumber, classes) => dispatch({ type: "PATCH_TRAIN", trainNumber, classes }),
       selectTrain: (train) => dispatch({ type: "SELECT_TRAIN", train }),
       selectTrainAndClass: (train, klass) => dispatch({ type: "SELECT_TRAIN_AND_CLASS", train, klass }),
@@ -338,6 +354,7 @@ export function BookingProvider({ children }: { children: ReactNode }) {
       refreshBookings,
       retrieve,
       cancel,
+      showResults,
     ],
   );
 

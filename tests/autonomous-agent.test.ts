@@ -5,7 +5,7 @@ import { setProvider } from "../server/providers/index";
 import { resetFallbackProvider, clearScheduleCache } from "../server/railway/router";
 import { setRailcoreFetch, resetRailcoreBlock, railcoreBlockState, railcoreRequest } from "../server/railway/railcore";
 import { setRailkitSdk } from "../server/railway/railkit";
-import { emptyAutoState, groundingIssues, resetAgentProtocol, runAutonomousAgent } from "../server/agent/autonomous";
+import { cleanToolName, emptyAutoState, groundingIssues, resetAgentProtocol, runAutonomousAgent } from "../server/agent/autonomous";
 import { runAutoTool } from "../server/agent/autoTools";
 
 const NVIDIA_URL = "https://integrate.api.nvidia.com/v1/chat/completions";
@@ -391,6 +391,45 @@ describe("autonomous agent — NVIDIA tool loop over real adapters", () => {
       "seat count 30 not in tool evidence",
       "delay 40 min not in tool evidence",
     ]);
+  });
+
+  it("19. harmony-leaked tool names (\"searchStations<|channel|>\") are sanitised and still executed", async () => {
+    const date = tomorrow();
+    scriptNvidia([
+      () =>
+        assistant({
+          content: null,
+          tool_calls: [
+            { id: "c1", type: "function", function: { name: "searchStations<|channel|>", arguments: JSON.stringify({ query: "Amritsar" }) } },
+            { id: "c2", type: "function", function: { name: "functions.searchStations", arguments: JSON.stringify({ query: "Ludhiana" }) } },
+          ],
+        }),
+      () =>
+        assistant({
+          content: null,
+          tool_calls: [{ id: "c3", type: "function", function: { name: "searchTrains<|channel|>commentary", arguments: JSON.stringify({ from: "ASR", to: "LDH", date }) } }],
+        }),
+      () => assistant({ content: `12014 AMRITSAR SHTABDI · 04:55 → 06:57 aur 14542 ASR CDG EXP · 05:10 → 07:12 — kaunsi?` }),
+    ]);
+    const res = await runAutonomousAgent({ text: "Kal Amritsar se Ludhiana", now: new Date().toISOString() });
+    expect(res.toolsUsed.map((t) => t.name)).toEqual(["searchStations", "searchStations", "searchTrains"]);
+    expect(res.toolsUsed.every((t) => t.ok)).toBe(true);
+    expect(res.source).toBe("ai");
+    expect(cleanToolName("getFare<|channel|>commentary")).toBe("getFare");
+    expect(cleanToolName("functions.getLiveStatus")).toBe("getLiveStatus");
+    expect(cleanToolName("createBooking")).toBe("createBooking"); // unknown stays unknown → refused by executor
+  });
+
+  it("20. 'aaj/kal' resolve against IST even when the server clock is UTC (client `today` wins)", async () => {
+    const seen = scriptNvidia([() => assistant({ content: "Kis date ko jaana hai?" })]);
+    // 19:30 UTC = 01:00 IST next day
+    const res = await runAutonomousAgent({ text: "Ludhiana se Delhi", now: "2026-09-03T19:30:00.000Z" });
+    expect(res.ok).toBe(true);
+    expect(seen[0].messages[0].content).toContain("Today is 2026-09-04");
+    scriptNvidia([() => assistant({ content: "Kis date ko jaana hai?" })]);
+    const seen2 = scriptNvidia([() => assistant({ content: "Kis date ko jaana hai?" })]);
+    await runAutonomousAgent({ text: "Ludhiana se Delhi", now: "2026-09-03T19:30:00.000Z", today: "2026-09-03" });
+    expect(seen2[0].messages[0].content).toContain("Today is 2026-09-03");
   });
 });
 

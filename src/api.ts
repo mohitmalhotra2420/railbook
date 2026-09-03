@@ -109,6 +109,7 @@ export const api = {
     history: { role: "user" | "assistant"; content: string }[];
     state: unknown;
     now: string;
+    today: string;
   }) =>
     request<{
       ok: boolean;
@@ -116,6 +117,7 @@ export const api = {
       reply: string | null;
       ui: {
         trains?: TrainResult[];
+        recommendations?: Recommendation[];
         from?: Station;
         to?: Station;
         date?: string;

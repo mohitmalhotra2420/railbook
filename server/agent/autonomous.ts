@@ -17,6 +17,7 @@
  *     deterministic legacy flow takes over — nothing is silently invented.
  */
 import { env } from "../env.js";
+import { recommend, type Recommendation } from "../recommend.js";
 import { isOutOfDomain, RAIL_ONLY_REPLY } from "../understand/domain.js";
 import { understand } from "../understand/legacy-nlu.js";
 import { todayYmdFrom } from "../understand/legacy-dates.js";
@@ -24,7 +25,7 @@ import { stripFences } from "../understand/parse-json.js";
 import type { Station, TrainResult } from "../providers/types.js";
 import { isForbiddenMoneyTool } from "./context.js";
 import { runAutoTool, type AutoToolResult } from "./autoTools.js";
-import { AUTO_TOOLS } from "./toolSpecs.js";
+import { AUTO_TOOLS, AUTO_TOOL_NAMES } from "./toolSpecs.js";
 
 // ────────────────────────────────────────────────────────────────────────────
 // Public types
@@ -64,6 +65,8 @@ export interface AutoAgentRequest {
   history?: ChatTurn[];
   state?: Partial<AutoAgentState> | null;
   now?: string;
+  /** Client's local calendar date (YYYY-MM-DD). Preferred over `now` for aaj/kal resolution. */
+  today?: string;
   /** Only honoured when AGENT_ALLOW_MODEL_OVERRIDE=1 and the id is allow-listed. */
   model?: string;
 }
@@ -88,6 +91,7 @@ function pickModel(requested: string | undefined): string {
 
 export interface AutoAgentUi {
   trains?: TrainResult[];
+  recommendations?: Recommendation[];
   from?: Station;
   to?: Station;
   date?: string;
@@ -121,7 +125,7 @@ export interface AutoAgentResponse {
 // Config
 // ────────────────────────────────────────────────────────────────────────────
 
-const MAX_ROUNDS = 5;
+const MAX_ROUNDS = 6;
 const MAX_TOOL_CALLS_PER_ROUND = 4;
 const MAX_HISTORY = 12;
 
@@ -314,12 +318,29 @@ function parseArgs(raw: unknown): Record<string, unknown> {
   }
 }
 
+const KNOWN_TOOL_NAMES: string[] = [...AUTO_TOOL_NAMES, "selectTrainForBooking"];
+
+/**
+ * gpt-oss on NIM occasionally leaks harmony control tokens into the function name
+ * ("searchStations<|channel|>", "searchTrains<|channel|>commentary", "functions.getFare").
+ * Strip them and map case-insensitively onto a known tool; unknown names pass through
+ * so the executor can answer `unknown_tool`.
+ */
+export function cleanToolName(raw: unknown): string {
+  let s = String(raw ?? "").trim();
+  const cut = s.indexOf("<|");
+  if (cut >= 0) s = s.slice(0, cut);
+  s = s.replace(/^functions\./, "").replace(/[^A-Za-z0-9_]/g, "");
+  const hit = KNOWN_TOOL_NAMES.find((n) => n.toLowerCase() === s.toLowerCase());
+  return hit ?? s;
+}
+
 function callsFromNative(msg: AssistantMsg): ParsedCall[] {
   const list = Array.isArray(msg.tool_calls) ? msg.tool_calls : [];
   return list
     .filter((c) => c?.function?.name)
     .slice(0, MAX_TOOL_CALLS_PER_ROUND)
-    .map((c, i) => ({ id: c.id || `call_${i}`, name: c.function.name, args: parseArgs(c.function.arguments) }));
+    .map((c, i) => ({ id: c.id || `call_${i}`, name: cleanToolName(c.function.name), args: parseArgs(c.function.arguments) }));
 }
 
 /** gpt-oss sometimes leaks harmony syntax into content: `... to=functions.searchTrains ... {"from":"ASR"}` */
@@ -328,7 +349,7 @@ function callsFromLeakedHarmony(content: string): ParsedCall[] {
   const re = /to=functions\.([A-Za-z_]+)[^{]*(\{[\s\S]*?\})/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(content)) && out.length < MAX_TOOL_CALLS_PER_ROUND) {
-    out.push({ id: `leak_${out.length}`, name: m[1], args: parseArgs(m[2]) });
+    out.push({ id: `leak_${out.length}`, name: cleanToolName(m[1]), args: parseArgs(m[2]) });
   }
   return out;
 }
@@ -355,7 +376,7 @@ function parseJsonProtocol(content: string): { calls: ParsedCall[]; reply: strin
     const calls = rawCalls
       .map((c, i) => {
         const o = (c && typeof c === "object" ? c : {}) as Record<string, unknown>;
-        const name = String(o.name ?? o.tool ?? "").trim();
+        const name = cleanToolName(o.name ?? o.tool ?? "");
         if (!name) return null;
         return { id: `json_${i}`, name, args: parseArgs(o.args ?? o.arguments ?? o.parameters ?? {}) };
       })
@@ -438,9 +459,11 @@ export function groundingIssues(reply: string, ev: Evidence, toolsRan: boolean):
 
 function evidenceSummary(results: AutoToolResult[]): string | null {
   const lines: string[] = [];
+  const hasSearch = results.some((r) => r.ok && r.name === "searchTrains");
   for (const r of results) {
     const p = r.payload as Record<string, unknown>;
     if (!r.ok) continue;
+    if (hasSearch && r.name === "searchStations" && !p.needChoice) continue;
     switch (r.name) {
       case "searchTrains": {
         const trains = (p.trains as { number: string; name: string; dep: string; arr: string; duration: string; classes: string[] }[]) ?? [];
@@ -571,6 +594,7 @@ function applyToolToState(state: AutoAgentState, call: ParsedCall, result: AutoT
     }));
     state.selectedTrain = null;
     ui.trains = result.ui.trains;
+    ui.recommendations = recommend(result.ui.trains);
     ui.from = from;
     ui.to = to;
     ui.date = state.date ?? undefined;
@@ -630,8 +654,12 @@ async function executeCall(call: ParsedCall, state: AutoAgentState): Promise<Aut
 
 export async function runAutonomousAgent(req: AutoAgentRequest): Promise<AutoAgentResponse> {
   const startedAll = Date.now();
-  const now = req.now ? new Date(req.now) : new Date();
-  const today = todayYmdFrom(Number.isNaN(now.getTime()) ? new Date() : now);
+  const nowRaw = req.now ? new Date(req.now) : new Date();
+  // Vercel functions run in UTC; Indian Railways dates are IST. Shift the instant so that local
+  // getters yield IST components on any server timezone (offset delta = 330 min − server offset).
+  const instant = Number.isNaN(nowRaw.getTime()) ? new Date() : nowRaw;
+  const now = new Date(instant.getTime() + (330 + instant.getTimezoneOffset()) * 60_000);
+  const today = req.today && /^\d{4}-\d{2}-\d{2}$/.test(req.today) ? req.today : todayYmdFrom(now);
   const state = normaliseState(req.state);
   state.turn += 1;
   const text = req.text.trim();

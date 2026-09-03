@@ -194,6 +194,7 @@ export function createApp() {
         history: Array.isArray(req.body?.history) ? req.body.history : [],
         state: req.body?.state ?? null,
         now: typeof req.body?.now === "string" ? req.body.now : undefined,
+        today: typeof req.body?.today === "string" ? req.body.today : undefined,
         model: typeof req.body?.model === "string" ? req.body.model : undefined,
       });
       res.json({ ...result, confirmBook: false });

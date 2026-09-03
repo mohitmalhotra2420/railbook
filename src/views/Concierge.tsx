@@ -7,7 +7,7 @@ import { api } from "../api";
 import { useBooking } from "../booking/context";
 import { validatePassengers } from "../booking/state";
 import { loadTravellers } from "../data/travellers";
-import { availabilityLabel, formatShortDate, inr, newId } from "../format";
+import { availabilityLabel, formatShortDate, inr, newId, todayYmd } from "../format";
 import { BERTH_BY_CLASS, CLASS_LABELS, isBookable, type ClassAvailability, type ClassCode, type Passenger, type Station, type TrainResult } from "../types";
 
 import type { ChatMessage } from "../conversation/types";
@@ -54,7 +54,7 @@ function progressStep(flow: string): number {
 
 export function Concierge() {
   const booking = useBooking();
-  const { state, wallet, go, setFrom, setTo, setDate, setPassengerCount, searchRoute, selectTrain, selectClass, selectSeat, updatePassenger, goReview, confirm, retrieve } = booking;
+  const { state, wallet, go, setFrom, setTo, setDate, setPassengerCount, searchRoute, showResults, selectTrain, selectClass, selectSeat, updatePassenger, goReview, confirm, retrieve } = booking;
   const [prefs, setPrefs] = useState<Prefs>({});
   const [lastAsked, setLastAsked] = useState<DialogSlot>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -621,6 +621,7 @@ export function Concierge() {
         history: agentHistoryRef.current.slice(-10),
         state: seedState,
         now: new Date().toISOString(),
+        today: todayYmd(),
       });
     } catch {
       setThinking(false);
@@ -682,12 +683,12 @@ export function Concierge() {
     }
     setMessages((m) => [...m, { id: newId(), role: "assistant", text: res.reply!, blocks: blocks.length ? blocks : undefined }]);
 
-    if (ui.trains?.length && ui.from && ui.to && ui.date) {
-      // Real provider trains: open the TrainBoard with exactly this list (no second search).
+    if (ui.trains && ui.from && ui.to && ui.date) {
+      // Real provider trains from the agent's own tool call: open the TrainBoard with exactly this list (no second search).
       lastFactTrainRef.current = ui.trains[0]?.number ?? lastFactTrainRef.current;
       pendingResults.current = prefs;
       setLastAsked("train");
-      await searchRoute(ui.from, ui.to, ui.date);
+      showResults(ui.from, ui.to, ui.date, ui.trains, ui.recommendations ?? []);
     }
     if (ui.selectTrain) {
       const pick = (ui.trains ?? state.trains).find((t) => t.number === ui.selectTrain);
