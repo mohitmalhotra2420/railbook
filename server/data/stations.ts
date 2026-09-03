@@ -57,6 +57,22 @@ export const STATIONS: Station[] = [
   { code: "PTKC", name: "Pathankot Cantt", city: "Pathankot" },
   { code: "ERS", name: "Ernakulam Junction", city: "Kochi" },
   { code: "ERN", name: "Ernakulam Town", city: "Kochi" },
+  // Multi-station cities — full well-known sets so the offline fallback
+  // picker stays useful when the provider quota runs out.
+  { code: "DEC", name: "Delhi Cantt", city: "Delhi" },
+  { code: "ANVT", name: "Anand Vihar Terminal", city: "Delhi" },
+  { code: "DEE", name: "Delhi Sarai Rohilla", city: "Delhi" },
+  { code: "AGA", name: "Agra City", city: "Agra" },
+  { code: "RKM", name: "Raja ki Mandi", city: "Agra" },
+  { code: "IDH", name: "Idgah Agra Junction", city: "Agra" },
+  { code: "DDL", name: "Dhandari Kalan", city: "Ludhiana" },
+  { code: "LTT", name: "Lokmanya Tilak Terminus", city: "Mumbai" },
+  { code: "BDTS", name: "Bandra Terminus", city: "Mumbai" },
+  { code: "DR", name: "Dadar", city: "Mumbai" },
+  { code: "TNA", name: "Thane", city: "Mumbai" },
+  { code: "KOAA", name: "Kolkata Terminal", city: "Kolkata" },
+  { code: "SHM", name: "Shalimar", city: "Kolkata" },
+  { code: "KCG", name: "Kacheguda", city: "Hyderabad" },
 ];
 
 const byCode = new Map(STATIONS.map((s) => [s.code, s]));
