@@ -5,7 +5,7 @@ import { setProvider } from "../server/providers/index";
 import { resetFallbackProvider, clearScheduleCache } from "../server/railway/router";
 import { setRailcoreFetch, resetRailcoreBlock, railcoreBlockState, railcoreRequest } from "../server/railway/railcore";
 import { setRailkitSdk } from "../server/railway/railkit";
-import { cleanToolName, emptyAutoState, groundingIssues, resetAgentProtocol, runAutonomousAgent, toPlainText } from "../server/agent/autonomous";
+import { cleanToolName, emptyAutoState, groundingIssues, resetAgentProtocol, runAutonomousAgent, toPlainText, hideToolNames } from "../server/agent/autonomous";
 import { runAutoTool } from "../server/agent/autoTools";
 
 const NVIDIA_URL = "https://integrate.api.nvidia.com/v1/chat/completions";
@@ -449,6 +449,12 @@ describe("autonomous agent — NVIDIA tool loop over real adapters", () => {
     expect(txt).toContain("• Fare: ₹975 per person");
     expect(txt).toContain("Total ₹2925");
     expect(toPlainText("04:55 → 06:57 · 2h 02m · CC EC")).toBe("04:55 → 06:57 · 2h 02m · CC EC");
+  });
+
+  it("hideToolNames removes internal identifiers from user-facing text", () => {
+    expect(hideToolNames("Agar booking karni ho, toh “selectTrainForBooking” karein.")).toBe("Agar booking karni ho, toh “book karo” boliye karein.");
+    expect(hideToolNames("Main getFare() call karunga")).toBe("Main fare check call karunga");
+    expect(hideToolNames("12014 CC · AVAILABLE 45 seats · ₹510")).toBe("12014 CC · AVAILABLE 45 seats · ₹510");
   });
 
   it("21. searchTrains with city names: ambiguous 'Delhi' → needChoice for slot 'to', resolved origin kept, no trains invented", async () => {

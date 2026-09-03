@@ -398,6 +398,38 @@ function parseJsonProtocol(content: string): { calls: ParsedCall[]; reply: strin
 // Plain-text normalisation (the chat bubble renders raw text, not markdown)
 // ────────────────────────────────────────────────────────────────────────────
 
+const TOOL_NAME_LEAK = new RegExp(`["“'\`]?\\b(?:functions\\.)?(${[...AUTO_TOOL_NAMES, "selectTrainForBooking"].join("|")})\\b["”'\`]?(?:\\s*\\(\\))?`, "g");
+
+/** Internal tool identifiers must never reach the user; swap them for plain-language actions. */
+export function hideToolNames(text: string): string {
+  return text.replace(TOOL_NAME_LEAK, (_m, name: string) => {
+    switch (name) {
+      case "selectTrainForBooking":
+        return "“book karo” boliye";
+      case "getFare":
+        return "fare check";
+      case "getAvailability":
+        return "seat availability check";
+      case "searchTrains":
+        return "train search";
+      case "searchStations":
+        return "station search";
+      case "getLiveStatus":
+        return "live status";
+      case "getTimetable":
+        return "timetable";
+      case "checkPNR":
+        return "PNR check";
+      case "getMyBookings":
+        return "My Bookings";
+      case "getWallet":
+        return "Wallet";
+      default:
+        return "app";
+    }
+  });
+}
+
 /** Convert light markdown (bold, headings, tables, bullets) into clean plain text. Pure formatting — no facts touched. */
 export function toPlainText(md: string): string {
   const lines = md.replace(/\r/g, "").split("\n");
@@ -914,7 +946,7 @@ export async function runAutonomousAgent(req: AutoAgentRequest): Promise<AutoAge
   function finish(ungrounded: string | null, issues: string[]): AutoAgentResponse {
     const latencyMs = Date.now() - startedAll;
     if (reply) {
-      return base({ ok: true, reply: toPlainText(reply), source: "ai", grounded: true, toolsUsed, modelUsed, protocol, rounds, latencyMs, failureReason: null });
+      return base({ ok: true, reply: hideToolNames(toPlainText(reply)), source: "ai", grounded: true, toolsUsed, modelUsed, protocol, rounds, latencyMs, failureReason: null });
     }
     // Model failed (guard / timeout / error) — fall back to a deterministic summary of REAL tool output.
     const summary = evidenceSummary(results);
