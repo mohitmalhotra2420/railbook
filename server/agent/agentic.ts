@@ -1018,6 +1018,12 @@ function systemPrompt(
     trainNumber?: string | null;
     classCode?: string | null;
     passengers?: number | null;
+    /** User ne pichhle options-list se number/code/name se station CHUNA hai —
+     *  yeh FINAL hai, dobara confirm mat karo. */
+    stationPicked?: "origin" | "destination" | null;
+    /** User ne ambiguous city bola hai (jaise "Delhi") jo abhi resolve NAHI hui —
+     *  sabse pehle station choice resolve karo, preference/date baad mein. */
+    destinationAmbiguous?: string | null;
   },
   dateHint: { kind: "date"; date: string } | { kind: "ambiguous"; options: { date: string; label: string }[] } | null,
   history: AgenticHistoryTurn[] = [],
@@ -1042,7 +1048,13 @@ function systemPrompt(
     `Date map (agle 7 din, IST): ${weekdayDateMap(now)}.`,
     hintLine,
     known.origin || known.destination || known.date || known.trainNumber || known.classCode || known.passengers
-      ? `Known context (inhi par continue karo, dobara mat poochho): origin=${known.origin ?? "-"}, destination=${known.destination ?? "-"}, date=${known.date ?? "-"}, train=${known.trainNumber ?? "-"}, class=${known.classCode ?? "-"}, passengers=${known.passengers ?? "-"}.`
+      ? `Known context (inhi par continue karo, dobara mat poochho): origin=${known.origin ?? "-"}, destination=${known.destination ?? "-"}, date=${known.date ?? "-"}, train=${known.trainNumber ?? "-"}, class=${known.classCode ?? "-"}, passengers=${known.passengers ?? "-"}.${
+          known.stationPicked
+            ? ` User ne abhi pichhle station-options se apni choice bheji hai — ${known.stationPicked}=${known.stationPicked === "origin" ? known.origin : known.destination} FINAL hai (server ne verify kiya). Confirm mat karo, seedha tool call karke jawab do.`
+            : known.destinationAmbiguous
+              ? ` User ne destination "${known.destinationAmbiguous}" bola jo AMBIGUOUS hai (multiple stations) — SABSE PEHLE JOURNEY_ANALYZE ya SEARCH_TRAINS tool call karo: needs_choice ke options user ko do. Station options SIRF tool result se — apni knowledge se station codes/options KABHI mat likho. Preference/date baad mein.`
+              : ""
+        }`
       : "",
     history.length
       ? `Conversation history upar di gayi hai — user ka pichla context wahi se aata hai (jaise \"saturday\" pichle sawaal ka jawab hai). History + known context use karo, user se dobara wahi mat poochho jo already pata hai.`
@@ -1119,7 +1131,9 @@ function groundingCheck(content: string, steps: ToolTraceStep[], evidenceParts: 
   // Station-code style tokens (2–5 uppercase letters) — evidence/system-prompt/
   // user text mein na mile to hallucination (jaise "NDAP" for Delhi Airport).
   const tokens = [...new Set(content.match(/\b[A-Z]{2,5}\b/g) ?? [])];
-  const badTokens = tokens.filter((t) => !SAFE_UPPER_TOKENS.has(t) && !evidence.includes(t));
+  // Word-boundary match: "NDL" ko "NDLS" ke ANDAR substring mil jaata tha —
+  // invented code ko exact token ki tarah check karo.
+  const badTokens = tokens.filter((t) => !SAFE_UPPER_TOKENS.has(t) && !new RegExp(`\\b${t}\\b`).test(evidence));
   // Train-type proper names (Rajdhani/Shatabdi/Vande Bharat…): data fail hone par
   // model kabhi khud se naam guess karta hai (12014 ko "Rajdhani" bolna — Shatabdi
   // hai). User ne bola ho ya provider data mein ho to theek; warna ungrounded.
@@ -1160,6 +1174,10 @@ export async function runAgenticTurn(input: {
     trainNumber?: string | null;
     classCode?: string | null;
     passengers?: number | null;
+    /** User ne pichhle options-list se station chuna hai — FINAL, confirm nahi karna. */
+    stationPicked?: "origin" | "destination" | null;
+    /** Ambiguous city (jaise "Delhi") jo abhi resolve nahi hui. */
+    destinationAmbiguous?: string | null;
   };
   /** Prior conversation turns (multi-turn state) — redacted, capped, sent before the current user message. */
   history?: AgenticHistoryTurn[];
@@ -1187,6 +1205,8 @@ export async function runAgenticTurn(input: {
           trainNumber: input.known?.trainNumber ?? null,
           classCode: input.known?.classCode ?? null,
           passengers: input.known?.passengers ?? null,
+          stationPicked: input.known?.stationPicked ?? null,
+          destinationAmbiguous: input.known?.destinationAmbiguous ?? null,
         },
         dateHint,
         historyTurns,
@@ -1436,6 +1456,7 @@ export async function runAgenticTurn(input: {
     // isme ke server-provided dates/numbers model ne "invent" nahi kiye.
     // Deterministic relay: tool ne needs_choice diya (ambiguous station) par model ne
     // options user ko nahi dikhayi? Options khud banao — 100% tool-data se.
+    const pendingNeedsChoice = lastNeedsChoice; // grounding-fail relay ke liye save
     if (lastNeedsChoice) {
       const mentioned = lastNeedsChoice.stations.filter((x) => clean.toUpperCase().includes(x.code.toUpperCase())).length;
       if (mentioned < Math.min(2, lastNeedsChoice.stations.length)) {
@@ -1456,7 +1477,44 @@ export async function runAgenticTurn(input: {
 
     const check = groundingCheck(clean, steps, [...evidenceParts, ...messages.map((m) => m.content ?? "")]);
     if (!check.grounded) {
-      // Ungrounded output — deterministic, provider-backed summary replaces it.
+      // Ungrounded output — deterministic, provider-backed replacement.
+      // Needs_choice waale turn par REAL tool options relay karo (model ne
+      // mixed/invented options likhe the — jaise "NDL" jo kisi station nahi).
+      if (pendingNeedsChoice) {
+        const lines = pendingNeedsChoice.stations.map((x, i) => `${i + 1}. ${x.code} – ${x.name}`).join("\n");
+        const relay = `**${pendingNeedsChoice.city} ke liye kaunsa station?**\n${lines}\nKripya number ya station code bata do.`;
+        return {
+          ok: true,
+          reply: relay,
+          grounded: true,
+          steps,
+          modelUsed,
+          latencyMs: Date.now() - startedAll,
+          failureReason: `ungrounded_options_replaced:${check.evidence}`,
+        };
+      }
+      // Destination AMBIGUOUS tha (server ko pata) par model ne apni knowledge
+      // se options likhe — REAL station API se options la kar relay karo.
+      if (input.known?.destinationAmbiguous) {
+        try {
+          const res = await resolveStationRef(input.known.destinationAmbiguous);
+          if ("candidates" in res && res.candidates.length) {
+            const lines = res.candidates.map((x, i) => `${i + 1}. ${x.code} – ${x.name}`).join("\n");
+            const relay = `**${res.city} ke liye kaunsa station?**\n${lines}\nKripya number ya station code bata do.`;
+            return {
+              ok: true,
+              reply: relay,
+              grounded: true,
+              steps,
+              modelUsed,
+              latencyMs: Date.now() - startedAll,
+              failureReason: `ungrounded_options_replaced:${check.evidence}`,
+            };
+          }
+        } catch {
+          /* station API fail — generic summary (neeche) */
+        }
+      }
       return {
         ok: steps.some((s) => s.ok),
         reply: `${deterministicSummary(steps)}\n(AI ka jawab providers ke data se match nahi hua — sirf verified data dikha raha hoon.)`,

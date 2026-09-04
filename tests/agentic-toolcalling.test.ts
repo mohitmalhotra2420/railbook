@@ -6,7 +6,7 @@
  * back into the conversation, subsequent tool calls, grounded final
  * answers, allowlist rejections and honest fallbacks.
  */
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import request from "supertest";
 import { createApp } from "../server/app";
 import { runAgent } from "../server/agent/run";
@@ -477,6 +477,11 @@ describe("agentic tool-calling layer", () => {
   });
 
   it("JOURNEY_ANALYZE: fastest ranking + alternative dates (engine output, provider-backed)", async () => {
+    // Wall-clock-independent: alternatives filter (d >= today) 2026-09-04 waale
+    // expectations se match kare isliye system time freeze — production filter
+    // past dates drop karna sahi behaviour hai.
+    vi.useFakeTimers({ now: new Date("2026-09-04T12:00:00+05:30"), toFake: ["Date"] });
+    try {
     railcoreMock();
     const res = await executeApprovedTool("JOURNEY_ANALYZE", {
       origin: "Amritsar",
@@ -499,6 +504,9 @@ describe("agentic tool-calling layer", () => {
       ]),
     );
     expect(data.providers.search).toBe("railcore");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("JOURNEY_ANALYZE: connecting journey via NDLS hub with a sane transfer buffer", async () => {

@@ -171,6 +171,173 @@ describe("fix: grounding guard pakadta hai invented station codes", () => {
   });
 });
 
+describe("fix: station-choice reply follow-up (screenshot bug: '4'/'NDLS' par khali reply)", () => {
+  const OPTIONS_REPLY = [
+    "Kya aapko Delhi ke kis station se jaana hai?",
+    "Options:",
+    "1. DLI - DELHI",
+    "2. DEC - DELHI CANTT",
+    "3. DEE - DELHI S ROHILLA",
+    "4. NDLS - NEW DELHI",
+    "5. NZM - Hazrat Nizamuddin",
+    "6. ANVT - Anand Vihar Terminal",
+    "Kripya ek number se chunen.",
+  ].join("\n");
+  const baseCtx = {
+    intent: "SEARCH_TRAIN",
+    origin: { code: "ASR", name: "AMRITSAR JN", city: "Amritsar" },
+    destination: null,
+    date: "2026-09-06",
+    dateProvided: true,
+    passengers: 1,
+    paxProvided: true,
+    classCode: null,
+    selectedTrainNumber: null,
+    selectedTrainName: null,
+    lastTrainNumbers: [],
+    bookingStage: "collecting",
+    pendingAsk: "to",
+    lastTool: null,
+    lastToolOk: null,
+  };
+  const hist = [
+    { role: "user", content: "Mujhe amritsar se delhi jaana kal 1 person hai" },
+    { role: "assistant", content: OPTIONS_REPLY },
+  ];
+
+  it("numeric pick '4' → destination NDLS resolve + REAL search reply (deterministic, kabhi khali nahi)", async () => {
+    process.env.NVIDIA_API_KEY = ""; // deterministic engine hi chale
+    process.env.RAILCORE_API_KEY = "rk_live_FIXTEST_railcore";
+    setRailcoreFetch(async (input) => {
+      const url = new URL(String(input));
+      const p = url.pathname;
+      if (p.endsWith("/stations/search")) {
+        const q = (url.searchParams.get("q") || "").toUpperCase();
+        if (q === "NDLS" || q === "NEW DELHI") {
+          return jsonResponse(200, { success: true, data: { results: [{ station_code: "NDLS", station_name: "NEW DELHI", city: "Delhi", confidence: 1 }] } });
+        }
+        return jsonResponse(200, { success: true, data: { results: [] } });
+      }
+      if (p.endsWith("/routes/trains")) {
+        return jsonResponse(200, { success: true, data: { trains: [
+          { train_number: "12014", train_name: "AMRITSAR SHTABDI", departure_time: "04:55", arrival_time: "11:02", duration_minutes: 367, running_days: [0,1,2,3,4,5,6], classes: ["CC"] },
+        ] } });
+      }
+      if (p.includes("/schedule")) {
+        return jsonResponse(200, { success: true, data: { train_number: "12014", classes: ["CC"], stops: [
+          { station_code: "ASR", arrival: "source", departure: "04:55" },
+          { station_code: "NDLS", arrival: "11:02", departure: "dest" },
+        ] } });
+      }
+      return jsonResponse(200, { success: true, data: {} });
+    });
+    const res = await runAgent({ text: "4", context: baseCtx as never, history: hist, now: NOW });
+    expect(res.reply).toBeTruthy();
+    expect(res.context?.destination?.code).toBe("NDLS");
+    expect(String(res.reply)).toMatch(/ASR → NDLS/);
+    expect(String(res.reply)).toMatch(/12014/); // REAL provider data, andaza nahi
+    expect(res.toolTrace?.[0]?.tool).toBe("SEARCH_TRAINS");
+    expect(res.toolTrace?.[0]?.source).toBe("railcore");
+    expect(res.grounded).toBe(true);
+    expect(res.confirmBook).toBe(false);
+  });
+
+  it("bare code 'NDLS' → destination resolve (agentic known pre-fill bhi)", async () => {
+    process.env.NVIDIA_API_KEY = ""; // deterministic
+    process.env.RAILCORE_API_KEY = "rk_live_FIXTEST_railcore";
+    setRailcoreFetch(async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith("/stations/search")) {
+        const q = (url.searchParams.get("q") || "").toUpperCase();
+        if (q === "NDLS") {
+          return jsonResponse(200, { success: true, data: { results: [{ station_code: "NDLS", station_name: "NEW DELHI", city: "Delhi", confidence: 1 }] } });
+        }
+        return jsonResponse(200, { success: true, data: { results: [] } });
+      }
+      return jsonResponse(200, { success: true, data: {} });
+    });
+    const res = await runAgent({ text: "NDLS", context: baseCtx as never, history: hist, now: NOW });
+    expect(res.context?.destination?.code).toBe("NDLS");
+    // slots complete hone par do valid outcomes: ya seedha reply, ya
+    // tool=searchTrains (client TrainBoard search flow chala deta hai).
+    expect(res.reply?.trim() ? true : res.tool === "searchTrains").toBe(true);
+  });
+
+  it("compact format '(Options: DLI, DEC, ...)' se bhi numeric pick '4' → NDLS", async () => {
+    const { resolveStationPick } = await import("../server/agent/run");
+    process.env.RAILCORE_API_KEY = "rk_live_FIXTEST_railcore";
+    setRailcoreFetch(async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith("/stations/search")) {
+        const q = (url.searchParams.get("q") || "").toUpperCase();
+        if (q === "NDLS") return jsonResponse(200, { success: true, data: { results: [{ station_code: "NDLS", station_name: "NEW DELHI", city: "Delhi", confidence: 1 }] } });
+        return jsonResponse(200, { success: true, data: { results: [] } });
+      }
+      return jsonResponse(200, { success: true, data: {} });
+    });
+    const compactHist = [
+      { role: "user", content: "Mujhe amritsar se delhi jaana kal 1 person hai" },
+      { role: "assistant", content: "Kis Delhi station se jaana hai? (Options: DLI, DEC, DEE, NDLS, NZM, ANVT, DAZ, DE)" },
+    ];
+    const pick = await resolveStationPick("4", compactHist, baseCtx as never);
+    expect(pick?.code).toBe("NDLS"); // compact list mein position 4 = NDLS
+    expect(pick?.side).toBe("to");
+  });
+
+  it("bare paren format '(DLI, DEC, ...)' bina 'Options:' keyword ke bhi pick + 'kaunse' variant suppression", async () => {
+    const { resolveStationPick } = await import("../server/agent/run");
+    process.env.RAILCORE_API_KEY = "rk_live_FIXTEST_railcore";
+    setRailcoreFetch(async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith("/stations/search")) {
+        const q = (url.searchParams.get("q") || "").toUpperCase();
+        if (q === "NDLS") return jsonResponse(200, { success: true, data: { results: [{ station_code: "NDLS", station_name: "NEW DELHI", city: "Delhi", confidence: 1 }] } });
+        return jsonResponse(200, { success: true, data: { results: [] } });
+      }
+      return jsonResponse(200, { success: true, data: {} });
+    });
+    const parenHist = [
+      { role: "user", content: "Mujhe amritsar se delhi jaana kal 1 person hai" },
+      { role: "assistant", content: "Kaunse Delhi station se jaana hai? (DLI, DEC, DEE, NDLS, NZM, ANVT, DAZ, DE)" },
+    ];
+    const pick = await resolveStationPick("4", parenHist, baseCtx as never);
+    expect(pick?.code).toBe("NDLS");
+    expect(pick?.side).toBe("to");
+    // 'kaunse … station?' reply par bhi resume bubble suppress hota hai
+    process.env.NVIDIA_API_KEY = "";
+    const res = await runAgent({
+      text: "Amritsar se Delhi 2026-09-05 ko sabse sasti train kaunsi hai? options compare karo",
+      context: { ...baseCtx, date: "2026-09-05" } as never,
+      now: NOW,
+    });
+    expect(res.interrupt).toBe(false);
+    expect(res.resumeText).toBeNull();
+  });
+
+  it("'kal'/'NDLS se ASR' jaise text kabhi station-pick nahi bante", async () => {
+    const { resolveStationPick } = await import("../server/agent/run");
+    process.env.RAILCORE_API_KEY = "rk_live_FIXTEST_railcore";
+    expect(await resolveStationPick("kal", hist, baseCtx as never)).toBeNull();
+    expect(await resolveStationPick("haan", hist, baseCtx as never)).toBeNull();
+    expect(await resolveStationPick("NDLS se ASR", hist, baseCtx as never)).toBeNull();
+    expect(await resolveStationPick("12030", hist, baseCtx as never)).toBeNull(); // train number
+  });
+
+  it("station-clarification reply ke baad conflicting resume bubble nahi (interrupt suppressed)", async () => {
+    process.env.NVIDIA_API_KEY = "";
+    process.env.RAILCORE_API_KEY = "";
+    const res = await runAgent({
+      text: "Amritsar se Delhi 2026-09-05 ko sabse sasti train kaunsi hai? options compare karo",
+      context: { ...baseCtx, date: "2026-09-05", destination: null } as never,
+      now: NOW,
+    });
+    expect(res.reply).toBeTruthy();
+    expect(/kaun sa station|Options:/i.test(String(res.reply))).toBe(true);
+    expect(res.interrupt).toBe(false); // pehle yahan "Waise booking continue... Kahan jaana hai?" jaata tha
+    expect(res.resumeText).toBeNull();
+  });
+});
+
 describe("fix: deterministic Atlas fallback — SELECT_CHEAPEST kabhi empty reply nahi deta", () => {
   it("agentic fail + ambiguous city → real station options ke saath clarification (empty reply bug)", async () => {
     process.env.NVIDIA_API_KEY = ""; // agentic engine off — deterministic fallback hi chale
