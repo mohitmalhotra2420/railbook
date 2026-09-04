@@ -621,7 +621,10 @@ if (want("9")) {
   // 9c: certainty question with insufficient data
   const { res: res9c } = await agent("Is Saturday ko Vande Bharat definitely chalegi Amritsar se Delhi?");
   const reply9c = String(res9c.reply ?? "");
-  const certaintyClaim = /definitely\s+chalegi|pakka\s+chalegi|guaranteed|100%\s*chalegi|surely\s+chalegi/i.test(reply9c);
+  // Negation-aware: "not guaranteed / no guarantee / guarantee nahi" HEDGE hai, certainty claim nahi.
+  const negated = /not\s+guaranteed|no\s+guarantee|guarantee[d]?\s+nahi|nahi\s+guarantee|can(?:'t|not)\s+guarantee|definitely\s+nahi|pakka\s+nahi/i.test(reply9c);
+  const certaintyClaim =
+    /definitely\s+chalegi|pakka\s+chalegi|guaranteed|100%\s*chalegi|surely\s+chalegi/i.test(reply9c) && !negated;
   record("9c", "'Vande Bharat definitely chalegi?' → no false certainty (checks data / hedges)", {
     noFalseCertainty: !certaintyClaim,
     groundedOrHedged:
