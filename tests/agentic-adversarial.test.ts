@@ -95,11 +95,12 @@ function railcoreMock(): void {
         madras: [["MAS", "MGR CHENNAI CTL"], ["MS", "CHENNAI EGMORE"], ["TBM", "TAMBARAM"]],
         calcutta: [["HWH", "HOWRAH JN"], ["SDAH", "SEALDAH"], ["KOAA", "KOLKATA TERM"]],
       };
-      const rows = multi[query];
+      const isDelPrefix = !multi[query] && query.startsWith("del");
+      const rows = multi[query] ?? (isDelPrefix ? multi.delhi : undefined);
       if (rows) {
         return jsonResponse(200, {
           success: true,
-          data: { results: rows.map(([code, name]) => ({ station_code: code, station_name: name, city: query, confidence: 0.9 })) },
+          data: { results: rows.map(([code, name]) => ({ station_code: code, station_name: name, city: isDelPrefix ? "delhi" : query, confidence: 0.9 })) },
         });
       }
       return jsonResponse(200, { success: true, data: { results: [] } });
@@ -300,6 +301,16 @@ describe("TEST 2: ambiguous stations need explicit user choice", () => {
     expect((airport.data as { needs_choice?: boolean } | null)?.needs_choice ?? false).toBe(false);
   });
 });
+
+  it("wrong code-style station (airport code) re-verifies -> needs_choice, not fake 0 trains", async () => {
+    railcoreMock();
+    const res = await executeApprovedTool("JOURNEY_ANALYZE", { origin: "ASR", destination: "DEL", date: "2026-09-05", preference: "fastest" });
+    expect(res.ok).toBe(false);
+    const data = res.data as { needs_choice?: boolean; city?: string; stations?: { code: string }[] };
+    expect(data.needs_choice).toBe(true);
+    expect(data.city?.toLowerCase()).toContain("del");
+    expect((data.stations ?? []).map((x) => x.code)).toContain("NDLS");
+  });
 
 /* ══ TEST 4 — RAILCORE -> RAILKIT FALLBACK INSIDE THE LOOP ════════ */
 

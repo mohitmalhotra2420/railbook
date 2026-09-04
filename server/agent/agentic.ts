@@ -427,6 +427,32 @@ async function journeyAnalyze(args: {
   const direct = search.trains;
   const providers = { search: search.provider };
 
+  // Khali search + code-jaisa station input = shayad galat code (jaise DEL airport code).
+  // Code ko station API se re-verify karo; alag stations mile to needs_choice — chup-chaap
+  // "0 trains" jhooth nahi bolna.
+  if (!direct.length && search.provider !== "none") {
+    for (const [rawInput, resolved] of [
+      [args.origin, from],
+      [args.destination, to],
+    ] as const) {
+      if (resolved && new RegExp(`^${resolved}$`, "i").test(String(rawInput ?? ""))) {
+        try {
+          const re = await routedStationSearch(String(rawInput));
+          const rows = re.stations ?? [];
+          if (rows.length && !rows.some((st) => st.code.toUpperCase() === resolved.toUpperCase())) {
+            return failResult(search.provider, `${rawInput} koi railway station code nahi nikla — in options mein se chuno.`, {
+              needs_choice: true,
+              city: String(rawInput),
+              stations: rows.slice(0, 8).map((x) => ({ code: x.code, name: x.name })),
+            });
+          }
+        } catch {
+          /* re-verify fail — normal empty-answer flow */
+        }
+      }
+    }
+  }
+
   // Dono providers fail (provider="none") ho to "0 trains" bolaana jhooth hai — saaf unavailable bolo.
   if (!direct.length && search.provider === "none") {
     return failResult(null, "Railway data source unavailable — RailCore/RailKit dono se jawab nahi mila, kuch invent nahi karunga.", {
