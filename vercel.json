@@ -20,10 +20,10 @@
   ],
   "functions": {
     "api/[[...path]].ts": {
-      "maxDuration": 30
+      "maxDuration": 60
     },
     "api/admin/[[...path]].ts": {
-      "maxDuration": 30
+      "maxDuration": 60
     }
   },
   "rewrites": [

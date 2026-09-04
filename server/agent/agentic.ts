@@ -1059,10 +1059,27 @@ export async function runAgenticTurn(input: {
   let repaired = false;
   if (env.nvidiaFallbackModel && env.nvidiaFallbackModel !== env.nvidiaModel) modelChain.push(env.nvidiaFallbackModel);
 
+  // Vercel function wall (~30s default) — poora turn is budget ke andar raho.
+  // Wall paar hua to jo tool-data mila uska summary return karo (null nahi).
+  const TURN_TIME_BUDGET_MS = Number(process.env.AI_AGENTIC_TURN_BUDGET_MS ?? 24000);
+  const timeLeft = () => TURN_TIME_BUDGET_MS - (Date.now() - startedAll);
+
   for (let step = 1; step <= MAX_STEPS; step++) {
+    if (timeLeft() < 2500) {
+      return {
+        ok: steps.length > 0,
+        reply: steps.length ? deterministicSummary(steps) : null,
+        grounded: steps.length > 0,
+        steps,
+        modelUsed,
+        latencyMs: Date.now() - startedAll,
+        failureReason: "turn_time_budget",
+      };
+    }
     const started = Date.now();
-    // Agentic loop ke paas multi-step reasoning + bada context hota hai — NLU se zyada time do.
-    const agenticTimeoutMs = Number(process.env.AI_AGENTIC_TIMEOUT_MS ?? 20000);
+    // Agentic loop ke paas multi-step reasoning + bada context hota hai — NLU se zyada time do,
+    // par ek single call poora budget kha nahi sakti.
+    const agenticTimeoutMs = Math.max(3000, Math.min(Number(process.env.AI_AGENTIC_TIMEOUT_MS ?? 20000), timeLeft() - 1500));
     let json: NvidiaChatJson | null = null;
     let msg: { content?: string | null; reasoning_content?: string | null; tool_calls?: ChatMsg["tool_calls"] } | undefined;
     let lastFailure: string | null = null;
