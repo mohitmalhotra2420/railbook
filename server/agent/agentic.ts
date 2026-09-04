@@ -1211,17 +1211,29 @@ export async function runAgenticTurn(input: {
       /(route|origin|destination|date|tarikh|class|train\s*(?:number|no|ka\s*n))?[^.?!\n]{0,28}(chahiye|bolo|batao|bataye|poochh?o?|missing|dena)[^.?!\n]{0,28}/i.test(clean) &&
       /(route|origin|destination|date|tarikh|class|train)/i.test(clean);
     const asksInsteadOfAnswering = okSteps.length > 0 && demandsKnownInfo;
-    if (asksInsteadOfAnswering && !repaired && step < MAX_STEPS) {
-      repaired = true;
-      messages.push({ role: "assistant", content });
-      messages.push({
-        role: "user",
-        content:
-          "SYSTEM CHECK: tools ALREADY returned the data (see the tool results above). " +
-          "Do NOT ask the user for information you already have. Rewrite the final answer now using ONLY those tool results " +
-          "(route, date, fare, availability jo bhi mila). Sirf tab poochho jab koi genuinely missing field answer block kar rahi ho — aur sirf wohi ek field.",
-      });
-      continue;
+    if (asksInsteadOfAnswering) {
+      if (!repaired && step < MAX_STEPS) {
+        repaired = true;
+        messages.push({ role: "assistant", content });
+        messages.push({
+          role: "user",
+          content:
+            "SYSTEM CHECK: tools ALREADY returned the data (see the tool results above). " +
+            "Do NOT ask the user for information you already have. Rewrite the final answer now using ONLY those tool results " +
+            "(route, date, fare, availability jo bhi mila). Sirf tab poochho jab koi genuinely missing field answer block kar rahi ho — aur sirf wohi ek field.",
+        });
+        continue;
+      }
+      // Repair ke baad bhi model wahi harkat kare to tool summaries hi FINAL jawab hain.
+      return {
+        ok: true,
+        reply: deterministicSummary(steps),
+        grounded: true,
+        steps,
+        modelUsed,
+        latencyMs: Date.now() - startedAll,
+        failureReason: "model_asked_instead_of_answered",
+      };
     }
 
     // System prompt (date map, resolver line, known context) server-generated hai —
