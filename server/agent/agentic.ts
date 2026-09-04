@@ -1056,6 +1056,7 @@ export async function runAgenticTurn(input: {
 
   // AI chain: primary (GPT-OSS) -> fallback (Nemotron) -> deterministic (upar caller sambhalta hai).
   const modelChain = [env.nvidiaModel];
+  let repaired = false;
   if (env.nvidiaFallbackModel && env.nvidiaFallbackModel !== env.nvidiaModel) modelChain.push(env.nvidiaFallbackModel);
 
   for (let step = 1; step <= MAX_STEPS; step++) {
@@ -1182,6 +1183,27 @@ export async function runAgenticTurn(input: {
       };
     }
     const clean = redact(content);
+
+    // Repair pass (one-shot): model ne tools chala kar data le liya, phir bhi
+    // "info maango" wala jawab de diya? Ek corrective call do — data upar hai.
+    const okSteps = steps.filter((st) => st.ok);
+    const asksInsteadOfAnswering =
+      okSteps.length > 0 &&
+      /\?/.test(clean) &&
+      /(chahiye|batao|poochh?|poochho|missing|dena|need|provide|date bolo)/i.test(clean);
+    if (asksInsteadOfAnswering && !repaired && step < MAX_STEPS) {
+      repaired = true;
+      messages.push({ role: "assistant", content });
+      messages.push({
+        role: "user",
+        content:
+          "SYSTEM CHECK: tools ALREADY returned the data (see the tool results above). " +
+          "Do NOT ask the user for information you already have. Rewrite the final answer now using ONLY those tool results " +
+          "(route, date, fare, availability jo bhi mila). Sirf tab poochho jab koi genuinely missing field answer block kar rahi ho — aur sirf wohi ek field.",
+      });
+      continue;
+    }
+
     // System prompt (date map, resolver line, known context) server-generated hai —
     // isme ke server-provided dates/numbers model ne "invent" nahi kiye.
     const check = groundingCheck(clean, steps, [...evidenceParts, messages[0].content ?? ""]);

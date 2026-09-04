@@ -429,6 +429,32 @@ describe("agentic tool-calling layer", () => {
     expect(turn.grounded).toBe(true);
   });
 
+  it("repair pass: model asks for info despite tool data -> one corrective call answers", async () => {
+    railcoreMock();
+    let modelCalls = 0;
+    setAgenticNvidiaFetch(async (_input, init) => {
+      const body = JSON.parse(String(init?.body));
+      const isRepair = (body.messages as any[]).some((m) => m.role === "user" && String(m.content).includes("SYSTEM CHECK"));
+      modelCalls++;
+      const toolMsgs = body.messages.filter((m: any) => m.role === "tool").length;
+      if (toolMsgs === 0) {
+        return chatResponse({
+          tool_calls: [toolCall("GET_FARE", { train_number: "12014", class_code: "CC" })],
+        });
+      }
+      if (!isRepair) {
+        // Dumb temp-0 behaviour: tools succeeded, phir bhi info maango wala jawab.
+        return chatResponse({ content: "Fare ke liye route aur date chahiye, batao?" });
+      }
+      return chatResponse({ content: "12014 CC ASR→NDLS ka fare ₹1260 total hai (2026-09-05, aaj ke liye)." });
+    });
+
+    const turn = await runAgenticTurn({ text: "12014 ka cc fare btao", now: NOW });
+    expect(modelCalls).toBe(3); // tool-call turn + dumb reply + repaired reply
+    expect(turn.reply).toContain("1260");
+    expect(turn.grounded).toBe(true);
+  });
+
   it("grounding: hallucinated fare in the final answer gets replaced by provider-backed summary", async () => {
     railcoreMock();
     setAgenticNvidiaFetch(async (_input, init) => {
