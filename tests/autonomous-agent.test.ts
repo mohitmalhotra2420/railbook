@@ -243,12 +243,14 @@ describe("autonomous agent — NVIDIA tool loop over real adapters", () => {
     const date = tomorrow();
     scriptNvidia([
       () => assistant({ content: null, tool_calls: [{ id: "f", type: "function", function: { name: "getFare", arguments: JSON.stringify({ trainNumber: "12014", from: "ASR", to: "LDH", date, classCode: "CC", passengers: 2 }) } }] }),
-      () => assistant({ content: "2 logon ka total ₹1070 hai." }),
-      () => assistant({ content: "Total ₹1070." }),
+      () => assistant({ content: "2 logon ka total ₹1149 hai." }),
+      () => assistant({ content: "Total ₹1149." }),
     ]);
     const res = await runAutonomousAgent({ text: "12014 CC 2 log fare", state: { ...emptyAutoState(), date } });
+    // getFare already returns the fee-inclusive total (1020 base + 50 service = 1070) — a model-invented
+    // figure that is in NO tool result (₹1149) must be rejected and replaced by the evidence summary.
     expect(res.source).toBe("evidence");
-    expect(res.reply).not.toContain("1070");
+    expect(res.reply).not.toContain("1149");
     expect(res.reply).toContain("₹1020");
   });
 

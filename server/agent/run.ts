@@ -14,6 +14,7 @@ import {
   type AgentToolName,
 } from "./context.js";
 import { executeTool, type ToolName } from "./tools.js";
+import { agenticConfigured, runAgenticTurn, type ToolTraceStep } from "./agentic.js";
 
 export type AgentRequest = {
   text: string;
@@ -44,7 +45,39 @@ export type AgentResponse = {
   modelUsed: string | null;
   latencyMs: number;
   failureReason: string | null;
+  engine?: "agentic_tool_calling" | "deterministic";
+  toolTrace?: ToolTraceStep[];
+  grounded?: boolean;
 };
+
+/** Fact/journey sawaal → AI-driven tool calling; booking flow deterministic rehta hai. */
+const AGENTIC_INTENTS = new Set([
+  "LIVE_TRAIN_STATUS",
+  "TRAIN_SCHEDULE",
+  "CHECK_FARE",
+  "CHECK_AVAILABILITY",
+  "CHECK_PNR",
+  "CANCELLED_TRAINS",
+  "COMPARE_TRAINS",
+]);
+const AGENTIC_FOLLOWS = new Set(["live", "timetable", "fare", "availability", "cancelled", "pnr"]);
+const JOURNEY_PHRASE =
+  /\b(sabse\s*(?:tez|fast|sasti|sasta|pehle)|fastest|cheapest|earliest|best\s*(?:value|train|option)|compare|tulna|alternative(?:\s*dates?)?|vikalp|connecting|via\s+\w+|route\s*(?:optimis|suggest))/i;
+
+function agenticEligible(
+  follow: ReturnType<typeof classifyFollowUp>,
+  intent: string | null | undefined,
+  text: string,
+  bookingInProg: boolean,
+): boolean {
+  if (!agenticConfigured()) return false;
+  const journeyHit = JOURNEY_PHRASE.test(text);
+  // Journey/optimisation questions sirf tab jab booking pick-flow active na ho.
+  if (journeyHit && !bookingInProg) return true;
+  if (follow && AGENTIC_FOLLOWS.has(follow)) return true;
+  if (intent && AGENTIC_INTENTS.has(intent)) return true;
+  return false;
+}
 
 function seedContext(req: AgentRequest): AgentContext {
   const base = req.context ? { ...req.context } : emptyAgentContext();
@@ -79,9 +112,39 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
 
   let reply: string | null = null;
   let toolOk: boolean | null = null;
+  let engine: "agentic_tool_calling" | "deterministic" = "deterministic";
+  let toolTrace: ToolTraceStep[] | undefined;
+  let grounded: boolean | undefined;
+
+  // ── AI-driven multi-step tool calling (facts + Atlas/journey) ──
+  const inProg = bookingInProgress(ctx);
+  if (agenticEligible(follow, understood.nlu.intent, req.text, inProg)) {
+    try {
+      const turn = await runAgenticTurn({
+        text: req.text,
+        now: req.now,
+        known: {
+          origin: ctx.origin?.code ?? null,
+          destination: ctx.destination?.code ?? null,
+          date: ctx.date ?? understood.nlu.date ?? null,
+          trainNumber: trainNo ?? null,
+        },
+      });
+      if (turn.reply) {
+        reply = turn.reply;
+        toolOk = turn.ok ? true : false;
+        engine = "agentic_tool_calling";
+        toolTrace = turn.steps;
+        grounded = turn.grounded;
+      }
+    } catch {
+      /* agentic fail — deterministic path neeche chal hi jayega */
+    }
+  }
+
   if (tool === "getCoachPosition" && !trainNo) {
     reply = "Kaunsi train ki coach position? 5-digit train number boliye.";
-  } else if (tool && tool !== "searchTrains") {
+  } else if (tool && tool !== "searchTrains" && reply == null) {
     const result = await executeTool(tool as ToolName, {
       query: req.text,
       origin: ctx.origin?.code,
@@ -129,5 +192,8 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
     modelUsed: understood.modelUsed,
     latencyMs: understood.latencyMs,
     failureReason: understood.failureReason,
+    engine,
+    toolTrace,
+    grounded,
   };
 }

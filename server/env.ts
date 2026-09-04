@@ -12,6 +12,7 @@ try {
 
 const NVIDIA_DEFAULT_BASE = "https://integrate.api.nvidia.com/v1";
 const NVIDIA_DEFAULT_MODEL = "openai/gpt-oss-20b";
+const NVIDIA_DEFAULT_FALLBACK_MODEL = "nvidia/nemotron-3.5-lightning-30b-a3b";
 
 /** Production default. Explicit `mock` / `railkit` / `authorized` still override. */
 export const DEFAULT_RAILWAY_PROVIDER = "railcore";
@@ -54,6 +55,10 @@ export const env = {
   },
   get agentAutoEnabled() {
     return (process.env.AGENT_AUTO ?? "1").trim() !== "0";
+  },
+  /** Secondary agentic model — GPT-OSS fail hone par ek hi retry isi se (default: Nemotron 3.5 Lightning). */
+  get nvidiaFallbackModel() {
+    return (process.env.NVIDIA_FALLBACK_MODEL ?? "").trim() || NVIDIA_DEFAULT_FALLBACK_MODEL;
   },
   get aiRequestTimeoutMs() {
     const n = Number(process.env.AI_REQUEST_TIMEOUT_MS ?? 7000);

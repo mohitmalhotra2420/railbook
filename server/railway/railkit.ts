@@ -38,7 +38,7 @@ export type PnrLookup = {
 
 type SdkResult = { success?: boolean; message?: string; data?: unknown };
 
-type RailkitSdk = {
+export type RailkitSdk = {
   configure: (key: string) => void;
   searchTrainBetweenStations: (from: string, to: string, date?: string) => Promise<SdkResult>;
   getTrainInfo: (trainNumber: string) => Promise<SdkResult>;

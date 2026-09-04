@@ -171,6 +171,9 @@ export function createApp() {
         modelUsed: result.modelUsed,
         latencyMs: result.latencyMs,
         failureReason: result.failureReason,
+        engine: result.engine ?? null,
+        toolTrace: result.toolTrace ?? null,
+        grounded: result.grounded ?? null,
       });
     } catch (err) {
       next(err);
