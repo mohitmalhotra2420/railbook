@@ -336,25 +336,33 @@ if (want("4")) {
     restoreRailcore();
   }
   // Restore verification — RailCore primary again (sirf jab REMOTE khud healthy ho).
-  const probe = await railcoreRequest("/stations/search", { q: "ASR" });
-  if (probe.ok) {
+  // NOTE: agent turn PEHLE — probe ka 429 local circuit-breaker chala deta hai
+  // (restoreRailcore() ne breaker clear ki thi) aur attempts count nahi hote.
+  {
+    const rcBefore = CALLS.railcore;
     const check = await agent("12030 ka Saturday ka CC fare batao Amritsar se New Delhi", {
       known: { from: { code: "ASR", name: "AMRITSAR JN", city: "Amritsar" }, to: { code: "NDLS", name: "NEW DELHI", city: "Delhi" } },
     });
     const checkTools = traceTools(check.res);
-    record("4b", "RailCore restored (remote healthy) → primary source active again", {
-      railcoreBack: checkTools.some((t) => t.source === "railcore"),
-    }, checkTools.map((t) => `${t.tool}(${t.source})`).join(" → ") || "no tools");
-  } else {
-    const check = await agent("12030 ka Saturday ka CC fare batao Amritsar se New Delhi", {
-      known: { from: { code: "ASR", name: "AMRITSAR JN", city: "Amritsar" }, to: { code: "NDLS", name: "NEW DELHI", city: "Delhi" } },
-    });
-    const checkTools = traceTools(check.res);
+    const railcoreAttempts = CALLS.railcore - rcBefore;
+    const railcoreServed = checkTools.some((t) => t.source === "railcore" && t.ok === true);
     const fallbackOk = checkTools.some((t) => t.source === "railkit_fallback" && t.ok === true);
-    record("4b", "RailCore remote rate-limited (daily limit; restore POST-RESET verify hoga) → RailKit real fallback serving, no mocks", {
-      remoteHealthChecked: true,
-      railkitServingCorrectly: fallbackOk,
-    }, `probe status=${probe.status}; tools: ${checkTools.map((t) => `${t.tool}(${t.source},${t.ok ? "ok" : "fail"})`).join(" → ")}`);
+    const probe = await railcoreRequest("/stations/search", { q: "ASR" }); // health note (ab breaker issue nahi)
+    if (probe.ok && railcoreServed) {
+      record("4b", "RailCore restored (remote healthy) → primary source active again", {
+        railcoreBack: true,
+      }, `probe=${probe.status}; tools: ${checkTools.map((t) => `${t.tool}(${t.source},${t.ok ? "ok" : "fail"})`).join(" → ")}`);
+    } else if (probe.ok && !railcoreServed) {
+      record("4b", "RailCore remote healthy par serve nahi hua — investigate", {
+        railcoreBack: false,
+      }, `probe=${probe.status}; attempts=${railcoreAttempts}; tools: ${checkTools.map((t) => `${t.tool}(${t.source})`).join(" → ")}`);
+    } else {
+      record("4b", "RailCore transport restored (injection removed) → primary re-attempted on every call (no sticky fallback state); remote daily-limited (429) so real RailKit serves — post-reset strict re-verify scheduled", {
+        remoteHealthChecked: true,
+        railcorePrimaryAttempted: railcoreAttempts > 0,
+        railkitServingCorrectly: fallbackOk,
+      }, `probe status=${probe.status}; railcore attempts after restore: ${railcoreAttempts}; tools: ${checkTools.map((t) => `${t.tool}(${t.source},${t.ok ? "ok" : "fail"})`).join(" → ")}`);
+    }
   }
 }
 

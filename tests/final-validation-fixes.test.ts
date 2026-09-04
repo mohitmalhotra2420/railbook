@@ -170,6 +170,39 @@ describe("fix: grounding guard pakadta hai invented station codes", () => {
   });
 });
 
+describe("fix: grounding guard pakadta hai invented train names", () => {
+  it("data fail hone par 'Rajdhani Express' guess karne wala reply replace hota hai", async () => {
+    setRailcoreFetch(async () => jsonResponse(503, { success: false, error: { message: "down" } }));
+    setRailkitSdk({
+      configure: () => undefined,
+      searchTrainBetweenStations: async () => { throw new Error("down"); },
+      getTrainInfo: async () => { throw new Error("down"); },
+      trackTrain: async () => { throw new Error("down"); },
+      getAvailability: async () => { throw new Error("down"); },
+      fareLookup: async () => { throw new Error("down"); },
+      checkPNRStatus: async () => { throw new Error("down"); },
+      cancelList: async () => { throw new Error("down"); },
+    } as never);
+    let modelCall = 0;
+    setAgenticNvidiaFetch(async () => {
+      modelCall++;
+      if (modelCall === 1) {
+        return jsonResponse(200, {
+          model: "openai/gpt-oss-20b",
+          choices: [{ message: { content: null, tool_calls: [{ id: "c1", type: "function", function: { name: "TRACK_TRAIN", arguments: JSON.stringify({ train_number: "12014" }) } }] } }],
+        });
+      }
+      return jsonResponse(200, {
+        model: "openai/gpt-oss-20b",
+        choices: [{ message: { content: "12014 (Rajdhani Express) ka live data abhi available nahi hai." } }],
+      });
+    });
+    const turn = await runAgenticTurn({ text: "12014 ka live location batao", now: NOW });
+    expect(turn.grounded).toBe(false);
+    expect(String(turn.reply ?? "")).not.toMatch(/Rajdhani/i);
+  });
+});
+
 describe("fix: preferred_class partition — probed class evidence", () => {
   it("search classes missing + probe CC sirf 12030 ko mila → CC train best (12926 faster/sasta ho tab bhi)", async () => {
     setRailcoreFetch(async (input) => {

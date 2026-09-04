@@ -52,3 +52,17 @@ Present on Vercel Production: `RAILWAY_PROVIDER`, `RAILCORE_API_KEY`, `RAILKIT_A
 - `/api/health`: `provider=railcore`, `fallback=railkit`, `agent.auto=true`, `model=openai/gpt-oss-20b`.
 - Architecture: AI-FIRST tool calling (see AGENTIC_TOOLCALLING_REPORT.md) — 419/419 unit tests, 12/12 live production tool-call cases.
 - GitHub: mohitmalhotra2420/Raillllbook@main.
+
+---
+
+# Adversarial-validation fix deploy (2026-09-04, round 2)
+
+**Deployment:** `dpl_Coho9PuFWH5JuU3iNtT4GHCHP4Dt` (production, READY)
+**Production URL:** https://railbook-three.vercel.app
+**Secrets printed:** none
+
+- `NVIDIA_API_KEY` updated to the new live key (sensitive var patched in place, targets production+preview). No `NVIDIA_FALLBACK_MODEL` env exists — the nemotron code-default was removed, so the model chain is GPT-OSS-20b only.
+- Code shipped (local commit `a717c2f`, pending GitHub push): nemotron removal, "next <weekday>" = next ISO week, legacy-city station clusters (Calcutta/Madras/Bombay → real options, never model-improvised), airport guard, honest `provider=none` on dual-provider search failure, station-code grounding guard (NDAP-class inventions blocked), preferred_class partition via verified probed class.
+- Live verify after deploy: `engine=agentic_tool_calling`, `model=openai/gpt-oss-20b`, "next Saturday" → tool arg `date=2026-09-12` ✓, Delhi ambiguity → asks with real options ✓, `grounded=true`.
+- Unit suite: 429/429 (10 new regression tests for the fixes).
+- RailCore daily quota was exhausted during local validation (resets 00:00 IST); provider fallback to real RailKit data verified in that window (`railkit_fallback` sources, no mocks).

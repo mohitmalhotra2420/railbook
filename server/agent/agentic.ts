@@ -1115,7 +1115,15 @@ function groundingCheck(content: string, steps: ToolTraceStep[], evidenceParts: 
   // user text mein na mile to hallucination (jaise "NDAP" for Delhi Airport).
   const tokens = [...new Set(content.match(/\b[A-Z]{2,5}\b/g) ?? [])];
   const badTokens = tokens.filter((t) => !SAFE_UPPER_TOKENS.has(t) && !evidence.includes(t));
-  return { grounded: bad.length === 0 && badTokens.length === 0, evidence: [...bad, ...badTokens].join(",") };
+  // Train-type proper names (Rajdhani/Shatabdi/Vande Bharat…): data fail hone par
+  // model kabhi khud se naam guess karta hai (12014 ko "Rajdhani" bolna — Shatabdi
+  // hai). User ne bola ho ya provider data mein ho to theek; warna ungrounded.
+  // ("SHTABDI" transliteration provider data mein aata hai — normalize karke compare.)
+  const normName = (x: string) => x.toLowerCase().replace(/shtabdi/g, "shatabdi").replace(/\s+/g, " ");
+  const nameHits = [...new Set((content.match(/\b(?:vande\s+bharat|rajdhani|shatabdi|garib\s+rath|duronto|tejas|humsafar|antyodaya|sampark\s+kranti)\b/gi) ?? []).map(normName))];
+  const normEvidence = normName(evidence);
+  const badNames = nameHits.filter((n) => !normEvidence.includes(n));
+  return { grounded: bad.length === 0 && badTokens.length === 0 && badNames.length === 0, evidence: [...bad, ...badTokens, ...badNames].join(",") };
 }
 
 function deterministicSummary(steps: ToolTraceStep[]): string {
@@ -1441,7 +1449,7 @@ export async function runAgenticTurn(input: {
       lastNeedsChoice = null; // model ne dikhayi — aage model ka jawab hi final
     }
 
-    const check = groundingCheck(clean, steps, [...evidenceParts, messages[0].content ?? ""]);
+    const check = groundingCheck(clean, steps, [...evidenceParts, ...messages.map((m) => m.content ?? "")]);
     if (!check.grounded) {
       // Ungrounded output — deterministic, provider-backed summary replaces it.
       return {

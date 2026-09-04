@@ -90,9 +90,11 @@ const c1 = await runCase(
     const reply = String(o.body.reply ?? "");
     const trace = o.body.toolTrace ?? [];
     const fullAnswer = trace.length >= 2 && /\b\d{5}\b/.test(reply) && /\d{3,}/.test(reply); // train no + a fare/seat number
-    // Honest multi-turn fallback: destination city ambiguous → AI asks which station (never assumes).
-    const honestClarification =
-      trace.length >= 1 && /kis .*station|kaunsa .*station|kaun si .*station|station chun|which station/i.test(reply) && !/\b\d{5}\b/.test(reply);
+    // Honest multi-turn fallback: destination city ambiguous → AI asks which station
+    // (never assumes). Options-presentation (3+ station codes + question) bhi yahi hai.
+    const asksStation = /kis [^.?!\n]{0,30}station|kaunsa? [^.?!\n]{0,30}station|kaun sa [^.?!\n]{0,30}station|station (?:code|chun|options|bata)|which station|options\s*[:\-]/i.test(reply);
+    const presentsOptions = ((reply.match(/\b[A-Z]{2,5}\b/g) ?? []).filter((c) => !["CC", "SL", "GN", "AC", "PNR", "RAC", "AM", "PM"].includes(c)).length >= 3) && /\?|kya aap|chahte|chuno|choose/i.test(reply);
+    const honestClarification = trace.length >= 1 && (asksStation || presentsOptions) && !/\b\d{5}\b/.test(reply);
     return {
       http200: o.status === 200,
       agentic: o.body.engine === "agentic_tool_calling",
