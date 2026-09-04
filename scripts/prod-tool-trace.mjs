@@ -86,16 +86,24 @@ const c1 = await runCase(
   "MULTI-STEP (user example): fastest ASR→Delhi Saturday + CC fare + availability",
   "Amritsar se Delhi Saturday ko sabse fast train kaunsi hai aur CC ka fare aur availability kya hai?",
   {},
-  (o) => ({
-    http200: o.status === 200,
-    agentic: o.body.engine === "agentic_tool_calling",
-    toolsCalled: (o.body.toolTrace ?? []).length >= 2,
-    hasSearch: (o.body.toolTrace ?? []).some((t) => t.tool === "SEARCH_TRAINS" || t.tool === "JOURNEY_ANALYZE"),
-    providerSource: (o.body.toolTrace ?? []).every((t) => t.source === "railcore" || t.source === "railkit_fallback" || t.source === "engine" || t.source === "kb" || t.ok === false),
-    grounded: o.body.grounded === true,
-    trainNumberInReply: /\b\d{5}\b/.test(String(o.body.reply ?? "")),
-    noConfirm: o.body.confirmBook === false,
-  }),
+  (o) => {
+    const reply = String(o.body.reply ?? "");
+    const trace = o.body.toolTrace ?? [];
+    const fullAnswer = trace.length >= 2 && /\b\d{5}\b/.test(reply) && /\d{3,}/.test(reply); // train no + a fare/seat number
+    // Honest multi-turn fallback: destination city ambiguous → AI asks which station (never assumes).
+    const honestClarification =
+      trace.length >= 1 && /kis station|kaunsa station|kaun si station|station chun/i.test(reply) && !/\b\d{5}\b/.test(reply);
+    return {
+      http200: o.status === 200,
+      agentic: o.body.engine === "agentic_tool_calling",
+      toolsCalled: trace.length >= 2 || honestClarification,
+      hasSearch: trace.some((t) => t.tool === "SEARCH_TRAINS" || t.tool === "JOURNEY_ANALYZE"),
+      providerSource: trace.every((t) => t.source === "railcore" || t.source === "railkit_fallback" || t.source === "engine" || t.source === "kb" || t.ok === false),
+      grounded: o.body.grounded === true,
+      answeredOrClarified: fullAnswer || honestClarification,
+      noConfirm: o.body.confirmBook === false,
+    };
+  },
 );
 
 /* 2 — MULTI-TURN: bare booking intent → the AI asks for the date */

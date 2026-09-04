@@ -163,8 +163,8 @@ export const AGENTIC_TOOLS = [
       parameters: {
         type: "object",
         properties: {
-          origin: { type: "string", description: "Origin station code (ASR) ya naam (Amritsar)" },
-          destination: { type: "string", description: "Destination station code ya naam" },
+          origin: { type: "string", description: "Origin station code (ASR) ya naam (Amritsar). Code sirf known context ya pichle tool result se lo — guess mat karo." },
+          destination: { type: "string", description: "Destination: city NAAM (jaise Delhi) best hai ya known rail code (NDLS). Airport-style codes galat hain — DEL DENDULURU hai, Delhi nahi." },
           date: { type: "string", description: "Journey date YYYY-MM-DD" },
         },
         required: ["origin", "destination", "date"],
@@ -287,7 +287,7 @@ export const AGENTIC_TOOLS = [
     function: {
       name: "JOURNEY_ANALYZE",
       description:
-        "Atlas engine: fastest/cheapest/earliest/best_value train rank + optional alternative dates aur connecting routes. Filters: max_fare_inr (budget cap), preferred_class (jaise CC/3A), depart_after/depart_before (HH:MM window). Comparison/optimisation sawaalon ke liye yeh use karo.",
+        "Atlas engine: fastest/cheapest/earliest/best_value train rank + optional alternative dates aur connecting routes. Filters: max_fare_inr (budget cap), preferred_class (jaise CC/3A), depart_after/depart_before (HH:MM window). Comparison/optimisation sawaalon ke liye yeh use karo. Origin/destination mein city NAAM (Delhi) ya known rail code (NDLS) do — airport codes mat bhejo (DEL DENDULURU hai, Delhi nahi).",
       parameters: {
         type: "object",
         properties: {
@@ -378,6 +378,16 @@ async function resolveStationRef(raw: string): Promise<ResolvedStn> {
   }
   if (res.stations.length) return { code: res.stations[0].code };
   return { error: `"${s}" station lookup mein nahi mila — invent nahi karunga.` };
+}
+
+/** Station code ka OFFICIAL naam (station API se) — code-mixups (DEL≠Delhi) pakadne ke liye. */
+async function stationNameOf(code: string): Promise<string | null> {
+  try {
+    const re = await routedStationSearch(code);
+    return re.stations.find((st) => st.code.toUpperCase() === code.toUpperCase())?.name ?? null;
+  } catch {
+    return null;
+  }
 }
 
 function okResult(source: string | null, summary: string, data: unknown): ApprovedToolResult {
@@ -679,8 +689,20 @@ async function journeyAnalyze(args: {
     connections = options.slice(0, 3);
   }
 
-  return okResult("engine", `Atlas analysis: ${direct.length} direct trains, preference=${args.preference}.${filterNotes.length ? ` filters: ${filterNotes.join(", ")}.` : ""}`, {
+  // 0 direct trains hone par resolved station NAMES bhi bhejo taaki model
+  // code-mixup pakde (DEL = DENDULURU hai, Delhi nahi) aur city naam se retry kare.
+  // Connections/alternatives ki computation pehle normal flow mein hoti rehti hai.
+  let resolvedStations: { from: string; from_name: string | null; to: string; to_name: string | null } | undefined;
+  let emptyNote = "";
+  if (!direct.length) {
+    const [fromName, toName] = await Promise.all([stationNameOf(from), stationNameOf(to)]);
+    resolvedStations = { from, from_name: fromName, to, to_name: toName };
+    emptyNote = ` Resolved stations: ${from} = ${fromName ?? "unknown"}, ${to} = ${toName ?? "unknown"}. Code galat lag raha hai to CITY NAAM se dobara try karo (jaise "Delhi") — railway codes misleading ho sakte hain (jaise DEL DENDULURU hai, Delhi nahi).`;
+  }
+
+  return okResult("engine", `Atlas analysis: ${direct.length} direct trains, preference=${args.preference}.${filterNotes.length ? ` filters: ${filterNotes.join(", ")}.` : ""}${emptyNote}`, {
     query: { from, to, date: args.date, preference: args.preference },
+    resolved_stations: resolvedStations,
     direct: { count: direct.length, best, ranked: ranked.slice(0, 5) },
     filters: filterNotes.length
       ? { notes: filterNotes, ...(cap != null ? { max_fare_inr: cap, cap_excluded_unknown_or_over: capExcluded, fare_probe_ok: !fareProbeNote } : {}) }
@@ -776,6 +798,24 @@ export async function executeApprovedTool(
             unavailable: true,
             query: { from: fromRes.code, to: toRes.code, date: a.date },
           });
+        }
+        if (!trains.length && search.provider !== "none") {
+          // 0 trains par provider healthy: resolved station NAMES surface karo
+          // taaki model apna code-mixup khud pakde (DEL = DENDULURU, Delhi nahi).
+          const [fromName, toName] = await Promise.all([stationNameOf(fromRes.code), stationNameOf(toRes.code)]);
+          return okResult(
+            search.provider,
+            `${fromRes.code}→${toRes.code} (${a.date}): koi direct train nahi mili. Resolved stations: ${fromRes.code} = ${fromName ?? "unknown"}, ${toRes.code} = ${toName ?? "unknown"}. Code galat lag raha hai to CITY NAAM se dobara search karo (jaise "Delhi") — railway codes misleading ho sakte hain (jaise DEL DENDULURU hai, Delhi nahi).`,
+            {
+              from: fromRes.code,
+              to: toRes.code,
+              from_name: fromName,
+              to_name: toName,
+              date: a.date,
+              count: 0,
+              trains: [],
+            },
+          );
         }
         return okResult(
           search.provider,
