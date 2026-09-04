@@ -83,7 +83,7 @@ const satYmd = `${saturday.getFullYear()}-${String(saturday.getMonth() + 1).padS
 /* 1 — the exact user example: multi-step search → fare → availability */
 const c1 = await runCase(
   1,
-  "MULTI-STEP (user example): fastest ASR→Delhi Saturday + CC fare + availability",
+  "MULTI-STEP (user example): fastest ASR→Delhi Saturday + CC fare + availability (station clarification expected for ambiguous Delhi)",
   "Amritsar se Delhi Saturday ko sabse fast train kaunsi hai aur CC ka fare aur availability kya hai?",
   {},
   (o) => {
@@ -92,7 +92,7 @@ const c1 = await runCase(
     const fullAnswer = trace.length >= 2 && /\b\d{5}\b/.test(reply) && /\d{3,}/.test(reply); // train no + a fare/seat number
     // Honest multi-turn fallback: destination city ambiguous → AI asks which station (never assumes).
     const honestClarification =
-      trace.length >= 1 && /kis station|kaunsa station|kaun si station|station chun/i.test(reply) && !/\b\d{5}\b/.test(reply);
+      trace.length >= 1 && /kis .*station|kaunsa .*station|kaun si .*station|station chun|which station/i.test(reply) && !/\b\d{5}\b/.test(reply);
     return {
       http200: o.status === 200,
       agentic: o.body.engine === "agentic_tool_calling",
@@ -105,6 +105,39 @@ const c1 = await runCase(
     };
   },
 );
+
+/* 1b — the user picks NDLS: the multi-step chain completes with real data */
+if (c1) {
+  await runCase(
+    "1b",
+    "MULTI-STEP completion: 'NDLS' → fastest train + CC fare + availability via chained tools",
+    "NDLS",
+    {
+      known: {
+        from: { code: "ASR", name: "AMRITSAR JN", city: "Amritsar" },
+        to: { code: "NDLS", name: "NEW DELHI", city: "Delhi" },
+      },
+      context: c1.body.context,
+      history: [
+        { role: "user", content: "Amritsar se Delhi Saturday ko sabse fast train kaunsi hai aur CC ka fare aur availability kya hai?" },
+        { role: "assistant", content: String(c1.body.reply ?? "") },
+      ],
+    },
+    (o) => {
+      const reply = String(o.body.reply ?? "");
+      const trace = o.body.toolTrace ?? [];
+      return {
+        http200: o.status === 200,
+        agentic: o.body.engine === "agentic_tool_calling",
+        toolsCalled: trace.length >= 2,
+        fareOrAvl: trace.some((t) => t.tool === "GET_FARE" || t.tool === "CHECK_AVAILABILITY"),
+        trainNumberInReply: /\b\d{5}\b/.test(reply),
+        grounded: o.body.grounded === true,
+        noConfirm: o.body.confirmBook === false,
+      };
+    },
+  );
+}
 
 /* 2 — MULTI-TURN: bare booking intent → the AI asks for the date */
 const c2 = await runCase(

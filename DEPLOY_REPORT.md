@@ -39,3 +39,16 @@ Present on Vercel Production: `RAILWAY_PROVIDER`, `RAILCORE_API_KEY`, `RAILKIT_A
 
 - First promote (`dpl_8sAmpZK…`) crashed serverless boot (`FUNCTION_INVOCATION_FAILED`) because the function imported `src/ai/agent.js` outside the server bundle. Same orchestrator; helpers now live at `server/agent/context.ts`. Second promote is the live one.
 - Automated `prod-verify` live check “failed” only because it required `provider===railcore`; the HTTP 200 body was real 12014 status via RailKit fallback.
+
+---
+
+# AI-first tool-calling deploy (2026-09-04)
+
+**Deployment:** `dpl_8ePr81yKoLf6q7Ugf8q6jgQahYaE` (promoted)
+**Production URL:** https://railbook-three.vercel.app · **Alias:** https://railbook-bookkro.vercel.app
+**Secrets printed:** none (verified: every /api/agent response scanned for key patterns)
+
+- `RAILCORE_API_KEY` replaced with the new live key (patch, 200 OK). `RAILKIT_API_KEY`, `NVIDIA_API_KEY`, `NVIDIA_MODEL` kept untouched. `RAILWAY_PROVIDER=railcore`.
+- `/api/health`: `provider=railcore`, `fallback=railkit`, `agent.auto=true`, `model=openai/gpt-oss-20b`.
+- Architecture: AI-FIRST tool calling (see AGENTIC_TOOLCALLING_REPORT.md) — 419/419 unit tests, 12/12 live production tool-call cases.
+- GitHub: mohitmalhotra2420/Raillllbook@main.
