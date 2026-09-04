@@ -1092,6 +1092,7 @@ export async function runAgenticTurn(input: {
 
   const steps: ToolTraceStep[] = [];
   const evidenceParts: string[] = [];
+  let lastNeedsChoice: { city: string; stations: { code: string; name: string }[] } | null = null;
   let modelUsed: string | null = null;
   const url = `${env.nvidiaBaseUrl.replace(/\/$/, "")}/chat/completions`;
 
@@ -1203,6 +1204,10 @@ export async function runAgenticTurn(input: {
         }
         const toolName = sanitizeToolName(tc.function.name);
         const result = await executeApprovedTool(toolName, args);
+        const rd = result.data as { needs_choice?: boolean; city?: string; stations?: { code: string; name: string }[] } | null;
+        if (!result.ok && rd?.needs_choice && Array.isArray(rd.stations)) {
+          lastNeedsChoice = { city: rd.city ?? "station", stations: rd.stations };
+        }
         try {
           evidenceParts.push(JSON.stringify(result.data ?? {}).slice(0, 20000));
         } catch {
@@ -1279,6 +1284,26 @@ export async function runAgenticTurn(input: {
 
     // System prompt (date map, resolver line, known context) server-generated hai —
     // isme ke server-provided dates/numbers model ne "invent" nahi kiye.
+    // Deterministic relay: tool ne needs_choice diya (ambiguous station) par model ne
+    // options user ko nahi dikhayi? Options khud banao — 100% tool-data se.
+    if (lastNeedsChoice) {
+      const mentioned = lastNeedsChoice.stations.filter((x) => clean.toUpperCase().includes(x.code.toUpperCase())).length;
+      if (mentioned < Math.min(2, lastNeedsChoice.stations.length)) {
+        const lines = lastNeedsChoice.stations.map((x, i) => `${i + 1}. ${x.code} – ${x.name}`).join("\n");
+        const relay = `**${lastNeedsChoice.city} ke liye kaunsa station?**\n${lines}\nKripya number ya station code bata do.`;
+        return {
+          ok: true,
+          reply: relay,
+          grounded: true,
+          steps,
+          modelUsed,
+          latencyMs: Date.now() - startedAll,
+          failureReason: "needs_choice_relayed_deterministically",
+        };
+      }
+      lastNeedsChoice = null; // model ne dikhayi — aage model ka jawab hi final
+    }
+
     const check = groundingCheck(clean, steps, [...evidenceParts, messages[0].content ?? ""]);
     if (!check.grounded) {
       // Ungrounded output — deterministic, provider-backed summary replaces it.
