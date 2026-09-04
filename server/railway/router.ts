@@ -39,11 +39,20 @@ import { MULTI_STATION_CITIES, isClusterStation, pickStations } from "./station-
 import { STATIONS as LOCAL_STATIONS } from "../data/stations.js";
 
 function enrichClusterHits(query: string, hits: Station[]): Station[] {
-  const group = MULTI_STATION_CITIES[query.trim().toLowerCase()];
+  const key = query.trim().toLowerCase();
+  const group = MULTI_STATION_CITIES[key];
   if (!group) return hits;
   const have = new Set(hits.map((s) => s.code.toUpperCase()));
+  const anyGroup = [...have].some((code) => group.includes(code));
+  // Legacy city naam (Calcutta/Madras/Bombay) par API se koi group member nahi
+  // mila — par query EXACT city key hai (city pakki hai). LOCAL dataset ke real
+  // stations hi options denge; "not found" bolaate hue model ko improvise
+  // (MAS/NBE jaise ungrounded codes) karne par majboor nahi karenge.
+  if (!anyGroup) {
+    const local = LOCAL_STATIONS.filter((s) => group.includes(s.code.toUpperCase()));
+    return local.length ? local : hits;
+  }
   // Only complete a real cluster (UMB+UBC). Never invent ERS when API only returned a lookalike.
-  if (![...have].some((code) => group.includes(code))) return hits;
   const extra = LOCAL_STATIONS.filter((s) => group.includes(s.code.toUpperCase()) && !have.has(s.code.toUpperCase()));
   return extra.length ? [...hits, ...extra] : hits;
 }
@@ -115,7 +124,7 @@ export async function routedStationSearch(q: string): Promise<StationSearchResul
       return { stations: [], needChoice: false, provider: "railcore" };
     }
     const local = searchLocalStations(query);
-    const pick = pickStations(query, local);
+    const pick = pickStations(query, enrichClusterHits(query, local));
     logServed("railkit_fallback", "stationSearch", started, pick.kind !== "none", remote.failureReason);
     if (pick.kind === "ambiguous") {
       return { stations: pick.stations, needChoice: true, city: pick.city, provider: "railkit_fallback" };
@@ -402,9 +411,15 @@ export class FallbackRailwayProvider implements RailwayProvider {
       logServed("none", "trainSearch", started, false, primary.failureReason ?? "railcore_failed");
       return [];
     }
-    const fb = await this.kit.searchTrains(query);
+    const fb = await this.kit.searchTrainsDetailed(query);
+    if (!fb.ok) {
+      // Dono providers fail — "0 trains" bolna jhooth hai. "none" label hi
+      // upstream (SEARCH_TRAINS/JOURNEY_ANALYZE) ko honest unavailable deta hai.
+      logServed("none", "trainSearch", started, false, `${primary.failureReason ?? "railcore_failed"}+railkit_failed`);
+      return [];
+    }
     logServed("railkit_fallback", "trainSearch", started, true, primary.failureReason ?? "railcore_failed");
-    return filterTrainsServingStops(fb, query.from, query.to);
+    return filterTrainsServingStops(fb.trains, query.from, query.to);
   }
 
   async getAvailability(

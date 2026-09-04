@@ -580,9 +580,12 @@ async function journeyAnalyze(args: {
   }
 
   // Preferred class: deterministic stable partition — class waale trains pehle.
+  // Search results mein classes kabhi-kabhi missing hoti hain (RailKit mapping);
+  // fare-probe ka VERIFIED classCode (cheapest.classCode) bhi partition evidence hai.
   if (pc) {
-    const withPc = ranked.filter((t) => t.classes.includes(pc as never));
-    const withoutPc = ranked.filter((t) => !t.classes.includes(pc as never));
+    const hasPc = (t: (typeof ranked)[number]) => t.classes.includes(pc as never) || t.cheapest?.classCode === pc;
+    const withPc = ranked.filter(hasPc);
+    const withoutPc = ranked.filter((t) => !hasPc(t));
     ranked = [...withPc, ...withoutPc];
   }
 
@@ -610,6 +613,7 @@ async function journeyAnalyze(args: {
         departure: ranked[0].departure,
         arrival: ranked[0].arrival,
         durationMinutes: ranked[0].durationMinutes,
+        classes: ranked[0].classes,
         cheapest:
           "cheapest" in ranked[0] && ranked[0].cheapest
             ? (ranked[0] as { cheapest: { fare: number; classCode: string } }).cheapest
@@ -1045,11 +1049,12 @@ function systemPrompt(
     "3b. User sirf train number + class poochhe (route/date na de) to bhi GET_FARE / CHECK_AVAILABILITY turant bulao — route/date optional hain, server timetable se route aur aaj ki date khud lagata hai. Missing slots ki bhikh mat maango.",
     "4. Sirf tool results ke facts bolo. Train number, naam, time, fare, seats, delay, STATION CODE — kuch bhi invent mat karo. Station codes/options sirf tool results se; apni knowledge se station code mat banao.",
     "5. Required info (origin/destination/date/train number/PNR) genuinely missing ho to POOCHHO — journey/book intent ke liye DATE sabse pehle poochho (sabse zaroori slot); station ambiguity ho to usi ek line mein saath mein poochho (jaise: \"Kis date ko jaana hai? Aur Delhi mein kaunsa station — NDLS, DLI?\"). Aaj ki date silently assume mat karo. Station options sirf tool result (needs_choice) ya well-known stations se bolo — airport/foreign codes (BCT jaise) kabhi Delhi ke options mein mat likho.",
-    "6. Data na mile to saaf bolo ki unavailable hai — kabhi fake number/seats/fare mat banao.",
+    "6. Data na mile to saaf bolo ki unavailable hai — kabhi fake number/seats/fare mat banao, aur train/station ka naam ya code khud se guess mat karo (sab kuch sirf tool result se).",
     "7. Final jawab mein koi API key/secret/URL nahi hoga.",
     "8. Jab user ko station options dikhane hon (needs_choice), options Gin ke poochho.",
-    "9. Date sirf Deterministic date resolver line, date map ya known context se aayegi — khud calendar math kabhi mat karo. Resolver ka result FINAL hai; ambiguous ho to user se poochho; resolver kuch na de aur user ne absolute date di ho (jaise 5 September ya 05/09/2026) to map mein nahi hogi — tab user se confirm karo.",
+    "9. Date sirf Deterministic date resolver line, date map ya known context se aayegi — khud calendar math kabhi mat karo. Resolver ka result FINAL hai; ambiguous ho to user se poochho; resolver kuch na de aur user ne absolute date di ho (jaise 5 September ya 05/09/2026) to map mein nahi hogi — tab user se confirm karo. Dhyan rahe: \"next <weekday>\" = AGLE hafte ka woh din (next Saturday aane wala Saturday nahi), \"coming <weekday>\"/bela weekday = aane wala pehla.",
     "10. Booking/payment kabhi tum nahi karte — booking tool tumhare paas hai hi nahi. User ticket book karna chahe to slots (origin/destination/date/passengers) jama karo aur trains dikhaao (SEARCH_TRAINS), phir bolo ki booking app ke TrainBoard/Confirm UI se hogi.",
+    "11. Multi-station cities (Delhi, Bombay/Mumbai, Madras/Chennai, Calcutta/Kolkata…) ke liye KHUD station mat chuno — destination mein CITY NAAM hi pass karo; tool needs_choice ke saath real station options laayega, wahi user ko dikhao. Apni knowledge se station substitute (Calcutta→Howrah jaisa) kabhi nahi.",
   ]
     .filter(Boolean)
     .join("\n");
@@ -1085,7 +1090,18 @@ function sanitizeToolName(raw: string): string {
   return m ? m[1] : s;
 }
 
-/** Final answer ke numbers tool results mein hone chahiye — warna deterministic summary. */
+/**
+ * Final answer ke numbers STATION-CODE style tokens tool results/known context
+ * mein hone chahiye — warna deterministic summary. "NDAP" jaise invented codes
+ * (jo kisi provider result mein nahi) user tak nahi jaane chahiye.
+ */
+const SAFE_UPPER_TOKENS = new Set([
+  // class/quota codes + common uppercase abbreviations (stations nahi hain)
+  "CC", "SL", "EC", "EA", "FC", "GN", "PQ", "PT", "TQ", "SS", "DP", "AC",
+  "PNR", "RAC", "IR", "UTC", "IST", "INR", "API", "OK", "NO", "PM", "AM",
+  "EX", "EXP", "IRCTC", "URL", "ID", "SMS", "TAT",
+]);
+
 function groundingCheck(content: string, steps: ToolTraceStep[], evidenceParts: string[]): { grounded: boolean; evidence: string } {
   const evidence =
     JSON.stringify(steps.map((s) => s.summary)) +
@@ -1095,7 +1111,11 @@ function groundingCheck(content: string, steps: ToolTraceStep[], evidenceParts: 
     evidenceParts.join(" ");
   const numbers = content.match(/\d+(?:\.\d+)?/g) ?? [];
   const bad = numbers.filter((n) => n.length >= 3 && !evidence.includes(n));
-  return { grounded: bad.length === 0, evidence: bad.join(",") };
+  // Station-code style tokens (2–5 uppercase letters) — evidence/system-prompt/
+  // user text mein na mile to hallucination (jaise "NDAP" for Delhi Airport).
+  const tokens = [...new Set(content.match(/\b[A-Z]{2,5}\b/g) ?? [])];
+  const badTokens = tokens.filter((t) => !SAFE_UPPER_TOKENS.has(t) && !evidence.includes(t));
+  return { grounded: bad.length === 0 && badTokens.length === 0, evidence: [...bad, ...badTokens].join(",") };
 }
 
 function deterministicSummary(steps: ToolTraceStep[]): string {
@@ -1276,6 +1296,50 @@ export async function runAgenticTurn(input: {
           args = {};
         }
         const toolName = sanitizeToolName(tc.function.name);
+        // Airport guard: user ne "airport" bola (jaise "Delhi airport") to koi
+        // rail station silently substitute nahi hoga — airports railway stations
+        // nahi hote; user se railway station/city poochna hi honest hai.
+        if (
+          /airport|हवाईअड्डा|hawai\s*adda/i.test(String(input.text ?? "")) &&
+          (toolName === "SEARCH_TRAINS" || toolName === "JOURNEY_ANALYZE")
+        ) {
+          const result = failResult(
+            null,
+            "Airport ke liye koi railway station silently assume nahi karunga — kis CITY ya railway station ki trains chahiye? (jaise Delhi ke liye NDLS/DLI/NZM options honge)",
+            { needs_airport_clarification: true },
+          );
+          evidenceParts.push(JSON.stringify(result.data ?? {}).slice(0, 20000));
+          steps.push({
+            step,
+            tool: toolName,
+            args: sanitizedArgs(toolName, args),
+            ok: result.ok,
+            source: result.source,
+            summary: result.summary,
+            latencyMs: Date.now() - stepStarted,
+            dataPreview: redact(JSON.stringify(result.data ?? null)).slice(0, 400),
+          });
+          messages.push({
+            role: "tool",
+            tool_call_id: tc.id,
+            content: JSON.stringify({ ok: result.ok, source: result.source, summary: result.summary, data: result.data }),
+          });
+          continue;
+        }
+        // "next <weekday>" guard: model kabhi date-map ka immediate occurrence
+        // utha leta hai (next Saturday → is Saturday). Resolver hi FINAL hai —
+        // user ne literally "next <weekday>" bola hai to args.date hint se align.
+        if (
+          dateHint?.kind === "date" &&
+          /\bnext\s+(?:sunday|monday|tuesday|wednesday|thursday|friday|saturday|sun|mon|tue|wed|thu|fri|sat|ravivar|somvar|mangalvar|budhvar|guruvar|shukravar|shanivar)\b/.test(
+            String(input.text ?? "").toLowerCase(),
+          ) &&
+          typeof args?.date === "string" &&
+          /^\d{4}-\d{2}-\d{2}$/.test(args.date) &&
+          args.date !== dateHint.date
+        ) {
+          args = { ...args, date: dateHint.date };
+        }
         const result = await executeApprovedTool(toolName, args);
         const rd = result.data as { needs_choice?: boolean; city?: string; stations?: { code: string; name: string }[] } | null;
         if (!result.ok && rd?.needs_choice && Array.isArray(rd.stations)) {

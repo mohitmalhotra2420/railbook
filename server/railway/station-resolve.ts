@@ -136,7 +136,10 @@ export function pickStations(query: string, hits: Station[]): StationPick {
 
   const group = MULTI_STATION_CITIES[qn];
   if (group) {
-    const inCity = hits.filter((s) => group.includes(s.code.toUpperCase()) && scoreStation(q, s) >= 40);
+    // Exact city-name query (delhi/calcutta/madras/bombay…): group membership
+    // hi authority hai — score gate group members ko nikaal deti thi (jaise
+    // "calcutta" → HOWRAH JN name-scorable nahi). Extra API rows score se.
+    const inCity = hits.filter((s) => group.includes(s.code.toUpperCase()));
     const unique = new Map(inCity.map((s) => [s.code.toUpperCase(), s]));
     if (unique.size >= 2) {
       // Show EVERY relevant station the lookup API returned — known group

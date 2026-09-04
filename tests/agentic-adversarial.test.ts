@@ -222,7 +222,7 @@ describe("TEST 1: date semantics (deterministic, arbitrary dates, IST)", () => {
       ["kal", "2026-09-05"],
       ["parson", "2026-09-06"],
       ["Saturday", "2026-09-05"],
-      ["next Saturday", "2026-09-05"],
+      ["next Saturday", "2026-09-12"], // agle hafte ka Saturday — "coming Saturday" = 2026-09-05
       ["coming Saturday", "2026-09-05"],
       ["next Monday", "2026-09-07"],
       ["5 September 2026", "2026-09-05"],
@@ -397,33 +397,20 @@ describe("TEST 5: both providers fail -> tool says unavailable, never invents", 
 
 /* ══ TEST 6 — AI FALLBACK CHAIN ═══════════════════════════════════ */
 
-describe("TEST 6: GPT-OSS -> Nemotron -> deterministic NLU", () => {
-  it("primary model failure falls back to Nemotron and still produces a usable tool plan", async () => {
+describe("TEST 6: GPT-OSS (single-model chain) -> deterministic NLU", () => {
+  it("primary model failure does NOT fall back to Nemotron (removed from chain); turn fails honestly", async () => {
     railcoreMock();
     setAgenticNvidiaFetch(async (_input, init) => {
       const body = JSON.parse(String(init?.body));
-      if (String(body.model).includes("gpt-oss")) {
-        return jsonResponse(500, { error: { message: "gpt-oss overloaded" } });
-      }
-      // Nemotron serves the plan (and must NOT receive reasoning_effort).
-      expect(body.reasoning_effort).toBeUndefined();
-      const toolMsgs = body.messages.filter((m: { role: string }) => m.role === "tool").length;
-      if (toolMsgs === 0) {
-        return jsonResponse(200, {
-          model: "nvidia/nemotron-3.5-lightning-30b-a3b",
-          choices: [{ message: { content: null, tool_calls: [toolCall("TRACK_TRAIN", { train_number: "12014" })] } }],
-        });
-      }
-      return jsonResponse(200, {
-        model: "nvidia/nemotron-3.5-lightning-30b-a3b",
-        choices: [{ message: { content: "12014 ki live status abhi unavailable hai.", tool_calls: undefined } }],
-      });
+      // Chain is GPT-OSS-20b ONLY now — nemotron must never be requested.
+      expect(String(body.model)).toContain("gpt-oss");
+      return jsonResponse(500, { error: { message: "gpt-oss overloaded" } });
     });
     const turn = await runAgenticTurn({ text: "12014 abhi kaha hai?", now: NOW });
-    expect(turn.ok).toBe(true);
-    expect(turn.modelUsed).toBe("nvidia/nemotron-3.5-lightning-30b-a3b");
-    expect(turn.steps[0].tool).toBe("TRACK_TRAIN");
-    expect(turn.reply).toMatch(/unavailable/i);
+    expect(turn.ok).toBe(false);
+    expect(turn.modelUsed ?? "").not.toContain("nemotron");
+    expect(turn.steps.length).toBe(0);
+    expect(turn.failureReason).toBeTruthy();
   });
 
   it("both AI models failing hands over to the deterministic engine", async () => {

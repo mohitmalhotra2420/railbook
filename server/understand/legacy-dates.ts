@@ -70,6 +70,22 @@ function nextWeekday(fromYmd: string, dow: number): string {
   return addDays(fromYmd, add);
 }
 
+/**
+ * "next <weekday>" = AGLE hafte (ISO Mon–Sun) ka woh din — current week ka
+ * occurrence skip hota hai. Jaise Friday ko "next Saturday" = aane wala
+ * Saturday NAHI, balki 8 din baad wala (kal to "kal"/"Saturday" hota hai).
+ */
+function nextWeekWeekday(fromYmd: string, dow: number): string {
+  const upcoming = nextWeekday(fromYmd, dow);
+  const [y, m, d] = fromYmd.split("-").map(Number);
+  const todayDow = new Date(y, m - 1, d).getDay(); // 0 = Sunday
+  const mondayOffset = (todayDow + 6) % 7; // days since Monday (ISO week)
+  const monday = addDays(fromYmd, -mondayOffset);
+  const sunday = addDays(monday, 6);
+  if (upcoming >= monday && upcoming <= sunday) return addDays(upcoming, 7);
+  return upcoming;
+}
+
 export function upcomingDay(day: number, now: Date): string | undefined {
   if (!Number.isInteger(day) || day < 1 || day > 31) return undefined;
   const today = todayYmdFrom(now);
@@ -148,11 +164,21 @@ export function parseDatePhrase(
   }
 
   const coming = raw.match(
-    /\b(?:coming|agle|agla|next)\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday|sun|mon|tue|wed|thu|fri|sat|ravivar|somvar|mangalvar|budhvar|guruvar|shukravar|shanivar)\b/,
+    /\b(?:coming|agle|agla|aayla)\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday|sun|mon|tue|wed|thu|fri|sat|ravivar|somvar|mangalvar|budhvar|guruvar|shukravar|shanivar)\b/,
   );
   if (coming) {
     const dow = WEEKDAYS[coming[1]];
     return { date: nextWeekday(today, dow), weekday: dow };
+  }
+
+  // "next <weekday>" — agle hafte ka din (current week skip). "coming" upar
+  // handle ho chuka hai (immediate occurrence ke liye).
+  const nextWd = raw.match(
+    /\bnext\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday|sun|mon|tue|wed|thu|fri|sat|ravivar|somvar|mangalvar|budhvar|guruvar|shukravar|shanivar)\b/,
+  );
+  if (nextWd) {
+    const dow = WEEKDAYS[nextWd[1]];
+    return { date: nextWeekWeekday(today, dow), weekday: dow };
   }
 
   const named = raw.match(new RegExp(`(\\d{1,2})(?:st|nd|rd|th)?\\s*(${MONTH_ALT})`, "u"));
@@ -189,14 +215,6 @@ export function parseDatePhrase(
       const date = upcomingDay(Number(bare[1]), now);
       if (date) return { date };
     }
-  }
-
-  const nextWd = raw.match(
-    /\bnext\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday|sun|mon|tue|wed|thu|fri|sat|ravivar|somvar|mangalvar|budhvar|guruvar|shukravar|shanivar)\b/,
-  );
-  if (nextWd) {
-    const dow = WEEKDAYS[nextWd[1]];
-    return { date: nextWeekday(today, dow), weekday: dow };
   }
 
   const wd = raw.match(

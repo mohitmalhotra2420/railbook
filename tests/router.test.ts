@@ -468,7 +468,7 @@ describe("RailCore HTTP + RailKit fallback", () => {
     expect(res.body.stations.map((s: { code: string }) => s.code)).toEqual(expect.arrayContaining(["NDLS", "DLI", "NZM"]));
   });
 
-  it("Kochi first-result KFX is not returned as the station", async () => {
+  it("Kochi exact city query with lookalike KFX hit returns the city's real stations, never the lookalike first", async () => {
     process.env.RAILWAY_PROVIDER = "railcore";
     process.env.RAILCORE_API_KEY = "rk_live_test";
     setRailcoreFetch(async () =>
@@ -480,8 +480,14 @@ describe("RailCore HTTP + RailKit fallback", () => {
     setProvider(null);
     const app = createApp();
     const res = await request(app).get("/api/stations").query({ q: "Kochi" });
-    expect(res.body.stations).toEqual([]);
-    expect(res.body.stations[0]?.code).not.toBe("KFX");
+    // Exact multi-station city key: curated city stations (ERS/ERN) hi options —
+    // API ka lookalike (KFX KOCHEWAHI) kabhi "the station" nahi ban sakta.
+    const codes = (res.body.stations ?? []).map((s: { code: string }) => s.code);
+    expect(codes.length).toBeGreaterThanOrEqual(2);
+    expect(codes).toContain("ERS");
+    expect(codes).toContain("ERN");
+    expect(codes[0]).not.toBe("KFX");
+    expect(res.body.needChoice).toBe(true);
   });
 });
 

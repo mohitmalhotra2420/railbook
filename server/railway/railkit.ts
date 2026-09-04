@@ -688,8 +688,13 @@ export class RailKitProvider implements RailwayProvider {
     return !env.railkitApiKey;
   }
 
-  async searchTrains(query: SearchQuery): Promise<TrainResult[]> {
-    if (!(await ensureRailkitConfigured())) return [];
+  /**
+   * Search with an explicit success flag — "genuinely empty" vs "fail hua"
+   * dono alag karna zaroori hai taaki FallbackRailwayProvider dono-provider
+   * outage par "0 trains" ka jhooth na bole ("none" label de sake).
+   */
+  async searchTrainsDetailed(query: SearchQuery): Promise<{ trains: TrainResult[]; ok: boolean }> {
+    if (!(await ensureRailkitConfigured())) return { trains: [], ok: false };
     const started = Date.now();
     try {
       const sdk = await loadSdk();
@@ -697,7 +702,7 @@ export class RailKitProvider implements RailwayProvider {
       const to = query.to.toUpperCase();
       const res = await sdk.searchTrainBetweenStations(from, to, ymdToDmy(query.date));
       logCall("searchTrainBetweenStations", started, Boolean(res?.success));
-      if (!res?.success) return [];
+      if (!res?.success) return { trains: [], ok: false };
       const data = res.data;
       const rows = Array.isArray(data)
         ? data
@@ -708,11 +713,15 @@ export class RailKitProvider implements RailwayProvider {
         .map((row) => mapSearchTrain(row, from, to, query.date))
         .filter((t): t is TrainResult => Boolean(t));
       mapped.sort((a, b) => a.departure.localeCompare(b.departure));
-      return mapped;
+      return { trains: mapped, ok: true };
     } catch {
       logCall("searchTrainBetweenStations", started, false);
-      return [];
+      return { trains: [], ok: false };
     }
+  }
+
+  async searchTrains(query: SearchQuery): Promise<TrainResult[]> {
+    return (await this.searchTrainsDetailed(query)).trains;
   }
 
   async getAvailability(
