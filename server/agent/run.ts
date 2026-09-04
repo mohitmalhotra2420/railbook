@@ -120,7 +120,14 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
   let agenticFailureReason: string | null = null;
 
   // ── AI-driven multi-step tool calling (facts + Atlas/journey) ──
-  const inProg = bookingInProgress(ctx);
+  // "Slots" (origin/destination/date) ka hona booking-flow NAHI hai — agentic layer
+  // unhe khud use karti hai. Sirf STRUCTURED booking stage hijack se bachti hai.
+  // Sirf GENUINE pick-flow hijack se bachta hai: train list have hai jisme se user
+  // "sabse tez wali" bol raha hai, ya pick ho chuka. Khali collecting-stage (fresh
+  // journey query) agentic layer ko jaati hai — slots waise bhi ctx mein hain.
+  const inProg =
+    Boolean(ctx.selectedTrainNumber) ||
+    (ctx.bookingStage === "collecting" && ctx.lastTrainNumbers.length > 0);
   if (agenticEligible(follow, understood.nlu.intent, req.text, inProg)) {
     try {
       const turn = await runAgenticTurn({
@@ -146,7 +153,8 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
     }
   }
 
-  if (tool === "getCoachPosition" && !trainNo) {
+  // NOTE: agentic jawab mil chuka ho to koi deterministic guard use overwrite NAHI karta.
+  if (tool === "getCoachPosition" && !trainNo && reply == null) {
     reply = "Kaunsi train ki coach position? 5-digit train number boliye.";
   } else if (tool && tool !== "searchTrains" && reply == null) {
     const result = await executeTool(tool as ToolName, {
@@ -165,13 +173,13 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
     if (result.ok && tool === "getLiveStatus") {
       reply = `${result.summary}\n(Live railway data — gadh ke nahi.)`;
     }
-  } else if (follow === "live" && !trainNo) {
+  } else if (follow === "live" && !trainNo && reply == null) {
     reply = "Train number kya hai? 5-digit number boliye.";
-  } else if (follow === "coach" && !trainNo) {
+  } else if (follow === "coach" && !trainNo && reply == null) {
     reply = "Kaunsi train ki coach position? 5-digit train number boliye.";
-  } else if (follow === "fare" && (!ctx.selectedTrainNumber || !ctx.classCode || !ctx.date || !ctx.origin || !ctx.destination)) {
+  } else if (follow === "fare" && reply == null && (!ctx.selectedTrainNumber || !ctx.classCode || !ctx.date || !ctx.origin || !ctx.destination)) {
     reply = "Fare ke liye train, class aur date chahiye. Jo missing hai woh batao — main figure invent nahi karunga.";
-  } else if (follow === "availability" && (!ctx.selectedTrainNumber || !ctx.classCode || !ctx.date)) {
+  } else if (follow === "availability" && reply == null && (!ctx.selectedTrainNumber || !ctx.classCode || !ctx.date)) {
     reply = "Availability ke liye train, class aur date chahiye.";
   }
 
