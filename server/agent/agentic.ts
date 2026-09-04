@@ -1204,10 +1204,13 @@ export async function runAgenticTurn(input: {
     // Repair pass (one-shot): model ne tools chala kar data le liya, phir bhi
     // "info maango" wala jawab de diya? Ek corrective call do — data upar hai.
     const okSteps = steps.filter((st) => st.ok);
-    const asksInsteadOfAnswering =
-      okSteps.length > 0 &&
-      /\?/.test(clean) &&
-      /(chahiye|batao|poochh?|poochho|missing|dena|need|provide|date bolo)/i.test(clean);
+    // Model tools chala ke data le chuka hai, phir bhi route/date/class jaisi cheez
+    // "maang" raha hai — jo summaries mein already hai. "availability bhi dekhun?"
+    // jaise legit offers trigger na hon — sirf demand-phrasing trigger karti hai.
+    const demandsKnownInfo =
+      /(route|origin|destination|date|tarikh|class|train\s*(?:number|no|ka\s*n))?[^.?!\n]{0,28}(chahiye|bolo|batao|bataye|poochh?o?|missing|dena)[^.?!\n]{0,28}/i.test(clean) &&
+      /(route|origin|destination|date|tarikh|class|train)/i.test(clean);
+    const asksInsteadOfAnswering = okSteps.length > 0 && demandsKnownInfo;
     if (asksInsteadOfAnswering && !repaired && step < MAX_STEPS) {
       repaired = true;
       messages.push({ role: "assistant", content });
