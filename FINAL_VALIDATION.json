@@ -1,0 +1,509 @@
+{
+  "ranAt": "2026-09-04T12:56:32.049Z",
+  "pass": 46,
+  "total": 46,
+  "results": [
+    {
+      "id": "1a",
+      "title": "Deterministic resolver: 13 phrases → exact IST dates (incl. arbitrary far dates, no 8-day hardcode)",
+      "pass": true,
+      "checks": {
+        "allCorrect": true
+      },
+      "note": "all 13 phrases exact"
+    },
+    {
+      "id": "1b",
+      "title": "LIVE: '25 December 2026' flows through GPT-OSS into real tool args (date=2026-12-25)",
+      "pass": true,
+      "checks": {
+        "agentic": true,
+        "farDateInToolArgs": true
+      },
+      "note": "JOURNEY_ANALYZE{\"origin\":\"Amritsar\",\"destination\":\"New Delhi\",\"date\":\"2026-12-25\",\"preference\":\"fastest\",\"include_alternative_dates\":true,\"include_connections\":true,\"max_fare_inr\":null,\"preferred_class\":null,\"depart_after\":null,\"depart_before\":null}"
+    },
+    {
+      "id": "1c",
+      "title": "LIVE: 'next Saturday' resolves to next week (2026-09-12), not tomorrow",
+      "pass": true,
+      "checks": {
+        "agentic": true,
+        "nextSatInArgs": true,
+        "notTomorrow": true
+      },
+      "note": "JOURNEY_ANALYZE{\"origin\":\"ASR\",\"destination\":\"Delhi\",\"date\":\"2026-09-12\",\"preference\":\"fastest\",\"include_alternative_dates\":true,\"include_connections\":true}",
+      "evidence": "Kya aap New Delhi ke kis station se ya station se jaana chahte hain?  \nOptions:  \n\n1. NDLS – New Delhi  \n2. DLI – Delhi "
+    },
+    {
+      "id": "2-Delhi",
+      "title": "'Delhi' → AI asks which station (multi-station city)",
+      "pass": true,
+      "checks": {
+        "askedOrNeedsChoice": true,
+        "noSilentSearch": true
+      },
+      "note": "Kya aap Delhi ke kis station se ya station par jaana chahte hain?  \nOptions:  \n1. NDLS – New Delhi  \n2. DLI – ",
+      "evidence": "JOURNEY_ANALYZE:false:Delhi ambiguous hai — pehle user se station poochna hoga."
+    },
+    {
+      "id": "2-Bombay",
+      "title": "'Bombay' → AI asks which station (multi-station city)",
+      "pass": true,
+      "checks": {
+        "askedOrNeedsChoice": true,
+        "noSilentSearch": true
+      },
+      "note": "Bombay ke liye kaun sa station chahte hain?  \nOptions:  \n1. BCT – Mumbai Central  \n2. MMCT – Mumbai Central  \n",
+      "evidence": "JOURNEY_ANALYZE:false:Bombay ambiguous hai — pehle user se station poochna hoga."
+    },
+    {
+      "id": "2-Madras",
+      "title": "'Madras' → AI asks which station (multi-station city)",
+      "pass": true,
+      "checks": {
+        "askedOrNeedsChoice": true,
+        "noSilentSearch": true
+      },
+      "note": "Madras ka matlab Chennai hai. Kya aap Chennai Central (MAS) ya Chennai Egmore (MS) jana chahte hain?",
+      "evidence": "JOURNEY_ANALYZE:false:Madras ambiguous hai — pehle user se station poochna hoga."
+    },
+    {
+      "id": "2-Calcutta",
+      "title": "'Calcutta' → AI asks which station (multi-station city)",
+      "pass": true,
+      "checks": {
+        "askedOrNeedsChoice": true,
+        "noSilentSearch": true
+      },
+      "note": "Calcutta ke liye kaun sa station chahte hain?  \nOptions:  \n1. Howrah Junction (HWH)  \n2. Sealdah (SDAH)  \n3. K",
+      "evidence": "JOURNEY_ANALYZE:false:Calcutta ambiguous hai — pehle user se station poochna hoga."
+    },
+    {
+      "id": "2-Jaipur",
+      "title": "'Jaipur' — single plausible station (JP) may resolve and search honestly; if multiple plausible, must ask",
+      "pass": true,
+      "checks": {
+        "legitimateSingleResolution": true,
+        "noInvention": true
+      },
+      "note": "मुझे खेद है, पर इस दिन के लिए Amritsar (ASR) से Jaipur (JP) जाने वाली किसी भी ट्रेन की जानकारी उपलब्ध नहीं है। यदि आप किसी अन्य दि"
+    },
+    {
+      "id": "2-DelhiAirport",
+      "title": "'Delhi airport' — never silently mapped to a rail station code",
+      "pass": true,
+      "checks": {
+        "noSuccessfulAirportSearch": true,
+        "asksOrNotFound": true,
+        "noFakeTrains": true
+      },
+      "note": "Ye jaankari abhi provider se nahi mil pa rahi. Main gadh ke nahi bataunga.\n(AI ka jawab providers ke data se match nahi hua — sirf verified data dikha"
+    },
+    {
+      "id": "3a",
+      "title": "Step 1: GPT-OSS understands; Delhi ambiguity → asks (or directly chains if it picks a station)",
+      "pass": true,
+      "checks": {
+        "agentic": true,
+        "asksOrProceeds": true
+      },
+      "note": "Kis Delhi station se jaana hai? (Options: NDLS – New Delhi, DLI – Delhi Junction, NZM – Hazrat Nizamuddin, DEC"
+    },
+    {
+      "id": "3b",
+      "title": "Chain: analyze/search + fare (GET_FARE ya grounded ₹ evidence) + availability with provider sources",
+      "pass": true,
+      "checks": {
+        "agentic": true,
+        "hasAnalyze": true,
+        "hasFare": true,
+        "hasAvl": true,
+        "sourcesOk": true,
+        "multiStep": true
+      },
+      "note": "JOURNEY_ANALYZE(engine) → GET_FARE(railkit_fallback) → CHECK_AVAILABILITY(railkit_fallback)"
+    },
+    {
+      "id": "3c",
+      "title": "Grounded final answer: every number in the reply exists in tool results",
+      "pass": true,
+      "checks": {
+        "groundedFlag": true,
+        "allNumbersInEvidence": true,
+        "hasTrainNumber": true,
+        "hasFare": true
+      },
+      "note": "**Fastest direct train (Saturday, 5 Sep 2026)**  \n- **Train:** 12030 – SWARN SHATABDI  \n- **Departure:** 16:50 ASR  \n- **Arrival:** 22:50 NDLS  \n- **Duration:** 6 hrs  \n\n"
+    },
+    {
+      "id": "4a",
+      "title": "RailCore down → SEARCH/FARE/AVL served by RailKit (real data, no mocks)",
+      "pass": true,
+      "checks": {
+        "agentic": true,
+        "railkitFallback": true,
+        "noRailcoreLeak": true,
+        "realData": true
+      },
+      "note": "JOURNEY_ANALYZE(engine,ok) → GET_FARE(railkit_fallback,ok) → CHECK_AVAILABILITY(railkit_fallback,ok)"
+    },
+    {
+      "id": "4b",
+      "title": "RailCore transport restored (injection removed) → primary re-attempted on every call (no sticky fallback state); remote daily-limited (429) so real RailKit serves — post-reset strict re-verify scheduled",
+      "pass": true,
+      "checks": {
+        "remoteHealthChecked": true,
+        "railcorePrimaryAttempted": true,
+        "railkitServingCorrectly": true
+      },
+      "note": "probe status=429; railcore attempts after restore: 1; tools: GET_FARE(railkit_fallback,ok)"
+    },
+    {
+      "id": "5",
+      "title": "Both providers down → AI says data unavailable; no invented numbers",
+      "pass": true,
+      "checks": {
+        "saysUnavailable": true,
+        "noInventedFare": true,
+        "noInventedSeats": true,
+        "noSuccessfulProvider": true
+      },
+      "note": "Maaf kijiye, lekin mujhe is samay Amritsar (ASR) se New Delhi (NDLS) ke trains ki jankari uplabdh nahi ho rahi hai.  \n\nTrain **12030** ke CC class ka fare aur s"
+    },
+    {
+      "id": "6a",
+      "title": "GPT-OSS agentic down → deterministic path still produces a usable tool plan (real NLU + real provider data)",
+      "pass": true,
+      "checks": {
+        "deterministic": true,
+        "hasRealData": true,
+        "agenticFailureReason": true,
+        "noConfirm": true
+      },
+      "note": "12014 AMRITSAR SHTABDI — Arrived at NEW DELHI(NDLS) at 11:09 04-Sep (Delay: 00:07), last NEW DELHI, delay 7 min\n(Live railway data — gadh ke"
+    },
+    {
+      "id": "6b",
+      "title": "Both AI paths down → deterministic NLU fallback answers (providers real)",
+      "pass": true,
+      "checks": {
+        "deterministic": true,
+        "sourceNlu": true,
+        "hasRealData": true,
+        "noConfirm": true
+      },
+      "note": "12014 AMRITSAR SHTABDI — Arrived at NEW DELHI(NDLS) at 11:09 04-Sep (Delay: 00:07), last NEW DELHI, delay 7 min\n(Live railway data — gadh ke"
+    },
+    {
+      "id": "7a",
+      "title": "Harmony token 'CHECK_AVAILABILITY<|channel|>commentary' → sanitized to allowlisted tool; never executed as-is",
+      "pass": true,
+      "checks": {
+        "sanitizedToAllowlisted": true,
+        "realProviderData": true
+      },
+      "note": "step1=CHECK_AVAILABILITY source=railkit_fallback"
+    },
+    {
+      "id": "7b",
+      "title": "Unknown tool 'BOOK_WALLET_TOOL' → not_in_allowlist; recovery via real TRACK_TRAIN",
+      "pass": true,
+      "checks": {
+        "rejected": true,
+        "neverExecuted": true,
+        "recovered": true
+      },
+      "note": "steps=BOOK_WALLET_TOOL:false,TRACK_TRAIN:true"
+    },
+    {
+      "id": "7c",
+      "title": "Invalid JSON arguments → rejected with exact zod issue; model retries with valid args",
+      "pass": true,
+      "checks": {
+        "rejectedInvalid": true,
+        "retried": true
+      },
+      "note": "steps=GET_FARE:false,GET_FARE:true"
+    },
+    {
+      "id": "7d",
+      "title": "Missing required args (GET_FARE without class_code) → rejected invalid_args",
+      "pass": true,
+      "checks": {
+        "rejected": true,
+        "reasonMentions": true
+      },
+      "note": "Invalid arguments for GET_FARE: class_code Required."
+    },
+    {
+      "id": "7e",
+      "title": "Extra unknown args → stripped by zod (non-strict object); execution proceeds with schema fields only",
+      "pass": true,
+      "checks": {
+        "executed": true,
+        "extraNeverPropagated": true,
+        "realData": true
+      },
+      "note": "ASR→NDLS (2026-09-05): 7 trains."
+    },
+    {
+      "id": "7f",
+      "title": "Arbitrary URL in args → rejected (url_in_args), never fetched",
+      "pass": true,
+      "checks": {
+        "rejected": true,
+        "notFetched": true
+      },
+      "note": "Args mein URL allowed nahi (origin)."
+    },
+    {
+      "id": "8a",
+      "title": "Model prompt contains no provider/NVIDIA keys (captured outgoing request body)",
+      "pass": true,
+      "checks": {
+        "clean": true
+      },
+      "note": "clean"
+    },
+    {
+      "id": "8b",
+      "title": "All 15 API responses scanned — no keys",
+      "pass": true,
+      "checks": {
+        "clean": true
+      }
+    },
+    {
+      "id": "8c",
+      "title": "Browser bundle (dist/, 2 assets) contains no keys",
+      "pass": true,
+      "checks": {
+        "clean": true,
+        "built": true
+      },
+      "note": "clean"
+    },
+    {
+      "id": "8d",
+      "title": "Git-tracked files (161) contain no keys; .env NOT tracked",
+      "pass": true,
+      "checks": {
+        "clean": true,
+        "envNotTracked": true
+      }
+    },
+    {
+      "id": "8e",
+      "title": "Console/log output contains no keys",
+      "pass": true,
+      "checks": {
+        "clean": true
+      }
+    },
+    {
+      "id": "9a",
+      "title": "Live location with providers down → 'unavailable', no invented location/delay",
+      "pass": true,
+      "checks": {
+        "saysUnavailable": true,
+        "noInventedDelay": true,
+        "noInventedStation": true
+      },
+      "note": "**12014 ka live status abhi uplabdh nahi hai.**  \n(Track train tool se koi real-time data nahi mila.)"
+    },
+    {
+      "id": "9b",
+      "title": "Non-existent train 99999 (real providers) → honest not-found/unavailable",
+      "pass": true,
+      "checks": {
+        "honest": true,
+        "noFakeLocation": true
+      },
+      "note": "**Train 99999 ka live status abhi uplabdh nahi hai.**  \n(Track data server se koi position ya delay information nahi mili.)"
+    },
+    {
+      "id": "9c",
+      "title": "'Vande Bharat definitely chalegi?' → no false certainty (checks data / hedges)",
+      "pass": true,
+      "checks": {
+        "noFalseCertainty": true,
+        "groundedOrHedged": true
+      },
+      "note": "Vande Bharat is **not** scheduled to run from Amritsar (ASR) to Delhi (NDLS) on Saturday, 5 September 2026. The train list for that date shows only conventional services "
+    },
+    {
+      "id": "10a",
+      "title": "Every recommended train EXISTS in provider-returned candidates (no invented trains)",
+      "pass": true,
+      "checks": {
+        "engineOk": true,
+        "rankedAllFromProvider": true,
+        "timingsMatchProvider": true,
+        "bestFromProvider": true
+      },
+      "note": "ranked=12030,12014,12716,12498,20808 | provider=12014,12716,12926,11058,12498,12030,20808"
+    },
+    {
+      "id": "10b",
+      "title": "Fare/availability grounding: engine + AI values match real GET_FARE / CHECK_AVAILABILITY",
+      "pass": true,
+      "checks": {
+        "fareReal": true,
+        "avlReal": true,
+        "engineFareMatchesProvider": true
+      },
+      "note": "fare=1275 avl={\"code\":\"CC\",\"label\":\"AC Chair Car\",\"status\":\"AVAILABLE\",\"seats\":55,\"fare\":1275,\"quota\":\"G"
+    },
+    {
+      "id": "11a",
+      "title": "fastest = minimum duration among provider candidates",
+      "pass": true,
+      "checks": {
+        "correct": true,
+        "fromProvider": true
+      },
+      "note": "engine=12030(360m) provider-min=12030(360m)"
+    },
+    {
+      "id": "11b",
+      "title": "earliest = earliest departure among provider candidates",
+      "pass": true,
+      "checks": {
+        "correct": true
+      },
+      "note": "engine=12014(04:55) provider-min=12014(04:55)"
+    },
+    {
+      "id": "11c",
+      "title": "earliest_arrival = earliest arrival (+day offset) among candidates",
+      "pass": true,
+      "checks": {
+        "correct": true
+      },
+      "note": "engine=12014(11:02) provider-min=12014(11:02)"
+    },
+    {
+      "id": "11d",
+      "title": "cheapest = minimum VERIFIED provider fare among probed candidates (re-verified via GET_FARE)",
+      "pass": true,
+      "checks": {
+        "isMinAmongProbed": true,
+        "fareMatchesProvider": true,
+        "realFare": true
+      },
+      "note": "engine=12014@₹1125(CC) provider=₹1125 probedMin=₹1125"
+    },
+    {
+      "id": "11e",
+      "title": "best_value = deterministic engine pick from provider candidates",
+      "pass": true,
+      "checks": {
+        "fromProvider": true
+      },
+      "note": "best=12014"
+    },
+    {
+      "id": "11f",
+      "title": "preferred_class=CC → deterministic partition: CC-capable trains ranked first, best has CC (search classes ya verified probed class se)",
+      "pass": true,
+      "checks": {
+        "partitionOrder": true,
+        "bestHasCc": true,
+        "anyCcFound": true
+      },
+      "note": "5 candidates, firstNonCc=2, lastCc=1, best=12030"
+    },
+    {
+      "id": "11g",
+      "title": "departure window 16:00–20:00 → all candidates inside window",
+      "pass": true,
+      "checks": {
+        "allInWindow": true,
+        "notEmptyIfAny": true
+      },
+      "note": "1 candidates: 12030@16:50"
+    },
+    {
+      "id": "11h",
+      "title": "max_fare_inr=700 cap → no candidate above cap (only VERIFIED fares kept; unknown-fare trains dropped with note)",
+      "pass": true,
+      "checks": {
+        "noneOverCap": true
+      },
+      "note": "0 candidates under cap"
+    },
+    {
+      "id": "11i",
+      "title": "Deterministic + reproducible: identical calls → identical ranking (live snapshot fields may vary, ranking inputs stable)",
+      "pass": true,
+      "checks": {
+        "identical": true
+      },
+      "note": "{\"best\":[\"12030\",\"16:50\",\"22:50\",360],\"ranked\":[[\"12030\",\"16:50\",\"22:50\",360],[\"12014\",\"04:55\",\"11:02\",367],[\"12716\",\"05"
+    },
+    {
+      "id": "12a",
+      "title": "T1 'jaana hai' → asks for the date (no assumption)",
+      "pass": true,
+      "checks": {
+        "agentic": true,
+        "asks": true,
+        "noFakeData": true
+      },
+      "note": "Kis date ko jaana hai? (Aaj 2026‑09‑04 se shuru kar sakte hain.)"
+    },
+    {
+      "id": "12b",
+      "title": "T2 'Saturday' → date resolved (2026-09-05) via carried context; Delhi ambiguity handled",
+      "pass": true,
+      "checks": {
+        "agentic": true,
+        "dateResolved": true,
+        "originNotReasked": true
+      },
+      "note": "Delhi ka kaunsa station chahte hain?  \nOptions:  \n1. NDLS – New Delhi  \n2. DLI – Delhi Junction  \n3. NZM – Haz"
+    },
+    {
+      "id": "12c",
+      "title": "T3 'NDLS' → continues with origin=ASR + date=2026-09-05 intact (no re-asking)",
+      "pass": true,
+      "checks": {
+        "searchRan": true,
+        "originAsr": true,
+        "destinationNdls": true,
+        "dateKept": true,
+        "notReasked": true
+      },
+      "note": "JOURNEY_ANALYZE{\"origin\":\"ASR\",\"destination\":\"NDLS\",\"date\":\"2026-09-05\",\"preference\":\"fastest\",\"include_alternative_dates\":true,\"include_connections\":true}"
+    },
+    {
+      "id": "12d",
+      "title": "T4 'CC ka fare aur availability?' → reuses context (origin/date/station intact; train from T3 results; fare+seats grounded)",
+      "pass": true,
+      "checks": {
+        "toolsOrFocusedAsk": true,
+        "ccClass": true,
+        "trainFromContext": true,
+        "noOriginDateReask": true
+      },
+      "note": "JOURNEY_ANALYZE{\"origin\":\"ASR\",\"destination\":\"NDLS\",\"date\":\"2026-09-05\",\"preference\":\"fastest\",\"include_alternative_dates\":false,\"include_connections\":false} → CHECK_AVAILABILITY{\"train_number\":\"12030\",\"date\":\"2026-09-05\",\"origin\":\"ASR\",\"destination\":\"NDLS\",\"class_code\":\"CC\"}",
+      "evidence": "**Train:** 12030 – SWARN SHATABDI  \n**Departure:** 16:50 (ASR) → **Arrival:** 22:50 (NDLS)  \n**Duration:** 6 h 0 m  \n\n**AC Chair Car (CC) availability (2026‑09‑05):**  \n- Seats available: **55**  \n- Fare: **₹1275** (incl. service fee)  \n\nYeh train aa"
+    }
+  ],
+  "calls": {
+    "nvidia": 45,
+    "railcore": 4,
+    "railkitHttp": 330,
+    "otherHost": 0,
+    "hosts": {
+      "integrate.api.nvidia.com": 45,
+      "ir.railcore.tech": 4,
+      "railkit-api.rajivdubey.dev": 330
+    }
+  },
+  "injected": {
+    "railcore": 26,
+    "railkit": 3,
+    "nvidia": 17
+  }
+}

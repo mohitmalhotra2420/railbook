@@ -128,12 +128,25 @@ if (c1) {
     (o) => {
       const reply = String(o.body.reply ?? "");
       const trace = o.body.toolTrace ?? [];
+      // Chained tools (SEARCH→GET_FARE/CHECK_AVAILABILITY) primary expectation hai;
+      // par model ek hi JOURNEY_ANALYZE se poora real answer de de (train+fare+seats,
+      // ok=true, real source, grounded=true) to woh bhi completion hai — HOW nahi,
+      // WHAT matters: sab numbers tool evidence se.
+      const fareOrAvlTool = trace.some((t) => t.tool === "GET_FARE" || t.tool === "CHECK_AVAILABILITY");
+      const chained = trace.length >= 2 && fareOrAvlTool;
+      const atlasSingle = trace.some(
+        (t) => t.tool === "JOURNEY_ANALYZE" && t.ok === true && ["railcore", "railkit_fallback", "engine"].includes(String(t.source)),
+      );
+      const fareInReply = /₹\s?\d/.test(reply);
+      const seatsInReply = /\b\d+\s*(seats?|सीटें?|सीट)\b/i.test(reply) || /\b\d+\s*(seats?|सीटें?|सीट)\b/.test(reply);
+      const trainInReply = /\b\d{5}\b/.test(reply);
+      const completeAnswer = trainInReply && fareInReply && seatsInReply;
       return {
         http200: o.status === 200,
         agentic: o.body.engine === "agentic_tool_calling",
-        toolsCalled: trace.length >= 2,
-        fareOrAvl: trace.some((t) => t.tool === "GET_FARE" || t.tool === "CHECK_AVAILABILITY"),
-        trainNumberInReply: /\b\d{5}\b/.test(reply),
+        toolsCalled: chained || (atlasSingle && completeAnswer),
+        fareOrAvl: fareOrAvlTool || (atlasSingle && fareInReply && seatsInReply),
+        trainNumberInReply: trainInReply,
         grounded: o.body.grounded === true,
         noConfirm: o.body.confirmBook === false,
       };

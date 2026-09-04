@@ -105,22 +105,22 @@ const ArgSchemas = {
   }),
   GET_TRAIN_INFO: z.object({ train_number: z.string().regex(/^\d{4,6}$/) }),
   GET_TIMETABLE: z.object({ train_number: z.string().regex(/^\d{4,6}$/) }),
-  TRACK_TRAIN: z.object({ train_number: z.string().regex(/^\d{4,6}$/), date: Ymd.optional() }),
+  TRACK_TRAIN: z.object({ train_number: z.string().regex(/^\d{4,6}$/), date: Ymd.nullish() }),
   CHECK_AVAILABILITY: z.object({
     train_number: z.string().regex(/^\d{4,6}$/),
-    date: Ymd.optional(),
-    origin: StationRef.optional(),
-    destination: StationRef.optional(),
-    class_code: z.string().regex(/^[A-Z0-9]{1,3}$/).optional(),
-    quota: z.string().regex(/^[A-Z]{2}$/).optional(),
+    date: Ymd.nullish(),
+    origin: StationRef.nullish(),
+    destination: StationRef.nullish(),
+    class_code: z.string().regex(/^[A-Z0-9]{1,3}$/).nullish(),
+    quota: z.string().regex(/^[A-Z]{2}$/).nullish(),
   }),
   GET_FARE: z.object({
     train_number: z.string().regex(/^\d{4,6}$/),
-    date: Ymd.optional(),
-    origin: StationRef.optional(),
-    destination: StationRef.optional(),
+    date: Ymd.nullish(),
+    origin: StationRef.nullish(),
+    destination: StationRef.nullish(),
     class_code: z.string().regex(/^[A-Z0-9]{1,3}$/),
-    passengers: z.number().int().min(1).max(6).optional(),
+    passengers: z.number().int().min(1).max(6).nullish(),
   }),
   CHECK_PNR: z.object({ pnr: z.string().regex(/^\d{10}$/) }),
   GET_CANCELLED_TRAINS: z.object({}),
@@ -143,12 +143,12 @@ const ArgSchemas = {
     destination: StationRef,
     date: Ymd,
     preference: z.enum(["fastest", "cheapest", "earliest", "earliest_arrival", "best_value"]),
-    include_alternative_dates: z.boolean().optional(),
-    include_connections: z.boolean().optional(),
-    max_fare_inr: z.number().int().min(1).max(100000).optional(),
-    preferred_class: z.string().regex(/^[A-Z0-9]{1,3}$/).optional(),
-    depart_after: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(),
-    depart_before: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(),
+    include_alternative_dates: z.boolean().nullish(),
+    include_connections: z.boolean().nullish(),
+    max_fare_inr: z.number().int().min(1).max(100000).nullish(),
+    preferred_class: z.string().regex(/^[A-Z0-9]{1,3}$/).nullish(),
+    depart_after: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).nullish(),
+    depart_before: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).nullish(),
   }),
 } as const;
 
@@ -769,6 +769,11 @@ export async function executeApprovedTool(
     };
   }
   const a = parsed.data as Record<string, unknown> & Record<string, never>;
+  // GPT-OSS jaise models optional params par explicit null bhejte hain —
+  // nullish schema accept karta hai; execution se pehle null == absent.
+  for (const k of Object.keys(a)) {
+    if (a[k] == null) delete a[k];
+  }
 
   try {
     switch (name as AgenticToolName) {

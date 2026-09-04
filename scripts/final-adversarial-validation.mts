@@ -280,8 +280,9 @@ if (want("3")) {
   // grounded aata hai (₹ amounts tool evidence mein hone chahiye).
   const ev3 = evidenceOf(final.res);
   const fareInReplyGrounded = (() => {
-    const fares = String(final.res.reply ?? "").match(/₹\s?\d{3,}/g) ?? [];
-    return fares.length > 0 && fares.every((f) => ev3.includes(f.replace(/₹\s?/, "")));
+    const fares = String(final.res.reply ?? "").match(/₹\s?\d[\d,]{2,}/g) ?? [];
+    const ev3n = ev3.replace(/,/g, "");
+    return fares.length > 0 && fares.every((f) => ev3n.includes(f.replace(/₹\s?/, "").replace(/,/g, "")));
   })();
   const hasFare = tools.some((t) => t.tool === "GET_FARE") || fareInReplyGrounded;
   const hasAvl = tools.some((t) => t.tool === "CHECK_AVAILABILITY") || /seats?|available|availability/i.test(String(final.res.reply ?? ""));
@@ -379,7 +380,7 @@ if (want("5")) {
     const tools = traceTools(res);
     record("5", "Both providers down → AI says data unavailable; no invented numbers", {
       saysUnavailable: /nahi mil|unavailab|abhi nahi|mil pa|nahi bata|uplabdh nahi|prapt nahi|available nahi|not available/i.test(reply),
-      noInventedFare: !/₹\s?\d{3,}/.test(reply.replace(/₹\s?0/, "")),
+      noInventedFare: !/₹\s?\d[\d,]{2,}/.test(reply.replace(/₹\s?0/, "")),
       noInventedSeats: !/AVAILABLE[- ]?\d+/.test(reply),
       noSuccessfulProvider: tools.every((t) => t.source !== "railcore" && t.source !== "railkit_fallback" || t.ok === false),
     }, mask(reply.slice(0, 160)));
@@ -834,7 +835,7 @@ if (want("12")) {
   // Fare GET_FARE se, availability board (CC fare+seats ek hi response) se, ya
   // JOURNEY_ANALYZE(cheapest/preferred_class=CC) ke VERIFIED fare se grounded.
   const analysisTool = t4Tools.find((t) => t.tool === "JOURNEY_ANALYZE" && (String(t.args?.preference ?? "") === "cheapest" || String(t.args?.preferred_class ?? "") === "CC"));
-  const fareGrounded = Boolean(fareTool) || (Boolean(avlTool) && /₹\s?\d{3,}/.test(r4)) || (Boolean(analysisTool) && /₹\s?\d{3,}/.test(r4));
+  const fareGrounded = Boolean(fareTool) || (Boolean(avlTool) && /₹\s?\d[\d,]{2,}/.test(r4)) || (Boolean(analysisTool) && /₹\s?\d[\d,]{2,}/.test(r4));
   const avlGrounded = Boolean(avlTool) || /seats?|available|availability|उपलब्ध/i.test(r4);
   // Reply ka 5-digit train number T3 ke provider results / context se hi aana chahiye.
   const replyTrains = [...new Set((r4.match(/\b\d{5}\b/g) ?? []))];

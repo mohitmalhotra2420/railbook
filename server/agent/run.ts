@@ -15,6 +15,165 @@ import {
 } from "./context.js";
 import { executeTool, type ToolName } from "./tools.js";
 import { agenticConfigured, runAgenticTurn, type AgenticHistoryTurn, type ToolTraceStep } from "./agentic.js";
+import { routedClassBoard, routedStationSearch, searchTrainsRouted } from "../railway/router.js";
+
+/** Atlas analyse intents — decideTool inhe map nahi karta (model ki zimmedari hai),
+ *  par agentic engine fail ho to deterministic fallback bhi inka honest answer deta hai. */
+const ATLAS_PREF: Record<string, "fastest" | "cheapest" | "best"> = {
+  SELECT_FASTEST: "fastest",
+  SELECT_CHEAPEST: "cheapest",
+  SELECT_BEST: "best",
+};
+
+/**
+ * Deterministic Atlas fallback — SELECT_FASTEST / SELECT_CHEAPEST / SELECT_BEST.
+ * Contract wahi: ya REAL provider evidence se grounded answer, ya honest
+ * clarification (ambiguous city / missing slot). Kabhi guess nahi, kabhi
+ * empty reply nahi (pehle yeh intents fallback mein chup ho jaate the).
+ */
+async function atlasFallback(
+  pref: "fastest" | "cheapest" | "best",
+  ctx: AgentContext,
+  nlu: NluResult,
+): Promise<{ reply: string; ok: boolean; trace: ToolTraceStep; grounded: boolean }> {
+  const trace = (ok: boolean, source: string | null, summary: string, dataPreview?: string): ToolTraceStep => ({
+    step: 1,
+    tool: "JOURNEY_ANALYZE",
+    args: {
+      origin: ctx.origin?.code ?? nlu.unresolvedFrom ?? null,
+      destination: ctx.destination?.code ?? nlu.unresolvedTo ?? null,
+      date: ctx.date ?? null,
+      preference: pref,
+    },
+    ok,
+    source,
+    summary,
+    latencyMs: 0,
+    ...(dataPreview ? { dataPreview } : {}),
+  });
+
+  /* 1) Ambiguous city → REAL station options ke saath clarification. */
+  const unresolved = nlu.unresolvedTo ?? nlu.unresolvedFrom ?? null;
+  if (unresolved) {
+    const res = await routedStationSearch(unresolved);
+    const list = res.stations.slice(0, 6).map((s) => `${s.code} – ${s.name}`).join(", ");
+    const question = list
+      ? `${res.city ?? unresolved} mein kaun sa station chahiye? Options: ${list}`
+      : `"${unresolved}" ke liye exact station chahiye — station ka naam ya code bataiye.`;
+    return {
+      reply: question,
+      ok: false,
+      trace: trace(
+        false,
+        res.provider,
+        `${unresolved} ambiguous — station clarification`,
+        JSON.stringify({ needs_choice: true, city: res.city ?? unresolved }).slice(0, 400),
+      ),
+      grounded: true, // sirf sawaal — koi factual claim nahi
+    };
+  }
+
+  /* 2) Missing slots → honest ask, koi silent assumption nahi. */
+  const missingAsk = !ctx.origin
+    ? "Kahan se jaana hai? Departure station bataiye."
+    : !ctx.destination
+      ? "Kahan jaana hai? Station bataiye."
+      : !ctx.date
+        ? "Kis date ko jaana hai?"
+        : null;
+  if (missingAsk) {
+    return { reply: missingAsk, ok: false, trace: trace(false, null, "slot missing — clarification"), grounded: true };
+  }
+
+  /* 3) REAL search + bounded fare probe — numbers sirf provider evidence se. */
+  const search = await searchTrainsRouted({ from: ctx.origin!.code, to: ctx.destination!.code, date: ctx.date! });
+  const trains = search.trains;
+  if (!trains.length) {
+    return {
+      reply: `${ctx.origin!.code} → ${ctx.destination!.code} (${ctx.date!}) ke liye koi train nahi mili — main andaza nahi lagaunga.`,
+      ok: false,
+      trace: trace(
+        false,
+        search.provider,
+        "0 trains — honest unavailable",
+        JSON.stringify({ trains: 0, provider: search.provider }).slice(0, 400),
+      ),
+      grounded: true, // "0 trains" claim provider evidence se hi aaya
+    };
+  }
+
+  // Bounded REAL fare probe (agentic journeyAnalyze jaisa): top-3 shortest
+  // candidates ko ek class-board each — searched class codes hi hint, koi
+  // extra schedule round-trip nahi.
+  const probe = new Map<string, { fare: number; classCode: string; status: string; seats: number | null } | null>();
+  await Promise.all(
+    [...trains]
+      .sort((a, b) => a.durationMinutes - b.durationMinutes)
+      .slice(0, 3)
+      .map(async (t) => {
+        try {
+          const board = await routedClassBoard(
+            t.number,
+            ctx.date!,
+            ctx.origin!.code,
+            ctx.destination!.code,
+            "GN",
+            t.classes.map((c) => c.code),
+          );
+          const available = board.classes.filter((c) => c.status === "AVAILABLE" && c.fare > 0);
+          const usable = [...available].sort((a, b) => a.fare - b.fare)[0];
+          probe.set(
+            t.number,
+            usable ? { fare: usable.fare, classCode: usable.code, status: usable.status, seats: usable.seats ?? null } : null,
+          );
+        } catch {
+          probe.set(t.number, null);
+        }
+      }),
+  );
+
+  const fareOf = (n: string) => probe.get(n)?.fare ?? Number.MAX_SAFE_INTEGER;
+  const ranked =
+    pref === "fastest"
+      ? [...trains].sort((a, b) => a.durationMinutes - b.durationMinutes || a.departure.localeCompare(b.departure))
+      : [...trains].sort((a, b) => fareOf(a.number) - fareOf(b.number) || a.durationMinutes - b.durationMinutes);
+  const train = ranked[0];
+  const pr = probe.get(train.number) ?? null;
+  const label = pref === "cheapest" ? "Sabse sasti train" : pref === "fastest" ? "Sabse fast train" : "Best option";
+  const fareLine = pr
+    ? `Cheapest available class: ${pr.classCode} ₹${pr.fare.toLocaleString("en-IN")}${pr.seats != null ? ` (${pr.seats} seats)` : ""}.`
+    : `Is train ka live fare/availability abhi confirm nahi ho paya — bol do to fresh check karta hoon.`;
+  const others = ranked
+    .slice(1, 3)
+    .map((t) => {
+      const c = probe.get(t.number) ?? null;
+      return `${t.number} ${t.name} (${c ? `${c.classCode} ₹${c.fare.toLocaleString("en-IN")}` : `dur. ${t.durationLabel}`})`;
+    });
+  const reply = [
+    `${label} ${ctx.origin!.code} → ${ctx.destination!.code} (${ctx.date!}): ${train.number} ${train.name} — ${train.departure} → ${train.arrival} (${train.durationLabel}).`,
+    fareLine,
+    others.length ? `Aur options: ${others.join("; ")}.` : "",
+    `(Real ${search.provider} data — guess nahi.)`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+  return {
+    reply,
+    ok: true,
+    trace: trace(
+      true,
+      search.provider,
+      `${train.number} ${train.name} — ${train.durationLabel}${pr ? `, ${pr.classCode} ₹${pr.fare.toLocaleString("en-IN")}` : ""}`.slice(0, 300),
+      JSON.stringify({
+        top: train.number,
+        trains: trains.length,
+        provider: search.provider,
+        probed: [...probe.entries()].map(([n, f]) => `${n}:${f ? f.classCode + "@" + f.fare : "null"}`),
+      }).slice(0, 400),
+    ),
+    grounded: true,
+  };
+}
 
 export type AgentRequest = {
   text: string;
@@ -214,6 +373,18 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
   let reply: string | null = null;
   let toolOk: boolean | null = null;
 
+  /* Atlas intents ka deterministic answer — pehle yahan empty reply jaata tha. */
+  let atlasTrace: ToolTraceStep | null = null;
+  let atlasGrounded: boolean | undefined;
+  const atlasPref = ATLAS_PREF[understood.nlu.intent];
+  if (!tool && atlasPref) {
+    const outcome = await atlasFallback(atlasPref, ctx, understood.nlu);
+    reply = outcome.reply;
+    toolOk = outcome.ok;
+    atlasTrace = outcome.trace;
+    atlasGrounded = outcome.grounded;
+  }
+
   if (tool === "getCoachPosition" && !trainNo) {
     reply = "Kaunsi train ki coach position? 5-digit train number boliye.";
   } else if (tool && tool !== "searchTrains") {
@@ -265,8 +436,8 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
     latencyMs: understood.latencyMs,
     failureReason: understood.failureReason,
     engine: "deterministic",
-    toolTrace: undefined,
+    toolTrace: atlasTrace ? [atlasTrace] : undefined,
     agenticFailureReason,
-    grounded: undefined,
+    grounded: atlasGrounded,
   };
 }

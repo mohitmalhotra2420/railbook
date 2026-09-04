@@ -14,7 +14,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import request from "supertest";
 import { parseDatePhrase } from "../server/understand/legacy-dates";
 import { createApp } from "../server/app";
-import { runAgenticTurn, setAgenticNvidiaFetch } from "../server/agent/agentic";
+import { runAgenticTurn, setAgenticNvidiaFetch, executeApprovedTool } from "../server/agent/agentic";
+import { runAgent } from "../server/agent/run";
 import { setRailcoreFetch, resetRailcoreBookings } from "../server/railway/railcore";
 import { setRailkitSdk } from "../server/railway/railkit";
 import { setProvider } from "../server/providers/index";
@@ -167,6 +168,128 @@ describe("fix: grounding guard pakadta hai invented station codes", () => {
     const turn = await runAgenticTurn({ text: "Amritsar se Delhi airport Saturday ko trains batao", now: NOW });
     expect(turn.grounded).toBe(false);
     expect(String(turn.reply ?? "")).not.toContain("NDAP");
+  });
+});
+
+describe("fix: deterministic Atlas fallback — SELECT_CHEAPEST kabhi empty reply nahi deta", () => {
+  it("agentic fail + ambiguous city → real station options ke saath clarification (empty reply bug)", async () => {
+    process.env.NVIDIA_API_KEY = ""; // agentic engine off — deterministic fallback hi chale
+    process.env.RAILCORE_API_KEY = "";
+    const res = await runAgent({
+      text: "Amritsar se Delhi 2026-09-05 ko sabse sasti train kaunsi hai? options compare karo",
+      now: NOW,
+    });
+    expect(res.engine).toBe("deterministic");
+    expect(res.reply).toBeTruthy();
+    expect(/kaun sa station|exact station/i.test(String(res.reply))).toBe(true);
+    expect(String(res.reply)).toMatch(/NDLS/); // real cluster options, guess nahi
+    expect(res.toolTrace?.[0]?.tool).toBe("JOURNEY_ANALYZE");
+    expect(res.toolTrace?.[0]?.ok).toBe(false);
+    expect(res.grounded).toBe(true);
+    expect(res.confirmBook).toBe(false);
+  });
+
+  it("complete slots → real search + bounded fare probe se grounded answer", async () => {
+    process.env.NVIDIA_API_KEY = "";
+    process.env.RAILCORE_API_KEY = "rk_live_FIXTEST_railcore";
+    setRailcoreFetch(async (input) => {
+      const url = new URL(String(input));
+      const p = url.pathname;
+      if (p.endsWith("/routes/trains")) {
+        return jsonResponse(200, { success: true, data: { trains: [
+          { train_number: "12014", train_name: "AMRITSAR SHTABDI", departure_time: "04:55", arrival_time: "11:02", duration_minutes: 367, running_days: [0,1,2,3,4,5,6], classes: ["CC"] },
+          { train_number: "12030", train_name: "SWARN SHATABDI", departure_time: "16:50", arrival_time: "22:50", duration_minutes: 360, running_days: [0,1,2,3,4,5,6], classes: ["CC"] },
+        ] } });
+      }
+      if (p.includes("/schedule")) {
+        const tn = p.match(/trains\/(\d+)/)?.[1] ?? "12014";
+        return jsonResponse(200, { success: true, data: { train_number: tn, classes: ["CC"], stops: [
+          { station_code: "ASR", arrival: "source", departure: "04:55" },
+          { station_code: "NDLS", arrival: "11:02", departure: "dest" },
+        ] } });
+      }
+      if (p.endsWith("/availability/seats")) {
+        const q = url.searchParams;
+        const tn = String(q.get("train_number") ?? "");
+        // 12014 sasta (₹1125), 12030 mehenga (₹1275) — cheapest ranking prove hoti hai
+        return jsonResponse(200, { success: true, data: { classes: [
+          { class_code: "CC", status: "AVAILABLE", total_fare: tn === "12014" ? 1125 : 1275, available_count: tn === "12014" ? 251 : 68 },
+        ] } });
+      }
+      return jsonResponse(200, { success: true, data: {} });
+    });
+    const res = await runAgent({
+      text: "Amritsar se NDLS 2026-09-05 ko sabse sasti train kaunsi hai? options compare karo",
+      now: NOW,
+    });
+    expect(res.engine).toBe("deterministic");
+    expect(res.reply).toBeTruthy();
+    expect(String(res.reply)).toMatch(/Sabse sasti train/);
+    expect(String(res.reply)).toMatch(/12014/); // ₹1125 < ₹1275 → cheapest hi top
+    expect(String(res.reply)).toMatch(/1,125/);
+    expect(String(res.reply)).toMatch(/12030/); // compare option bhi
+    expect(res.toolTrace?.[0]?.tool).toBe("JOURNEY_ANALYZE");
+    expect(res.toolTrace?.[0]?.ok).toBe(true);
+    expect(res.toolTrace?.[0]?.source).toBe("railcore");
+    expect(res.grounded).toBe(true);
+  });
+});
+
+describe("fix: GPT-OSS explicit-null optional args (OpenAI semantics)", () => {
+  beforeEach(() => {
+    setRailcoreFetch(async (input) => {
+      const url = new URL(String(input));
+      const p = url.pathname;
+      const q = url.searchParams;
+      if (p.endsWith("/stations/search")) {
+        const query = (q.get("q") || "").toLowerCase();
+        if (query === "asr") return jsonResponse(200, { success: true, data: { results: [{ station_code: "ASR", station_name: "AMRITSAR JN", city: "Amritsar", confidence: 1 }] } });
+        if (query === "ndls") return jsonResponse(200, { success: true, data: { results: [{ station_code: "NDLS", station_name: "NEW DELHI", city: "Delhi", confidence: 1 }] } });
+        return jsonResponse(200, { success: true, data: { results: [] } });
+      }
+      if (p.endsWith("/routes/trains")) {
+        return jsonResponse(200, { success: true, data: { trains: [
+          { train_number: "12030", train_name: "SWARN SHATABDI", departure_time: "16:50", arrival_time: "22:50", duration_minutes: 360, running_days: [0, 1, 2, 3, 4, 5, 6] },
+        ] } });
+      }
+      if (p.includes("/schedule")) {
+        return jsonResponse(200, { success: true, data: { train_number: "12030", classes: ["CC"], stops: [
+          { station_code: "ASR", arrival: "source", departure: "16:50" },
+          { station_code: "NDLS", arrival: "22:50", departure: "dest" },
+        ] } });
+      }
+      if (p.endsWith("/fares/estimate")) {
+        return jsonResponse(200, { success: true, data: { fares: [{ class_code: "CC", fare: 1275 }] } });
+      }
+      return jsonResponse(200, { success: true, data: {} });
+    });
+  });
+  it("GET_FARE with nulls for optional fields executes (null == absent, invalid_args nahi)", async () => {
+    const r = await executeApprovedTool("GET_FARE", {
+      train_number: "12030",
+      date: null,
+      origin: null,
+      destination: null,
+      class_code: "CC",
+      passengers: null,
+    } as never);
+    expect(r.ok).toBe(true);
+    expect(String(r.summary)).toMatch(/12030/);
+  });
+  it("JOURNEY_ANALYZE with nulls for all optional filters executes fastest analysis", async () => {
+    const r = await executeApprovedTool("JOURNEY_ANALYZE", {
+      origin: "ASR",
+      destination: "NDLS",
+      date: "2026-09-05",
+      preference: "fastest",
+      include_alternative_dates: null,
+      include_connections: null,
+      max_fare_inr: null,
+      preferred_class: null,
+      depart_after: null,
+      depart_before: null,
+    } as never);
+    expect(r.ok).toBe(true);
   });
 });
 
