@@ -147,9 +147,10 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
         toolTrace = turn.steps;
         grounded = turn.grounded;
       }
-      if (!turn.ok) agenticFailureReason = turn.failureReason ?? "unknown";
-    } catch {
-      /* agentic fail — deterministic path neeche chal hi jayega */
+      if (!turn.ok || !turn.reply) agenticFailureReason = turn.failureReason ?? "no_reply";
+    } catch (err) {
+      // Ab chup nahi rahenge — deterministic fallback chalega par wajah record hogi.
+      agenticFailureReason = `throw:${err instanceof Error ? err.message : "unknown"}`;
     }
   }
 
