@@ -44,7 +44,7 @@ Present on Vercel Production: `RAILWAY_PROVIDER`, `RAILCORE_API_KEY`, `RAILKIT_A
 
 # AI-first tool-calling deploy (2026-09-04)
 
-**Deployment:** `dpl_8ePr81yKoLf6q7Ugf8q6jgQahYaE` (promoted)
+**Deployment:** `dpl_DzTdw6icqhRYrHbU7x8NB2Wu1NrS` (promoted)
 **Production URL:** https://railbook-three.vercel.app · **Alias:** https://railbook-bookkro.vercel.app
 **Secrets printed:** none (verified: every /api/agent response scanned for key patterns)
 
