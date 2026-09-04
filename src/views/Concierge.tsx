@@ -20,7 +20,7 @@ import {
   sanitizePassengerName,
 } from "../voice/passengerSpeech";
 import { speakGuide } from "../voice/speakGuide";
-import { isStationPickInterrupt } from "../ai/agent";
+import { isStationPickInterrupt, classifyFollowUp } from "../ai/agent";
 import { formatGoesToAnswer, formatScheduleCompare, type CompareSchedule } from "../ai/compare";
 import { matchOfferedStation } from "../ai/stationPick";
 import { onUtterance } from "../conversation/bus";
@@ -84,6 +84,8 @@ export function Concierge() {
   });
   const handleTextRef = useRef<(text: string) => void>(() => undefined);
   const lastFactTrainRef = useRef<string | null>(null);
+  /** Last server-side AI agent context — sent back each turn so multi-turn state survives. */
+  const agentCtxRef = useRef<import("../api").AgentContextClient | null>(null);
   const saved = loadTravellers();
 
   const voice = useVoiceInput(
@@ -611,6 +613,97 @@ export function Concierge() {
     const userDateKnown = Boolean(state.trains.length || state.selectedTrain || state.previewFare);
     let extraction: NluResult | undefined;
     setThinking(true);
+
+    /* ── AI-FIRST TOOL CALLING ─────────────────────────────────────────
+     * USER → NVIDIA GPT-OSS-20B → model selects approved tools → server
+     * executes them on RailCore (primary) → RailKit (fallback) → results
+     * go back to the model → it may chain more tools → grounded reply.
+     * The deterministic flow further below is the FALLBACK only. */
+    const follow = classifyFollowUp(trimmed);
+    const criticalBookingFlow =
+      state.flow === "PASSENGERS_PENDING" ||
+      state.flow === "FARE_REVIEW" ||
+      state.flow === "PAYMENT_PENDING" ||
+      state.flow === "BOOKING_PENDING";
+    const classPickWhileSelected =
+      Boolean(state.selectedTrain) && /\b(cc|ec|1a|2a|3a|sl|2s|ea)\b/i.test(trimmed) && trimmed.length <= 28;
+    const localUiQuery =
+      follow === "bookings" ||
+      follow === "wallet" ||
+      follow === "guide" ||
+      follow === "train_pick" ||
+      follow === "more_trains" ||
+      /\b(station\s*(?:par|pe|pr|on)\b[^?]*\b(kya|kaun|kitni|board|trains?)|station board|board dikhao)\b/i.test(trimmed);
+    if (!criticalBookingFlow && !classPickWhileSelected && !localUiQuery) {
+      try {
+        const agentRes = await api.agent({
+          text: trimmed,
+          lastAsked,
+          known: {
+            from: state.from,
+            to: state.to,
+            date: state.dateProvided ? state.date || null : null,
+            passengerCount: state.paxProvided ? state.passengerCount : null,
+          },
+          context: agentCtxRef.current ?? undefined,
+          history: messages
+            .slice(-8)
+            .map((m) => ({ role: m.role, content: String(m.text ?? "").slice(0, 500) })),
+          now: new Date().toISOString(),
+          bookingFlow: state.flow ?? undefined,
+        });
+        if (agentRes.reply) {
+          if (agentRes.context) agentCtxRef.current = agentRes.context;
+          const c = agentRes.context;
+          if (c?.selectedTrainNumber) lastFactTrainRef.current = c.selectedTrainNumber;
+          // Multi-turn slots flow into the deterministic booking engine.
+          if (c?.origin && c.origin.code !== state.from?.code) setFrom(c.origin);
+          if (c?.destination && c.destination.code !== state.to?.code) setTo(c.destination);
+          if (c?.date && c.dateProvided && c.date !== state.date) setDate(c.date);
+          if (c?.passengers && c.paxProvided && c.passengers !== state.passengerCount) setPassengerCount(c.passengers);
+          const trace = agentRes.toolTrace ?? [];
+          const sources = [...new Set(trace.map((t) => t.source).filter(Boolean))].join("+");
+          const engineLabel = agentRes.engine === "agentic_tool_calling" ? "AI tool-calling" : "Agent fallback";
+          setLastDbg(
+            `${engineLabel} · ${agentRes.modelUsed ?? "gpt-oss-20b"} · ${trace.length} tool call${trace.length === 1 ? "" : "s"}${
+              sources ? ` · ${sources}` : ""
+            } · ${((agentRes.latencyMs ?? 0) / 1000).toFixed(1)}s`,
+          );
+          const traceLine = trace.length
+            ? `\n\n⚙️ ${trace.map((t) => t.tool).join(" → ")}${sources ? ` (${sources})` : ""}`
+            : "";
+          setThinking(false);
+          setMessages((m) => [...m, { id: newId(), role: "assistant", text: agentRes.reply! + traceLine }]);
+          if (agentRes.interrupt && agentRes.resumeText) {
+            if (agentRes.resumeAsk) setLastAsked(agentRes.resumeAsk);
+            setMessages((m) => [...m, { id: newId(), role: "assistant", text: agentRes.resumeText! }]);
+          }
+          // Booking continuity: AI gathered all slots + booking intent → open the bookable TrainBoard.
+          const wantBooking =
+            c?.intent === "BOOK_TRAIN" ||
+            c?.intent === "SEARCH_TRAIN" ||
+            /jana hai|jaana hai|book kar|ticket chahiye/i.test(trimmed);
+          const sameSearch =
+            state.trains.length > 0 &&
+            state.from?.code === c?.origin?.code &&
+            state.to?.code === c?.destination?.code &&
+            state.date === c?.date;
+          if (wantBooking && c?.origin && c?.destination && c?.date && !sameSearch) {
+            setBusy(true);
+            try {
+              await searchRoute(c.origin, c.destination, c.date);
+            } catch {
+              /* TrainBoard surfaces search errors */
+            } finally {
+              setBusy(false);
+            }
+          }
+          return;
+        }
+      } catch {
+        /* agent unusable — deterministic fallback below */
+      }
+    }
     try {
       const understood = await api.understand({
         text: trimmed,

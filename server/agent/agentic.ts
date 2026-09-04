@@ -962,8 +962,16 @@ export function deterministicDateHint(
 
 function systemPrompt(
   now: string | undefined,
-  known: { origin?: string | null; destination?: string | null; date?: string | null; trainNumber?: string | null },
+  known: {
+    origin?: string | null;
+    destination?: string | null;
+    date?: string | null;
+    trainNumber?: string | null;
+    classCode?: string | null;
+    passengers?: number | null;
+  },
   dateHint: { kind: "date"; date: string } | { kind: "ambiguous"; options: { date: string; label: string }[] } | null,
+  history: AgenticHistoryTurn[] = [],
 ): string {
   const hintLine =
     dateHint?.kind === "date"
@@ -980,22 +988,28 @@ function systemPrompt(
   const todayLabel = `${todayYmdStr} (${DAYS[today.getUTCDay()]})`;
   return [
     "Tum RailBook ka railway assistant ho (Hinglish jawab, 2-4 chhoti lines).",
+    "Tumhara kaam: user ke sawaal samajhkar APPROVED TOOLS se sachchi railway data laana. Tum khud decide karte ho kaunsa tool chahiye — multi-step allowed hai.",
     `Aaj ki date (IST): ${todayLabel}.`,
     `Date map (agle 7 din, IST): ${weekdayDateMap(now)}.`,
     hintLine,
-    known.origin || known.destination || known.date || known.trainNumber
-      ? `Known context (inhi par continue karo, dobara mat poochho): origin=${known.origin ?? "-"}, destination=${known.destination ?? "-"}, date=${known.date ?? "-"}, train=${known.trainNumber ?? "-"}.`
+    known.origin || known.destination || known.date || known.trainNumber || known.classCode || known.passengers
+      ? `Known context (inhi par continue karo, dobara mat poochho): origin=${known.origin ?? "-"}, destination=${known.destination ?? "-"}, date=${known.date ?? "-"}, train=${known.trainNumber ?? "-"}, class=${known.classCode ?? "-"}, passengers=${known.passengers ?? "-"}.`
+      : "",
+    history.length
+      ? `Conversation history upar di gayi hai — user ka pichla context wahi se aata hai (jaise \"saturday\" pichle sawaal ka jawab hai). History + known context use karo, user se dobara wahi mat poochho jo already pata hai.`
       : "",
     "RULES:",
-    "1. Railway data ke liye sirf approved tools use karo — tabhi jab jawab ke liye data chahiye.",
-    "2. Fastest/cheapest/earliest/best/compare/alternative-dates/connecting routes ke liye JOURNEY_ANALYZE use karo.",
-    "3. Multi-step allowed hai: pehle SEARCH_TRAINS, phir candidates par GET_FARE / CHECK_AVAILABILITY / GET_TIMETABLE.",
+    "1. Railway data ke liye khud decide karke approved tools call karo — tabhi jab jawab ke liye data chahiye. Agar context/history se required info (origin/destination/date/train) already pata hai to poochho mat, seedha tool call karo.",
+    "2. Fastest/cheapest/earliest/best/compare/alternative-dates/connecting routes ke liye JOURNEY_ANALYZE use karo (yeh deterministic Atlas engine hai — uske output par explain karo).",
+    "3. Multi-step tool calling allowed + encouraged hai: pehle SEARCH_TRAINS, phir results dekh kar zaroorat ke hisaab se GET_TIMETABLE / GET_FARE / CHECK_AVAILABILITY / GET_TRAIN_INFO call karo. Ek tool call mein sab na mile to agla tool call karo.",
     "3b. User sirf train number + class poochhe (route/date na de) to bhi GET_FARE / CHECK_AVAILABILITY turant bulao — route/date optional hain, server timetable se route aur aaj ki date khud lagata hai. Missing slots ki bhikh mat maango.",
     "4. Sirf tool results ke facts bolo. Train number, naam, time, fare, seats, delay, STATION CODE — kuch bhi invent mat karo. Station codes/options sirf tool results se; apni knowledge se station code mat banao.",
-    "5. Data na mile to saaf bolo ki unavailable hai. Aaj ki date silently assume mat karo — date genuinely na ho to poochho.",
-    "6. Final jawab mein koi API key/secret/URL nahi hoga.",
-    "7. Jab user ko station options dikhane hon (needs_choice), options Gin ke poochho.",
-    "8. Date sirf Deterministic date resolver line ya date map se aayegi — khud calendar math kabhi mat karo. Resolver ka result FINAL hai; ambiguous ho to user se poochho; resolver kuch na de aur user ne absolute date di ho (jaise 5 September ya 05/09/2026) to map mein nahi hogi — tab user se confirm karo.",
+    "5. Required info (origin/destination/date/train number/PNR) genuinely missing ho to POOCHHO — e.g. \"Kis date ko jaana hai?\" ya \"Kis station se — NDLS, DLI?\" Aaj ki date silently assume mat karo.",
+    "6. Data na mile to saaf bolo ki unavailable hai — kabhi fake number/seats/fare mat banao.",
+    "7. Final jawab mein koi API key/secret/URL nahi hoga.",
+    "8. Jab user ko station options dikhane hon (needs_choice), options Gin ke poochho.",
+    "9. Date sirf Deterministic date resolver line, date map ya known context se aayegi — khud calendar math kabhi mat karo. Resolver ka result FINAL hai; ambiguous ho to user se poochho; resolver kuch na de aur user ne absolute date di ho (jaise 5 September ya 05/09/2026) to map mein nahi hogi — tab user se confirm karo.",
+    "10. Booking/payment kabhi tum nahi karte — booking tool tumhare paas hai hi nahi. User ticket book karna chahe to slots (origin/destination/date/passengers) jama karo aur trains dikhaao (SEARCH_TRAINS), phir bolo ki booking app ke TrainBoard/Confirm UI se hogi.",
   ]
     .filter(Boolean)
     .join("\n");
@@ -1061,10 +1075,21 @@ type NvidiaChatJson = {
   choices?: { message?: { content?: string | null; reasoning_content?: string | null; tool_calls?: ChatMsg["tool_calls"] } }[];
 };
 
+export type AgenticHistoryTurn = { role: "user" | "assistant"; content: string };
+
 export async function runAgenticTurn(input: {
   text: string;
   now?: string;
-  known?: { origin?: string | null; destination?: string | null; date?: string | null; trainNumber?: string | null };
+  known?: {
+    origin?: string | null;
+    destination?: string | null;
+    date?: string | null;
+    trainNumber?: string | null;
+    classCode?: string | null;
+    passengers?: number | null;
+  };
+  /** Prior conversation turns (multi-turn state) — redacted, capped, sent before the current user message. */
+  history?: AgenticHistoryTurn[];
 }): Promise<AgenticTurn> {
   const startedAll = Date.now();
   if (!env.nvidiaApiKey) {
@@ -1073,6 +1098,10 @@ export async function runAgenticTurn(input: {
   // Deterministic date resolver (IST) — arbitrary dates bhi; model sirf follow karta hai.
   const nowDate = input.now && Date.parse(input.now) ? new Date(input.now) : new Date();
   const dateHint = deterministicDateHint(String(input.text ?? ""), nowDate);
+  const historyTurns = (Array.isArray(input.history) ? input.history : [])
+    .filter((h) => h && (h.role === "user" || h.role === "assistant") && typeof h.content === "string" && h.content.trim())
+    .slice(-8)
+    .map((h) => ({ role: h.role, content: redact(h.content.slice(0, 700)) }));
   const messages: ChatMsg[] = [
     {
       role: "system",
@@ -1083,10 +1112,14 @@ export async function runAgenticTurn(input: {
           destination: input.known?.destination ?? null,
           date: input.known?.date ?? null,
           trainNumber: input.known?.trainNumber ?? null,
+          classCode: input.known?.classCode ?? null,
+          passengers: input.known?.passengers ?? null,
         },
         dateHint,
+        historyTurns,
       ),
     },
+    ...historyTurns,
     { role: "user", content: redact(input.text) },
   ];
 

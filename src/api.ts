@@ -34,6 +34,21 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   return data;
 }
 
+/** Slots the server-side AI agent returns so the deterministic booking flow can continue. */
+export interface AgentContextClient {
+  intent?: string | null;
+  origin?: { code: string; name: string; city: string } | null;
+  destination?: { code: string; name: string; city: string } | null;
+  date?: string | null;
+  dateProvided?: boolean;
+  passengers?: number | null;
+  paxProvided?: boolean;
+  classCode?: string | null;
+  selectedTrainNumber?: string | null;
+  bookingStage?: string | null;
+  pendingAsk?: string | null;
+}
+
 export interface AdminModel {
   id: string;
   name: string;
@@ -145,7 +160,7 @@ export const api = {
     request<{
       nlu: NluResult;
       source: "ai" | "nlu";
-      context: unknown;
+      context: AgentContextClient | null;
       tool: string | null;
       toolOk: boolean | null;
       reply: string | null;
@@ -157,6 +172,19 @@ export const api = {
       modelUsed?: string | null;
       latencyMs?: number;
       failureReason?: string | null;
+      engine?: "agentic_tool_calling" | "deterministic" | null;
+      toolTrace?: {
+        step: number;
+        tool: string;
+        args: Record<string, unknown>;
+        ok: boolean;
+        source: string | null;
+        summary: string;
+        latencyMs: number;
+        dataPreview?: string;
+      }[] | null;
+      grounded?: boolean | null;
+      agenticFailureReason?: string | null;
     }>("/api/agent", {
       method: "POST",
       body: JSON.stringify(body),

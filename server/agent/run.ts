@@ -1,5 +1,5 @@
 import { runUnderstand } from "../understand/index.js";
-import type { DialogSlot } from "../understand/legacy-nlu.js";
+import { understand as deterministicUnderstand, type DialogSlot, type KnownSlots, type NluResult } from "../understand/legacy-nlu.js";
 import {
   bookingInProgress,
   classifyFollowUp,
@@ -14,7 +14,7 @@ import {
   type AgentToolName,
 } from "./context.js";
 import { executeTool, type ToolName } from "./tools.js";
-import { agenticConfigured, runAgenticTurn, type ToolTraceStep } from "./agentic.js";
+import { agenticConfigured, runAgenticTurn, type AgenticHistoryTurn, type ToolTraceStep } from "./agentic.js";
 
 export type AgentRequest = {
   text: string;
@@ -28,10 +28,12 @@ export type AgentRequest = {
   context?: AgentContext;
   now?: string;
   bookingFlow?: string;
+  /** Prior conversation turns — multi-turn state for the AI tool-calling layer. */
+  history?: AgenticHistoryTurn[];
 };
 
 export type AgentResponse = {
-  nlu: Awaited<ReturnType<typeof runUnderstand>>["nlu"];
+  nlu: NluResult;
   source: "ai" | "nlu";
   context: AgentContext;
   tool: AgentToolName;
@@ -52,33 +54,43 @@ export type AgentResponse = {
   agenticFailureReason?: string | null;
 };
 
-/** Fact/journey sawaal → AI-driven tool calling; booking flow deterministic rehta hai. */
-const AGENTIC_INTENTS = new Set([
-  "LIVE_TRAIN_STATUS",
-  "TRAIN_SCHEDULE",
-  "CHECK_FARE",
-  "CHECK_AVAILABILITY",
-  "CHECK_PNR",
-  "CANCELLED_TRAINS",
-  "COMPARE_TRAINS",
-]);
-const AGENTIC_FOLLOWS = new Set(["live", "timetable", "fare", "availability", "cancelled", "pnr"]);
-const JOURNEY_PHRASE =
-  /\b(sabse\s*(?:tez|fast|sasti|sasta|pehle)|fastest|cheapest|earliest|best\s*(?:value|train|option)|compare|tulna|alternative(?:\s*dates?)?|vikalp|connecting|via\s+\w+|route\s*(?:optimis|suggest))/i;
+/**
+ * ARCHITECTURE (AI-first tool calling):
+ *
+ *   USER → NVIDIA GPT-OSS-20B (understands request, SELECTS approved tools)
+ *        → SERVER executes each tool call securely (keys never reach the model)
+ *        → RailCore PRIMARY → RailKit FALLBACK (every result carries `source`)
+ *        → tool result returned to the model → model may chain the next tool
+ *        → final grounded response (numbers must exist in tool evidence)
+ *
+ * Koi deterministic classifier pehle se tool calls decide NAHI karta — jo
+ * tool chahiye, kitne chahiye, kis order mein chahiye, yeh MODEL decide
+ * karta hai (multi-step). Deterministic NLU/tool-routing sirf FALLBACK hai:
+ * model missing/timeout/error/ungrounded ho tab chalta hai. Booking mutations
+ * (payment/confirm/passengers) hamesha deterministic booking engine ke paas
+ * rehte hain — model ke paas booking tool hai hi nahi, confirmBook kabhi true
+ * nahi hota.
+ */
 
-function agenticEligible(
-  follow: ReturnType<typeof classifyFollowUp>,
-  intent: string | null | undefined,
-  text: string,
-  bookingInProg: boolean,
-): boolean {
-  if (!agenticConfigured()) return false;
-  const journeyHit = JOURNEY_PHRASE.test(text);
-  // Journey/optimisation questions sirf tab jab booking pick-flow active na ho.
-  if (journeyHit && !bookingInProg) return true;
-  if (follow && AGENTIC_FOLLOWS.has(follow)) return true;
-  if (intent && AGENTIC_INTENTS.has(intent)) return true;
-  return false;
+/** Booking stages where the deterministic booking engine must own the turn. */
+const BOOKING_MUTATION_STAGES = new Set([
+  "PASSENGERS_PENDING",
+  "FARE_REVIEW",
+  "PAYMENT_PENDING",
+  "BOOKING_PENDING",
+  "PASSENGERS",
+  "REVIEW",
+  "PAYMENT",
+  "CONFIRM",
+]);
+
+/** Hard booking-action phrases — never routed to the model (defense in depth). */
+const BOOKING_MUTATION_TEXT =
+  /\b(book\s*kar(?:\s*do)?|book\s*kardo|confirm(?:\s*karo|\s*kar\s*do|\s*kar)?|pay(?:ment)?\s*(?:kar|karo|kardo|kar\s*do)?|paise\s*(?:de|do)|payment|confirm\s*&\s*book|haan\s*book|yes\s*book|book\s*it)\b/i;
+
+function isBookingMutation(req: AgentRequest): boolean {
+  if (req.bookingFlow && BOOKING_MUTATION_STAGES.has(String(req.bookingFlow).toUpperCase())) return true;
+  return BOOKING_MUTATION_TEXT.test(String(req.text ?? "").trim());
 }
 
 function seedContext(req: AgentRequest): AgentContext {
@@ -96,15 +108,102 @@ function seedContext(req: AgentRequest): AgentContext {
   return base;
 }
 
+function missingOf(known: KnownSlots): string[] {
+  const missing: string[] = [];
+  if (!known.from) missing.push("from");
+  if (!known.to) missing.push("to");
+  if (!known.date) missing.push("date");
+  if (!known.passengerCount) missing.push("passengers");
+  return missing;
+}
+
 export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
+  const seeded = seedContext(req);
+
+  /* ── 1) AI-DRIVEN TOOL CALLING (primary engine) ────────────────────
+   * Model request + multi-turn state dekh kar KHUD decide karta hai kaunse
+   * approved tools call karne hain (multi-step chaining allowed). Sirf
+   * booking mutations model tak nahi pahunchte (booking tool hai hi nahi).
+   * Cheap deterministic slot-merge (no network) context compile karta hai. */
+  let agenticFailureReason: string | null = null;
+  if (!isBookingMutation(req) && agenticConfigured()) {
+    const det = deterministicUnderstand(req.text, {
+      now: req.now ? new Date(req.now) : undefined,
+      lastAsked: req.lastAsked ?? null,
+      known: {
+        from: seeded.origin,
+        to: seeded.destination,
+        date: seeded.date,
+        passengerCount: seeded.passengers,
+      },
+    });
+    const ctx = mergeAgentContext(seeded, det, req.text);
+    const follow = classifyFollowUp(req.text);
+    const trainNo = resolveTrainNumber(req.text, ctx) ?? det.trainNumber;
+    if (trainNo) ctx.selectedTrainNumber = trainNo;
+
+    try {
+      const turn = await runAgenticTurn({
+        text: req.text,
+        now: req.now,
+        history: req.history,
+        known: {
+          origin: ctx.origin?.code ?? null,
+          destination: ctx.destination?.code ?? null,
+          date: ctx.date ?? det.date ?? null,
+          trainNumber: trainNo ?? null,
+          classCode: ctx.classCode ?? det.classCodes?.[0] ?? null,
+          passengers: ctx.passengers ?? det.passengerCount ?? null,
+        },
+      });
+      if (turn.reply) {
+        const interrupt = bookingInProgress(ctx) && follow !== "more_trains" && follow !== "train_pick";
+        if (interrupt) ctx.bookingStage = "paused";
+        const resume = interrupt ? resumeBookingLine({ ...ctx, bookingStage: "collecting" }) : null;
+        void neverAutoBook(det.intent, req.bookingFlow);
+        return {
+          nlu: det,
+          source: "nlu",
+          context: ctx,
+          tool: null,
+          toolOk: turn.ok ? true : false,
+          reply: turn.reply,
+          interrupt,
+          resumeAsk: resume?.ask ?? null,
+          resumeText: resume?.text ?? null,
+          confirmBook: false,
+          missingFields: missingOf({
+            from: det.from,
+            to: det.to,
+            date: det.date,
+            passengerCount: det.passengerCount,
+          }),
+          modelUsed: turn.modelUsed,
+          latencyMs: turn.latencyMs,
+          failureReason: null,
+          engine: "agentic_tool_calling",
+          toolTrace: turn.steps,
+          agenticFailureReason: turn.ok ? null : (turn.failureReason ?? null),
+          grounded: turn.grounded,
+        };
+      }
+      // Agentic chala par reply nahi bana — wajah record karo, fallback chalo.
+      if (!turn.ok || !turn.reply) agenticFailureReason = turn.failureReason ?? "no_reply";
+    } catch (err) {
+      // Deterministic fallback chalega par wajah record hogi.
+      agenticFailureReason = `throw:${err instanceof Error ? err.message : "unknown"}`;
+    }
+  }
+
+  /* ── 2) DETERMINISTIC FALLBACK (existing architecture, preserved) ── */
   const understood = await runUnderstand({
     text: req.text,
     lastAsked: req.lastAsked ?? null,
     known: req.known ?? {},
     now: req.now,
   });
-  const seeded = seedContext(req);
-  const ctx = mergeAgentContext(seeded, understood.nlu, req.text);
+  const seeded2 = seedContext(req);
+  const ctx = mergeAgentContext(seeded2, understood.nlu, req.text);
   const follow = classifyFollowUp(req.text);
   const trainNo = resolveTrainNumber(req.text, ctx) ?? understood.nlu.trainNumber;
   if (trainNo) ctx.selectedTrainNumber = trainNo;
@@ -114,50 +213,10 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
 
   let reply: string | null = null;
   let toolOk: boolean | null = null;
-  let engine: "agentic_tool_calling" | "deterministic" = "deterministic";
-  let toolTrace: ToolTraceStep[] | undefined;
-  let grounded: boolean | undefined;
-  let agenticFailureReason: string | null = null;
 
-  // ── AI-driven multi-step tool calling (facts + Atlas/journey) ──
-  // "Slots" (origin/destination/date) ka hona booking-flow NAHI hai — agentic layer
-  // unhe khud use karti hai. Sirf STRUCTURED booking stage hijack se bachti hai.
-  // Sirf GENUINE pick-flow hijack se bachta hai: train list have hai jisme se user
-  // "sabse tez wali" bol raha hai, ya pick ho chuka. Khali collecting-stage (fresh
-  // journey query) agentic layer ko jaati hai — slots waise bhi ctx mein hain.
-  const inProg =
-    Boolean(ctx.selectedTrainNumber) ||
-    (ctx.bookingStage === "collecting" && ctx.lastTrainNumbers.length > 0);
-  if (agenticEligible(follow, understood.nlu.intent, req.text, inProg)) {
-    try {
-      const turn = await runAgenticTurn({
-        text: req.text,
-        now: req.now,
-        known: {
-          origin: ctx.origin?.code ?? null,
-          destination: ctx.destination?.code ?? null,
-          date: ctx.date ?? understood.nlu.date ?? null,
-          trainNumber: trainNo ?? null,
-        },
-      });
-      if (turn.reply) {
-        reply = turn.reply;
-        toolOk = turn.ok ? true : false;
-        engine = "agentic_tool_calling";
-        toolTrace = turn.steps;
-        grounded = turn.grounded;
-      }
-      if (!turn.ok || !turn.reply) agenticFailureReason = turn.failureReason ?? "no_reply";
-    } catch (err) {
-      // Ab chup nahi rahenge — deterministic fallback chalega par wajah record hogi.
-      agenticFailureReason = `throw:${err instanceof Error ? err.message : "unknown"}`;
-    }
-  }
-
-  // NOTE: agentic jawab mil chuka ho to koi deterministic guard use overwrite NAHI karta.
-  if (tool === "getCoachPosition" && !trainNo && reply == null) {
+  if (tool === "getCoachPosition" && !trainNo) {
     reply = "Kaunsi train ki coach position? 5-digit train number boliye.";
-  } else if (tool && tool !== "searchTrains" && reply == null) {
+  } else if (tool && tool !== "searchTrains") {
     const result = await executeTool(tool as ToolName, {
       query: req.text,
       origin: ctx.origin?.code,
@@ -174,13 +233,13 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
     if (result.ok && tool === "getLiveStatus") {
       reply = `${result.summary}\n(Live railway data — gadh ke nahi.)`;
     }
-  } else if (follow === "live" && !trainNo && reply == null) {
+  } else if (follow === "live" && !trainNo) {
     reply = "Train number kya hai? 5-digit number boliye.";
-  } else if (follow === "coach" && !trainNo && reply == null) {
+  } else if (follow === "coach" && !trainNo) {
     reply = "Kaunsi train ki coach position? 5-digit train number boliye.";
-  } else if (follow === "fare" && reply == null && (!ctx.selectedTrainNumber || !ctx.classCode || !ctx.date || !ctx.origin || !ctx.destination)) {
+  } else if (follow === "fare" && (!ctx.selectedTrainNumber || !ctx.classCode || !ctx.date || !ctx.origin || !ctx.destination)) {
     reply = "Fare ke liye train, class aur date chahiye. Jo missing hai woh batao — main figure invent nahi karunga.";
-  } else if (follow === "availability" && reply == null && (!ctx.selectedTrainNumber || !ctx.classCode || !ctx.date)) {
+  } else if (follow === "availability" && (!ctx.selectedTrainNumber || !ctx.classCode || !ctx.date)) {
     reply = "Availability ke liye train, class aur date chahiye.";
   }
 
@@ -205,9 +264,9 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
     modelUsed: understood.modelUsed,
     latencyMs: understood.latencyMs,
     failureReason: understood.failureReason,
-    engine,
-    toolTrace,
+    engine: "deterministic",
+    toolTrace: undefined,
     agenticFailureReason,
-    grounded,
+    grounded: undefined,
   };
 }

@@ -621,18 +621,167 @@ describe("agent integration: agentic path + deterministic fallback", () => {
     expect(res.body.reply).toBeTruthy();
   });
 
-  it("booking flow stays deterministic (no agentic hijack of BOOK_TRAIN)", async () => {
+  it("AI-FIRST: booking-intent goes to the model — it asks for the missing date (no silent assumptions)", async () => {
+    railcoreMock();
+    setAgenticNvidiaFetch(async () => {
+      // Model asks for the genuinely missing slot instead of calling tools with an assumed date.
+      return chatResponse({ content: "Kis date ko jaana hai?" });
+    });
+    const result = await runAgent({ text: "Mujhe Amritsar se Delhi jaana hai", now: NOW });
+    expect(result.engine).toBe("agentic_tool_calling");
+    expect(result.reply).toContain("Kis date ko");
+    expect(result.toolTrace ?? []).toEqual([]);
+    expect(result.confirmBook).toBe(false);
+  });
+
+  it("booking MUTATION (confirm/payment) never reaches the model — deterministic flow owns it", async () => {
     railcoreMock();
     let agenticCalled = false;
     setAgenticNvidiaFetch(async () => {
       agenticCalled = true;
-      throw new Error("must not be called for booking flow");
+      throw new Error("must not be called for booking mutations");
     });
-    const result = await runAgent({ text: "Mujhe Amritsar se Ludhiana jaana hai", now: NOW });
+    const result = await runAgent({
+      text: "Haan, book kar do",
+      now: NOW,
+      bookingFlow: "FARE_REVIEW",
+    });
     expect(agenticCalled).toBe(false);
-    // Server stays silent on missing slots (client Concierge asks the date);
-    // the important part: no agentic hijack, deterministic engine label.
-    expect(result.reply ?? null).toBeNull();
     expect(result.engine ?? "deterministic").toBe("deterministic");
+    expect(result.confirmBook).toBe(false);
+    // Same guard by text alone (no bookingFlow hint).
+    const result2 = await runAgent({ text: "Payment kar do, confirm book kardo", now: NOW });
+    expect(result2.engine ?? "deterministic").toBe("deterministic");
+    expect(result2.confirmBook).toBe(false);
+  });
+
+  it("MULTI-TURN: 'jaana hai' asks the date, then 'Saturday' continues with ASR/NDLS context — no re-asking", async () => {
+    railcoreMock();
+    const searches: Record<string, unknown>[] = [];
+    setAgenticNvidiaFetch(async (_input, init) => {
+      const body = JSON.parse(String(init?.body));
+      const toolMsgs = body.messages.filter((m: any) => m.role === "tool").length;
+      if (toolMsgs === 0) {
+        // Turn 2: the model already knows origin/destination from context — only the date was asked.
+        return chatResponse({
+          tool_calls: [toolCall("SEARCH_TRAINS", { origin: "ASR", destination: "NDLS", date: "2026-09-05" })],
+        });
+      }
+      const called = body.messages.filter((m: any) => m.role === "assistant" && m.tool_calls).flatMap((m: any) => m.tool_calls);
+      for (const tc of called) searches.push(JSON.parse(tc.function.arguments));
+      return chatResponse({
+        content: "Saturday 5 Sep ko ASR→NDLS 2 trains hain: 12014 AMRITSAR SHATABDI (18:25→23:00) aur 12460 INTERCITY EXP (21:15→04:15).",
+      });
+    });
+    // Turn 1 already happened (the model asked "Kis date ko jaana hai?").
+    // Turn 2 carries the conversation state: known slots + history.
+    const result = await runAgent({
+      text: "Saturday",
+      now: NOW,
+      known: {
+        from: { code: "ASR", name: "AMRITSAR JN", city: "Amritsar" },
+        to: { code: "NDLS", name: "NEW DELHI", city: "Delhi" },
+      },
+      history: [
+        { role: "user", content: "Amritsar se Delhi jaana hai" },
+        { role: "assistant", content: "Kis date ko jaana hai?" },
+      ],
+    });
+    expect(result.engine).toBe("agentic_tool_calling");
+    expect(result.toolTrace?.[0]?.tool).toBe("SEARCH_TRAINS");
+    expect(result.toolTrace?.[0]?.args).toMatchObject({ origin: "ASR", destination: "NDLS", date: "2026-09-05" });
+    expect(result.toolTrace?.[0]?.source).toBe("railcore");
+    expect(result.reply).toContain("12014");
+    // The model never re-asked origin/destination — it used the carried context.
+    expect(searches[0]).toMatchObject({ origin: "ASR", destination: "NDLS" });
+  });
+
+  it("AI-FIRST: journey phrasing outside any old regex gate still reaches the model (no deterministic pre-gate)", async () => {
+    railcoreMock();
+    // First call returns a tool call; second (after the tool result) returns the answer.
+    let call = 0;
+    setAgenticNvidiaFetch(async () => {
+      call += 1;
+      if (call === 1) {
+        return chatResponse({
+          tool_calls: [
+            toolCall("JOURNEY_ANALYZE", { origin: "ASR", destination: "NDLS", date: "2026-09-05", preference: "fastest" }),
+          ],
+        });
+      }
+      return chatResponse({ content: "Sabse fast: 12014 AMRITSAR SHATABDI — 4h 35m, 18:25→23:00." });
+    });
+    const res = await request(createApp())
+      .post("/api/agent")
+      .send({
+        // No "fastest/sabse tez/compare" keyword the old gate looked for — the model decides.
+        text: "Amritsar se Delhi subah wali sabse achhi train kaunsi hai 5 tareek ko?",
+        now: NOW,
+      });
+    expect(res.status).toBe(200);
+    expect(res.body.engine).toBe("agentic_tool_calling");
+    expect(res.body.toolTrace?.[0]?.tool).toBe("JOURNEY_ANALYZE");
+    expect(res.body.grounded).toBe(true);
+  });
+
+  it("USER EXAMPLE: fastest train + CC fare + availability — model chains SEARCH_TRAINS → GET_FARE → CHECK_AVAILABILITY", async () => {
+    railcoreMock();
+    const chain: string[] = [];
+    setAgenticNvidiaFetch(async (_input, init) => {
+      const body = JSON.parse(String(init?.body));
+      const toolMsgs = body.messages.filter((m: any) => m.role === "tool").length;
+      if (toolMsgs === 0) {
+        return chatResponse({
+          tool_calls: [toolCall("SEARCH_TRAINS", { origin: "ASR", destination: "NDLS", date: "2026-09-05" })],
+        });
+      }
+      if (toolMsgs === 1) {
+        return chatResponse({
+          tool_calls: [toolCall("GET_FARE", { train_number: "12014", date: "2026-09-05", origin: "ASR", destination: "NDLS", class_code: "CC" })],
+        });
+      }
+      if (toolMsgs === 2) {
+        return chatResponse({
+          tool_calls: [
+            toolCall("CHECK_AVAILABILITY", { train_number: "12014", date: "2026-09-05", origin: "ASR", destination: "NDLS", class_code: "CC" }),
+          ],
+        });
+      }
+      const called = body.messages.filter((m: any) => m.role === "assistant" && m.tool_calls).flatMap((m: any) => m.tool_calls);
+      for (const tc of called) chain.push(tc.function.name);
+      return chatResponse({
+        content:
+          "Sabse fast train: 12014 AMRITSAR SHATABDI (18:25→23:00, 4h 35m). CC fare ₹1210 hai aur 47 seats AVAILABLE hain.",
+      });
+    });
+    const res = await request(createApp())
+      .post("/api/agent")
+      .send({
+        text: "Amritsar se Delhi Saturday ko sabse fast train kaunsi hai aur CC ka fare aur availability kya hai?",
+        now: NOW,
+      });
+    expect(res.status).toBe(200);
+    expect(res.body.engine).toBe("agentic_tool_calling");
+    const tools = (res.body.toolTrace ?? []).map((t: { tool: string }) => t.tool);
+    expect(tools).toEqual(["SEARCH_TRAINS", "GET_FARE", "CHECK_AVAILABILITY"]);
+    expect(tools).not.toContain("JOURNEY_ANALYZE"); // model was free to choose its own plan
+    expect(res.body.reply).toContain("12014");
+    expect(res.body.reply).toContain("1210");
+    expect(res.body.reply).toContain("47");
+    expect(res.body.grounded).toBe(true);
+    expect(JSON.stringify(res.body)).not.toMatch(/rk_live_test_secret|nvapi_test_key/);
+  });
+
+  it("NVIDIA down mid-conversation → deterministic fallback still answers (architecture preserved)", async () => {
+    railcoreMock();
+    setAgenticNvidiaFetch(async () => {
+      throw new Error("nvidia unreachable");
+    });
+    const res = await request(createApp())
+      .post("/api/agent")
+      .send({ text: "12014 abhi kaha hai?", now: NOW, history: [{ role: "user", content: "12014 ki live status" }] });
+    expect(res.status).toBe(200);
+    expect(res.body.engine ?? "deterministic").toBe("deterministic");
+    expect(res.body.reply).toBeTruthy();
   });
 });

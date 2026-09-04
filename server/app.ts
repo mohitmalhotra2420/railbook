@@ -155,6 +155,16 @@ export function createApp() {
         context: req.body?.context,
         now: req.body?.now,
         bookingFlow: req.body?.bookingFlow,
+        history: Array.isArray(req.body?.history)
+          ? (req.body.history as { role?: unknown; content?: unknown }[])
+              .filter(
+                (h): h is { role: "user" | "assistant"; content: string } =>
+                  (h?.role === "user" || h?.role === "assistant") &&
+                  typeof h?.content === "string" &&
+                  h.content.trim().length > 0,
+              )
+              .slice(-10)
+          : undefined,
       });
       res.json({
         nlu: result.nlu,

@@ -8,3 +8,6 @@ coverage
 .vite
 .arena
 .vercel
+
+PROD_TOOL_TRACE.json
+tmpscripts/
