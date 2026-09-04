@@ -29,6 +29,7 @@ import {
   searchTrainsRouted,
 } from "../railway/router.js";
 import { parseDatePhrase } from "../understand/legacy-dates.js";
+import { RailKitProvider } from "../railway/railkit.js";
 import type { ClassCode } from "../providers/types.js";
 import { executeTool } from "./tools.js";
 
@@ -424,8 +425,22 @@ async function journeyAnalyze(args: {
   const to = toRes.code;
 
   const search = await searchTrainsRouted({ from, to, date: args.date });
-  const direct = search.trains;
+  let direct = search.trains;
   const providers = { search: search.provider };
+
+  // RailCore 200+empty de de (coverage gap, jaise kuch intermediate pairs) aur RailKit
+  // configured ho to ek RailKit attempt — fake data nahi, dusra provider.
+  if (!direct.length && search.provider === "railcore" && env.railkitApiKey) {
+    try {
+      const kitTrains = await new RailKitProvider().searchTrains({ from, to, date: args.date });
+      if (kitTrains.length) {
+        direct = kitTrains;
+        providers.search = "railkit_fallback";
+      }
+    } catch {
+      /* railkit fail — honest empty jaari */
+    }
+  }
 
   // Khali search + code-jaisa station input = shayad galat code (jaise DEL airport code).
   // Code ko station API se re-verify karo; alag stations mile to needs_choice — chup-chaap
