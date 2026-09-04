@@ -195,6 +195,7 @@ function railcoreMock(): void {
           train_name: num === "12722" ? "DAKSHIN EXPRESS" : "AMRITSAR SHATABDI",
           running_days: ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"],
           total_duration_minutes: num === "12722" ? 315 : 275,
+          classes: num === "12722" ? ["SL"] : ["CC", "EC"],
           stops,
         },
       });
@@ -358,24 +359,45 @@ describe("agentic tool-calling layer", () => {
       const body = JSON.parse(String(init?.body));
       const toolMsgs = body.messages.filter((m: any) => m.role === "tool").length;
       if (toolMsgs === 0) {
-        return chatResponse({ tool_calls: [toolCall("CHECK_AVAILABILITY", { train_number: "12014" })] });
+        // class_code GET_FARE ke liye required hai — iska missing hona ab bhi invalid_args hai.
+        return chatResponse({ tool_calls: [toolCall("GET_FARE", { train_number: "12014" })] });
       }
       if (toolMsgs === 1) {
         return chatResponse({
           tool_calls: [
-            toolCall("CHECK_AVAILABILITY", { train_number: "12014", date: "2026-09-05", origin: "ASR", destination: "NDLS", class_code: "CC" }),
+            toolCall("GET_FARE", { train_number: "12014", date: "2026-09-05", origin: "ASR", destination: "NDLS", class_code: "CC" }),
           ],
         });
       }
-      return chatResponse({ content: "12014 CC mein 2026-09-05 ko AVAILABLE hai — 47 seats." });
+      const fee = Number(process.env.SERVICE_FEE_INR ?? 25);
+      return chatResponse({ content: `12014 CC ka fare ₹${1210 + fee} total hai (2026-09-05).` });
     });
 
-    const turn = await runAgenticTurn({ text: "12014 CC ki availability batao", now: NOW });
+    const fee = Number(process.env.SERVICE_FEE_INR ?? 25);
+    const turn = await runAgenticTurn({ text: "12014 CC ka fare batao", now: NOW });
     expect(turn.steps[0].ok).toBe(false);
     expect(turn.steps[0].summary).toMatch(/Invalid arguments/i);
     expect(turn.steps[1].ok).toBe(true);
     expect(turn.grounded).toBe(true);
-    expect(turn.reply).toContain("47");
+    expect(turn.reply).toContain(String(1210 + fee));
+  });
+
+  it("train-specific fare/availability WITHOUT route/date auto-resolves via timetable + today", async () => {
+    railcoreMock();
+    const fare = await executeApprovedTool("GET_FARE", { train_number: "12014", class_code: "CC" });
+    expect(fare.ok).toBe(true);
+    const fareData = fare.data as { resolvedRoute?: { origin?: string; destination?: string; date?: string; autoRoute?: boolean; autoDate?: boolean } };
+    expect(fareData.resolvedRoute?.origin).toBe("ASR");
+    expect(fareData.resolvedRoute?.destination).toBe("NDLS");
+    expect(fareData.resolvedRoute?.autoRoute).toBe(true);
+    expect(fareData.resolvedRoute?.autoDate).toBe(true);
+    expect(fare.summary).toContain("ASR→NDLS");
+    expect(fare.summary).toContain(`₹${1210 + Number(process.env.SERVICE_FEE_INR ?? 25)}`);
+
+    const avail = await executeApprovedTool("CHECK_AVAILABILITY", { train_number: "12014" });
+    expect(avail.ok).toBe(true);
+    expect(avail.summary).toContain("ASR→NDLS");
+    expect(JSON.stringify(avail.data)).toContain("AVAILABLE");
   });
 
   it("harmony channel tokens in tool names are sanitized, allowlist still enforced", async () => {

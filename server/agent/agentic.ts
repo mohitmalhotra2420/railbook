@@ -107,17 +107,17 @@ const ArgSchemas = {
   TRACK_TRAIN: z.object({ train_number: z.string().regex(/^\d{4,6}$/), date: Ymd.optional() }),
   CHECK_AVAILABILITY: z.object({
     train_number: z.string().regex(/^\d{4,6}$/),
-    date: Ymd,
-    origin: StationRef,
-    destination: StationRef,
+    date: Ymd.optional(),
+    origin: StationRef.optional(),
+    destination: StationRef.optional(),
     class_code: z.string().regex(/^[A-Z0-9]{1,3}$/).optional(),
     quota: z.string().regex(/^[A-Z]{2}$/).optional(),
   }),
   GET_FARE: z.object({
     train_number: z.string().regex(/^\d{4,6}$/),
-    date: Ymd,
-    origin: StationRef,
-    destination: StationRef,
+    date: Ymd.optional(),
+    origin: StationRef.optional(),
+    destination: StationRef.optional(),
     class_code: z.string().regex(/^[A-Z0-9]{1,3}$/),
     passengers: z.number().int().min(1).max(6).optional(),
   }),
@@ -210,7 +210,7 @@ export const AGENTIC_TOOLS = [
     type: "function",
     function: {
       name: "CHECK_AVAILABILITY",
-      description: "Ek train ki seat availability. class_code chhodo to saari classes.",
+      description: "Ek train ki seat availability. class_code chhodo to saari classes. Route/date optional hai — na do to server timetable se route aur aaj ki date khud use karta hai.",
       parameters: {
         type: "object",
         properties: {
@@ -221,7 +221,7 @@ export const AGENTIC_TOOLS = [
           class_code: { type: "string", description: "CC/3A/SL... optional" },
           quota: { type: "string", description: "GN default" },
         },
-        required: ["train_number", "date", "origin", "destination"],
+        required: ["train_number"],
       },
     },
   },
@@ -229,7 +229,7 @@ export const AGENTIC_TOOLS = [
     type: "function",
     function: {
       name: "GET_FARE",
-      description: "Ek train + class ka ticket fare (service fee ke saath total).",
+      description: "Ek train + class ka ticket fare (service fee ke saath total). Route/date optional hai — na do to server timetable se route aur aaj ki date khud use karta hai.",
       parameters: {
         type: "object",
         properties: {
@@ -240,7 +240,7 @@ export const AGENTIC_TOOLS = [
           class_code: { type: "string" },
           passengers: { type: "number" },
         },
-        required: ["train_number", "date", "origin", "destination", "class_code"],
+        required: ["train_number", "class_code"],
       },
     },
   },
@@ -306,6 +306,45 @@ export const AGENTIC_TOOLS = [
     },
   },
 ] as const;
+
+/**
+ * Train-specific fare/availability ke liye missing route/date DETERMINISTIC resolve:
+ * route na mile to timetable ke first/last stop, date na ho to aaj (IST).
+ * Model ko kabhi route/date invent nahi karni padti — server bharata hai, label ke saath.
+ */
+async function resolveTrainRouteDate(a: {
+  train_number: string;
+  date?: string;
+  origin?: string;
+  destination?: string;
+}): Promise<{ origin?: string; destination?: string; date: string; autoRoute: boolean; autoDate: boolean }> {
+  let origin = (a.origin ?? "").trim().toUpperCase() || undefined;
+  let destination = (a.destination ?? "").trim().toUpperCase() || undefined;
+  const autoDate = !a.date;
+  const date = a.date ?? todayYmd();
+  const autoRoute = !origin || !destination;
+  if (origin && !/^[A-Z0-9]{2,5}$/.test(origin)) {
+    const r = await resolveStationRef(origin);
+    if ("code" in r) origin = r.code;
+  }
+  if (destination && !/^[A-Z0-9]{2,5}$/.test(destination)) {
+    const r = await resolveStationRef(destination);
+    if ("code" in r) destination = r.code;
+  }
+  if (!origin || !destination) {
+    try {
+      const sched = await routedSchedule(a.train_number);
+      const stops = sched.schedule?.stops ?? [];
+      if (stops.length >= 2) {
+        origin = origin ?? stops[0].code;
+        destination = destination ?? stops[stops.length - 1].code;
+      }
+    } catch {
+      /* route resolve nahi hua — provider wali error honest aayegi */
+    }
+  }
+  return { origin, destination, date, autoRoute, autoDate };
+}
 
 /* ── Secure execution (server-side only; keys never leave) ───────── */
 
@@ -751,51 +790,59 @@ export async function executeApprovedTool(
         return okResult(res.provider, `${live.trainNumber ?? a.train_number} — ${live.status ?? "unknown"}${live.currentStation ? `, last ${live.currentStation}` : ""}${live.delayMinutes != null ? `, delay ${live.delayMinutes}m` : ""}.`, live);
       }
       case "CHECK_AVAILABILITY": {
+        const ctx = await resolveTrainRouteDate(a as unknown as { train_number: string; date?: string; origin?: string; destination?: string });
+        if (!ctx.origin || !ctx.destination) {
+          return failResult(null, `Availability ke liye route chahiye (origin/destination) aur timetable se route resolve nahi hua — user se poochho.`);
+        }
         const code = (a.class_code as string | undefined)?.toUpperCase() as ClassCode | undefined;
         if (!code) {
           const board = await routedClassBoard(
             a.train_number as string,
-            a.date as string,
-            a.origin as string,
-            a.destination as string,
+            ctx.date,
+            ctx.origin,
+            ctx.destination,
             (a.quota as string | undefined) ?? "GN",
           );
-          if (!board.classes.length) return failResult(board.provider, "Availability unavailable.");
+          if (!board.classes.length) return failResult(board.provider, `Availability unavailable (${ctx.origin}→${ctx.destination}, ${ctx.date}).`);
           return okResult(
             board.provider,
-            `${a.train_number}: ${board.classes.map((c) => `${c.code} ${c.status}${c.seats != null ? ` ${c.seats}` : ""}`).join(", ")}.`,
-            { train_number: a.train_number, date: a.date, classes: board.classes },
+            `${a.train_number} ${ctx.origin}→${ctx.destination} (${ctx.date}${ctx.autoDate ? ", aaj ke liye" : ""}): ${board.classes.map((c) => `${c.code} ${c.status}${c.seats != null ? ` ${c.seats}` : ""}`).join(", ")}.`,
+            { train_number: a.train_number, date: ctx.date, resolvedRoute: { origin: ctx.origin, destination: ctx.destination, autoDate: ctx.autoDate }, classes: board.classes },
           );
         }
         const row = await getProvider().getAvailability(
           a.train_number as string,
-          a.date as string,
-          a.origin as string,
-          a.destination as string,
+          ctx.date,
+          ctx.origin,
+          ctx.destination,
           code,
           (a.quota as string | undefined) ?? "GN",
         );
-        if (row.status === "UNKNOWN") return failResult(providerOf(), "Availability unavailable — invent nahi karunga.", row);
+        if (row.status === "UNKNOWN") return failResult(providerOf(), `Availability unavailable (${ctx.origin}→${ctx.destination}, ${ctx.date}) — invent nahi karunga.`, row);
         return okResult(
           providerOf(),
-          `${a.train_number} ${code}: ${row.status}${row.seats != null ? `, ${row.seats} seats` : ""}${row.fare > 0 ? `, ₹${row.fare}` : ""}.`,
-          row,
+          `${a.train_number} ${code} ${ctx.origin}→${ctx.destination} (${ctx.date}${ctx.autoDate ? ", aaj ke liye" : ""}): ${row.status}${row.seats != null ? `, ${row.seats} seats` : ""}${row.fare > 0 ? `, ₹${row.fare}` : ""}.`,
+          { ...row, resolvedRoute: { origin: ctx.origin, destination: ctx.destination, date: ctx.date, autoDate: ctx.autoDate } },
         );
       }
       case "GET_FARE": {
+        const ctx = await resolveTrainRouteDate(a as unknown as { train_number: string; date?: string; origin?: string; destination?: string });
+        if (!ctx.origin || !ctx.destination) {
+          return failResult(null, `Fare ke liye route chahiye (origin/destination) aur timetable se route resolve nahi hua — user se poochho. Train ${a.train_number} ki timetable bhi unavailable thi.`);
+        }
         const fare = await getProvider().getFare(
           a.train_number as string,
-          a.date as string,
-          a.origin as string,
-          a.destination as string,
+          ctx.date,
+          ctx.origin,
+          ctx.destination,
           (a.class_code as string).toUpperCase() as ClassCode,
           (a.passengers as number | undefined) ?? 1,
         );
-        if (!fare.railwayAvailable && fare.baseFare <= 0) return failResult(providerOf(), "Fare unavailable — andaza nahi lagaunga.", fare);
+        if (!fare.railwayAvailable && fare.baseFare <= 0) return failResult(providerOf(), `Fare unavailable (${ctx.origin}→${ctx.destination}, ${ctx.date}) — andaza nahi lagaunga.`, fare);
         return okResult(
           providerOf(),
-          `${a.train_number} ${(a.class_code as string).toUpperCase()}: ticket ₹${fare.baseFare}, service ₹${fare.serviceFee}, total ₹${fare.total}${(a.passengers as number | undefined) ? ` (${a.passengers} pax)` : ""}.`,
-          fare,
+          `${a.train_number} ${(a.class_code as string).toUpperCase()} ${ctx.origin}→${ctx.destination} (${ctx.date}${ctx.autoRoute ? ", poora route" : ""}${ctx.autoDate ? ", aaj ke liye" : ""}): ticket ₹${fare.baseFare}, service ₹${fare.serviceFee}, total ₹${fare.total}${(a.passengers as number | undefined) ? ` (${a.passengers} pax)` : ""}.`,
+          { ...fare, resolvedRoute: { origin: ctx.origin, destination: ctx.destination, date: ctx.date, autoRoute: ctx.autoRoute, autoDate: ctx.autoDate } },
         );
       }
       case "CHECK_PNR": {
@@ -902,6 +949,7 @@ function systemPrompt(
     "1. Railway data ke liye sirf approved tools use karo — tabhi jab jawab ke liye data chahiye.",
     "2. Fastest/cheapest/earliest/best/compare/alternative-dates/connecting routes ke liye JOURNEY_ANALYZE use karo.",
     "3. Multi-step allowed hai: pehle SEARCH_TRAINS, phir candidates par GET_FARE / CHECK_AVAILABILITY / GET_TIMETABLE.",
+    "3b. User sirf train number + class poochhe (route/date na de) to bhi GET_FARE / CHECK_AVAILABILITY turant bulao — route/date optional hain, server timetable se route aur aaj ki date khud lagata hai. Missing slots ki bhikh mat maango.",
     "4. Sirf tool results ke facts bolo. Train number, naam, time, fare, seats, delay, STATION CODE — kuch bhi invent mat karo. Station codes/options sirf tool results se; apni knowledge se station code mat banao.",
     "5. Data na mile to saaf bolo ki unavailable hai. Aaj ki date silently assume mat karo — date genuinely na ho to poochho.",
     "6. Final jawab mein koi API key/secret/URL nahi hoga.",
@@ -1063,14 +1111,17 @@ export async function runAgenticTurn(input: {
       }
     }
     if (!json || !msg) {
+      // Model chain poori tarah fail — par agar tools chal chuke hain to unka
+      // provider-backed summary hi sahi jawab hai (weak deterministic NLU par mat ja).
+      const reason = lastFailure ?? "empty_content";
       return {
         ok: false,
-        reply: null,
-        grounded: false,
+        reply: steps.length ? deterministicSummary(steps) : null,
+        grounded: steps.length > 0,
         steps,
         modelUsed,
         latencyMs: Date.now() - startedAll,
-        failureReason: lastFailure ?? "empty_content",
+        failureReason: reason,
       };
     }
     const toolCalls = (msg?.tool_calls ?? []).filter(
@@ -1119,7 +1170,16 @@ export async function runAgenticTurn(input: {
 
     const content = (msg?.content ?? msg?.reasoning_content ?? "").trim();
     if (!content) {
-      return { ok: false, reply: null, grounded: false, steps, modelUsed, latencyMs: Date.now() - startedAll, failureReason: "empty_content" };
+      // Model ne na tool call kiya na content diya — tools chal chuke hain to unka summary do.
+      return {
+        ok: false,
+        reply: steps.length ? deterministicSummary(steps) : null,
+        grounded: steps.length > 0,
+        steps,
+        modelUsed,
+        latencyMs: Date.now() - startedAll,
+        failureReason: "empty_content",
+      };
     }
     const clean = redact(content);
     // System prompt (date map, resolver line, known context) server-generated hai —

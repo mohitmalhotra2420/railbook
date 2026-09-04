@@ -48,6 +48,8 @@ export type AgentResponse = {
   engine?: "agentic_tool_calling" | "deterministic";
   toolTrace?: ToolTraceStep[];
   grounded?: boolean;
+  /** Agentic turn chala par model/provider fail hua to wajah (observability; success par null). */
+  agenticFailureReason?: string | null;
 };
 
 /** Fact/journey sawaal → AI-driven tool calling; booking flow deterministic rehta hai. */
@@ -115,6 +117,7 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
   let engine: "agentic_tool_calling" | "deterministic" = "deterministic";
   let toolTrace: ToolTraceStep[] | undefined;
   let grounded: boolean | undefined;
+  let agenticFailureReason: string | null = null;
 
   // ── AI-driven multi-step tool calling (facts + Atlas/journey) ──
   const inProg = bookingInProgress(ctx);
@@ -137,6 +140,7 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
         toolTrace = turn.steps;
         grounded = turn.grounded;
       }
+      if (!turn.ok) agenticFailureReason = turn.failureReason ?? "unknown";
     } catch {
       /* agentic fail — deterministic path neeche chal hi jayega */
     }
@@ -194,6 +198,7 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
     failureReason: understood.failureReason,
     engine,
     toolTrace,
+    agenticFailureReason,
     grounded,
   };
 }
