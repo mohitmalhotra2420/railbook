@@ -442,16 +442,18 @@ describe("agentic tool-calling layer", () => {
           tool_calls: [toolCall("GET_FARE", { train_number: "12014", class_code: "CC" })],
         });
       }
+      const total = 1210 + Number(process.env.SERVICE_FEE_INR ?? 25);
       if (!isRepair) {
         // Dumb temp-0 behaviour: tools succeeded, phir bhi info maango wala jawab.
         return chatResponse({ content: "Fare ke liye route aur date chahiye, batao?" });
       }
-      return chatResponse({ content: "12014 CC ASR→NDLS ka fare ₹1260 total hai (2026-09-05, aaj ke liye)." });
+      return chatResponse({ content: `12014 CC ASR→NDLS ka fare ₹${total} total hai (2026-09-05, aaj ke liye).` });
     });
 
+    const total = 1210 + Number(process.env.SERVICE_FEE_INR ?? 25);
     const turn = await runAgenticTurn({ text: "12014 ka cc fare btao", now: NOW });
     expect(modelCalls).toBe(3); // tool-call turn + dumb reply + repaired reply
-    expect(turn.reply).toContain("1260");
+    expect(turn.reply).toContain(String(total));
     expect(turn.grounded).toBe(true);
   });
 
