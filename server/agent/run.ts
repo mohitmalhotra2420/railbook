@@ -1043,7 +1043,9 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
     else if (/kitne coach/i.test(rawText)) factKeyword = "coaches";
     else if (/engine ka naam/i.test(rawText)) factKeyword = "locomotive";
     let subject = "";
-    const factNum = rawText.match(/\b(\d{5})\b/)?.[1];
+    /* Follow-up ("maine to top speed poochi thi?") mein number text me nahi —
+     * context ki selected train se le (screenshot bug 4 fix). */
+    const factNum = rawText.match(/\b(\d{5})\b/)?.[1] ?? ctx.selectedTrainNumber ?? null;
     if (factNum) {
       try {
         const info = await routedTrainInfo(factNum);
@@ -1071,8 +1073,10 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
       webResults = await webSearch(q2, 3);
       console.error(JSON.stringify({ factFallback: true, factQuery: q2, results: webResults.length, retry: true }));
     }
-    if (webResults.length) {
-      const best = webResults[0];
+    /* Disambiguation ("Top speed may refer to:") jawab nahi hota — skip. */
+    const good = webResults.filter((x) => !/may refer to:/i.test(x.snippet));
+    if (good.length) {
+      const best = good[0];
       reply = `Web se mila: ${best.snippet}\n(Source: ${best.title} — ${best.url})\n(Ye railway API ka live data nahi, web-search ka jawab hai.)`;
       toolOk = true;
     }
