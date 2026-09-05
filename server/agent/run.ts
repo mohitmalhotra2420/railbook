@@ -605,8 +605,14 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
           .slice(0, 3)
           .map((t) => `${t.number} ${t.name} (${t.departure}→${t.arrival})`)
           .join(", ");
+        // User feedback (2026-09-05): list ke saath SABSE FAST upfront — dobara poochhna na pade.
+        const withDur = search.trains.filter((t) => t.durationMinutes != null);
+        const fastest = withDur.length
+          ? withDur.reduce((b, t) => (t.durationMinutes < (b.durationMinutes ?? Infinity) ? t : b))
+          : null;
+        const fastestLine = fastest ? ` Sabse fast: ${fastest.number} ${fastest.name} (${fastest.durationLabel}).` : "";
         reply = search.trains.length
-          ? `Theek hai — ${ctx.origin!.code} → ${ctx.destination!.code} (${ctx.date}): ${search.trains.length} trains mili. Top: ${top}.`
+          ? `Theek hai — ${ctx.origin!.code} → ${ctx.destination!.code} (${ctx.date}): ${search.trains.length} trains mili.${fastestLine} Top: ${top}.`
           : `${ctx.origin!.code} → ${ctx.destination!.code} (${ctx.date}) ke liye koi train nahi mili — main andaza nahi lagaunga.`;
         toolOk = search.trains.length > 0;
         atlasTrace = {

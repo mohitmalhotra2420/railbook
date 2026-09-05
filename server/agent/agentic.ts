@@ -826,10 +826,20 @@ export async function executeApprovedTool(
             },
           );
         }
+        // User feedback (2026-09-05): train list dete waqt SABSE FAST train usi
+        // summary mein batao — user ko dobara poochna na pade. Duration ke hisaab se.
+        const withDur = trains.filter((t) => t.durationMinutes != null);
+        const fastest = withDur.length
+          ? withDur.reduce((best, t) => ((t.durationMinutes ?? Infinity) < (best.durationMinutes ?? Infinity) ? t : best))
+          : null;
+        const durLabel = (m: number) => `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
+        const fastestLine = fastest
+          ? ` Sabse fast: ${fastest.number} ${fastest.name} (${fastest.durationLabel ?? durLabel(fastest.durationMinutes ?? 0)}).`
+          : "";
         return okResult(
           search.provider,
           trains.length
-            ? `${fromRes.code}→${toRes.code} (${a.date}): ${trains.length} trains.`
+            ? `${fromRes.code}→${toRes.code} (${a.date}): ${trains.length} trains.${fastestLine}`
             : `${fromRes.code}→${toRes.code} (${a.date}): koi train nahi mili.`,
           {
             from: fromRes.code,
@@ -1072,6 +1082,8 @@ function systemPrompt(
     "9. Date sirf Deterministic date resolver line, date map ya known context se aayegi — khud calendar math kabhi mat karo. Resolver ka result FINAL hai; ambiguous ho to user se poochho; resolver kuch na de aur user ne absolute date di ho (jaise 5 September ya 05/09/2026) to map mein nahi hogi — tab user se confirm karo. Dhyan rahe: \"next <weekday>\" = AGLE hafte ka woh din (next Saturday aane wala Saturday nahi), \"coming <weekday>\"/bela weekday = aane wala pehla.",
     "10. Booking/payment kabhi tum nahi karte — booking tool tumhare paas hai hi nahi. User ticket book karna chahe to slots (origin/destination/date/passengers) jama karo aur trains dikhaao (SEARCH_TRAINS), phir bolo ki booking app ke TrainBoard/Confirm UI se hogi.",
     "11. Multi-station cities (Delhi, Bombay/Mumbai, Madras/Chennai, Calcutta/Kolkata…) ke liye KHUD station mat chuno — destination mein CITY NAAM hi pass karo; tool needs_choice ke saath real station options laayega, wahi user ko dikhao. Apni knowledge se station substitute (Calcutta→Howrah jaisa) kabhi nahi.",
+    "12. Jab bhi train LIST dikha rahe ho (SEARCH_TRAINS/JOURNEY_ANALYZE results), usi PEHLE jawab mein sabse FAST train batao — tool summary mein 'Sabse fast: <number> <name> (<duration>)' line aati hai, use reply mein top par highlight karo. User ko yeh dobara poochna na pade. Cheapest/earliest bhi isi tarah jab relevant ho.",
+    "13. Reply ke end mein PROACTIVE offer/continuation KABHI mat likho (jaise 'waise hum continue kar sakte hain', 'aap chahe to…', 'kya aapko aur kuch chahiye?', 'shall I continue?'). Sirf user ke sawaal ka jawab do — aage ka step tabhi batao jab user poochhe. (Zaroori slot-filling questions — date/station/passengers/booking-confirm — exempt hain, woh poochte raho.)",
   ]
     .filter(Boolean)
     .join("\n");
@@ -1081,6 +1093,26 @@ function redact(s: string): string {
   return s
     .replace(/rk_live_[A-Za-z0-9_-]+|rk_test_[A-Za-z0-9_-]+|nvapi-[A-Za-z0-9_-]+|vcp_[A-Za-z0-9]+/g, "[REDACTED]")
     .replace(/Bearer\s+[A-Za-z0-9._-]+/g, "Bearer [REDACTED]");
+}
+
+/**
+ * User feedback (2026-09-05): model reply ke end mein proactive
+ * offer/continuation sentences ("waise hum continue kar sakte hain",
+ * "aap chahe to…", "kya aapko aur kuch chahiye?") NAHI aane chahiye —
+ * jab tak user khud na poochhe. Sentence-level scrub (model-agnostic guard;
+ * system-prompt rule 13 bhi hai, yeh defensive backup hai).
+ * Slot-filling questions (date/station/passengers/booking-confirm) is se
+ * match nahi hote — woh required hain aur bane rehte hain.
+ */
+export function scrubProactiveOffers(s: string): string {
+  const OFFER_RE =
+    /(?:waise\b[^.?!]*continue|continue\s+kar\s+sakte|hum\s+continue\s+kar|aap\s+chahe\w*\s+to\b[^.?!]*(?:kar\s+sakte|dekh|bata|dika)|kya\s+aapko\s+(?:aur|bhi)\s+[^.?!]*(?:chahiye|dekh|bata|dika)|shall\s+(?:we|i)\s+(?:continue|proceed)|aur\s+kuch\s+(?:chahiye|poochh))/i;
+  const sentences = s.split(/(?<=[.?!])\s+/);
+  const kept = sentences.filter((x) => !OFFER_RE.test(x));
+  // Sirf-pura-offer reply → "" (runAgent phir deterministic fallback se jawab dega).
+  // Short-but-legit remainder ("Done.") kabhi original se replace NAHI hota.
+  const out = kept.join(" ").replace(/\s{2,}/g, " ").trimEnd();
+  return out.length > 0 ? out : "";
 }
 
 /** Trace/test ke liye: model ke raw args ko zod se guzar kar EXECUTED args nikaalo. */
@@ -1471,7 +1503,7 @@ export async function runAgenticTurn(input: {
         failureReason: "empty_content",
       };
     }
-    const clean = redact(content);
+    const clean = scrubProactiveOffers(redact(content));
 
     // Repair pass (one-shot): model ne tools chala kar data le liya, phir bhi
     // "info maango" wala jawab de diya? Ek corrective call do — data upar hai.
