@@ -32,6 +32,7 @@ import { parseDatePhrase } from "../understand/legacy-dates.js";
 import { RailKitProvider } from "../railway/railkit.js";
 import type { ClassCode } from "../providers/types.js";
 import { executeTool } from "./tools.js";
+import { segmentOfStops } from "./context.js";
 
 export type AgenticToolName =
   | "SEARCH_TRAINS"
@@ -129,7 +130,11 @@ const ArgSchemas = {
     date: Ymd,
   }),
   GET_TRAIN_INFO: z.object({ train_number: z.string().regex(/^\d{4,6}$/) }),
-  GET_TIMETABLE: z.object({ train_number: z.string().regex(/^\d{4,6}$/) }),
+  GET_TIMETABLE: z.object({
+    train_number: z.string().regex(/^\d{4,6}$/),
+    origin: z.string().trim().min(2).max(20).nullish(),
+    destination: z.string().trim().min(2).max(20).nullish(),
+  }),
   TRACK_TRAIN: z.object({ train_number: z.string().regex(/^\d{4,6}$/), date: Ymd.nullish() }),
   CHECK_AVAILABILITY: z.object({
     train_number: z.string().regex(/^\d{4,6}$/),
@@ -895,10 +900,30 @@ export async function executeApprovedTool(
         if (!res.schedule) return failResult(res.provider, "Timetable nahi mili.");
         const stops = "stops" in res.schedule ? res.schedule.stops ?? [] : [];
         const name = "trainName" in res.schedule ? res.schedule.trainName : "";
+        const totalDur = "durationMinutes" in res.schedule ? (res.schedule as { durationMinutes: number | null }).durationMinutes ?? null : null;
+        // User feedback (2026-09-05): "kitne time leti hai" par poora-route
+        // duration bol raha tha — user ke origin→destination SEGMENT duration do.
+        let seg: ReturnType<typeof segmentOfStops> = null;
+        const segFrom = (a.origin as string | undefined) ?? null;
+        const segTo = (a.destination as string | undefined) ?? null;
+        if (segFrom && segTo) {
+          const fromRes = await resolveStationRef(segFrom);
+          const toRes = await resolveStationRef(segTo);
+          if (!("error" in fromRes) && !("candidates" in fromRes) && !("error" in toRes) && !("candidates" in toRes)) {
+            seg = segmentOfStops(stops, fromRes.code, toRes.code);
+          }
+        }
+        const segLine = seg ? `, ${seg.from}→${seg.to} ${seg.departure}→${seg.arrival} (${seg.durationLabel})` : "";
         return okResult(
           res.provider,
-          `${a.train_number} ${name} — ${stops.length} stops.`,
-          { trainNumber: a.train_number, trainName: name, stops },
+          `${a.train_number} ${name} — ${stops.length} stops${segLine}.`,
+          {
+            trainNumber: a.train_number,
+            trainName: name,
+            stops,
+            segment: seg,
+            totalRouteDurationMinutes: totalDur,
+          },
         );
       }
       case "TRACK_TRAIN": {
@@ -1108,6 +1133,8 @@ function systemPrompt(
     "9. Date sirf Deterministic date resolver line, date map ya known context se aayegi — khud calendar math kabhi mat karo. Resolver ka result FINAL hai; ambiguous ho to user se poochho; resolver kuch na de aur user ne absolute date di ho (jaise 5 September ya 05/09/2026) to map mein nahi hogi — tab user se confirm karo. Dhyan rahe: \"next <weekday>\" = AGLE hafte ka woh din (next Saturday aane wala Saturday nahi), \"coming <weekday>\"/bela weekday = aane wala pehla.",
     "10. Booking/payment kabhi tum nahi karte — booking tool tumhare paas hai hi nahi. User ticket book karna chahe to slots (origin/destination/date/passengers) jama karo aur trains dikhaao (SEARCH_TRAINS), phir bolo ki booking app ke TrainBoard/Confirm UI se hogi.",
     "11. Multi-station cities (Delhi, Bombay/Mumbai, Madras/Chennai, Calcutta/Kolkata…) ke liye KHUD station mat chuno — destination mein CITY NAAM hi pass karo; tool needs_choice ke saath real station options laayega, wahi user ko dikhao. Apni knowledge se station substitute (Calcutta→Howrah jaisa) kabhi nahi.",
+        "14. Train ka NAAM user ne bola (jaise 'swarn shatabdi', 'vande bharat') to USI train ka jawab do — known context mein trainNumber aaya hai ya list mein se naam match hua hai. Pichhli selected train se mix mat karo. Naam se train identify na ho to honestly poochho, galat train ka data mat do.",
+    "15. 'Kitne time leti hai / kitna samay lagta hai' = user ke origin→destination SEGMENT ka duration (GET_TIMETABLE summary mein 'FROM→TO dep→arr (Xh YYm)' segment line hai). Poora-route duration sirf tab batao jab user 'poora route' maange.",
     "12. Jab bhi train LIST dikha rahe ho (SEARCH_TRAINS/JOURNEY_ANALYZE results): reply TEXT mein sirf 2-3 line ka summary do — count + 'Sabse fast: <number> <name> (<duration>)' top par highlight. POORI train-by-train list reply text mein MAT likho — app khud organized TABLE mein saari trains dikhata hai. User ko dobara poochna na pade. Cheapest/earliest bhi isi tarah jab relevant ho.",
     "13. Reply ke end mein PROACTIVE offer/continuation KABHI mat likho (jaise 'waise hum continue kar sakte hain', 'aap chahe to…', 'kya aapko aur kuch chahiye?', 'shall I continue?'). Sirf user ke sawaal ka jawab do — aage ka step tabhi batao jab user poochhe. (Zaroori slot-filling questions — date/station/passengers/booking-confirm — exempt hain, woh poochte raho.)",
   ]
@@ -1488,6 +1515,16 @@ export async function runAgenticTurn(input: {
           args.date !== dateHint.date
         ) {
           args = { ...args, date: dateHint.date };
+        }
+        // GET_TIMETABLE segment (2026-09-05): model ne origin/destination na
+        // bheje ho to known context se inject — "kitne time leti hai" ka jawab
+        // user ke segment ka hona chahiye, poora-route ka nahi.
+        if (toolName === "GET_TIMETABLE" && typeof args.date === "undefined") {
+          /* date irrelevant here */
+        }
+        if (toolName === "GET_TIMETABLE") {
+          if (!args.origin && input.known?.origin) args = { ...args, origin: input.known.origin };
+          if (!args.destination && input.known?.destination) args = { ...args, destination: input.known.destination };
         }
         const result = await executeApprovedTool(toolName, args);
         // Structured table capture (user feedback 2026-09-05): SEARCH/JOURNEY

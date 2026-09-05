@@ -1,8 +1,13 @@
 import { runUnderstand } from "../understand/index.js";
 import { understand as deterministicUnderstand, type DialogSlot, type KnownSlots, type NluResult } from "../understand/legacy-nlu.js";
 import {
+  TRAIN_NAME_SUFFIX_RE,
+  TRAIN_TYPE_KEYWORD_RE,
   bookingInProgress,
   classifyFollowUp,
+  matchTrainNameInList,
+  mentionsTrainName,
+  trainNamePhrase,
   decideTool,
   emptyAgentContext,
   factReplyUnavailable,
@@ -23,6 +28,7 @@ import {
   type ToolTraceStep,
 } from "./agentic.js";
 import { routedClassBoard, routedStationSearch, searchTrainsRouted } from "../railway/router.js";
+import { searchRailcoreTrainsByName } from "../railway/railcore.js";
 
 /** Atlas analyse intents — decideTool inhe map nahi karta (model ki zimmedari hai),
  *  par agentic engine fail ho to deterministic fallback bhi inka honest answer deta hai. */
@@ -436,6 +442,50 @@ export async function resolveStationPick(
   return null;
 }
 
+/** Train NAAM se resolve (user feedback 2026-09-05: "kisi aur train ka naam
+ * se poocha, vande bharat hi bata diya"). (1) pichhli search list mein se naam
+ * match, (2) nahi to RailCore /trains/search API se. Ek solid match → number;
+ * multiple/zero → honest clarify (galat train ka data KABHI nahi). */
+async function resolveTrainByName(
+  text: string,
+  ctx: AgentContext,
+): Promise<{ trainNumber: string; trainName: string } | { clarify: string } | null> {
+  if (/\b\d{4,6}\b/.test(text)) return null; // number already diya
+  const list = ctx.lastTrains ?? [];
+
+  const listHit = list.length ? matchTrainNameInList(text, list) : null;
+  if (listHit && !("ambiguous" in listHit)) {
+    return { trainNumber: listHit.number, trainName: listHit.name };
+  }
+  if (listHit && "ambiguous" in listHit) {
+    const lines = listHit.ambiguous.slice(0, 4).map((t) => `${t.number} ${t.name}`).join("; ");
+    return { clarify: `Kaunsi train — ${lines}? Train number bata dijiye.` };
+  }
+
+  const hasNameKeyword = TRAIN_TYPE_KEYWORD_RE.test(text) || TRAIN_NAME_SUFFIX_RE.test(text);
+  if (!hasNameKeyword) return null;
+
+  const phrase = trainNamePhrase(text);
+  if (!phrase || phrase.length < 3) return null;
+  let results: { number: string; name: string; from: string; to: string }[] = [];
+  try {
+    results = await searchRailcoreTrainsByName(phrase);
+  } catch {
+    return null; // API fail — engine seedha jaane de (deterministic honest ask)
+  }
+  if (!results.length) {
+    return { clarify: `\"${phrase}\" naam se koi train nahi mili — train number (5-digit) bata dijiye. Main andaza nahi lagaunga.` };
+  }
+  // Route context se relevance: user ke origin/destination wali train pehle.
+  const o = ctx.origin?.code?.toUpperCase();
+  const d = ctx.destination?.code?.toUpperCase();
+  const routeMatched = results.filter((t) => (o && t.from === o) || (d && t.to === d) || (o && t.to === o) || (d && t.from === d));
+  const pool = routeMatched.length === 1 ? routeMatched : results;
+  if (pool.length === 1) return { trainNumber: pool[0].number, trainName: pool[0].name };
+  const lines = pool.slice(0, 4).map((t) => `${t.number} ${t.name} (${t.from}→${t.to})`).join("; ");
+  return { clarify: `\"${phrase}\" se ${pool.length} trains mili — kaunsi? ${lines}. Train number bata dijiye.` };
+}
+
 /** Search memory (2026-09-05 user feedback: "memory yaad nahi rehti"):
  * successful search ke baad ctx mein trains yaad rakho — agle turn par
  * "yeh wali / dusri wali / sabse fast wali" resolve ho sake, aur known
@@ -443,6 +493,7 @@ export async function resolveStationPick(
 function rememberSearch(ctx: AgentContext, table: AgentTrainTable | null | undefined): void {
   if (!table?.rows?.length) return;
   ctx.lastTrainNumbers = table.rows.map((r) => r.number);
+  ctx.lastTrains = table.rows.map((r) => ({ number: r.number, name: r.name }));
   ctx.fastestTrainNumber = table.fastest;
   // Highlighted (fastest) train hi reply mein sabse prominent thi — "us wali" default wahi.
   if (!ctx.selectedTrainNumber) {
@@ -530,7 +581,26 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
     }
   }
 
-  if (!isBookingMutation(req) && agenticConfigured()) {
+  /* Train NAAM se resolve (2026-09-05): "swarn shatabdi ka time batao" jaisi
+   * queries pichhli selected train par galti se na chal jayein. Ek solid match
+   * → dono engines ke liye selectedTrain set; ambiguous/zero → honest clarify
+   * (model ko galat train answer karne ka mauka hi nahi). */
+  let nameClarify: string | null = null;
+  if (!isBookingMutation(req)) {
+    try {
+      const resolved = await resolveTrainByName(req.text, seeded);
+      if (resolved && "trainNumber" in resolved) {
+        seeded.selectedTrainNumber = resolved.trainNumber;
+        seeded.selectedTrainName = resolved.trainName;
+      } else if (resolved && "clarify" in resolved) {
+        nameClarify = resolved.clarify;
+      }
+    } catch {
+      /* optional hai — normal flow continue */
+    }
+  }
+
+  if (!nameClarify && !isBookingMutation(req) && agenticConfigured()) {
     const det = deterministicUnderstand(req.text, {
       now: req.now ? new Date(req.now) : undefined,
       lastAsked: req.lastAsked ?? null,
@@ -643,6 +713,32 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
 
   const tool = decideTool(follow, ctx, understood.nlu.intent);
   ctx.lastTool = tool;
+
+  /* Naam ambiguous/zero tha — model skip ho chuka hai; yahan honest clarify
+   * hi final reply hai (koi tool call NAHI, koi galat train ka data NAHI). */
+  if (nameClarify) {
+    void neverAutoBook(understood.nlu.intent, req.bookingFlow);
+    return {
+      nlu: understood.nlu,
+      source: understood.source,
+      context: ctx,
+      tool: null,
+      toolOk: null,
+      reply: nameClarify,
+      interrupt: false,
+      resumeAsk: null,
+      resumeText: null,
+      trains: null,
+      confirmBook: false,
+      missingFields: understood.missingFields,
+      modelUsed: understood.modelUsed,
+      latencyMs: understood.latencyMs,
+      failureReason: understood.failureReason,
+      engine: "deterministic",
+      agenticFailureReason: "train_name_clarify",
+      grounded: true,
+    };
+  }
 
   let reply: string | null = null;
   let toolOk: boolean | null = null;

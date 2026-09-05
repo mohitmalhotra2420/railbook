@@ -53,6 +53,8 @@ export interface AgentContext {
   selectedTrainNumber: string | null;
   selectedTrainName: string | null;
   lastTrainNumbers: string[];
+  /** Pichhli search ki trains (number+name) — naam se reference resolve karne ke liye. */
+  lastTrains: { number: string; name: string }[];
   fastestTrainNumber: string | null;
   bookingStage: BookingStage;
   pendingAsk: DialogSlot;
@@ -73,6 +75,7 @@ export function emptyAgentContext(): AgentContext {
     selectedTrainNumber: null,
     selectedTrainName: null,
     lastTrainNumbers: [],
+    lastTrains: [],
     fastestTrainNumber: null,
     bookingStage: "idle",
     pendingAsk: null,
@@ -117,7 +120,7 @@ export function classifyFollowUp(text: string): FollowUp {
   ) {
     return "live";
   }
-  if (/\b(timetable|time table|schedule|ka time)\b/.test(t)) return "timetable";
+  if (/\b(timetable|time table|schedule|ka time|k[ai]tn[ea]?\s+time|time\s+le[nt]i?|time\s+lagta|duration|kitna\s+samay|kitne\s+samay)\b/.test(t)) return "timetable";
   if (/\b(fare|kitna padega|kitna lagega|price|kitna fare)\b/.test(t) || /किराया|कितना पड़ेगा/.test(text)) return "fare";
   if (
     /\b(available|availability|avl|seat(?:s)?\s*(?:hai|hain|available|batao|bata|btana|btao|bta|dikhao|check|status|btana)|kitni seats?)\b/.test(t) ||
@@ -157,6 +160,46 @@ export function isStationPickInterrupt(text: string): boolean {
   return false;
 }
 
+/* Train NAAM se resolve (server parity, 2026-09-05). */
+const TRAIN_NAME_GENERIC_TOKENS = new Set(["EXP", "EXPRESS", "MAIL", "SF", "SPL", "SPECIAL", "TRAIN", "TRAINS", "VIA"]);
+
+export function trainNameTokens(name: string): string[] {
+  return String(name ?? "")
+    .toUpperCase()
+    .split(/[^A-Z0-9]+/)
+    .filter((t) => t.length >= 3 && !TRAIN_NAME_GENERIC_TOKENS.has(t));
+}
+
+export function matchTrainNameInList(
+  text: string,
+  trains: { number: string; name: string }[],
+): { number: string; name: string } | { ambiguous: { number: string; name: string }[] } | null {
+  const words = new Set(
+    String(text ?? "")
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter(Boolean),
+  );
+  const hits: { number: string; name: string }[] = [];
+  for (const tr of trains) {
+    const toks = trainNameTokens(tr.name);
+    if (!toks.length) continue;
+    if (toks.every((tok) => words.has(tok.toLowerCase()))) hits.push(tr);
+  }
+  if (hits.length === 1) return hits[0];
+  if (hits.length > 1) return { ambiguous: hits };
+  return null;
+}
+
+const TRAIN_TYPE_KEYWORD_RE_CLIENT =
+  /\b(shatabdi|shatbdi|rajdhani|vande\s+bharat|vande|garib\s+rath|duronto|intercity|tejas|humsafar|gatimaan|gatiman|kranti|saryu|yamuna|jallianwala|punjab\s+mail|golden\s+temple|satluj|sutlej|akal|navyug|himsagar|janshatabdi|jan\s+shatabdi|double\s+decker)\b/i;
+const TRAIN_NAME_SUFFIX_RE_CLIENT = /\b[a-z]{3,}(?:\s+[a-z]{3,})*\s+(?:express|exp|mail)\b/i;
+
+export function mentionsTrainName(text: string, trains: { number: string; name: string }[] = []): boolean {
+  if (TRAIN_TYPE_KEYWORD_RE_CLIENT.test(text) || TRAIN_NAME_SUFFIX_RE_CLIENT.test(text)) return true;
+  return trains.length ? Boolean(matchTrainNameInList(text, trains)) : false;
+}
+
 export function resolveTrainNumber(text: string, ctx: AgentContext): string | undefined {
   const byNum = text.match(/\b(\d{5})\b/)?.[1];
   if (byNum) return byNum;
@@ -166,6 +209,9 @@ export function resolveTrainNumber(text: string, ctx: AgentContext): string | un
   if (/\b(yeh? wali|this (one|train)|isi ko)\b/i.test(text) && ctx.selectedTrainNumber) {
     return ctx.selectedTrainNumber;
   }
+  const listTrains = ctx.lastTrains ?? [];
+  const listHit = listTrains.length ? matchTrainNameInList(text, listTrains) : null;
+  if (listHit && !("ambiguous" in listHit)) return listHit.number;
   const list = ctx.lastTrainNumbers;
   const ordinal = text.match(/\b(\d+)(?:st|nd|rd|th)\s+train\b/i);
   if (ordinal) {
@@ -176,6 +222,7 @@ export function resolveTrainNumber(text: string, ctx: AgentContext): string | un
   if (/\b(doosri|dusri|second)(\s+wali|\s+train)?\b/i.test(text) && list[1]) return list[1];
   if (/\b(teesri|third)(\s+wali|\s+train)?\b/i.test(text) && list[2]) return list[2];
   if (/\b(chauthi|fourth)(\s+wali|\s+train)?\b/i.test(text) && list[3]) return list[3];
+  if (mentionsTrainName(text, listTrains)) return undefined;
   return ctx.selectedTrainNumber ?? undefined;
 }
 
@@ -185,7 +232,11 @@ export function mergeAgentContext(
   text: string,
   extra?: { selectedTrainNumber?: string | null; selectedTrainName?: string | null; lastTrainNumbers?: string[]; bookingStage?: BookingStage },
 ): AgentContext {
-  const next: AgentContext = { ...prev, lastTrainNumbers: [...prev.lastTrainNumbers] };
+  const next: AgentContext = {
+    ...prev,
+    lastTrainNumbers: [...prev.lastTrainNumbers],
+    lastTrains: [...(prev.lastTrains ?? [])],
+  };
   if (nlu.intent && nlu.intent !== "NONE" && nlu.intent !== "CONFIRM_YES" && nlu.intent !== "CONFIRM_NO") {
     next.intent = nlu.intent;
   }

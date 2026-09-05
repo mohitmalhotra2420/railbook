@@ -11,7 +11,7 @@ import {
 } from "../railway/router.js";
 import { getWallet } from "../wallet.js";
 import type { ClassCode } from "../providers/types.js";
-import { isForbiddenMoneyTool } from "./context.js";
+import { isForbiddenMoneyTool, segmentOfStops } from "./context.js";
 
 export type ToolName =
   | "searchStations"
@@ -144,10 +144,16 @@ export async function executeTool(
       const routed = await routedSchedule(args.trainNumber);
       const stops = routed.schedule && "stops" in routed.schedule ? routed.schedule.stops ?? [] : [];
       const name = routed.schedule && "trainName" in routed.schedule ? routed.schedule.trainName : "";
+      // User feedback (2026-09-05): duration jawab user ke origin→destination
+      // SEGMENT ka hona chahiye — poora route nahi (jab tak na maange).
+      const seg = segmentOfStops(stops, args.origin ?? null, args.destination ?? null);
+      const segLine = seg ? ` ${seg.from}→${seg.to}: ${seg.departure}→${seg.arrival} (${seg.durationLabel}).` : "";
       return {
         ok: Boolean(routed.schedule),
         tool,
-        summary: routed.schedule ? `${args.trainNumber} ${name} — ${stops.length} stops.` : "Timetable nahi mili.",
+        summary: routed.schedule
+          ? `${args.trainNumber} ${name} — ${stops.length} stops.${segLine}`
+          : "Timetable nahi mili.",
         data: routed.schedule,
         provider: routed.provider,
       };

@@ -237,6 +237,41 @@ export async function searchRailcoreStations(q: string): Promise<Station[]> {
   return (await searchRailcoreStationsResult(q)).stations;
 }
 
+/** Train search BY NAME (user feedback 2026-09-05: "naam se pehchana nahi") —
+ * /v1/trains/search?q= se real results: number, naam, source→destination. */
+export interface RailcoreTrainNameResult {
+  number: string;
+  name: string;
+  from: string;
+  to: string;
+  type: string;
+}
+
+export async function searchRailcoreTrainsByName(q: string): Promise<RailcoreTrainNameResult[]> {
+  const started = Date.now();
+  const query = q.trim();
+  if (!query) return [];
+  const res = await railcoreRequest("/trains/search", { q: query, limit: 10 });
+  logCall("trainNameSearch", started, res.ok, res.ok ? null : failReason(res.json));
+  if (!res.ok) return [];
+  const data = asObj(unwrap(res.json));
+  const rows = Array.isArray(data.results) ? data.results : [];
+  const out: RailcoreTrainNameResult[] = [];
+  for (const row of rows) {
+    const o = asObj(row);
+    const number = String(o.train_number ?? "").trim();
+    if (!/^\d{4,6}$/.test(number)) continue;
+    out.push({
+      number,
+      name: String(o.train_name ?? `Train ${number}`),
+      from: String(o.source_station_code ?? "").toUpperCase(),
+      to: String(o.destination_station_code ?? "").toUpperCase(),
+      type: String(o.train_type ?? ""),
+    });
+  }
+  return out;
+}
+
 export function isUsableLive(live: RailcoreLiveStatus | null): boolean {
   if (!live) return false;
   if (!live.trainNumber) return false;
