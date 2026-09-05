@@ -1060,6 +1060,7 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
     }
     const factQuery = `${subject ? subject + " " : ""}${factKeyword}`.trim().slice(0, 140);
     const webResults = await webSearch(factQuery, 3);
+    console.error(JSON.stringify({ factFallback: true, factQuery, results: webResults.length }));
     if (webResults.length) {
       const best = webResults[0];
       reply = `Web se mila: ${best.snippet}\n(Source: ${best.title} — ${best.url})\n(Ye railway API ka live data nahi, web-search ka jawab hai.)`;

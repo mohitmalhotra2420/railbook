@@ -34,9 +34,13 @@ async function fetchJson(url: string): Promise<unknown | null> {
       headers: { "User-Agent": "RailBook/1.0 (assistant web lookup)", Accept: "application/json" },
       signal: AbortSignal.timeout(WEB_TIMEOUT_MS),
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      console.error(JSON.stringify({ webLookup: "http_error", url: String(url).slice(0, 120), status: res.status }));
+      return null;
+    }
     return (await res.json()) as unknown;
-  } catch {
+  } catch (e) {
+    console.error(JSON.stringify({ webLookup: "fetch_error", url: String(url).slice(0, 120), err: String(e).slice(0, 140) }));
     return null;
   }
 }
@@ -104,6 +108,7 @@ export async function webSearch(query: string, limit = 4): Promise<WebSearchResu
   const q = query.trim().slice(0, 200);
   if (!q) return [];
   const [ddg, wikiEn] = await Promise.all([ddgInstantAnswer(q), wikipediaLookup(q, "en")]);
+  console.error(JSON.stringify({ webLookup: "results", q: q.slice(0, 90), ddg: ddg.length, wikiEn: wikiEn.length }));
   let results = [...ddg, ...wikiEn];
   if (!results.length) {
     const wikiHi = await wikipediaLookup(q, "hi");
