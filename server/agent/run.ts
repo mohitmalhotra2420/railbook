@@ -9,12 +9,19 @@ import {
   mergeAgentContext,
   neverAutoBook,
   resolveTrainNumber,
-  resumeBookingLine,
   type AgentContext,
   type AgentToolName,
 } from "./context.js";
 import { executeTool, type ToolName } from "./tools.js";
-import { agenticConfigured, runAgenticTurn, type AgenticHistoryTurn, type ToolTraceStep } from "./agentic.js";
+import {
+  agenticConfigured,
+  runAgenticTurn,
+  type AgentTrainRow,
+  type AgentTrainTable,
+  type AgenticHistoryTurn,
+  type SearchCapture,
+  type ToolTraceStep,
+} from "./agentic.js";
 import { routedClassBoard, routedStationSearch, searchTrainsRouted } from "../railway/router.js";
 
 /** Atlas analyse intents — decideTool inhe map nahi karta (model ki zimmedari hai),
@@ -35,7 +42,7 @@ async function atlasFallback(
   pref: "fastest" | "cheapest" | "best",
   ctx: AgentContext,
   nlu: NluResult,
-): Promise<{ reply: string; ok: boolean; trace: ToolTraceStep; grounded: boolean }> {
+): Promise<{ reply: string; ok: boolean; trace: ToolTraceStep; grounded: boolean; trains: AgentTrainTable | null }> {
   const trace = (ok: boolean, source: string | null, summary: string, dataPreview?: string): ToolTraceStep => ({
     step: 1,
     tool: "JOURNEY_ANALYZE",
@@ -70,6 +77,7 @@ async function atlasFallback(
         JSON.stringify({ needs_choice: true, city: res.city ?? unresolved }).slice(0, 400),
       ),
       grounded: true, // sirf sawaal — koi factual claim nahi
+      trains: null,
     };
   }
 
@@ -82,7 +90,7 @@ async function atlasFallback(
         ? "Kis date ko jaana hai?"
         : null;
   if (missingAsk) {
-    return { reply: missingAsk, ok: false, trace: trace(false, null, "slot missing — clarification"), grounded: true };
+    return { reply: missingAsk, ok: false, trace: trace(false, null, "slot missing — clarification"), grounded: true, trains: null };
   }
 
   /* 3) REAL search + bounded fare probe — numbers sirf provider evidence se. */
@@ -99,6 +107,7 @@ async function atlasFallback(
         JSON.stringify({ trains: 0, provider: search.provider }).slice(0, 400),
       ),
       grounded: true, // "0 trains" claim provider evidence se hi aaya
+      trains: null,
     };
   }
 
@@ -149,17 +158,30 @@ async function atlasFallback(
       const c = probe.get(t.number) ?? null;
       return `${t.number} ${t.name} (${c ? `${c.classCode} ₹${c.fare.toLocaleString("en-IN")}` : `dur. ${t.durationLabel}`})`;
     });
+  // Sabse fast UPFRONT (user feedback 2026-09-05): lead train fast se different
+  // ho to bhi fastest line reply mein top ke paas rahe — table mein bhi highlight hai.
+  const fastestAll = [...trains].sort((a, b) => a.durationMinutes - b.durationMinutes)[0];
+  const fastestLine =
+    fastestAll && fastestAll.number !== train.number
+      ? `Sabse fast: ${fastestAll.number} ${fastestAll.name} (${fastestAll.durationLabel}).`
+      : "";
   const reply = [
     `${label} ${ctx.origin!.code} → ${ctx.destination!.code} (${ctx.date!}): ${train.number} ${train.name} — ${train.departure} → ${train.arrival} (${train.durationLabel}).`,
     fareLine,
+    fastestLine,
     others.length ? `Aur options: ${others.join("; ")}.` : "",
+    `Poora comparison neeche table mein hai.`,
     `(Real ${search.provider} data — guess nahi.)`,
   ]
     .filter(Boolean)
     .join("\n");
+  const fares = new Map<string, { classCode: string; amount: number } | null>(
+    [...probe.entries()].map(([n, f]) => [n, f ? { classCode: f.classCode, amount: f.fare } : null]),
+  );
   return {
     reply,
     ok: true,
+    trains: tableFromSearch(ctx.origin!.code, ctx.destination!.code, ctx.date!, ranked.slice(0, 12), fares),
     trace: trace(
       true,
       search.provider,
@@ -208,6 +230,8 @@ export type AgentResponse = {
   failureReason: string | null;
   engine?: "agentic_tool_calling" | "deterministic";
   toolTrace?: ToolTraceStep[];
+  /** Structured search results — client isse organized TABLE banata hai (2026-09-05 feedback). */
+  trains?: AgentTrainTable | null;
   grounded?: boolean;
   /** Agentic turn chala par model/provider fail hua to wajah (observability; success par null). */
   agenticFailureReason?: string | null;
@@ -412,6 +436,48 @@ export async function resolveStationPick(
   return null;
 }
 
+/** Search memory (2026-09-05 user feedback: "memory yaad nahi rehti"):
+ * successful search ke baad ctx mein trains yaad rakho — agle turn par
+ * "yeh wali / dusri wali / sabse fast wali" resolve ho sake, aur known
+ * context model tak pahunchta rahe. */
+function rememberSearch(ctx: AgentContext, table: AgentTrainTable | null | undefined): void {
+  if (!table?.rows?.length) return;
+  ctx.lastTrainNumbers = table.rows.map((r) => r.number);
+  ctx.fastestTrainNumber = table.fastest;
+  // Highlighted (fastest) train hi reply mein sabse prominent thi — "us wali" default wahi.
+  if (!ctx.selectedTrainNumber) {
+    ctx.selectedTrainNumber = table.fastest ?? table.rows[0].number ?? null;
+    ctx.selectedTrainName = table.rows.find((r) => r.number === ctx.selectedTrainNumber)?.name ?? null;
+  }
+  ctx.bookingStage = "results";
+}
+
+/** TrainResult[] → AgentTrainTable (deterministic paths ke liye). */
+function tableFromSearch(
+  from: string,
+  to: string,
+  date: string,
+  trains: { number: string; name: string; departure: string; arrival: string; arrivalDayOffset: number; durationMinutes: number; durationLabel: string; classes: { code: string }[] }[],
+  fares?: Map<string, { classCode: string; amount: number } | null>,
+): AgentTrainTable {
+  const rows: AgentTrainRow[] = trains.map((t) => ({
+    number: t.number,
+    name: t.name,
+    departure: t.departure,
+    arrival: t.arrival,
+    arrivalDayOffset: t.arrivalDayOffset,
+    durationMinutes: t.durationMinutes,
+    durationLabel: t.durationLabel,
+    classes: t.classes.map((c) => c.code),
+    fare: fares?.get(t.number) ?? null,
+  }));
+  const withDur = rows.filter((r) => r.durationMinutes != null);
+  const fastest = withDur.length
+    ? withDur.reduce((best, r) => ((r.durationMinutes ?? Infinity) < (best.durationMinutes ?? Infinity) ? r : best))
+    : null;
+  return { from, to, date, fastest: fastest?.number ?? null, rows };
+}
+
 function seedContext(req: AgentRequest): AgentContext {
   const base = req.context ? { ...req.context } : emptyAgentContext();
   if (req.known?.from) base.origin = req.known.from;
@@ -480,11 +546,13 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
     const trainNo = resolveTrainNumber(req.text, ctx) ?? det.trainNumber;
     if (trainNo) ctx.selectedTrainNumber = trainNo;
 
+    const capture: SearchCapture = { table: null };
     try {
       const turn = await runAgenticTurn({
         text: req.text,
         now: req.now,
         history: req.history,
+        capture,
         known: {
           origin: ctx.origin?.code ?? null,
           destination: ctx.destination?.code ?? null,
@@ -510,9 +578,11 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
         /provider se nahi mil|gadh ke nahi bataunga|unavailable/i.test(String(turn.reply ?? ""));
       if (unhelpfulNoData) agenticFailureReason = "unhelpful_summary_with_pending_choice";
       if (turn.reply && !pickReasked && !unhelpfulNoData) {
-        const interrupt = bookingInProgress(ctx) && follow !== "more_trains" && follow !== "train_pick" && !asksStationChoice(turn.reply);
-        if (interrupt) ctx.bookingStage = "paused";
-        const resume = interrupt ? resumeBookingLine({ ...ctx, bookingStage: "collecting" }) : null;
+        // Memory (2026-09-05): search hui to trains ctx mein yaad rakho.
+        rememberSearch(ctx, capture.table);
+        // User instruction (2026-09-05): "waise hum continue kar sakte hain"
+        // jaisi proactive lines KABHI nahi — user poochhe tabhi aayengi.
+        // interrupt/resume mechanism band; slot-filling sawaal reply ke andar hi aate hain.
         void neverAutoBook(det.intent, req.bookingFlow);
         return {
           nlu: det,
@@ -521,9 +591,10 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
           tool: null,
           toolOk: turn.ok ? true : false,
           reply: turn.reply,
-          interrupt,
-          resumeAsk: resume?.ask ?? null,
-          resumeText: resume?.text ?? null,
+          interrupt: false,
+          resumeAsk: null,
+          resumeText: null,
+          trains: capture.table,
           confirmBook: false,
           missingFields: missingOf({
             from: det.from,
@@ -584,12 +655,18 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
   let atlasGrounded: boolean | undefined;
   const atlasPref = ATLAS_PREF[understood.nlu.intent];
   const searchishIntent = Boolean(atlasPref) || understood.nlu.intent === "SEARCH_TRAIN" || understood.nlu.intent === "BOOK_TRAIN";
-  if (!tool && searchishIntent) {
+  let detTrains: AgentTrainTable | null = null;
+  // tool === "searchTrains" ka deterministic executor hai hi nahi (agentic
+  // engine ka tool hai) — searchish intent + complete slots par atlasFallback
+  // hi real search + table + memory dega. Warna agentic timeout par EMPTY reply.
+  if ((!tool || tool === "searchTrains") && searchishIntent) {
     const outcome = await atlasFallback(atlasPref ?? "best", ctx, understood.nlu);
     reply = outcome.reply;
     toolOk = outcome.ok;
     atlasTrace = outcome.trace;
     atlasGrounded = outcome.grounded;
+    detTrains = outcome.trains;
+    rememberSearch(ctx, detTrains);
   }
 
   /* Station-choice reply ("4"/"NDLS") ka deterministic answer — slot context
@@ -612,9 +689,11 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
           : null;
         const fastestLine = fastest ? ` Sabse fast: ${fastest.number} ${fastest.name} (${fastest.durationLabel}).` : "";
         reply = search.trains.length
-          ? `Theek hai — ${ctx.origin!.code} → ${ctx.destination!.code} (${ctx.date}): ${search.trains.length} trains mili.${fastestLine} Top: ${top}.`
+          ? `Theek hai — ${ctx.origin!.code} → ${ctx.destination!.code} (${ctx.date}): ${search.trains.length} trains mili.${fastestLine} Poori list neeche table mein hai.`
           : `${ctx.origin!.code} → ${ctx.destination!.code} (${ctx.date}) ke liye koi train nahi mili — main andaza nahi lagaunga.`;
         toolOk = search.trains.length > 0;
+        detTrains = tableFromSearch(ctx.origin!.code, ctx.destination!.code, ctx.date!, search.trains.slice(0, 12));
+        rememberSearch(ctx, detTrains);
         atlasTrace = {
           step: 1,
           tool: "SEARCH_TRAINS",
@@ -673,10 +752,8 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
     reply = "Availability ke liye train, class aur date chahiye.";
   }
 
-  const interrupt = Boolean(reply) && bookingInProgress(ctx) && follow !== "more_trains" && follow !== "train_pick" && !asksStationChoice(reply);
-  if (interrupt) ctx.bookingStage = "paused";
-  const resume = interrupt ? resumeBookingLine({ ...ctx, bookingStage: "collecting" }) : null;
-
+  // User instruction (2026-09-05): proactive "waise hum continue kar sakte hain"
+  // lines KABHI nahi bhejna — resume mechanism band.
   void neverAutoBook(understood.nlu.intent, req.bookingFlow);
 
   return {
@@ -686,9 +763,10 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
     tool,
     toolOk,
     reply,
-    interrupt,
-    resumeAsk: resume?.ask ?? null,
-    resumeText: resume?.text ?? null,
+    interrupt: false,
+    resumeAsk: null,
+    resumeText: null,
+    trains: detTrains,
     confirmBook: false,
     missingFields: understood.missingFields,
     modelUsed: understood.modelUsed,

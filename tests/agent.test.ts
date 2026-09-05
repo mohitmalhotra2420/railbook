@@ -151,7 +151,10 @@ describe("agent context + follow-ups", () => {
     });
     expect(turn.liveTrain).toBe("12014");
     expect(turn.resumeAsk).toBe("date");
-    expect(turn.resumeText).toMatch(/continue/i);
+    // 2026-09-05 user instruction: no proactive "continue kar sakte hain" phrasing —
+    // seedha slot-filling sawaal (date) aana chahiye.
+    expect(turn.resumeText).toMatch(/kis date ko jaana hai\?/i);
+    expect(turn.resumeText).not.toMatch(/continue/i);
     expect(turn.confirmBook).toBeFalsy();
   });
 

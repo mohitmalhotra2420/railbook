@@ -80,6 +80,31 @@ export type AgenticTurn = {
   failureReason: string | null;
 };
 
+/* ── Structured train table (user feedback 2026-09-05: chat-text list
+ * instead of an organized table) — search tools ka structured output,
+ * response ke saath client tak jaata hai aur wahan proper <table> banta hai. */
+export type AgentTrainRow = {
+  number: string;
+  name: string;
+  departure: string;
+  arrival: string;
+  arrivalDayOffset: number;
+  durationMinutes: number | null;
+  durationLabel: string | null;
+  classes: string[];
+  fare?: { classCode: string; amount: number } | null;
+};
+
+export type AgentTrainTable = {
+  from: string;
+  to: string;
+  date: string;
+  fastest: string | null;
+  rows: AgentTrainRow[];
+};
+
+export type SearchCapture = { table: AgentTrainTable | null };
+
 /* ── Injectable NVIDIA fetch (tests) ─────────────────────────────── */
 
 let nvidiaFetchImpl: typeof fetch | null = null;
@@ -853,6 +878,7 @@ export async function executeApprovedTool(
               arrival: t.arrival,
               arrivalDayOffset: t.arrivalDayOffset,
               durationMinutes: t.durationMinutes,
+              durationLabel: t.durationLabel,
               classes: t.classes.map((c) => c.code),
             })),
           },
@@ -1082,7 +1108,7 @@ function systemPrompt(
     "9. Date sirf Deterministic date resolver line, date map ya known context se aayegi — khud calendar math kabhi mat karo. Resolver ka result FINAL hai; ambiguous ho to user se poochho; resolver kuch na de aur user ne absolute date di ho (jaise 5 September ya 05/09/2026) to map mein nahi hogi — tab user se confirm karo. Dhyan rahe: \"next <weekday>\" = AGLE hafte ka woh din (next Saturday aane wala Saturday nahi), \"coming <weekday>\"/bela weekday = aane wala pehla.",
     "10. Booking/payment kabhi tum nahi karte — booking tool tumhare paas hai hi nahi. User ticket book karna chahe to slots (origin/destination/date/passengers) jama karo aur trains dikhaao (SEARCH_TRAINS), phir bolo ki booking app ke TrainBoard/Confirm UI se hogi.",
     "11. Multi-station cities (Delhi, Bombay/Mumbai, Madras/Chennai, Calcutta/Kolkata…) ke liye KHUD station mat chuno — destination mein CITY NAAM hi pass karo; tool needs_choice ke saath real station options laayega, wahi user ko dikhao. Apni knowledge se station substitute (Calcutta→Howrah jaisa) kabhi nahi.",
-    "12. Jab bhi train LIST dikha rahe ho (SEARCH_TRAINS/JOURNEY_ANALYZE results), usi PEHLE jawab mein sabse FAST train batao — tool summary mein 'Sabse fast: <number> <name> (<duration>)' line aati hai, use reply mein top par highlight karo. User ko yeh dobara poochna na pade. Cheapest/earliest bhi isi tarah jab relevant ho.",
+    "12. Jab bhi train LIST dikha rahe ho (SEARCH_TRAINS/JOURNEY_ANALYZE results): reply TEXT mein sirf 2-3 line ka summary do — count + 'Sabse fast: <number> <name> (<duration>)' top par highlight. POORI train-by-train list reply text mein MAT likho — app khud organized TABLE mein saari trains dikhata hai. User ko dobara poochna na pade. Cheapest/earliest bhi isi tarah jab relevant ho.",
     "13. Reply ke end mein PROACTIVE offer/continuation KABHI mat likho (jaise 'waise hum continue kar sakte hain', 'aap chahe to…', 'kya aapko aur kuch chahiye?', 'shall I continue?'). Sirf user ke sawaal ka jawab do — aage ka step tabhi batao jab user poochhe. (Zaroori slot-filling questions — date/station/passengers/booking-confirm — exempt hain, woh poochte raho.)",
   ]
     .filter(Boolean)
@@ -1261,6 +1287,8 @@ export async function runAgenticTurn(input: {
   };
   /** Prior conversation turns (multi-turn state) — redacted, capped, sent before the current user message. */
   history?: AgenticHistoryTurn[];
+  /** Optional out-param: successful search tools yahan structured table capture karte hain. */
+  capture?: SearchCapture;
 }): Promise<AgenticTurn> {
   const startedAll = Date.now();
   const transport = agenticTransport();
@@ -1462,6 +1490,57 @@ export async function runAgenticTurn(input: {
           args = { ...args, date: dateHint.date };
         }
         const result = await executeApprovedTool(toolName, args);
+        // Structured table capture (user feedback 2026-09-05): SEARCH/JOURNEY
+        // success par rows nikalo — client proper <table> render karega, aur
+        // run.ts inhi se ctx memory (lastTrainNumbers/fastest) bharta hai.
+        if (result.ok && input.capture && (toolName === "SEARCH_TRAINS" || toolName === "JOURNEY_ANALYZE")) {
+          const d = result.data as
+            | {
+                from?: string;
+                to?: string;
+                date?: string;
+                trains?: AgentTrainRow[];
+                query?: { from?: string; to?: string; date?: string };
+                direct?: { ranked?: (AgentTrainRow & { cheapest?: { fare: number; classCode: string } | null })[] };
+              }
+            | null;
+          const q = d?.query ?? d;
+          const rows: AgentTrainRow[] =
+            toolName === "SEARCH_TRAINS"
+              ? Array.isArray(d?.trains)
+                ? (d?.trains ?? []).map((t) => ({ ...t, fare: t.fare ?? null }))
+                : []
+              : Array.isArray(d?.direct?.ranked)
+                ? (d?.direct?.ranked ?? []).map((t) => ({
+                    ...t,
+                    durationLabel: t.durationLabel ?? (t.durationMinutes != null ? `${Math.floor(t.durationMinutes / 60)}h ${String(t.durationMinutes % 60).padStart(2, "0")}m` : null),
+                    fare: t.cheapest ? { classCode: t.cheapest.classCode, amount: t.cheapest.fare } : null,
+                  }))
+                : [];
+          if (d && rows.length && q?.from && q?.to && q?.date) {
+            const withDur = rows.filter((t) => t.durationMinutes != null);
+            const fastest = withDur.length
+              ? withDur.reduce((best, t) => ((t.durationMinutes ?? Infinity) < (best.durationMinutes ?? Infinity) ? t : best))
+              : null;
+            input.capture.table = {
+              from: String(q.from),
+              to: String(q.to),
+              date: String(q.date),
+              fastest: fastest?.number ?? null,
+              rows: rows.map((t) => ({
+                number: String(t.number),
+                name: String(t.name ?? ""),
+                departure: String(t.departure ?? "--:--"),
+                arrival: String(t.arrival ?? "--:--"),
+                arrivalDayOffset: Number(t.arrivalDayOffset ?? 0) || 0,
+                durationMinutes: t.durationMinutes ?? null,
+                durationLabel: t.durationLabel ?? null,
+                classes: Array.isArray(t.classes) ? t.classes.map(String) : [],
+                fare: t.fare ?? null,
+              })),
+            };
+          }
+        }
         const rd = result.data as { needs_choice?: boolean; city?: string; stations?: { code: string; name: string }[] } | null;
         if (!result.ok && rd?.needs_choice && Array.isArray(rd.stations)) {
           lastNeedsChoice = { city: rd.city ?? "station", stations: rd.stations };

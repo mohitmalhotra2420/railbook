@@ -183,6 +183,7 @@ export function createApp() {
         failureReason: result.failureReason,
         engine: result.engine ?? null,
         toolTrace: result.toolTrace ?? null,
+        trains: result.trains ?? null,
         grounded: result.grounded ?? null,
         agenticFailureReason: (result as { agenticFailureReason?: string | null }).agenticFailureReason ?? null,
       });

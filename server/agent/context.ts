@@ -31,6 +31,8 @@ export interface AgentContext {
   selectedTrainNumber: string | null;
   selectedTrainName: string | null;
   lastTrainNumbers: string[];
+  /** Search ke turant baad "sabse fast wali" jaise references resolve karne ke liye. */
+  fastestTrainNumber: string | null;
   bookingStage: BookingStage;
   pendingAsk: DialogSlot;
   lastTool: AgentToolName;
@@ -50,6 +52,7 @@ export function emptyAgentContext(): AgentContext {
     selectedTrainNumber: null,
     selectedTrainName: null,
     lastTrainNumbers: [],
+    fastestTrainNumber: null,
     bookingStage: "idle",
     pendingAsk: null,
     lastTool: null,
@@ -118,6 +121,11 @@ export function classifyFollowUp(text: string): FollowUp {
 export function resolveTrainNumber(text: string, ctx: AgentContext): string | undefined {
   const byNum = text.match(/\b(\d{5})\b/)?.[1];
   if (byNum) return byNum;
+  // Memory (2026-09-05): "sabse fast wali / sabse tez train" — pichhli search
+  // ka fastest yaad hai to wahi resolve karo, model se dobara mat poochhwao.
+  if (/\bsabse\s+(fast|tez|jaldi|shighra)\b|\bfastest\b/i.test(text) && ctx.fastestTrainNumber) {
+    return ctx.fastestTrainNumber;
+  }
   if (/\b(yeh? wali|this (one|train)|isi ko)\b/i.test(text) && ctx.selectedTrainNumber) {
     return ctx.selectedTrainNumber;
   }
@@ -209,19 +217,19 @@ export function resumeBookingLine(ctx: AgentContext): { ask: DialogSlot; text: s
       : "aapki booking";
   const when = ctx.dateProvided && ctx.date ? ` ${ctx.date} ki` : "";
   if (ask === "date") {
-    return { ask, text: `Waise hum${when} ${route} booking continue kar sakte hain. Kis date ko jaana hai?` };
+    return { ask, text: `${route}${when} kis date ko jaana hai?` };
   }
   if (ask === "passengers") {
-    return { ask, text: `Waise hum${when} ${route} booking continue kar sakte hain. Kitne passengers hain?` };
+    return { ask, text: `${route}${when} kitne passengers hain?` };
   }
   if (ask === "from") {
-    return { ask, text: `Waise booking continue kar sakte hain. Kahan se jaana hai?` };
+    return { ask, text: "Kahan se jaana hai?" };
   }
   if (ask === "to") {
-    return { ask, text: `Waise booking continue kar sakte hain. Kahan jaana hai?` };
+    return { ask, text: "Kahan jaana hai?" };
   }
   if (ctx.bookingStage === "results" || ctx.lastTrainNumbers.length) {
-    return { ask: "train", text: `Waise ${route} ki trains pehle wali list se continue kar sakte hain. Kaunsi train choose karein?` };
+    return { ask: "train", text: `${route} ki trains — kaunsi choose karein?` };
   }
   return null;
 }

@@ -1390,3 +1390,68 @@ h2 { font-size: 17px; }
   overflow-y: auto;
   padding-right: 2px;
 }
+
+/* ── Train table (chat search results, 2026-09-05) ─────────────────── */
+.traintable-wrap {
+  margin-top: 10px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--card);
+  overflow: hidden;
+  box-shadow: var(--shadow);
+}
+.traintable-head {
+  padding: 10px 14px;
+  background: var(--navy);
+  color: #fff;
+  font-size: 14px;
+}
+.traintable-head .muted { color: #c9d4e4; }
+.traintable-scroll { overflow-x: auto; }
+table.traintable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  min-width: 520px;
+}
+.traintable th {
+  text-align: left;
+  padding: 8px 10px;
+  background: var(--paper);
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+.traintable td {
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+  white-space: nowrap;
+}
+.traintable tbody tr:last-child td { border-bottom: none; }
+.traintable tbody tr.fastest td {
+  background: var(--green-soft);
+  border-top: 1px solid var(--green);
+  border-bottom: 1px solid var(--green);
+}
+.tt-name strong { margin-right: 4px; }
+.tt-fast {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--green);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+}
+.tt-classes { color: var(--muted); }
+.traintable-foot {
+  padding: 6px 14px;
+  font-size: 11px;
+  background: var(--paper);
+}

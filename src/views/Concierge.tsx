@@ -9,6 +9,7 @@ import { validatePassengers } from "../booking/state";
 import { loadTravellers } from "../data/travellers";
 import { availabilityLabel, formatShortDate, inr, newId } from "../format";
 import { BERTH_BY_CLASS, CLASS_LABELS, isBookable, type ClassAvailability, type ClassCode, type Passenger, type Station, type TrainResult } from "../types";
+import type { AgentTrainTable } from "../ai/agent";
 
 import type { ChatMessage } from "../conversation/types";
 import { useVoiceInput } from "../voice/useVoiceInput";
@@ -673,7 +674,15 @@ export function Concierge() {
             ? `\n\n⚙️ ${trace.map((t) => t.tool).join(" → ")}${sources ? ` (${sources})` : ""}`
             : "";
           setThinking(false);
-          setMessages((m) => [...m, { id: newId(), role: "assistant", text: agentRes.reply! + traceLine }]);
+          // User feedback (2026-09-05): train list chat-text nahi — proper organized TABLE.
+          const tableBlock =
+            agentRes.trains && agentRes.trains.rows.length
+              ? [{ type: "traintable" as const, table: agentRes.trains }]
+              : undefined;
+          setMessages((m) => [
+            ...m,
+            { id: newId(), role: "assistant", text: agentRes.reply! + traceLine, blocks: tableBlock },
+          ]);
           if (agentRes.interrupt && agentRes.resumeText) {
             if (agentRes.resumeAsk) setLastAsked(agentRes.resumeAsk);
             setMessages((m) => [...m, { id: newId(), role: "assistant", text: agentRes.resumeText! }]);
@@ -1306,6 +1315,9 @@ function BlockView({
   onBookings: () => void;
 }) {
   const { updatePassenger } = useBooking();
+  if (block.type === "traintable") {
+    return <TrainTableView table={block.table} />;
+  }
   if (block.type === "chips") {
     return (
       <div className="inline-chips">
@@ -1573,5 +1585,58 @@ function TrainMini({
       )}
       {primary && <div className="choose">Choose this train</div>}
     </button>
+  );
+}
+
+/* ── Organized train table (user feedback 2026-09-05) ─────────────────
+ * Chat-text bullet list confusing thi — ab search results proper <table>
+ * mein aate hain: train, nikalne/pahunchne ka time, duration, classes.
+ * Sabse fast row ⚡ ke saath highlight. Data 100% server tool evidence se. */
+function TrainTableView({ table }: { table: AgentTrainTable }) {
+  const rows = table.rows ?? [];
+  const day = (n: number) => (n > 0 ? `+${n}d` : "");
+  return (
+    <div className="traintable-wrap">
+      <div className="traintable-head">
+        <strong>{table.from} → {table.to}</strong>
+        <span className="muted"> · {formatShortDate(table.date)} · {rows.length} trains</span>
+      </div>
+      <div className="traintable-scroll">
+        <table className="traintable">
+          <thead>
+            <tr>
+              <th>Train</th>
+              <th>Nikal</th>
+              <th>Pahunche</th>
+              <th>Time</th>
+              <th>Class</th>
+              <th>Fare</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((t) => {
+              const isFastest = table.fastest != null && t.number === table.fastest;
+              return (
+                <tr key={t.number} className={isFastest ? "fastest" : undefined}>
+                  <td className="tt-name">
+                    <strong>{t.number}</strong> {t.name}
+                    {isFastest && <span className="tt-fast">⚡ Sabse fast</span>}
+                  </td>
+                  <td>{t.departure}</td>
+                  <td>
+                    {t.arrival}
+                    {t.arrivalDayOffset > 0 && <span className="muted"> +{t.arrivalDayOffset}d</span>}
+                  </td>
+                  <td>{t.durationLabel ?? (t.durationMinutes != null ? `${Math.floor(t.durationMinutes / 60)}h ${String(t.durationMinutes % 60).padStart(2, "0")}m` : "—")}</td>
+                  <td className="tt-classes">{t.classes.join(", ") || "—"}</td>
+                  <td>{t.fare ? `${t.fare.classCode} ₹${t.fare.amount.toLocaleString("en-IN")}` : "—"}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <div className="traintable-foot muted">Real railway data · koi guess nahi</div>
+    </div>
   );
 }

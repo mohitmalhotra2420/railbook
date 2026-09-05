@@ -3,6 +3,27 @@ import { nextMissing } from "./nlu";
 import type { Station } from "../types";
 import { isGoesToAsk } from "./facts";
 
+/** Server /api/agent `trains` payload — organized train table (2026-09-05). */
+export interface AgentTrainRow {
+  number: string;
+  name: string;
+  departure: string;
+  arrival: string;
+  arrivalDayOffset: number;
+  durationMinutes: number | null;
+  durationLabel: string | null;
+  classes: string[];
+  fare?: { classCode: string; amount: number } | null;
+}
+
+export interface AgentTrainTable {
+  from: string;
+  to: string;
+  date: string;
+  fastest: string | null;
+  rows: AgentTrainRow[];
+}
+
 export type AgentToolName =
   | "searchStations"
   | "searchTrains"
@@ -32,6 +53,7 @@ export interface AgentContext {
   selectedTrainNumber: string | null;
   selectedTrainName: string | null;
   lastTrainNumbers: string[];
+  fastestTrainNumber: string | null;
   bookingStage: BookingStage;
   pendingAsk: DialogSlot;
   lastTool: AgentToolName;
@@ -51,6 +73,7 @@ export function emptyAgentContext(): AgentContext {
     selectedTrainNumber: null,
     selectedTrainName: null,
     lastTrainNumbers: [],
+    fastestTrainNumber: null,
     bookingStage: "idle",
     pendingAsk: null,
     lastTool: null,
@@ -137,6 +160,9 @@ export function isStationPickInterrupt(text: string): boolean {
 export function resolveTrainNumber(text: string, ctx: AgentContext): string | undefined {
   const byNum = text.match(/\b(\d{5})\b/)?.[1];
   if (byNum) return byNum;
+  if (/\bsabse\s+(fast|tez|jaldi|shighra)\b|\bfastest\b/i.test(text) && ctx.fastestTrainNumber) {
+    return ctx.fastestTrainNumber;
+  }
   if (/\b(yeh? wali|this (one|train)|isi ko)\b/i.test(text) && ctx.selectedTrainNumber) {
     return ctx.selectedTrainNumber;
   }
@@ -227,20 +253,22 @@ export function resumeBookingLine(ctx: AgentContext): { ask: DialogSlot; text: s
       ? `${ctx.origin?.city ?? ctx.origin?.code ?? "?"} → ${ctx.destination?.city ?? ctx.destination?.code ?? "?"}`
       : "aapki booking";
   const when = ctx.dateProvided && ctx.date ? ` ${ctx.date} ki` : "";
+  // User instruction (2026-09-05): "Waise hum continue kar sakte hain" jaisi
+  // proactive offer-lines KABHI nahi — seedha slot-filling sawaal poochho.
   if (ask === "date") {
-    return { ask, text: `Waise hum${when} ${route} booking continue kar sakte hain. Kis date ko jaana hai?` };
+    return { ask, text: `${route}${when} kis date ko jaana hai?` };
   }
   if (ask === "passengers") {
-    return { ask, text: `Waise hum${when} ${route} booking continue kar sakte hain. Kitne passengers hain?` };
+    return { ask, text: `${route}${when} kitne passengers hain?` };
   }
   if (ask === "from") {
-    return { ask, text: `Waise booking continue kar sakte hain. Kahan se jaana hai?` };
+    return { ask, text: "Kahan se jaana hai?" };
   }
   if (ask === "to") {
-    return { ask, text: `Waise booking continue kar sakte hain. Kahan jaana hai?` };
+    return { ask, text: "Kahan jaana hai?" };
   }
   if (ctx.bookingStage === "results" || ctx.lastTrainNumbers.length) {
-    return { ask: "train", text: `Waise ${route} ki trains pehle wali list se continue kar sakte hain. Kaunsi train choose karein?` };
+    return { ask: "train", text: `${route} ki trains — kaunsi choose karein?` };
   }
   return null;
 }

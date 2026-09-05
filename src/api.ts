@@ -173,6 +173,7 @@ export const api = {
       latencyMs?: number;
       failureReason?: string | null;
       engine?: "agentic_tool_calling" | "deterministic" | null;
+      trains?: import("./ai/agent").AgentTrainTable | null;
       toolTrace?: {
         step: number;
         tool: string;
