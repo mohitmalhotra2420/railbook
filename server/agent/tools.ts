@@ -166,11 +166,17 @@ export async function executeTool(
             })
             .join("; ")}${stops.length > 25 ? ` …(aur ${stops.length - 25})` : ""}.`
         : "";
+      /* Web-scrape fallback (2026-09-06): API fail par verified site se aaya
+       * data — source label reply mein saaf dikhe. */
+      const webSource =
+        /^web_/.test(routed.provider)
+          ? ` (Source: ${routed.provider === "web_ixigo" ? "ixigo.com" : routed.provider === "web_trainspnrstatus" ? "trainspnrstatus.com" : "confirmtkt.com"} — railway API se nahi, verified web site se.)`
+          : "";
       return {
         ok: Boolean(routed.schedule),
         tool,
         summary: routed.schedule
-          ? `${args.trainNumber} ${name} — ${stops.length} stops.${segLine}${routeLine}`
+          ? `${args.trainNumber} ${name} — ${stops.length} stops.${segLine}${routeLine}${webSource}`
           : "Timetable nahi mili.",
         data: routed.schedule,
         provider: routed.provider,

@@ -1,3 +1,4 @@
+import { scrapeTrainScheduleWeb } from "./webscrape.js";
 import { env } from "../env.js";
 import { searchStations as searchLocalStations } from "../data/stations.js";
 import {
@@ -57,7 +58,7 @@ function enrichClusterHits(query: string, hits: Station[]): Station[] {
   return extra.length ? [...hits, ...extra] : hits;
 }
 
-export type ServedProvider = "railcore" | "railkit_fallback" | "railkit" | "local" | "none";
+export type ServedProvider = "railcore" | "railkit_fallback" | "railkit" | "local" | "none" | "web_ixigo" | "web_confirmtkt" | "web_trainspnrstatus";
 
 export type LastRailwayLog = {
   railwayProvider: ServedProvider;
@@ -173,6 +174,24 @@ export type RoutedSchedule = {
   provider: ServedProvider;
 };
 
+/** Verified-site web-scrape ka result RailcoreSchedule-shape mein (last-resort). */
+function scrapedAsSchedule(sc: Awaited<ReturnType<typeof scrapeTrainScheduleWeb>>): RailcoreSchedule | null {
+  if (!sc) return null;
+  return {
+    trainNumber: sc.trainNumber,
+    trainName: sc.trainName ?? "",
+    runningDays: [],
+    classes: [],
+    durationMinutes: null,
+    stops: sc.stops.map((st) => ({
+      code: st.code,
+      name: st.name,
+      arrival: st.arrival,
+      departure: st.departure,
+    })),
+  };
+}
+
 export async function routedSchedule(number: string): Promise<RoutedSchedule> {
   const started = Date.now();
   if (railcoreIsPrimary()) {
@@ -186,11 +205,25 @@ export async function routedSchedule(number: string): Promise<RoutedSchedule> {
       logServed("railkit_fallback", "timetable", started, true, "railcore_unusable");
       return { schedule: fb, provider: "railkit_fallback" };
     }
+    /* VERIFIED-SITE WEB SCRAPING (user request 2026-09-06): API dono fail →
+     * public verified sites (ixigo/ConfirmTkt/trainspnrstatus) se scrape.
+     * Provider label "web_<site>" — reply mein source saaf dikhta hai. */
+    const sc = await scrapeTrainScheduleWeb(number);
+    if (sc) {
+      logServed(sc.provider, "timetable", started, true, "railcore+railkit_failed → web-scrape");
+      return { schedule: scrapedAsSchedule(sc), provider: sc.provider };
+    }
     logServed("none", "timetable", started, false, "both_failed");
     return { schedule: null, provider: "none" };
   }
   const schedule = await railkitSchedule(number);
-  return { schedule, provider: schedule ? "railkit" : "none" };
+  if (schedule) return { schedule, provider: "railkit" };
+  const sc2 = await scrapeTrainScheduleWeb(number);
+  if (sc2) {
+    logServed(sc2.provider, "timetable", started, true, "railkit_failed → web-scrape");
+    return { schedule: scrapedAsSchedule(sc2), provider: sc2.provider };
+  }
+  return { schedule: null, provider: "none" };
 }
 
 export async function routedTrainInfo(number: string): Promise<{

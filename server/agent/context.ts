@@ -104,8 +104,8 @@ export function classifyFollowUp(text: string): FollowUp {
   // User feedback (2026-09-06): "kon kon se stops / har stop ka naam / poora
   // timetable / route" — ye sab TIMETABLE follow-up hai, journey-slot sawaal nahi.
   if (
-    /\b(stops?|halts?|route|via|kahan\s?kahan|kon\s?kon\s?se|kaun\s?kaun\s?se|har\s+stop|sabhi\s+stops?|poora\s+(timetable|time\s?table|schedule|route)|stations?\s+ki\s+(list|details|detail)|raste\s+(mein|ka|ki))\b/.test(t) ||
-    /रूट|रास्ता|कौन.?कौन से|रुकती|रुकता/.test(text)
+    /\b(stops?|halts?|route|via|kahan\s?kahan|kahan\s+se\s+kahan|kahaa\s+se\s+kahaa|kaha\s+se\s+kaha|kon\s?kon\s?se|kaun\s?kaun\s?se|har\s+stop|sabhi\s+stops?|poora\s+(timetable|time\s?table|schedule|route)|stations?\s+ki\s+(list|details|detail)|raste\s+(mein|ka|ki)|kis\s+station\s+se)\b/.test(t) ||
+    /रूट|रास्ता|कौन.?कौन से|रुकती|रुकता|कहां से कहां|कहाँ से कहाँ/.test(text)
   ) {
     return "timetable";
   }

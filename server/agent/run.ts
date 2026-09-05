@@ -28,11 +28,18 @@ import {
   type SearchCapture,
   type ToolTraceStep,
 } from "./agentic.js";
-import { routedClassBoard, routedSchedule, routedStationSearch, searchTrainsRouted } from "../railway/router.js";
+import { routedClassBoard, routedSchedule, routedStationSearch, routedTrainInfo, searchTrainsRouted } from "../railway/router.js";
+import { webSearch } from "./websearch.js";
 import { searchRailcoreTrainsByName } from "../railway/railcore.js";
 
 /** Atlas analyse intents — decideTool inhe map nahi karta (model ki zimmedari hai),
  *  par agentic engine fail ho to deterministic fallback bhi inka honest answer deta hai. */
+/* General-fact sawaal (2026-09-06 screenshot): "top speed", "kitni tez",
+ * "kab chalu hui" — ye railway API/KB ka data NAHI hota. Naam-resolution
+ * skip + deterministic web lookup (Wikipedia/DDG) inhi par chalta hai. */
+const GENERAL_FACT_RE =
+  /\b(top speed|max speed|average speed|kitni tez|kitna tez|speed kya|speed kitni|kab (?:shuru|chalu|start)|kitne saal|history|kab bani|pehli train|sabse pehli|kitne coach|engine ka naam|kaise kaam)\b/i;
+
 const ATLAS_PREF: Record<string, "fastest" | "cheapest" | "best"> = {
   SELECT_FASTEST: "fastest",
   SELECT_CHEAPEST: "cheapest",
@@ -596,6 +603,10 @@ async function resolveTrainByName(
   /* 2026-09-06: "kon kon se stops hai" jaise follow-up question-phrases train
    * naam nahi — fuzzy search se hijack MAT ("kon kon" → KONKAN KANYA thi). */
   if (!hasNameKeyword && !/\d{4,6}/.test(text) && isQuestionPhraseNotTrainName(text)) return null;
+  /* 2026-09-06 (screenshot): "vande bharat ki top speed" GENERAL-FACT sawaal
+   * hai — train-number resolve karke "kaunsi?" poochna hi nahi. Fact words +
+   * no number → naam-resolution skip, general-fact web path jawab dega. */
+  if (GENERAL_FACT_RE.test(text) && !/\b\d{5}\b/.test(text)) return null;
   if (!hasNameKeyword) {
     const followish =
       /^(timetable|live|fare|availability|coach|train_pick)$/.test(classifyFollowUp(text) ?? "") ||
@@ -1007,6 +1018,29 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
   }
 
   // User instruction (2026-09-05): proactive "waise hum continue kar sakte hain"
+  /* GENERAL-FACT WEB FALLBACK (user 2026-09-06: "agar data API se na mile to
+   * verified sites se le aaye"): "top speed / kitni tez / kab chalu hui" jaise
+   * sawaal API/KB se aate hi nahi. Model timeout par bhi jawab mile —
+   * deterministic web lookup (Wikipedia/DDG), SAAPH label ke saath. */
+  if (!reply && !tool && GENERAL_FACT_RE.test(String(req.text ?? ""))) {
+    let factQuery = String(req.text ?? "").slice(0, 120);
+    const factNum = factQuery.match(/\b(\d{5})\b/)?.[1];
+    if (factNum) {
+      try {
+        const info = await routedTrainInfo(factNum);
+        if (info.info?.trainName) factQuery = `${info.info.trainName} ${factQuery}`.slice(0, 140);
+      } catch {
+        /* naam nahi mila — seedha text se search */
+      }
+    }
+    const webResults = await webSearch(factQuery, 3);
+    if (webResults.length) {
+      const best = webResults[0];
+      reply = `Web se mila: ${best.snippet}\n(Source: ${best.title} — ${best.url})\n(Ye railway API ka live data nahi, web-search ka jawab hai.)`;
+      toolOk = true;
+    }
+  }
+
   // lines KABHI nahi bhejna — resume mechanism band.
   void neverAutoBook(understood.nlu.intent, req.bookingFlow);
 

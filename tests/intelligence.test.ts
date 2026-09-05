@@ -175,6 +175,65 @@ describe("WEB SEARCH (last-resort fallback, user request 2026-09-06)", () => {
   });
 });
 
+/* ══ Screenshot 2026-09-06 fixes: general-fact questions + "kahan se kahan" ══ */
+describe("GENERAL-FACT sawaal (screenshot 2026-09-06): flat denial nahi, WEB se jawab", () => {
+  it("classifyFollowUp: 'kahan se kahan jaati hai' → timetable (route)", () => {
+    expect(classifyFollowUp("Kahan se kahan jaati hai")).toBe("timetable");
+    expect(classifyFollowUp("kahan se kahan jaati")).toBe("timetable");
+    expect(classifyFollowUp("ye train kaha se kaha jaati hai")).toBe("timetable");
+    expect(classifyFollowUp("कहां से कहां जाती है")).toBe("timetable");
+  });
+
+  it("runAgent: '12014 ki top speed' → web se jawab (flat denial NAHI)", async () => {
+    railcoreMock();
+    setWebFetch(async (url: any) => {
+      const u = String(url);
+      if (u.includes("api.duckduckgo.com")) {
+        return jsonResponse(200, {
+          AbstractText: "Amritsar Shatabdi operates at a maximum speed of 150 km/h.",
+          AbstractURL: "https://en.wikipedia.org/wiki/Amritsar_Shatabdi",
+          Heading: "Amritsar Shatabdi",
+        });
+      }
+      if (u.includes("wikipedia.org")) return jsonResponse(200, { query: { search: [] } });
+      return jsonResponse(404, {});
+    });
+    const r = await runAgent({ text: "12014 ki top speed kitni hai", now: "2026-09-06T00:03:00+05:30" });
+    expect(String(r.reply)).toMatch(/web se mila|Web se mila/i);
+    expect(String(r.reply)).toMatch(/150 km\/h|wikipedia|Source/i);
+    expect(String(r.reply)).not.toMatch(/available nahi|evidence mein nahi/i);
+  });
+
+  it("runAgent: 'vande bharat ki top speed' → TRAIN_NAME hijack NAHI (kaunsi? nahi)", async () => {
+    setWebFetch(async (url: any) => {
+      const u = String(url);
+      if (u.includes("api.duckduckgo.com")) {
+        return jsonResponse(200, {
+          AbstractText: "Vande Bharat trains have a maximum operating speed of 160 km/h.",
+          AbstractURL: "https://en.wikipedia.org/wiki/Vande_Bharat_Express",
+          Heading: "Vande Bharat Express",
+        });
+      }
+      if (u.includes("wikipedia.org")) return jsonResponse(200, { query: { search: [] } });
+      return jsonResponse(404, {});
+    });
+    const r = await runAgent({ text: "vande bharat ki top speed kya hai", now: "2026-09-06T00:03:00+05:30" });
+    expect(String(r.reply)).toMatch(/web se mila|Web se mila|160 km\/h/i);
+    expect(String(r.reply)).not.toMatch(/kaunsi|10 trains|kon si/i);
+    expect(String(r.reply)).not.toMatch(/available nahi|evidence mein nahi/i);
+  });
+
+  it("runAgent follow-up: 'kahan se kahan jaati hai' → pichhli train ka route", async () => {
+    railcoreMock();
+    setWebFetch(null);
+    const first = await runAgent({ text: "12054 ka poora timetable do", now: "2026-09-06T00:03:00+05:30" });
+    expect(String(first.reply)).toMatch(/Route: 1\. ASR/);
+    const second = await runAgent({ text: "Kahan se kahan jaati hai", context: first.context as never, known: {}, now: "2026-09-06T00:04:00+05:30" });
+    expect(String(second.reply)).toMatch(/ASR|Route/i);
+    expect(String(second.reply)).not.toMatch(/evidence mein nahi/i);
+  });
+});
+
 /* BUG-fix 2026-09-06 (live e2e pakda): "kon kon se stops hai" par model ne
  * TRAIN_NAME_SEARCH("kon kon") karke KONKAN KANYA dhoondh li thi —
  * question-words train naam nahi hote. */

@@ -1106,9 +1106,13 @@ export async function executeApprovedTool(
           }
         }
         const segLine = seg ? `, ${seg.from}→${seg.to} ${seg.departure}→${seg.arrival} (${seg.durationLabel})` : "";
+        // Web-scrape fallback (2026-09-06): verified-site data — label saaf.
+        const webLine = /^web_/.test(res.provider)
+          ? ` (Source: ${res.provider === "web_ixigo" ? "ixigo.com" : res.provider === "web_trainspnrstatus" ? "trainspnrstatus.com" : "confirmtkt.com"} — railway API se nahi, verified web site se.)`
+          : "";
         return okResult(
           res.provider,
-          `${a.train_number} ${name} — ${stops.length} stops${segLine}.`,
+          `${a.train_number} ${name} — ${stops.length} stops${segLine}.${webLine}`,
           {
             trainNumber: a.train_number,
             trainName: name,
@@ -1204,7 +1208,20 @@ export async function executeApprovedTool(
       }
       case "GENERAL_RAILWAY_ANSWER": {
         const text = RAILWAY_KB[a.topic as string];
-        if (!text) return failResult("kb", `Topic "${a.topic}" KB mein nahi hai — bina evidence answer nahi dunga.`);
+        if (!text) {
+          // Web fallback (user 2026-09-06): KB miss par flat denial nahi —
+          // verified web (Wikipedia/DDG) se topic ki jankari le aao, labeled.
+          const webResults = await webSearch(`Indian Railways ${a.topic} rules information`, 3);
+          if (webResults.length) {
+            const best = webResults[0];
+            return okResult(
+              "web",
+              `Web se mila: ${best.snippet}\n(Source: ${best.title} — ${best.url})`,
+              { topic: a.topic, answer: best.snippet, webSource: best.url },
+            );
+          }
+          return failResult("kb", `Topic "${a.topic}" KB mein nahi hai — bina evidence answer nahi dunga.`);
+        }
         return okResult("kb", text, { topic: a.topic, answer: text });
       }
       case "JOURNEY_ANALYZE":
@@ -1336,7 +1353,7 @@ function systemPrompt(
     "20. Timetable/stops/route poora poochha jaye ('poora timetable do', 'kon kon se stops hain', 'har stop ka naam', 'route kya hai', 'kahan kahan rukti hai') to GET_TIMETABLE ke data se SABHI stops list karo — naam + arrival/departure (max ~25, numbered). Sirf '11 stops' jaisa COUNT mat bolna. Ye sawaal journey-slot (origin/date) ka nahi hai — 'kahan se jana hai?' MAT poochna. 'Kon kon se/kaun kaun se' jaise question-words TRAIN KE NAAM nahi hote — bina number ke follow-up par pichhli train (history/known context) use karo, TRAIN_NAME_SEARCH par ye phrase mat bhejo.",
     "21. Do trains compare karne ko kahe ('12014 and 12054 mein se kon si better', 'X vs Y') to DONO par GET_TIMETABLE call karo aur duration/stops/classes/timing compare karke 2-4 line mein data-based verdict do. Ek train ka data na mile to doosre ka jo mila wo do + saaf bolo kaunsa nahi mila — poora compare 'data nahi mila' se cancel MAT karo. Route alag ho (last stop different) to pehle batao.",
     "22. User ne clearly kaha ki travel NAHI karna, sirf information chahiye ('jaana nahi hai', 'sirf details chahiye', 'bas batao') to journey slots (origin/destination/date) kabhi mat poochho — seedha info tool se do. Travel-denial wale message ko station/journey input ki tarah parse MAT karna.",
-    "23. WEB_SEARCH last-resort hai (Wikipedia/DDG): railway tools/KB jawab na deyin YA sawaal general railway background/history/news ka ho tabhi. Web results 'web search se mila' label ke saath do — unhe verified railway data jaisa present na karo, aur live time/fare/seats/availability/booking ke liye web data kabhi use na karo. Ek reply mein max 1 web search.",
+      "23. GENERAL-FACT sawaal (top speed/max speed/kitni tez/average speed/kab chalu hui/kab shuru/history/kitne coach) par WEB_SEARCH PEHLA tool hai — train ka naam/number dhoondh kar train-list 'kaunsi?' bilkul mat poochho. Web results 'web se mila' + source ke saath do — unhe verified railway data jaisa present na karo. Baaki cases mein WEB_SEARCH last-resort hai (railway tools/KB jawab na dein YA sawaal general railway background/history/news ka ho). Live time/fare/seats/availability/booking ke liye web data kabhi use na karo. Ek reply mein max 1 web search.",
   ]
     .filter(Boolean)
     .join("\n");
