@@ -33,11 +33,13 @@ import { parseDatePhrase } from "../understand/legacy-dates.js";
 import { RailKitProvider } from "../railway/railkit.js";
 import type { ClassCode } from "../providers/types.js";
 import { executeTool } from "./tools.js";
-import { segmentOfStops } from "./context.js";
+import { isQuestionPhraseNotTrainName, segmentOfStops } from "./context.js";
 import { searchRailcoreTrainsByName } from "../railway/railcore.js";
+import { webSearch } from "./websearch.js";
 import { stationBoard, trainHistory } from "../railway/railkit.js";
 
 export type AgenticToolName =
+  | "WEB_SEARCH"
   | "SEARCH_TRAINS"
   | "TRAIN_NAME_SEARCH"
   | "SEARCH_STATIONS"
@@ -55,6 +57,7 @@ export type AgenticToolName =
   | "JOURNEY_ANALYZE";
 
 const APPROVED: readonly AgenticToolName[] = [
+  "WEB_SEARCH",
   "SEARCH_TRAINS",
   "TRAIN_NAME_SEARCH",
   "SEARCH_STATIONS",
@@ -137,6 +140,7 @@ const StationRef = z.string().trim().min(2).max(40);
 const Ymd = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 
 const ArgSchemas = {
+  WEB_SEARCH: z.object({ query: z.string().trim().min(2).max(120) }),
   TRAIN_NAME_SEARCH: z.object({ query: z.string().trim().min(2).max(60) }),
   SEARCH_STATIONS: z.object({ query: z.string().trim().min(2).max(40) }),
   GET_COACH_POSITION: z.object({
@@ -212,6 +216,19 @@ const ArgSchemas = {
 /* ── OpenAI-style tools spec (what the model is told about) ──────── */
 
 export const AGENTIC_TOOLS = [
+  {
+    type: "function",
+    function: {
+      name: "WEB_SEARCH",
+      description:
+        "LAST-RESORT web lookup (Wikipedia + DuckDuckGo) — SIRF tab use karo jab (a) railway tools/KB se jawab na mile, ya (b) sawaal GENERAL/current railway info ka ho jo live API/KB mein nahi hota (train services ka background, railway history, naye trains ka news, aise rules jo KB mein nahi). Results ko 'web search se mila' kehkar do — live time/fare/seats/availability/booking par web data KABHI use mat karo. Ek reply mein max 1 call.",
+      parameters: {
+        type: "object",
+        properties: { query: { type: "string", description: "Search query (train/railway topic)" } },
+        required: ["query"],
+      },
+    },
+  },
   {
     type: "function",
     function: {
@@ -904,7 +921,32 @@ export async function executeApprovedTool(
 
   try {
     switch (name as AgenticToolName) {
+      case "WEB_SEARCH": {
+        const q = String(a.query ?? "").trim();
+        if (!q) return failResult("web", "Search query khaali hai.");
+        const results = await webSearch(q, 4);
+        if (!results.length) {
+          return failResult("web", `"${q}" par web se bhi kuch nahi mila — invent nahi karunga.`);
+        }
+        return okResult(
+          "web",
+          `Web search "${q}": ${results.length} results (Wikipedia/DDG — UNVERIFIED, live railway data nahi).`,
+          {
+            query: q,
+            count: results.length,
+            results,
+            note: "Ye WEB-sourced hai (Wikipedia/DuckDuckGo) — railway API ka live data NAHI. Reply mein 'web se mila' bolo; time/fare/seats/booking ke liye use mat karo.",
+          },
+        );
+      }
       case "TRAIN_NAME_SEARCH": {
+        const q0 = String(a.query ?? "").trim();
+        /* 2026-09-06: "kon kon se stops hai" jaise FOLLOW-UP question-words ko
+         * train naam mat samjho (model ne 'kon kon' se KONKAN KANYA dhoondh li
+         * thi). Solid naam bachta hai to hi search karo. */
+        if (!/\d{4,6}/.test(q0) && isQuestionPhraseNotTrainName(q0)) {
+          return failResult("railcore", `"${q0}" train ka naam nahi lagta — ye follow-up/question phrase hai. Pichhli baat ki train ka data use karo (history/context mein hai).`);
+        }
         const results = await searchRailcoreTrainsByName(a.query as string);
         if (!results.length) {
           return failResult("railcore", `"${a.query}" naam se koi train nahi mili — train number (5-digit) maango.`);
@@ -1291,6 +1333,10 @@ function systemPrompt(
     "13. Reply ke end mein PROACTIVE offer/continuation KABHI mat likho (jaise 'waise hum continue kar sakte hain', 'aap chahe to…', 'kya aapko aur kuch chahiye?', 'shall I continue?'). Sirf user ke sawaal ka jawab do — aage ka step tabhi batao jab user poochhe. (Zaroori slot-filling questions — date/station/passengers/booking-confirm — exempt hain, woh poochte raho.)",
     "18. CONTEXT-SWITCH (sabse zaroori): user ka CURRENT message hi priority hai. Agar aapne pichhle reply mein kuch poochha tha (station options/date/confirm) par user ne uska jawab NAHI diya aur koi alag cheez/train poochh li — to PEHLE naye sawaal ka jawab do (tool call karke). Apna pending sawaal naye reply mein dobara repeat ya attach mat karo; jab user khud wapas usi journey ki baat kare tab options yaad dilao. Same chat mein topic/train badalna normal hai — 'chhodo/arré chhad' jaise words ko ignore-marker ki tarah samjho.",
     "19. Purani search ki trains se current sawaal ka jawab MAT banao (jaise user ne fastest train poocha aur aap pichhli list ki kisi train par 'nahi, ye wahin stop nahi karti' bolo). Current sawaal ka data na mile to: pehle relevant TOOL call karo; phir bhi na mile to 1-2 line mein saaf bolo kya unavailable hai — flat 'is question ka jawab evidence mein nahi hai' jaisa kabhi nahi.",
+    "20. Timetable/stops/route poora poochha jaye ('poora timetable do', 'kon kon se stops hain', 'har stop ka naam', 'route kya hai', 'kahan kahan rukti hai') to GET_TIMETABLE ke data se SABHI stops list karo — naam + arrival/departure (max ~25, numbered). Sirf '11 stops' jaisa COUNT mat bolna. Ye sawaal journey-slot (origin/date) ka nahi hai — 'kahan se jana hai?' MAT poochna. 'Kon kon se/kaun kaun se' jaise question-words TRAIN KE NAAM nahi hote — bina number ke follow-up par pichhli train (history/known context) use karo, TRAIN_NAME_SEARCH par ye phrase mat bhejo.",
+    "21. Do trains compare karne ko kahe ('12014 and 12054 mein se kon si better', 'X vs Y') to DONO par GET_TIMETABLE call karo aur duration/stops/classes/timing compare karke 2-4 line mein data-based verdict do. Ek train ka data na mile to doosre ka jo mila wo do + saaf bolo kaunsa nahi mila — poora compare 'data nahi mila' se cancel MAT karo. Route alag ho (last stop different) to pehle batao.",
+    "22. User ne clearly kaha ki travel NAHI karna, sirf information chahiye ('jaana nahi hai', 'sirf details chahiye', 'bas batao') to journey slots (origin/destination/date) kabhi mat poochho — seedha info tool se do. Travel-denial wale message ko station/journey input ki tarah parse MAT karna.",
+    "23. WEB_SEARCH last-resort hai (Wikipedia/DDG): railway tools/KB jawab na deyin YA sawaal general railway background/history/news ka ho tabhi. Web results 'web search se mila' label ke saath do — unhe verified railway data jaisa present na karo, aur live time/fare/seats/availability/booking ke liye web data kabhi use na karo. Ek reply mein max 1 web search.",
   ]
     .filter(Boolean)
     .join("\n");

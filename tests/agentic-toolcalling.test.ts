@@ -250,7 +250,7 @@ function chatResponse(step: ScriptStep) {
 }
 
 describe("agentic tool-calling layer", () => {
-  it("exposes exactly the 15 approved tools", () => {
+  it("exposes exactly the 16 approved tools (15 railway + WEB_SEARCH last-resort)", () => {
     const names = AGENTIC_TOOLS.map((t) => t.function.name).sort();
     expect(names).toEqual(
       [
@@ -269,6 +269,7 @@ describe("agentic tool-calling layer", () => {
         "SEARCH_TRAINS",
         "TRACK_TRAIN",
         "TRAIN_NAME_SEARCH",
+        "WEB_SEARCH",
       ].sort(),
     );
   });

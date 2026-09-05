@@ -5,6 +5,7 @@ import {
   TRAIN_TYPE_KEYWORD_RE,
   bookingInProgress,
   classifyFollowUp,
+  isQuestionPhraseNotTrainName,
   matchTrainNameInList,
   mentionsTrainName,
   trainNamePhrase,
@@ -27,7 +28,7 @@ import {
   type SearchCapture,
   type ToolTraceStep,
 } from "./agentic.js";
-import { routedClassBoard, routedStationSearch, searchTrainsRouted } from "../railway/router.js";
+import { routedClassBoard, routedSchedule, routedStationSearch, searchTrainsRouted } from "../railway/router.js";
 import { searchRailcoreTrainsByName } from "../railway/railcore.js";
 
 /** Atlas analyse intents — decideTool inhe map nahi karta (model ki zimmedari hai),
@@ -36,6 +37,9 @@ const ATLAS_PREF: Record<string, "fastest" | "cheapest" | "best"> = {
   SELECT_FASTEST: "fastest",
   SELECT_CHEAPEST: "cheapest",
   SELECT_BEST: "best",
+  /* 2026-09-06: "12014 vs 12054 kon si better" — deterministic compare
+   * (atlasFallback ke andar compareTrainsDeterministic). */
+  COMPARE_TRAINS: "best",
 };
 
 /**
@@ -44,11 +48,117 @@ const ATLAS_PREF: Record<string, "fastest" | "cheapest" | "best"> = {
  * clarification (ambiguous city / missing slot). Kabhi guess nahi, kabhi
  * empty reply nahi (pehle yeh intents fallback mein chup ho jaate the).
  */
+/* ── Deterministic train compare (2026-09-06): "12014 and 12054 mein se kon
+ * si better hai" — dono ka REAL timetable lekar honest comparison. Ek ka data
+ * na mile to doosre ka data + saaf batana kaunsa nahi mila (poora cancel nahi). */
+async function compareTrainsDeterministic(numbers: string[]): Promise<{
+  reply: string;
+  ok: boolean;
+  trace: ToolTraceStep;
+}> {
+  const uniq = numbers.filter((v, i, a) => a.indexOf(v) === i).slice(0, 3);
+  const rows: {
+    num: string;
+    name: string;
+    stops: { code: string; name: string; arrival?: string | null; departure?: string | null }[];
+    durationMinutes: number | null;
+    classes: string[];
+  }[] = [];
+  const missing: string[] = [];
+  for (const num of uniq) {
+    const sched = await routedSchedule(num);
+    const schedule = sched.schedule;
+    if (!schedule || !("stops" in schedule) || !schedule.stops?.length) {
+      missing.push(num);
+      continue;
+    }
+    const stops = schedule.stops;
+    const first = stops[0];
+    const last = stops[stops.length - 1];
+    const dep = first?.departure ?? first?.arrival ?? null;
+    const arr = last?.arrival ?? last?.departure ?? null;
+    let dur: number | null = "durationMinutes" in schedule && typeof schedule.durationMinutes === "number" ? schedule.durationMinutes : null;
+    if (dur == null && dep && arr) {
+      const toMin = (x: string) => {
+        const m = x.match(/(\d{1,2}):(\d{2})/);
+        return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+      };
+      const a = toMin(dep);
+      const b = toMin(arr);
+      if (a != null && b != null) dur = b >= a ? b - a : b + 1440 - a;
+    }
+    rows.push({
+      num,
+      name: "trainName" in schedule ? String(schedule.trainName || num) : num,
+      stops,
+      durationMinutes: dur,
+      classes: "classes" in schedule ? (schedule.classes ?? []).filter((c) => c && c !== "UNKNOWN") : [],
+    });
+  }
+  const trace = (ok: boolean, summary: string): ToolTraceStep => ({
+    step: 1,
+    tool: "getTimetable",
+    args: { compare: uniq.join(","), trains: rows.map((r) => r.num) },
+    ok,
+    source: "railcore",
+    summary,
+    latencyMs: 0,
+  });
+  if (!rows.length) {
+    return {
+      reply: `${uniq.join(", ")} — kisi ki bhi timetable nahi mil paayi. Main guess nahi karunga.`,
+      ok: false,
+      trace: trace(false, "compare: timetables unavailable"),
+    };
+  }
+  const line = (r: (typeof rows)[number]) => {
+    const first = r.stops[0];
+    const last = r.stops[r.stops.length - 1];
+    const dep = first?.departure ?? first?.arrival ?? "??:??";
+    const arr = last?.arrival ?? last?.departure ?? "??:??";
+    const durLabel =
+      r.durationMinutes != null
+        ? `${Math.floor(r.durationMinutes / 60)}h ${String(r.durationMinutes % 60).padStart(2, "0")}m`
+        : "duration nahi pata";
+    return `${r.num} ${r.name} — ${r.stops.length} stops, ${first?.code ?? "?"} ${dep} → ${last?.code ?? "?"} ${arr} (${durLabel})${r.classes.length ? `, classes ${r.classes.join("/")}` : ""}`;
+  };
+  let reply: string;
+  if (rows.length >= 2) {
+    const [a, b] = rows;
+    const routeNote =
+      a.stops[a.stops.length - 1]?.code !== b.stops[b.stops.length - 1]?.code
+        ? ` Dhyan: route alag hai — ${a.num} ${a.stops[a.stops.length - 1]?.code} tak, ${b.num} ${b.stops[b.stops.length - 1]?.code} tak.`
+        : "";
+    let verdict = "Dono ka data upar hai; apni zaroorat (time/class/stops) ke hisaab se chuno.";
+    if (a.durationMinutes != null && b.durationMinutes != null && a.durationMinutes !== b.durationMinutes) {
+      const faster = a.durationMinutes < b.durationMinutes ? a : b;
+      const slower = faster === a ? b : a;
+      verdict = `Time mein ${faster.num} better hai (${Math.abs(a.durationMinutes - b.durationMinutes)} min kam)${a.stops.length !== b.stops.length ? `, ${faster.stops.length} stops vs ${slower.num} ki ${slower.stops.length}` : ""}.`;
+    } else if (a.stops.length !== b.stops.length) {
+      const fewer = a.stops.length < b.stops.length ? a : b;
+      verdict = `Kam stops wali ${fewer.num} hai (${fewer.stops.length} stops).`;
+    }
+    reply = `${rows.map(line).join("\n")}${routeNote ? "\n" + routeNote.trim() : ""}\n${verdict}`;
+  } else {
+    reply = `${line(rows[0])}${missing.length ? `\n${missing.join(", ")} ki timetable nahi mil paayi — jo mila wo upar hai.` : ""}`;
+  }
+  return {
+    reply,
+    ok: true,
+    trace: trace(true, `compare: ${rows.map((r) => r.num).join(" vs ")}${missing.length ? ` (${missing.join(",")} missing)` : ""}`),
+  };
+}
+
 async function atlasFallback(
   pref: "fastest" | "cheapest" | "best",
   ctx: AgentContext,
   nlu: NluResult,
 ): Promise<{ reply: string; ok: boolean; trace: ToolTraceStep; grounded: boolean; trains: AgentTrainTable | null }> {
+  /* 2026-09-06: "12014 vs 12054 kon si better" — deterministic compare pehle. */
+  if (nlu.intent === "COMPARE_TRAINS" && (nlu.compareNumbers?.length ?? 0) >= 2) {
+    const cmp = await compareTrainsDeterministic(nlu.compareNumbers!);
+    return { reply: cmp.reply, ok: cmp.ok, trace: cmp.trace, grounded: true, trains: null };
+  }
   const trace = (ok: boolean, source: string | null, summary: string, dataPreview?: string): ToolTraceStep => ({
     step: 1,
     tool: "JOURNEY_ANALYZE",
@@ -483,6 +593,9 @@ async function resolveTrainByName(
    * ke liye). Keyword (shatabdi/rajdhani/…) ho to follow-up ki zaroorat nahi. */
   const hasNameKeyword = TRAIN_TYPE_KEYWORD_RE.test(text) || TRAIN_NAME_SUFFIX_RE.test(text);
   const phrase = trainNamePhrase(text) ?? "";
+  /* 2026-09-06: "kon kon se stops hai" jaise follow-up question-phrases train
+   * naam nahi — fuzzy search se hijack MAT ("kon kon" → KONKAN KANYA thi). */
+  if (!hasNameKeyword && !/\d{4,6}/.test(text) && isQuestionPhraseNotTrainName(text)) return null;
   if (!hasNameKeyword) {
     const followish =
       /^(timetable|live|fare|availability|coach|train_pick)$/.test(classifyFollowUp(text) ?? "") ||

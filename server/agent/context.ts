@@ -101,6 +101,14 @@ export function classifyFollowUp(text: string): FollowUp {
     return "live";
   }
   if (/\b(coach(?:es)?\s*(?:position|layout|composition)?|dibba|dabba)\b/.test(t) || /कोच|डिब्बा/.test(text)) return "coach";
+  // User feedback (2026-09-06): "kon kon se stops / har stop ka naam / poora
+  // timetable / route" — ye sab TIMETABLE follow-up hai, journey-slot sawaal nahi.
+  if (
+    /\b(stops?|halts?|route|via|kahan\s?kahan|kon\s?kon\s?se|kaun\s?kaun\s?se|har\s+stop|sabhi\s+stops?|poora\s+(timetable|time\s?table|schedule|route)|stations?\s+ki\s+(list|details|detail)|raste\s+(mein|ka|ki))\b/.test(t) ||
+    /रूट|रास्ता|कौन.?कौन से|रुकती|रुकता/.test(text)
+  ) {
+    return "timetable";
+  }
   if (/\b(timetable|time table|schedule|timing|ka time|k[ai]tn[ea]?\s+time|time\s+le[nt]i?|time\s+lagta|duration|kitna\s+samay|kitne\s+samay)\b/.test(t)) return "timetable";
   if (/\b(fare|kitna padega|kitna lagega|price|kitna fare)\b/.test(t) || /किराया|कितना पड़ेगा/.test(text)) return "fare";
   if (
@@ -239,6 +247,21 @@ export function segmentOfStops(
     durationMinutes: mins,
     durationLabel: label,
   };
+}
+
+/* ── 2026-09-06 (live e2e bug): "kon kon se stops hai" jaise FOLLOW-UP
+ * question-phrases train KE NAAM nahi hote — par fuzzy train-search unhe
+ * hijack kar leti thi ("kon kon" → KONKAN KANYA!). Test: phrase se question/
+ * filler/stops-words hatao — agar KUCH solid naam nahi bachta, to ye train
+ * naam nahi hai. ("shane punjab ki stops" → "shane punjab" bacha = naam hai.) */
+const QUESTION_PHRASE_WORDS =
+  /\b(kon|kaun|kahan|kahaa|kaha|se|si|sab|sabhi|kuch|kitne|kitni|stops?|halts?|route|timetable|time|table|details?|detail|pura|poora|hai|hain|batao|bata|btaw|do|dijiye|chahiye|ka|ki|ke|mein|me|par|pe|to|ye|yeh|wo|woh|wali|milegi|milti|deta|deti|mujhe|mhujhe|jaana|jana|nahi|nhn|nhi|sirf|bas|arré|arre|chhodo|chhod)\b/gi;
+
+export function isQuestionPhraseNotTrainName(phrase: string): boolean {
+  const p = String(phrase ?? "").trim();
+  if (!p) return true;
+  const rest = p.replace(QUESTION_PHRASE_WORDS, " ").replace(/\s+/g, " ").trim();
+  return rest.length < 3 || /^\d{1,2}$/.test(rest);
 }
 
 export function resolveTrainNumber(text: string, ctx: AgentContext): string | undefined {

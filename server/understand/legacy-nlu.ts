@@ -95,6 +95,8 @@ export interface NluResult {
   /** Spoken city that is not in the bookable catalog. */
   unresolvedFrom?: string;
   unresolvedTo?: string;
+  /** COMPARE_TRAINS: dono (ya sab) bole gaye train numbers (2026-09-06). */
+  compareNumbers?: string[];
 }
 
 const NUM_WORDS: Record<string, number> = {
@@ -614,12 +616,19 @@ export function understand(text: string, ctx: NluContext = {}): NluResult {
   }
   if (intent === "CONFIRM_NO" && (from || to || date)) intent = "SEARCH_TRAIN";
 
+  /* COMPARE_TRAINS: "12014 and 12054 mein se kon si better" — dono numbers
+   * (2026-09-06): deterministic compare executor ke liye. */
+  const compareNumbers =
+    intent === "COMPARE_TRAINS"
+      ? [...t.matchAll(/\b(\d{5})\b/g)].map((m) => m[1]).filter((v, i, a) => a.indexOf(v) === i).slice(0, 3)
+      : undefined;
   return {
     intent,
     from,
     to,
     unresolvedFrom,
     unresolvedTo,
+    compareNumbers,
     date,
     dateAmbiguous: dateHit.ambiguous,
     passengerCount: pax,

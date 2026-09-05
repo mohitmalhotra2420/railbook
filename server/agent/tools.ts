@@ -148,11 +148,29 @@ export async function executeTool(
       // SEGMENT ka hona chahiye — poora route nahi (jab tak na maange).
       const seg = segmentOfStops(stops, args.origin ?? null, args.destination ?? null);
       const segLine = seg ? ` ${seg.from}→${seg.to}: ${seg.departure}→${seg.arrival} (${seg.durationLabel}).` : "";
+      // User feedback (2026-09-06): "poora timetable / kon kon se stops / har
+      // stop ka naam" par sirf COUNT nahi — poora stop-by-stop route list.
+      // Segment question (origin→destination) par list nahi, sirf segment.
+      const routeLine = !seg && stops.length
+        ? ` Route: ${stops
+            .slice(0, 25)
+            .map((st, i) => {
+              const first = i === 0;
+              const last = i === stops.length - 1;
+              /* Source par arrival 00:00 aur destination par departure 00:00
+               * API placeholder hai — display mein hide karo. */
+              const arr = st.arrival && !(first && st.arrival === "00:00") ? `arr ${st.arrival}` : null;
+              const dep = st.departure && !(last && st.departure === "00:00") ? `dep ${st.departure}` : null;
+              const timing = [arr, dep].filter(Boolean).join("/");
+              return `${i + 1}. ${st.code} ${st.name}${timing ? ` (${timing})` : ""}`;
+            })
+            .join("; ")}${stops.length > 25 ? ` …(aur ${stops.length - 25})` : ""}.`
+        : "";
       return {
         ok: Boolean(routed.schedule),
         tool,
         summary: routed.schedule
-          ? `${args.trainNumber} ${name} — ${stops.length} stops.${segLine}`
+          ? `${args.trainNumber} ${name} — ${stops.length} stops.${segLine}${routeLine}`
           : "Timetable nahi mili.",
         data: routed.schedule,
         provider: routed.provider,
