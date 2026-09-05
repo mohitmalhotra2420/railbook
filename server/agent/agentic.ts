@@ -1189,14 +1189,18 @@ function agenticTransport(): AgenticTransport | null {
     };
   }
   if (!env.nvidiaApiKey) return null;
-  const models = [env.nvidiaModel];
-  if (env.nvidiaFallbackModel && env.nvidiaFallbackModel !== env.nvidiaModel) models.push(env.nvidiaFallbackModel);
+  // BENCHMARK-ONLY (AGENTIC_MODEL): single-model chain, sirf benchmark scripts set karte hain.
+  // Prod kabhi set nahi karta — wahan [NVIDIA_MODEL (+fallback)] hi rehta hai.
+  const benchOverride = env.agenticModelOverride;
+  const models = benchOverride
+    ? [benchOverride]
+    : [env.nvidiaModel, ...(env.nvidiaFallbackModel && env.nvidiaFallbackModel !== env.nvidiaModel ? [env.nvidiaFallbackModel] : [])];
   return {
     provider: "nvidia",
     url: `${env.nvidiaBaseUrl.replace(/\/$/, "")}/chat/completions`,
     apiKey: env.nvidiaApiKey,
     models,
-    primaryModel: env.nvidiaModel,
+    primaryModel: benchOverride || env.nvidiaModel,
     reasoningEffort: true,
   };
 }
@@ -1306,8 +1310,11 @@ export async function runAgenticTurn(input: {
           body: JSON.stringify({
             model,
             temperature: 0,
-            // reasoning_effort GPT-OSS-specific hai; HF/GLM use karein to bhejna nahi.
-            ...(transport.reasoningEffort && model === transport.primaryModel ? { reasoning_effort: "low" } : {}),
+            // reasoning_effort GPT-OSS-specific hai (openai/gpt-oss* family only);
+            // HF/GLM ya Nemotron jaise models ko bhejne par API reject/ignore karti hai.
+            ...(transport.reasoningEffort && model === transport.primaryModel && model.startsWith("openai/gpt-oss")
+              ? { reasoning_effort: "low" }
+              : {}),
             max_tokens: 900,
             messages,
             tools: AGENTIC_TOOLS,

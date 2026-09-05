@@ -54,6 +54,12 @@ export const env = {
   get nvidiaModel() {
     return (process.env.NVIDIA_MODEL ?? "").trim() || NVIDIA_DEFAULT_MODEL;
   },
+  /** BENCHMARK-ONLY override: AGENTIC_MODEL set ho to agentic engine usi single model ko
+   *  chalata hai (chain fallback ke bina). Prod mein kabhi set nahi hota — default path
+   *  (NVIDIA_MODEL = GPT-OSS-20B) bilkul unchanged rehta hai. */
+  get agenticModelOverride() {
+    return (process.env.AGENTIC_MODEL ?? "").trim();
+  },
   /** Model for the autonomous tool-calling agent. Defaults to NVIDIA_MODEL. */
   get agentModel() {
     return (process.env.AGENT_MODEL ?? "").trim() || this.nvidiaModel;

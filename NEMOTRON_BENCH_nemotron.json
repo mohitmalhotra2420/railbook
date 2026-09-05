@@ -1,0 +1,596 @@
+{
+  "ranAt": "2026-09-05T06:15:47.741Z",
+  "leg": "nemotron",
+  "model": "nvidia/nemotron-3-ultra-550b-a55b",
+  "results": [
+    {
+      "id": "A",
+      "title": "BASIC JOURNEY — SEARCH_TRAINS, date=tomorrow",
+      "pass": true,
+      "checks": {
+        "searchCalled": true,
+        "dateTomorrow": true,
+        "routeOk": true,
+        "grounded": true
+      },
+      "detail": "tools=SEARCH_TRAINS | date=2026-09-06 | 13028ms",
+      "text": "Amritsar se Ludhiana kal jaana hai",
+      "reply": "• ASR→LDH (2026-09-06): 22 trains.",
+      "tools": [
+        {
+          "tool": "SEARCH_TRAINS",
+          "args": {
+            "origin": "Amritsar",
+            "destination": "Ludhiana",
+            "date": "2026-09-06"
+          },
+          "ok": true,
+          "source": "railcore",
+          "summary": "ASR→LDH (2026-09-06): 22 trains."
+        }
+      ],
+      "metrics": {
+        "modelUsed": "nvidia/nemotron-3-ultra-550b-a55b",
+        "modelCalls": 3,
+        "modelLatencyMs": 7321,
+        "ttfr": null,
+        "toolCalls": 1,
+        "toolLatencyMs": 5700,
+        "totalMs": 13028,
+        "ok": false,
+        "grounded": true,
+        "failureReason": "http_500",
+        "fallbackWouldTrigger": true
+      },
+      "hallucinations": [],
+      "hygiene": {
+        "noUnknownTools": true,
+        "noMalformedJson": true,
+        "noTemplateLeakage": true,
+        "stoppedAfterSufficient": true
+      }
+    },
+    {
+      "id": "B",
+      "title": "FASTEST TRAIN — search + deterministic fastest",
+      "pass": false,
+      "checks": {
+        "searchOrAtlas": false,
+        "routeOk": false,
+        "grounded": true,
+        "nonEmptyReply": true
+      },
+      "detail": "tools= | 4514ms | reply=Kis date ke liye fastest train chahiye? Aaj (2026-09-05) ya koi aur date?",
+      "text": "Amritsar se Delhi sabse fast train kaunsi hai?",
+      "reply": "Kis date ke liye fastest train chahiye? Aaj (2026-09-05) ya koi aur date?",
+      "tools": [],
+      "metrics": {
+        "modelUsed": "nvidia/nemotron-3-ultra-550b-a55b",
+        "modelCalls": 1,
+        "modelLatencyMs": 4508,
+        "ttfr": null,
+        "toolCalls": 0,
+        "toolLatencyMs": 0,
+        "totalMs": 4514,
+        "ok": true,
+        "grounded": true,
+        "failureReason": null,
+        "fallbackWouldTrigger": false
+      },
+      "hallucinations": [],
+      "hygiene": {
+        "noUnknownTools": true,
+        "noMalformedJson": true,
+        "noTemplateLeakage": true,
+        "stoppedAfterSufficient": true
+      }
+    },
+    {
+      "id": "C",
+      "title": "MULTI-TOOL — CHECK_AVAILABILITY + GET_FARE",
+      "pass": true,
+      "checks": {
+        "availabilityCalled": true,
+        "fareCalled": true,
+        "argsOk": true,
+        "grounded": true
+      },
+      "detail": "tools=CHECK_AVAILABILITY→GET_FARE→GET_TRAIN_INFO | 5627ms",
+      "text": "12014 ka CC mein availability aur fare batao",
+      "reply": "Ye jaankari abhi provider se nahi mil pa rahi. Main gadh ke nahi bataunga.",
+      "tools": [
+        {
+          "tool": "CHECK_AVAILABILITY",
+          "args": {
+            "train_number": "12014",
+            "class_code": "CC"
+          },
+          "ok": false,
+          "source": null,
+          "summary": "Availability ke liye route chahiye (origin/destination) aur timetable se route resolve nahi hua — user se poochho."
+        },
+        {
+          "tool": "GET_FARE",
+          "args": {
+            "train_number": "12014",
+            "class_code": "CC"
+          },
+          "ok": false,
+          "source": null,
+          "summary": "Fare ke liye route chahiye (origin/destination) aur timetable se route resolve nahi hua — user se poochho. Train 12014 ki timetable bhi unavailable thi."
+        },
+        {
+          "tool": "GET_TRAIN_INFO",
+          "args": {
+            "train_number": "12014"
+          },
+          "ok": false,
+          "source": "none",
+          "summary": "Train info nahi mili."
+        }
+      ],
+      "metrics": {
+        "modelUsed": "nvidia/nemotron-3-ultra-550b-a55b",
+        "modelCalls": 3,
+        "modelLatencyMs": 4292,
+        "ttfr": null,
+        "toolCalls": 3,
+        "toolLatencyMs": 1334,
+        "totalMs": 5627,
+        "ok": false,
+        "grounded": true,
+        "failureReason": "http_500",
+        "fallbackWouldTrigger": true
+      },
+      "hallucinations": [],
+      "hygiene": {
+        "noUnknownTools": true,
+        "noMalformedJson": true,
+        "noTemplateLeakage": true,
+        "stoppedAfterSufficient": true
+      },
+      "regradeNote": "argsOk fix: schema snake_case hai (train_number/class_code) — original check galat camelCase maangta tha. Tool fail route-availability/railcore-limit ki wajah se tha, args sahi the."
+    },
+    {
+      "id": "D",
+      "title": "TRAIN COMPARISON — GET_TIMETABLE dono + deterministic compare",
+      "pass": true,
+      "checks": {
+        "timetablesOrAtlas": true,
+        "bothTrainsInArgs": true,
+        "replyMentionsBoth": true,
+        "grounded": true
+      },
+      "detail": "tools=GET_TIMETABLE→GET_TIMETABLE | 9738ms",
+      "text": "12014 aur 14542 mein kaunsi Ludhiana jaldi pahunchti hai?",
+      "reply": "**12014 Shatabdi Express** Ludhiana **06:57** baje pahunchti hai,  \n**14542 Amritsar–Chandigarh Express** **07:12** baje.  \nIsliye **12014 pehle** (≈15 min pehle) Ludhiana hoti hai.",
+      "tools": [
+        {
+          "tool": "GET_TIMETABLE",
+          "args": {
+            "train_number": "12014"
+          },
+          "ok": true,
+          "source": "railcore",
+          "summary": "12014 Shatabdi Express — 8 stops."
+        },
+        {
+          "tool": "GET_TIMETABLE",
+          "args": {
+            "train_number": "14542"
+          },
+          "ok": true,
+          "source": "railcore",
+          "summary": "14542 Amritsar - Chandigarh Express — 7 stops."
+        }
+      ],
+      "metrics": {
+        "modelUsed": "nvidia/nemotron-3-ultra-550b-a55b",
+        "modelCalls": 2,
+        "modelLatencyMs": 8837,
+        "ttfr": null,
+        "toolCalls": 2,
+        "toolLatencyMs": 898,
+        "totalMs": 9738,
+        "ok": true,
+        "grounded": true,
+        "failureReason": null,
+        "fallbackWouldTrigger": false
+      },
+      "hallucinations": [],
+      "hygiene": {
+        "noUnknownTools": true,
+        "noMalformedJson": true,
+        "noTemplateLeakage": true,
+        "stoppedAfterSufficient": true
+      }
+    },
+    {
+      "id": "E",
+      "title": "LIVE STATUS — TRACK_TRAIN",
+      "pass": true,
+      "checks": {
+        "trackCalled": true,
+        "trainOk": true,
+        "grounded": true
+      },
+      "detail": "tools=TRACK_TRAIN | 11669ms",
+      "text": "12014 abhi kahan hai?",
+      "reply": "12014 ka live status abhi available nahi hai — main fake position nahi bataunga.",
+      "tools": [
+        {
+          "tool": "TRACK_TRAIN",
+          "args": {
+            "train_number": "12014"
+          },
+          "ok": false,
+          "source": "none",
+          "summary": "Live status unavailable — main fake position nahi bataunga."
+        }
+      ],
+      "metrics": {
+        "modelUsed": "nvidia/nemotron-3-ultra-550b-a55b",
+        "modelCalls": 2,
+        "modelLatencyMs": 6805,
+        "ttfr": null,
+        "toolCalls": 1,
+        "toolLatencyMs": 4862,
+        "totalMs": 11669,
+        "ok": true,
+        "grounded": true,
+        "failureReason": null,
+        "fallbackWouldTrigger": false
+      },
+      "hallucinations": [],
+      "hygiene": {
+        "noUnknownTools": true,
+        "noMalformedJson": true,
+        "noTemplateLeakage": true,
+        "stoppedAfterSufficient": true
+      },
+      "regradeNote": "trainOk fix: snake_case train_number sahi tha; tool chala, provider liveStatus both_failed (railcore rate-limit + railkit monthly khatam) — environmental, model sahi tha."
+    },
+    {
+      "id": "F",
+      "title": "MISSING DATE — date poochhe, assume na kare",
+      "pass": true,
+      "checks": {
+        "asksDate": true,
+        "noAssumedSearch": true,
+        "noInventedTrains": true
+      },
+      "detail": "tools= | reply=Ye jaankari abhi provider se nahi mil pa rahi. Main gadh ke nahi bataunga. (AI ka jawab providers ke",
+      "text": "Amritsar se Ludhiana jaana hai",
+      "reply": "Ye jaankari abhi provider se nahi mil pa rahi. Main gadh ke nahi bataunga.\n(AI ka jawab providers ke data se match nahi hua — sirf verified data dikha raha hoon.)",
+      "tools": [],
+      "metrics": {
+        "modelUsed": "nvidia/nemotron-3-ultra-550b-a55b",
+        "modelCalls": 1,
+        "modelLatencyMs": 17447,
+        "ttfr": null,
+        "toolCalls": 0,
+        "toolLatencyMs": 0,
+        "totalMs": 17448,
+        "ok": false,
+        "grounded": false,
+        "failureReason": "ungrounded_numbers:ASR,LDH",
+        "fallbackWouldTrigger": true
+      },
+      "hallucinations": [],
+      "hygiene": {
+        "noUnknownTools": true,
+        "noMalformedJson": true,
+        "noTemplateLeakage": true,
+        "stoppedAfterSufficient": true
+      }
+    },
+    {
+      "id": "G",
+      "title": "EXPLICIT TODAY — date=today",
+      "pass": true,
+      "checks": {
+        "searchCalled": true,
+        "dateToday": true,
+        "grounded": true
+      },
+      "detail": "tools=SEARCH_TRAINS | date=2026-09-05 (aaj=2026-09-05) | 13144ms",
+      "text": "Aaj Amritsar se Ludhiana jaana hai",
+      "reply": "• ASR→LDH (2026-09-05): 18 trains.",
+      "tools": [
+        {
+          "tool": "SEARCH_TRAINS",
+          "args": {
+            "origin": "Amritsar",
+            "destination": "Ludhiana",
+            "date": "2026-09-05"
+          },
+          "ok": true,
+          "source": "railcore",
+          "summary": "ASR→LDH (2026-09-05): 18 trains."
+        }
+      ],
+      "metrics": {
+        "modelUsed": "nvidia/nemotron-3-ultra-550b-a55b",
+        "modelCalls": 2,
+        "modelLatencyMs": 10336,
+        "ttfr": null,
+        "toolCalls": 1,
+        "toolLatencyMs": 2806,
+        "totalMs": 13144,
+        "ok": false,
+        "grounded": true,
+        "failureReason": "http_500",
+        "fallbackWouldTrigger": true
+      },
+      "hallucinations": [],
+      "hygiene": {
+        "noUnknownTools": true,
+        "noMalformedJson": true,
+        "noTemplateLeakage": true,
+        "stoppedAfterSufficient": true
+      }
+    },
+    {
+      "id": "H",
+      "title": "HINDI/HINGLISH — semantic plan sahi",
+      "pass": true,
+      "checks": {
+        "searchOrAtlas": true,
+        "dateTomorrow": true,
+        "routeOk": true,
+        "grounded": true
+      },
+      "detail": "tools=JOURNEY_ANALYZE | date=2026-09-06 | 15649ms",
+      "text": "bhai kal amritsar se delhi ki sabse jaldi wali train bata",
+      "reply": "Kal (2026-09-06) Amritsar se Delhi ke liye sabse pehle wali train batane ke liye mujhe pata hona chahiye ki **Delhi ka kaunsa station** chahiye:\n\n1. **NDLS** – New Delhi  \n2. **DLI** – Delhi  \n3. **NZM** – Hazrat Nizamuddin  \n4. **ANVT** – Anand Vihar Terminal  \n5. **DEE** – Delhi Sarai Rohilla  \n6. **DEC** – Delhi Cantt  \n7. **DAZ** – Delhi Azadpur  \n8. **DE** – Delhi MG  \n\nBatao kaunsa station prefer karoge?",
+      "tools": [
+        {
+          "tool": "JOURNEY_ANALYZE",
+          "args": {
+            "origin": "Amritsar",
+            "destination": "Delhi",
+            "date": "2026-09-06",
+            "preference": "earliest"
+          },
+          "ok": false,
+          "source": null,
+          "summary": "Delhi ambiguous hai — pehle user se station poochna hoga."
+        }
+      ],
+      "metrics": {
+        "modelUsed": "nvidia/nemotron-3-ultra-550b-a55b",
+        "modelCalls": 2,
+        "modelLatencyMs": 14226,
+        "ttfr": null,
+        "toolCalls": 1,
+        "toolLatencyMs": 1420,
+        "totalMs": 15649,
+        "ok": true,
+        "grounded": true,
+        "failureReason": null,
+        "fallbackWouldTrigger": false
+      },
+      "hallucinations": [],
+      "hygiene": {
+        "noUnknownTools": true,
+        "noMalformedJson": true,
+        "noTemplateLeakage": true,
+        "stoppedAfterSufficient": true
+      }
+    },
+    {
+      "id": "I",
+      "title": "AMBIGUOUS DELHI — clarification, silent pick nahi",
+      "pass": false,
+      "checks": {
+        "asksStation": false,
+        "noSilentPick": true,
+        "noInventedStation": true
+      },
+      "detail": "tools= | dest= | reply=Ye jaankari abhi provider se nahi mil pa rahi. Main gadh ke nahi bataunga. (AI ka jawab providers ke",
+      "text": "Amritsar se Delhi jaana hai",
+      "reply": "Ye jaankari abhi provider se nahi mil pa rahi. Main gadh ke nahi bataunga.\n(AI ka jawab providers ke data se match nahi hua — sirf verified data dikha raha hoon.)",
+      "tools": [],
+      "metrics": {
+        "modelUsed": "nvidia/nemotron-3-ultra-550b-a55b",
+        "modelCalls": 1,
+        "modelLatencyMs": 31044,
+        "ttfr": null,
+        "toolCalls": 0,
+        "toolLatencyMs": 0,
+        "totalMs": 31044,
+        "ok": false,
+        "grounded": false,
+        "failureReason": "ungrounded_numbers:DEE,DSA",
+        "fallbackWouldTrigger": true
+      },
+      "hallucinations": [],
+      "hygiene": {
+        "noUnknownTools": true,
+        "noMalformedJson": true,
+        "noTemplateLeakage": true,
+        "stoppedAfterSufficient": true
+      }
+    },
+    {
+      "id": "J",
+      "title": "GENERAL RAILWAY — GENERAL_RAILWAY_ANSWER",
+      "pass": true,
+      "checks": {
+        "generalAnswerCalled": true,
+        "nonEmptyReply": true,
+        "explainsRacWl": true,
+        "noHallucinatedData": true
+      },
+      "detail": "tools=GENERAL_RAILWAY_ANSWER→GENERAL_RAILWAY_ANSWER | 36247ms | reply=**RAC (Reservation Against Cancellation):** Seat share hoti hai — 2 passengers e",
+      "text": "RAC aur WL mein kya difference hai?",
+      "reply": "**RAC (Reservation Against Cancellation):** Seat share hoti hai — 2 passengers ek seat/berth share karte hain. Chart ke baad confirm ho sakta hai.\n\n**WL (Waitlist):** Koi seat guarantee nahi; RAC bhi full hone ke baad WL milta hai. Chart preparation tak number ghat ke confirm/RAC ho sakta hai, warna ticket auto-cancel hokar refund milta hai.\n\n**Seedha difference:** RAC = seat share (travel allowed), WL = sirf queue (travel allowed nahi jab tak confirm/RAC na ho).",
+      "tools": [
+        {
+          "tool": "GENERAL_RAILWAY_ANSWER",
+          "args": {
+            "topic": "rac"
+          },
+          "ok": true,
+          "source": "kb",
+          "summary": "RAC (Reservation Against Cancellation) ka matlab: seat share hoti hai, jaise khaali seat milti hai to full confirm. RAC ticket se sleeper coach mein do passenge"
+        },
+        {
+          "tool": "GENERAL_RAILWAY_ANSWER",
+          "args": {
+            "topic": "waitlist"
+          },
+          "ok": true,
+          "source": "kb",
+          "summary": "Waitlist (WL) ticket tab hota hai jab RAC bhi full ho. Chart banne tak WL number ghata confirm/RAC ho sakta hai; na ho to ticket cancel ho jaata hai aur refund "
+        }
+      ],
+      "metrics": {
+        "modelUsed": "nvidia/nemotron-3-ultra-550b-a55b",
+        "modelCalls": 3,
+        "modelLatencyMs": 36244,
+        "ttfr": null,
+        "toolCalls": 2,
+        "toolLatencyMs": 1,
+        "totalMs": 36247,
+        "ok": true,
+        "grounded": true,
+        "failureReason": null,
+        "fallbackWouldTrigger": false
+      },
+      "hallucinations": [],
+      "hygiene": {
+        "noUnknownTools": true,
+        "noMalformedJson": true,
+        "noTemplateLeakage": true,
+        "stoppedAfterSufficient": true
+      }
+    },
+    {
+      "id": "K",
+      "title": "UNEXPECTED NL — semantic interpretation, no hallucination",
+      "pass": false,
+      "checks": {
+        "validPlanOrAsk": false,
+        "dateTomorrowIfSearched": true,
+        "delhiDest": true,
+        "noHallucinatedFacts": true
+      },
+      "detail": "tools= | date=- | reply=Kal subah (2026-09-06) Delhi se jaldi nikal kar shaam tak pahunchne ke liye **destination** batao — ",
+      "text": "Kal subah aisi train dekh jo jaldi Delhi chhod de aur shaam tak pahucha de",
+      "reply": "Kal subah (2026-09-06) Delhi se jaldi nikal kar shaam tak pahunchne ke liye **destination** batao — kahan jaana hai?",
+      "tools": [],
+      "metrics": {
+        "modelUsed": "nvidia/nemotron-3-ultra-550b-a55b",
+        "modelCalls": 1,
+        "modelLatencyMs": 10666,
+        "ttfr": null,
+        "toolCalls": 0,
+        "toolLatencyMs": 0,
+        "totalMs": 10666,
+        "ok": true,
+        "grounded": true,
+        "failureReason": null,
+        "fallbackWouldTrigger": false
+      },
+      "hallucinations": [],
+      "hygiene": {
+        "noUnknownTools": true,
+        "noMalformedJson": true,
+        "noTemplateLeakage": true,
+        "stoppedAfterSufficient": true
+      }
+    },
+    {
+      "id": "L2",
+      "title": "MULTI-TURN — state preserve, date fill, re-ask nahi",
+      "pass": true,
+      "checks": {
+        "statePreserved": true,
+        "dateFilled": true,
+        "noReAskKnownSlots": true,
+        "grounded": true
+      },
+      "detail": "T1=ask → T2 tools=SEARCH_TRAINS | date=2026-09-06 | T2=13834ms",
+      "text": "Kal",
+      "reply": "Delhi ke kaunse station jaana hai? Options:\n- NDLS (New Delhi)\n- DLI (Delhi)\n- NZM (Hazrat Nizamuddin)\n- ANVT (Anand Vihar Terminal)\n- DEC (Delhi Cantt)\n- DEE (Delhi S Rohilla)\n- DAZ (Delhi Azadpur)\n- DE (Delhi MG)\n\nBatao, phir trains dikhata hoon.",
+      "tools": [
+        {
+          "tool": "SEARCH_TRAINS",
+          "args": {
+            "origin": "ASR",
+            "destination": "Delhi",
+            "date": "2026-09-06"
+          },
+          "ok": false,
+          "source": null,
+          "summary": "Delhi — destination ambiguous, user se poochna hoga."
+        }
+      ],
+      "metrics": {
+        "modelUsed": "nvidia/nemotron-3-ultra-550b-a55b",
+        "modelCalls": 2,
+        "modelLatencyMs": 13084,
+        "ttfr": null,
+        "toolCalls": 1,
+        "toolLatencyMs": 748,
+        "totalMs": 13834,
+        "ok": true,
+        "grounded": true,
+        "failureReason": null,
+        "fallbackWouldTrigger": false
+      },
+      "hallucinations": [],
+      "hygiene": {
+        "noUnknownTools": true,
+        "noMalformedJson": true,
+        "noTemplateLeakage": true,
+        "stoppedAfterSufficient": true
+      }
+    }
+  ],
+  "calls": {
+    "ai": 24,
+    "railcore": 36,
+    "railkit": 11,
+    "aiDurations": [
+      1981,
+      5011,
+      329,
+      4508,
+      2184,
+      1779,
+      329,
+      4101,
+      4736,
+      3713,
+      3092,
+      17447,
+      10055,
+      281,
+      10649,
+      3577,
+      31044,
+      27330,
+      3166,
+      5748,
+      10666,
+      395,
+      3713,
+      9371
+    ]
+  },
+  "metrics": {
+    "turns": 13,
+    "toolCalls": 12,
+    "toolOk": 6,
+    "aiCalls": 24,
+    "hallucinationFlags": 0
+  },
+  "leakDetected": false,
+  "correctedScore": {
+    "pass": 9,
+    "total": 12,
+    "note": "camelCase check-bug regrade (C/E) — raw as-run score JSON .run mai... raw results pass flags regrade se pehle file backup"
+  }
+}
