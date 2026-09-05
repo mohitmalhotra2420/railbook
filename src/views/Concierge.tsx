@@ -1607,7 +1607,7 @@ function TrainTableView({ table }: { table: AgentTrainTable }) {
             <tr>
               <th>Train</th>
               <th>Nikal</th>
-              <th>{rows.some((t) => t.station) ? "Pahunche (station)" : "Pahunche"}</th>
+              <th>Pahunche</th>
               <th>Time</th>
               <th>Class</th>
               <th>Fare</th>
@@ -1626,7 +1626,6 @@ function TrainTableView({ table }: { table: AgentTrainTable }) {
                   <td>
                     {t.arrival}
                     {t.arrivalDayOffset > 0 && <span className="muted"> +{t.arrivalDayOffset}d</span>}
-                    {t.station && <span className="tt-stn"> · {t.station}</span>}
                   </td>
                   <td>{t.durationLabel ?? (t.durationMinutes != null ? `${Math.floor(t.durationMinutes / 60)}h ${String(t.durationMinutes % 60).padStart(2, "0")}m` : "—")}</td>
                   <td className="tt-classes">{t.classes.join(", ") || "—"}</td>

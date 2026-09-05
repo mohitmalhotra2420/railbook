@@ -535,7 +535,7 @@ describe("agentic tool-calling layer", () => {
     expect(viaNdls.legs[1].train).toContain("12722");
   });
 
-  it("JOURNEY_ANALYZE: ambiguous city → CITY-MODE sab-stations search, station tags (2026-09-05 fix)", async () => {
+  it("JOURNEY_ANALYZE: ambiguous city stays honest (needs_choice), no guessing", async () => {
     railcoreMock();
     const res = await executeApprovedTool("JOURNEY_ANALYZE", {
       origin: "Delhi",
@@ -543,24 +543,10 @@ describe("agentic tool-calling layer", () => {
       date: "2026-09-05",
       preference: "fastest",
     });
-    // Naya contract: city ki SAB stations par real search — koi guess nahi,
-    // har train apne station ke saath label hota hai.
-    expect(res.ok).toBe(true);
+    expect(res.ok).toBe(false);
     const data = res.data as any;
-    expect(data.city_stations_searched).toEqual(expect.arrayContaining(["NDLS", "DLI", "NZM"]));
-    expect(data.trains.length).toBeGreaterThan(0);
-    const dakshin = data.trains.find((t: any) => t.number === "12722");
-    expect(dakshin).toBeTruthy();
-    expect(dakshin.station).toBe("NDLS");
-    expect(res.summary).toMatch(/12722 DAKSHIN EXPRESS/);
-    // Empty city (jaise kisi aisi city jahan kuch nahi) → needs_choice fallback
-    const empty = await executeApprovedTool("JOURNEY_ANALYZE", {
-      origin: "Bombay",
-      destination: "Nagpur",
-      date: "2026-09-05",
-      preference: "fastest",
-    });
-    expect(empty.ok).toBe(false);
+    expect(data.needs_choice).toBe(true);
+    expect(data.stations.map((s: any) => s.code)).toEqual(expect.arrayContaining(["NDLS", "DLI", "NZM"]));
   });
 
   it("GENERAL_RAILWAY_ANSWER: verified KB facts only", async () => {
