@@ -89,7 +89,7 @@ export async function extractWithLlm(input: {
 }): Promise<LlmOutcome> {
   const apiKey = env.nvidiaApiKey;
   if (!apiKey) return emptyOutcome("missing_key");
-  const model = env.nvidiaModel;
+  const model = env.nluModel; // NLU/fallback layer — NVIDIA_MODEL (primary planner) se alag ho sakta hai
   const timeoutMs = env.aiRequestTimeoutMs;
   const messages = [
     { role: "system", content: railbookSystemPrompt(input.today) },
@@ -100,10 +100,11 @@ export async function extractWithLlm(input: {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   // gpt-oss is a reasoning model: cap tokens and force JSON so CoT cannot eat the timeout.
+  // reasoning_effort GPT-OSS family specific hai — any other NLU model ko nahi bhejte.
   const payload = {
     model,
     temperature: 0,
-    reasoning_effort: "low",
+    ...(model.startsWith("openai/gpt-oss") ? { reasoning_effort: "low" as const } : {}),
     max_tokens: 768,
     response_format: { type: "json_object" },
     messages,

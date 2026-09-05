@@ -1315,6 +1315,10 @@ export async function runAgenticTurn(input: {
             ...(transport.reasoningEffort && model === transport.primaryModel && model.startsWith("openai/gpt-oss")
               ? { reasoning_effort: "low" }
               : {}),
+            // DeepSeek V4 hybrid-thinking: production mein thinking OFF — latency
+            // experiment mein measured: 63s/call (thinking ON) → 18-31s/call (OFF),
+            // quality identical (6/6 tool-selection/JSON). Params: chat_template_kwargs.
+            ...(model.startsWith("deepseek") ? { chat_template_kwargs: { thinking: false } } : {}),
             max_tokens: 900,
             messages,
             tools: AGENTIC_TOOLS,

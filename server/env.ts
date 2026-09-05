@@ -54,6 +54,12 @@ export const env = {
   get nvidiaModel() {
     return (process.env.NVIDIA_MODEL ?? "").trim() || NVIDIA_DEFAULT_MODEL;
   },
+  /** NLU/fallback layer ka model. Default = NVIDIA_MODEL (backward compat).
+   *  Primary planner DeepSeek hote hue bhi fast NLU (GPT-OSS) rakhne ke liye
+   *  NLU_MODEL=openai/gpt-oss-20b set hota hai. */
+  get nluModel() {
+    return (process.env.NLU_MODEL ?? "").trim() || this.nvidiaModel;
+  },
   /** BENCHMARK-ONLY override: AGENTIC_MODEL set ho to agentic engine usi single model ko
    *  chalata hai (chain fallback ke bina). Prod mein kabhi set nahi hota — default path
    *  (NVIDIA_MODEL = GPT-OSS-20B) bilkul unchanged rehta hai. */

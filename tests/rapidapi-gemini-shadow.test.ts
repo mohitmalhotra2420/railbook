@@ -13,8 +13,10 @@ describe("RapidAPI Gemini is shadow-only", () => {
     delete process.env.RAPIDAPI_GEMINI_SHADOW;
   });
 
-  it("NVIDIA remains the production model; RapidAPI is not the default provider", () => {
-    expect(env.nvidiaModel).toBe("openai/gpt-oss-20b");
+  it("Production models intentional hain (DeepSeek primary, GPT-OSS NLU); RapidAPI is not the default provider", () => {
+    // 2026-09-05 intentional switch: DeepSeek V4 Flash primary planner, GPT-OSS NLU/fallback.
+    expect(env.nvidiaModel).toBe("deepseek-ai/deepseek-v4-flash-0731");
+    expect(env.nluModel).toBe("openai/gpt-oss-20b");
     expect(env.rapidapiGeminiShadow).toBe(false);
   });
 

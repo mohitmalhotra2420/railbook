@@ -86,9 +86,10 @@ Return ONLY JSON: {"reply":"..."}`;
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: env.nvidiaModel,
+        model: env.nluModel, // NLU layer model
         temperature: 0,
-        reasoning_effort: "low",
+        // reasoning_effort GPT-OSS family specific hai — any other model ko nahi.
+        ...(env.nluModel.startsWith("openai/gpt-oss") ? { reasoning_effort: "low" } : {}),
         max_tokens: 256,
         response_format: { type: "json_object" },
         messages: [

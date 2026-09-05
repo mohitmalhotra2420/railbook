@@ -1,0 +1,147 @@
+{
+  "ranAt": "2026-09-05T07:04:23.087Z",
+  "model": "deepseek-ai/deepseek-v4-flash-0731",
+  "realCalls": 6,
+  "results": [
+    {
+      "config": "A",
+      "promptKey": "P2",
+      "prompt": "12014 ka CC mein availability aur fare batao",
+      "status": 200,
+      "latencyMs": 58823,
+      "ttft": null,
+      "promptTokens": 2477,
+      "completionTokens": 164,
+      "reasoningTokensExposed": null,
+      "reasoningContentChars": 173,
+      "reasoningPresent": true,
+      "finishReason": "tool_calls",
+      "toolsPlanned": [
+        "CHECK_AVAILABILITY",
+        "GET_FARE"
+      ],
+      "argsRaw": [
+        "{\"train_number\":\"12014\",\"class_code\":\"CC\"}",
+        "{\"train_number\":\"12014\",\"class_code\":\"CC\"}"
+      ],
+      "jsonValid": true,
+      "selectionOk": true,
+      "content": "\n\n",
+      "modelEcho": "deepseek-ai/deepseek-v4-flash-0731"
+    },
+    {
+      "config": "A",
+      "promptKey": "P5",
+      "prompt": "Amritsar se Ludhiana jaana hai",
+      "status": 200,
+      "latencyMs": 67846,
+      "ttft": null,
+      "promptTokens": 2476,
+      "completionTokens": 61,
+      "reasoningTokensExposed": null,
+      "reasoningContentChars": 57,
+      "reasoningPresent": true,
+      "finishReason": "stop",
+      "toolsPlanned": [],
+      "argsRaw": [],
+      "jsonValid": true,
+      "selectionOk": true,
+      "content": "Amritsar se Ludhiana ke liye kaunsi date ko jaana hai? (Aaj 5 Sep 2026 hai.) Date batao, main trains dikha doonga.",
+      "modelEcho": "deepseek-ai/deepseek-v4-flash-0731"
+    },
+    {
+      "config": "B",
+      "promptKey": "P5",
+      "prompt": "Amritsar se Ludhiana jaana hai",
+      "status": 200,
+      "latencyMs": 17927,
+      "ttft": null,
+      "promptTokens": 2476,
+      "completionTokens": 62,
+      "reasoningTokensExposed": null,
+      "reasoningContentChars": 0,
+      "reasoningPresent": false,
+      "finishReason": "stop",
+      "toolsPlanned": [],
+      "argsRaw": [],
+      "jsonValid": true,
+      "selectionOk": true,
+      "content": "\n\nMain aapki madad kar sakta hoon! Amritsar se Ludhiana ke liye trains dhoondhne ke liye mujhe journey date chahiye.\n\n**Kis date ko jaana hai?** (Aaj 5 September 2026 hai)",
+      "modelEcho": "deepseek-ai/deepseek-v4-flash-0731"
+    },
+    {
+      "config": "B",
+      "promptKey": "P2",
+      "prompt": "12014 ka CC mein availability aur fare batao",
+      "status": 200,
+      "latencyMs": 30987,
+      "ttft": null,
+      "promptTokens": 2477,
+      "completionTokens": 178,
+      "reasoningTokensExposed": null,
+      "reasoningContentChars": 0,
+      "reasoningPresent": false,
+      "finishReason": "tool_calls",
+      "toolsPlanned": [
+        "CHECK_AVAILABILITY",
+        "GET_FARE",
+        "GET_TRAIN_INFO"
+      ],
+      "argsRaw": [
+        "{\"train_number\":\"12014\",\"class_code\":\"CC\"}",
+        "{\"train_number\":\"12014\",\"class_code\":\"CC\"}",
+        "{\"train_number\":\"12014\"}"
+      ],
+      "jsonValid": true,
+      "selectionOk": true,
+      "content": "\n\nMain aapke liye 12014 (Shatabdi) ki CC class availability aur fare check karta hoon.\n\n",
+      "modelEcho": "deepseek-ai/deepseek-v4-flash-0731"
+    },
+    {
+      "config": "C",
+      "promptKey": "P2",
+      "prompt": "12014 ka CC mein availability aur fare batao",
+      "status": 200,
+      "latencyMs": 24059,
+      "ttft": null,
+      "promptTokens": 2477,
+      "completionTokens": 164,
+      "reasoningTokensExposed": null,
+      "reasoningContentChars": 173,
+      "reasoningPresent": true,
+      "finishReason": "tool_calls",
+      "toolsPlanned": [
+        "CHECK_AVAILABILITY",
+        "GET_FARE"
+      ],
+      "argsRaw": [
+        "{\"train_number\":\"12014\",\"class_code\":\"CC\"}",
+        "{\"train_number\":\"12014\",\"class_code\":\"CC\"}"
+      ],
+      "jsonValid": true,
+      "selectionOk": true,
+      "content": "\n\n",
+      "modelEcho": "deepseek-ai/deepseek-v4-flash-0731"
+    },
+    {
+      "config": "C",
+      "promptKey": "P5",
+      "prompt": "Amritsar se Ludhiana jaana hai",
+      "status": 200,
+      "latencyMs": 18817,
+      "ttft": null,
+      "promptTokens": 2476,
+      "completionTokens": 64,
+      "reasoningTokensExposed": null,
+      "reasoningContentChars": 57,
+      "reasoningPresent": true,
+      "finishReason": "stop",
+      "toolsPlanned": [],
+      "argsRaw": [],
+      "jsonValid": true,
+      "selectionOk": true,
+      "content": "Amritsar se Ludhiana ke liye kaunsi date ko jaana hai? (Aaj 5 Sep 2026 hai — date batao, jaise 6 Sep ya 12 Sep)",
+      "modelEcho": "deepseek-ai/deepseek-v4-flash-0731"
+    }
+  ]
+}

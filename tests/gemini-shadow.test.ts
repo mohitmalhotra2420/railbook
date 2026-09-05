@@ -19,8 +19,11 @@ describe("Gemini is shadow-only and cannot take money", () => {
     delete process.env.GEMINI_SHADOW;
   });
 
-  it("NVIDIA remains the only production AI provider name", () => {
-    expect(env.nvidiaModel).toBe("openai/gpt-oss-20b");
+  it("Production AI models intentional hain: primary planner DeepSeek, NLU/fallback GPT-OSS", () => {
+    // 2026-09-05 intentional switch: DeepSeek V4 Flash primary planner (thinking off),
+    // GPT-OSS-20B NLU/fallback layer par. Gemini/RapidAPI shadow-only guard intact.
+    expect(env.nvidiaModel).toBe("deepseek-ai/deepseek-v4-flash-0731");
+    expect(env.nluModel).toBe("openai/gpt-oss-20b");
     expect(env.geminiShadow).toBe(false);
   });
 
