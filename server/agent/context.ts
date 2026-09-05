@@ -101,7 +101,7 @@ export function classifyFollowUp(text: string): FollowUp {
     return "live";
   }
   if (/\b(coach(?:es)?\s*(?:position|layout|composition)?|dibba|dabba)\b/.test(t) || /कोच|डिब्बा/.test(text)) return "coach";
-  if (/\b(timetable|time table|schedule|ka time|k[ai]tn[ea]?\s+time|time\s+le[nt]i?|time\s+lagta|duration|kitna\s+samay|kitne\s+samay)\b/.test(t)) return "timetable";
+  if (/\b(timetable|time table|schedule|timing|ka time|k[ai]tn[ea]?\s+time|time\s+le[nt]i?|time\s+lagta|duration|kitna\s+samay|kitne\s+samay)\b/.test(t)) return "timetable";
   if (/\b(fare|kitna padega|kitna lagega|price|kitna fare)\b/.test(t) || /किराया|कितना पड़ेगा/.test(text)) return "fare";
   if (
     /\b(available|availability|avl|seat(?:s)?\s*(?:hai|hain|available|batao|bata|btana|btao|bta|dikhao|check|status|btana)|kitni seats?)\b/.test(t) ||
@@ -169,7 +169,7 @@ export const TRAIN_TYPE_KEYWORD_RE =
 export const TRAIN_NAME_SUFFIX_RE = /\b[a-z]{3,}(?:\s+[a-z]{3,})*\s+(?:express|exp|mail)\b/i;
 
 const NAME_STOPWORDS = new Set(
-  ("ka ki ke ko se mein me kya kitne kitna kitni kab kahan kaise hai hain hota hoti hote batao bata batade batao btana btavo btana time samay leti leta lena lijaati jaati jaata jana jaana nikal nikalti niklega niklega chalti chalti hai wali wala yeh ye woh wo is us train trains railway gari gaadi book booking ticket tatkal fare kiraya seat seats availability available rate rupees rupaye abhi aaj kal tomorrow yesterday date din raat subah shaam confirm cancel refund pnr status live running position kahan pehle baad aage piche se lekar tak only sirf please kripya boliye bataiye chahiye chahta chahti karna karni kardo karde dena dena do dijiye").split(
+  ("ka ki ke ko se mein me kya kitne kitna kitni kab kahan kaise hai hain hota hoti hote batao bata batade btana btavo time samay leti leta lena lijaati jaati jaata jana jaana nikal nikalti niklega chalti wali wala yeh ye woh wo is us train trains railway gari gaadi book booking ticket tatkal fare kiraya seat seats availability available rate rupees rupaye abhi aaj kal kal ki parso tomorrow yesterday today date din raat subah shaam monday tuesday wednesday thursday friday saturday sunday somvar mangalvar budhvar guruvar shukravar ravivar confirm cancel refund pnr status live running position kahan pehle baad aage piche se lekar tak only sirf please kripya boliye bataiye chahiye chahta chahti karna karni kardo karde dena do dijiye express mail aur ya and or bhi sabse achhi acchi achi best better behtar kaunsi kaunsa kaunse kaun koi kuch sasti sasta sastme mehnga mehngi expensive cheap fast tez jaldi late lateest latest tareek tarikh number code quota general acchi sabse wali accha").split(
     " ",
   ),
 );
@@ -180,7 +180,7 @@ export function trainNamePhrase(text: string): string | null {
   let best: string[] = [];
   let cur: string[] = [];
   for (const tok of tokens) {
-    if (NAME_STOPWORDS.has(tok) || /^\d+$/.test(tok)) {
+    if (NAME_STOPWORDS.has(tok) || /^\d+$/.test(tok) || tok.length < 3) {
       if (cur.length > best.length) best = cur;
       cur = [];
     } else {

@@ -250,7 +250,7 @@ function chatResponse(step: ScriptStep) {
 }
 
 describe("agentic tool-calling layer", () => {
-  it("exposes exactly the 10 approved tools", () => {
+  it("exposes exactly the 15 approved tools", () => {
     const names = AGENTIC_TOOLS.map((t) => t.function.name).sort();
     expect(names).toEqual(
       [
@@ -258,12 +258,17 @@ describe("agentic tool-calling layer", () => {
         "CHECK_PNR",
         "GENERAL_RAILWAY_ANSWER",
         "GET_CANCELLED_TRAINS",
+        "GET_COACH_POSITION",
         "GET_FARE",
+        "GET_STATION_BOARD",
         "GET_TIMETABLE",
+        "GET_TRAIN_HISTORY",
         "GET_TRAIN_INFO",
         "JOURNEY_ANALYZE",
+        "SEARCH_STATIONS",
         "SEARCH_TRAINS",
         "TRACK_TRAIN",
+        "TRAIN_NAME_SEARCH",
       ].sort(),
     );
   });

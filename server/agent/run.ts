@@ -446,6 +446,22 @@ export async function resolveStationPick(
  * se poocha, vande bharat hi bata diya"). (1) pichhli search list mein se naam
  * match, (2) nahi to RailCore /trains/search API se. Ek solid match → number;
  * multiple/zero → honest clarify (galat train ka data KABHI nahi). */
+/** Phrase user ke apne origin/destination station se match karti hai? ("amritsar ka
+ * time" = station context, train-name search NAHI chalana). */
+function phraseMatchesStation(phrase: string, ctx: AgentContext): boolean {
+  if (!phrase) return true;
+  const ptoks = phrase.toLowerCase().split(/\s+/).filter(Boolean);
+  for (const st of [ctx.origin, ctx.destination]) {
+    if (!st) continue;
+    const stoks = `${st.city} ${st.name} ${st.code}`
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter(Boolean);
+    if (ptoks.length && ptoks.every((t) => stoks.includes(t))) return true;
+  }
+  return false;
+}
+
 async function resolveTrainByName(
   text: string,
   ctx: AgentContext,
@@ -462,25 +478,46 @@ async function resolveTrainByName(
     return { clarify: `Kaunsi train — ${lines}? Train number bata dijiye.` };
   }
 
+  /* Gate (user feedback: "AI ko khud samjhna chahiye"): train-NAME jaisi phrase
+   * + train-info follow-up — aur phrase koi STATION nahi (route query se bachne
+   * ke liye). Keyword (shatabdi/rajdhani/…) ho to follow-up ki zaroorat nahi. */
   const hasNameKeyword = TRAIN_TYPE_KEYWORD_RE.test(text) || TRAIN_NAME_SUFFIX_RE.test(text);
-  if (!hasNameKeyword) return null;
-
-  const phrase = trainNamePhrase(text);
+  const phrase = trainNamePhrase(text) ?? "";
+  if (!hasNameKeyword) {
+    const followish =
+      /^(timetable|live|fare|availability|coach|train_pick)$/.test(classifyFollowUp(text) ?? "") ||
+      /\btrains?\b/i.test(text);
+    const phraseIsStation = phraseMatchesStation(phrase, ctx);
+    if (!followish || phrase.length < 4 || phraseIsStation) return null;
+  }
   if (!phrase || phrase.length < 3) return null;
+  /* Phrase koi STATION to nahi? ("amritsar ka time" jaisi journey query ko
+   * train-search se hijack mat karo — live station API se verify karo.) */
+  try {
+    const stRes = await routedStationSearch(phrase);
+    const p = phrase.toLowerCase();
+    const isStation = stRes.stations.some(
+      (st) => st.city.toLowerCase() === p || st.name.toLowerCase().includes(p),
+    );
+    if (isStation) return null;
+  } catch {
+    /* station check fail — train search chalne do */
+  }
   let results: { number: string; name: string; from: string; to: string }[] = [];
   try {
     results = await searchRailcoreTrainsByName(phrase);
   } catch {
     return null; // API fail — engine seedha jaane de (deterministic honest ask)
   }
-  if (!results.length) {
-    return { clarify: `\"${phrase}\" naam se koi train nahi mili — train number (5-digit) bata dijiye. Main andaza nahi lagaunga.` };
-  }
-  // Route context se relevance: user ke origin/destination wali train pehle.
+  /* 0 results → KUCH mat karo (hijack nahi) — normal model/deterministic flow.
+   * Phrase generic ho sakta hai; honest clarify sirf real train-name conflict par. */
+  if (!results.length) return null;
+  // Route context se relevance: user ke EXACT origin→destination direction wali
+  // train pehle (up/down pair "SHANE PUNJAB" 12498/12497 mein sahi direction).
   const o = ctx.origin?.code?.toUpperCase();
   const d = ctx.destination?.code?.toUpperCase();
-  const routeMatched = results.filter((t) => (o && t.from === o) || (d && t.to === d) || (o && t.to === o) || (d && t.from === d));
-  const pool = routeMatched.length === 1 ? routeMatched : results;
+  const exact = o && d ? results.filter((t) => t.from === o && t.to === d) : [];
+  const pool = exact.length === 1 ? exact : exact.length > 1 ? exact : results;
   if (pool.length === 1) return { trainNumber: pool[0].number, trainName: pool[0].name };
   const lines = pool.slice(0, 4).map((t) => `${t.number} ${t.name} (${t.from}→${t.to})`).join("; ");
   return { clarify: `\"${phrase}\" se ${pool.length} trains mili — kaunsi? ${lines}. Train number bata dijiye.` };
@@ -586,10 +623,12 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
    * → dono engines ke liye selectedTrain set; ambiguous/zero → honest clarify
    * (model ko galat train answer karne ka mauka hi nahi). */
   let nameClarify: string | null = null;
+  let nameResolvedTrain: { number: string; name: string } | null = null;
   if (!isBookingMutation(req)) {
     try {
       const resolved = await resolveTrainByName(req.text, seeded);
       if (resolved && "trainNumber" in resolved) {
+        nameResolvedTrain = { number: resolved.trainNumber, name: resolved.trainName };
         seeded.selectedTrainNumber = resolved.trainNumber;
         seeded.selectedTrainName = resolved.trainName;
       } else if (resolved && "clarify" in resolved) {
@@ -697,6 +736,12 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
     now: req.now,
   });
   const seeded2 = seedContext(req);
+  /* Naam-se-resolve (upar hua) deterministic ctx par bhi apply ho — warna
+   * fallback pichhli selected train (galat) ka jawab de deta tha. */
+  if (nameResolvedTrain) {
+    seeded2.selectedTrainNumber = nameResolvedTrain.number;
+    seeded2.selectedTrainName = nameResolvedTrain.name;
+  }
   /* Station-pick deterministic path mein bhi apply ho (seedContext req se
    * padta hai, pick upar resolve hua tha). */
   if (stationPick) {

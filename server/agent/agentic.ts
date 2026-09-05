@@ -18,6 +18,7 @@ import { env } from "../env.js";
 import { getProvider } from "../providers/index.js";
 import { todayYmd } from "../util.js";
 import {
+  routedCoachPosition,
   routedCancelled,
   routedClassBoard,
   routedLiveStatus,
@@ -33,9 +34,16 @@ import { RailKitProvider } from "../railway/railkit.js";
 import type { ClassCode } from "../providers/types.js";
 import { executeTool } from "./tools.js";
 import { segmentOfStops } from "./context.js";
+import { searchRailcoreTrainsByName } from "../railway/railcore.js";
+import { stationBoard, trainHistory } from "../railway/railkit.js";
 
 export type AgenticToolName =
   | "SEARCH_TRAINS"
+  | "TRAIN_NAME_SEARCH"
+  | "SEARCH_STATIONS"
+  | "GET_COACH_POSITION"
+  | "GET_STATION_BOARD"
+  | "GET_TRAIN_HISTORY"
   | "GET_TRAIN_INFO"
   | "GET_TIMETABLE"
   | "TRACK_TRAIN"
@@ -48,6 +56,11 @@ export type AgenticToolName =
 
 const APPROVED: readonly AgenticToolName[] = [
   "SEARCH_TRAINS",
+  "TRAIN_NAME_SEARCH",
+  "SEARCH_STATIONS",
+  "GET_COACH_POSITION",
+  "GET_STATION_BOARD",
+  "GET_TRAIN_HISTORY",
   "GET_TRAIN_INFO",
   "GET_TIMETABLE",
   "TRACK_TRAIN",
@@ -124,6 +137,20 @@ const StationRef = z.string().trim().min(2).max(40);
 const Ymd = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 
 const ArgSchemas = {
+  TRAIN_NAME_SEARCH: z.object({ query: z.string().trim().min(2).max(60) }),
+  SEARCH_STATIONS: z.object({ query: z.string().trim().min(2).max(40) }),
+  GET_COACH_POSITION: z.object({
+    train_number: z.string().regex(/^\d{4,6}$/),
+    station: z.string().trim().min(2).max(20).nullish(),
+  }),
+  GET_STATION_BOARD: z.object({
+    station_code: z.string().trim().min(2).max(10),
+    hours: z.number().int().min(2).max(8).nullish(),
+  }),
+  GET_TRAIN_HISTORY: z.object({
+    train_number: z.string().regex(/^\d{4,6}$/),
+    date: Ymd,
+  }),
   SEARCH_TRAINS: z.object({
     origin: StationRef,
     destination: StationRef,
@@ -185,6 +212,76 @@ const ArgSchemas = {
 /* ── OpenAI-style tools spec (what the model is told about) ──────── */
 
 export const AGENTIC_TOOLS = [
+  {
+    type: "function",
+    function: {
+      name: "TRAIN_NAME_SEARCH",
+      description:
+        "Train ka NAAM se number resolve karo (jaise 'swarn shatabdi', 'saryu yamuna express', 'vande bharat'). Real railway API se matching trains laata hai: number, naam, source→destination. Jab user kisi train ka naam le kar pooche aur known context mein trainNumber nahi hai (ya naam alag train ka lag raha hai) to PEHLE yeh call karo, phir jo poocha uska data doosre tool se lao.",
+      parameters: {
+        type: "object",
+        properties: { query: { type: "string", description: "User ne bola train naam/phrase jaise 'swarn shatabdi'" } },
+        required: ["query"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "SEARCH_STATIONS",
+      description: "City/station naam se official railway station codes search karo (jaise 'Delhi' → NDLS, DLI, NZM...). Station options dikhane ke liye.",
+      parameters: {
+        type: "object",
+        properties: { query: { type: "string", description: "City ya station naam" } },
+        required: ["query"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "GET_COACH_POSITION",
+      description: "Train ka coach layout/position (engine se coach kram). Station de to us station ke hisaab se.",
+      parameters: {
+        type: "object",
+        properties: {
+          train_number: { type: "string", description: "5-digit train number" },
+          station: { type: "string", description: "Station code (optional)" },
+        },
+        required: ["train_number"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "GET_STATION_BOARD",
+      description: "Kisi station par agle kuch ghante mein aane/jaane wali trains (live board).",
+      parameters: {
+        type: "object",
+        properties: {
+          station_code: { type: "string", description: "Station code jaise ASR" },
+          hours: { type: "number", description: "Window ghante mein (2/4/8, default 2)" },
+        },
+        required: ["station_code"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "GET_TRAIN_HISTORY",
+      description: "Train ka PIChhla/completed run (diya gaya date) — actual arrival/departure aur delay per station. 'Kal ki train late thi?' jaise sawaalon ke liye.",
+      parameters: {
+        type: "object",
+        properties: {
+          train_number: { type: "string", description: "5-digit train number" },
+          date: { type: "string", description: "Run date YYYY-MM-DD (aaj nahi — pichhla din)" },
+        },
+        required: ["train_number", "date"],
+      },
+    },
+  },
   {
     type: "function",
     function: {
@@ -807,6 +904,59 @@ export async function executeApprovedTool(
 
   try {
     switch (name as AgenticToolName) {
+      case "TRAIN_NAME_SEARCH": {
+        const results = await searchRailcoreTrainsByName(a.query as string);
+        if (!results.length) {
+          return failResult("railcore", `"${a.query}" naam se koi train nahi mili — train number (5-digit) maango.`);
+        }
+        return okResult(
+          "railcore",
+          `"${a.query}": ${results.length} trains mili.`,
+          { query: a.query, count: results.length, trains: results.slice(0, 10) },
+        );
+      }
+      case "SEARCH_STATIONS": {
+        const res = await routedStationSearch(a.query as string);
+        if (!res.stations.length) {
+          return failResult(res.provider, `"${a.query}" se koi station nahi mila.`);
+        }
+        return okResult(
+          res.provider,
+          `${res.city ?? a.query}: ${res.stations.length} stations mile.`,
+          { query: a.query, city: res.city ?? null, stations: res.stations.slice(0, 10) },
+        );
+      }
+      case "GET_COACH_POSITION": {
+        const res = await routedCoachPosition(a.train_number as string, (a.station as string | undefined) ?? undefined);
+        const cp = res.coachPosition;
+        if (!cp) return failResult(res.provider, "Coach position abhi provider se nahi aayi — main fake layout nahi bataunga.");
+        const coaches = Array.isArray(cp.coaches) ? cp.coaches : [];
+        return okResult(
+          res.provider,
+          `${a.train_number}: ${coaches.length} coaches.`,
+          { trainNumber: a.train_number, stationCode: cp.stationCode ?? null, coaches },
+        );
+      }
+      case "GET_STATION_BOARD": {
+        const board = await stationBoard(String(a.station_code as string).toUpperCase(), typeof a.hours === "number" ? a.hours : 2);
+        if (!board) return failResult(null, "Station board abhi available nahi hai.");
+        const rows = Array.isArray(board.trains) ? board.trains.slice(0, 12) : [];
+        return okResult(
+          null,
+          `${a.station_code}: ${board.total ?? rows.length} trains (${board.summary ?? "agle ghante"}).`,
+          { station: a.station_code, total: board.total ?? rows.length, summary: board.summary, trains: rows },
+        );
+      }
+      case "GET_TRAIN_HISTORY": {
+        const history = await trainHistory(a.train_number as string, a.date as string);
+        if (!history) return failResult(null, "Is date ka completed run nahi mila — main yesterday ka live invent nahi karunga.");
+        const stops = Array.isArray(history.stops) ? history.stops.slice(0, 20) : [];
+        return okResult(
+          "railkit",
+          `${history.trainNumber} ${history.trainName} (${history.date}) — ${stops.length} stops ka completed run.`,
+          { trainNumber: history.trainNumber, trainName: history.trainName, date: history.date, stops },
+        );
+      }
       case "SEARCH_TRAINS": {
         const fromRes = await resolveStationRef(a.origin as string);
         if ("error" in fromRes) return failResult(null, fromRes.error);
@@ -1133,7 +1283,9 @@ function systemPrompt(
     "9. Date sirf Deterministic date resolver line, date map ya known context se aayegi — khud calendar math kabhi mat karo. Resolver ka result FINAL hai; ambiguous ho to user se poochho; resolver kuch na de aur user ne absolute date di ho (jaise 5 September ya 05/09/2026) to map mein nahi hogi — tab user se confirm karo. Dhyan rahe: \"next <weekday>\" = AGLE hafte ka woh din (next Saturday aane wala Saturday nahi), \"coming <weekday>\"/bela weekday = aane wala pehla.",
     "10. Booking/payment kabhi tum nahi karte — booking tool tumhare paas hai hi nahi. User ticket book karna chahe to slots (origin/destination/date/passengers) jama karo aur trains dikhaao (SEARCH_TRAINS), phir bolo ki booking app ke TrainBoard/Confirm UI se hogi.",
     "11. Multi-station cities (Delhi, Bombay/Mumbai, Madras/Chennai, Calcutta/Kolkata…) ke liye KHUD station mat chuno — destination mein CITY NAAM hi pass karo; tool needs_choice ke saath real station options laayega, wahi user ko dikhao. Apni knowledge se station substitute (Calcutta→Howrah jaisa) kabhi nahi.",
-        "14. Train ka NAAM user ne bola (jaise 'swarn shatabdi', 'vande bharat') to USI train ka jawab do — known context mein trainNumber aaya hai ya list mein se naam match hua hai. Pichhli selected train se mix mat karo. Naam se train identify na ho to honestly poochho, galat train ka data mat do.",
+            "16. User ne train ka NAAM bola aur known context mein uska number nahi hai (ya naam doosri train ka lag raha hai) to PEHLE TRAIN_NAME_SEARCH call karke number resolve karo, phir jo poocha uska data doosre tool se lao. Naam se multiple trains milein to user se kaunsi poochho — galat train ka data KABHI mat do.",
+    "17. SIRF wahi data do jo user ne poocha. 'kitne time leti hai' = sirf duration; 'fare kitna' = sirf fare; 'platform/coach' = sirf coach position; 'kahan hai abhi' = sirf live position. Poora dump mat karo — user ne jo manga bas wahi, ek-do line mein.",
+    "14. Train ka NAAM user ne bola (jaise 'swarn shatabdi', 'vande bharat') to USI train ka jawab do — known context mein trainNumber aaya hai ya list mein se naam match hua hai. Pichhli selected train se mix mat karo. Naam se train identify na ho to honestly poochho, galat train ka data mat do.",
     "15. 'Kitne time leti hai / kitna samay lagta hai' = user ke origin→destination SEGMENT ka duration (GET_TIMETABLE summary mein 'FROM→TO dep→arr (Xh YYm)' segment line hai). Poora-route duration sirf tab batao jab user 'poora route' maange.",
     "12. Jab bhi train LIST dikha rahe ho (SEARCH_TRAINS/JOURNEY_ANALYZE results): reply TEXT mein sirf 2-3 line ka summary do — count + 'Sabse fast: <number> <name> (<duration>)' top par highlight. POORI train-by-train list reply text mein MAT likho — app khud organized TABLE mein saari trains dikhata hai. User ko dobara poochna na pade. Cheapest/earliest bhi isi tarah jab relevant ho.",
     "13. Reply ke end mein PROACTIVE offer/continuation KABHI mat likho (jaise 'waise hum continue kar sakte hain', 'aap chahe to…', 'kya aapko aur kuch chahiye?', 'shall I continue?'). Sirf user ke sawaal ka jawab do — aage ka step tabhi batao jab user poochhe. (Zaroori slot-filling questions — date/station/passengers/booking-confirm — exempt hain, woh poochte raho.)",
@@ -1188,7 +1340,7 @@ function sanitizeToolName(raw: string): string {
     .replace(/<\|[^|]*\|>/g, "")
     .trim();
   if ((APPROVED as readonly string[]).includes(s)) return s;
-  const m = s.match(/^(SEARCH_TRAINS|GET_TRAIN_INFO|GET_TIMETABLE|TRACK_TRAIN|CHECK_AVAILABILITY|GET_FARE|CHECK_PNR|GET_CANCELLED_TRAINS|GENERAL_RAILWAY_ANSWER|JOURNEY_ANALYZE)/);
+  const m = s.match(/^(SEARCH_TRAINS|TRAIN_NAME_SEARCH|SEARCH_STATIONS|GET_COACH_POSITION|GET_STATION_BOARD|GET_TRAIN_HISTORY|GET_TRAIN_INFO|GET_TIMETABLE|TRACK_TRAIN|CHECK_AVAILABILITY|GET_FARE|CHECK_PNR|GET_CANCELLED_TRAINS|GENERAL_RAILWAY_ANSWER|JOURNEY_ANALYZE)/);
   return m ? m[1] : s;
 }
 
