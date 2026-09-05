@@ -31,7 +31,7 @@ export function setWebFetch(fn: typeof fetch | null): void {
 async function fetchJson(url: string): Promise<unknown | null> {
   try {
     const res = await (webFetchImpl ?? globalThis.fetch.bind(globalThis))(url, {
-      headers: { "User-Agent": "RailBook/1.0 (assistant web lookup)", Accept: "application/json" },
+      headers: { "User-Agent": "RailBook/1.0 (+https://github.com/mohitmalhotra2420/railbook; railway assistant)", Accept: "application/json" },
       signal: AbortSignal.timeout(WEB_TIMEOUT_MS),
     });
     if (!res.ok) {
@@ -107,13 +107,15 @@ async function wikipediaLookup(query: string, lang: "en" | "hi"): Promise<WebSea
 export async function webSearch(query: string, limit = 4): Promise<WebSearchResult[]> {
   const q = query.trim().slice(0, 200);
   if (!q) return [];
-  const [ddg, wikiEn] = await Promise.all([ddgInstantAnswer(q), wikipediaLookup(q, "en")]);
-  console.error(JSON.stringify({ webLookup: "results", q: q.slice(0, 90), ddg: ddg.length, wikiEn: wikiEn.length }));
-  let results = [...ddg, ...wikiEn];
+  /* Wikipedia PEHLE (datacenter IPs se reliable), DDG baad mein — prod logs:
+   * DDG Render se TimeoutError deta hai, Wikipedia chalta hai. */
+  const wikiEn = await wikipediaLookup(q, "en");
+  let results = [...wikiEn];
   if (!results.length) {
-    const wikiHi = await wikipediaLookup(q, "hi");
-    results = wikiHi;
+    const [ddg, wikiHi] = await Promise.all([ddgInstantAnswer(q), wikipediaLookup(q, "hi")]);
+    results = [...wikiHi, ...ddg];
   }
+  console.error(JSON.stringify({ webLookup: "results", q: q.slice(0, 90), n: results.length }));
   /* Dedupe by URL */
   const seen = new Set<string>();
   const out: WebSearchResult[] = [];

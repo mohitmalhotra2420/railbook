@@ -1048,7 +1048,9 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
       try {
         const info = await routedTrainInfo(factNum);
         const nm = info.info?.trainName ?? "";
-        if (nm) subject = titleCaseWords(nm);
+        /* RailCore "SHTABDI" spelling deta hai, Wikipedia mein "Shatabdi" —
+         * normalize karke hi query banao warna wiki search 0 deta hai. */
+        if (nm) subject = titleCaseWords(nm.replace(/\bSHTABDI\b/gi, "SHATABDI"));
       } catch {
         /* naam nahi mila — number hi subject */
       }
@@ -1059,8 +1061,16 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
       if (typeM) subject = titleCaseWords(typeM[1]);
     }
     const factQuery = `${subject ? subject + " " : ""}${factKeyword}`.trim().slice(0, 140);
-    const webResults = await webSearch(factQuery, 3);
+    let webResults = await webSearch(factQuery, 3);
     console.error(JSON.stringify({ factFallback: true, factQuery, results: webResults.length }));
+    /* Naam+number wali query fail ho to bina-number retry (naam hi kaafi) —
+     * e.g. "Amritsar Shatabdi 12014 top speed" 0 par "Amritsar Shatabdi top
+     * speed" mil sakta hai. */
+    if (!webResults.length && subject.includes(" ")) {
+      const q2 = subject.replace(/ \d{5}$/, "") + " " + factKeyword;
+      webResults = await webSearch(q2, 3);
+      console.error(JSON.stringify({ factFallback: true, factQuery: q2, results: webResults.length, retry: true }));
+    }
     if (webResults.length) {
       const best = webResults[0];
       reply = `Web se mila: ${best.snippet}\n(Source: ${best.title} — ${best.url})\n(Ye railway API ka live data nahi, web-search ka jawab hai.)`;
