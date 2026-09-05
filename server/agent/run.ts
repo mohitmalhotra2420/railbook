@@ -574,6 +574,17 @@ function phraseMatchesStation(phrase: string, ctx: AgentContext): boolean {
   return false;
 }
 
+
+/* "AMRITSAR SHATABDI" -> "Amritsar Shatabdi" — web queries case-sensitivity
+ * ke liye (DDG/Wikipedia titlecase par better milti hain). */
+function titleCaseWords(s: string): string {
+  return String(s ?? "")
+    .toLowerCase()
+    .split(/\s+/)
+    .map((w) => (w ? w[0].toUpperCase() + w.slice(1) : w))
+    .join(" ");
+}
+
 async function resolveTrainByName(
   text: string,
   ctx: AgentContext,
@@ -1023,16 +1034,31 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
    * sawaal API/KB se aate hi nahi. Model timeout par bhi jawab mile —
    * deterministic web lookup (Wikipedia/DDG), SAAPH label ke saath. */
   if (!reply && !tool && GENERAL_FACT_RE.test(String(req.text ?? ""))) {
-    let factQuery = String(req.text ?? "").slice(0, 120);
-    const factNum = factQuery.match(/\b(\d{5})\b/)?.[1];
+    /* English query banwao — live test: Hinglish raw text par DDG/Wikipedia
+     * 0 results dete hain, "Amritsar Shatabdi 12014 top speed" par dete hain. */
+    const rawText = String(req.text ?? "");
+    let factKeyword = "information";
+    if (/\b(top speed|max speed|average speed|kitni tez|kitna tez|speed kya|speed kitni)\b/i.test(rawText)) factKeyword = rawText.includes("average") ? "average speed" : "top speed";
+    else if (/\b(kab shuru|kab chalu|kab start|kitne saal|kab bani|history|pehli train|sabse pehli)\b/i.test(rawText)) factKeyword = "history";
+    else if (/kitne coach/i.test(rawText)) factKeyword = "coaches";
+    else if (/engine ka naam/i.test(rawText)) factKeyword = "locomotive";
+    let subject = "";
+    const factNum = rawText.match(/\b(\d{5})\b/)?.[1];
     if (factNum) {
       try {
         const info = await routedTrainInfo(factNum);
-        if (info.info?.trainName) factQuery = `${info.info.trainName} ${factQuery}`.slice(0, 140);
+        const nm = info.info?.trainName ?? "";
+        if (nm) subject = titleCaseWords(nm);
       } catch {
-        /* naam nahi mila — seedha text se search */
+        /* naam nahi mila — number hi subject */
       }
+      if (!subject) subject = factNum;
+      else subject = `${subject} ${factNum}`;
+    } else {
+      const typeM = rawText.match(/\b(vande bharat|shatabdi|rajdhani|gatimaan|gatiman|duronto|tejas|garib rath|hum safar|jan shatabdi|double decker|mahamana|antyodaya|bande bharat|namma metro|namo bharat)\b/i);
+      if (typeM) subject = titleCaseWords(typeM[1]);
     }
+    const factQuery = `${subject ? subject + " " : ""}${factKeyword}`.trim().slice(0, 140);
     const webResults = await webSearch(factQuery, 3);
     if (webResults.length) {
       const best = webResults[0];
