@@ -1263,12 +1263,12 @@ function systemPrompt(
           known.stationPicked
             ? ` User ne abhi pichhle station-options se apni choice bheji hai — ${known.stationPicked}=${known.stationPicked === "origin" ? known.origin : known.destination} FINAL hai (server ne verify kiya). Confirm mat karo, seedha tool call karke jawab do.`
             : known.destinationAmbiguous
-              ? ` User ne destination "${known.destinationAmbiguous}" bola jo AMBIGUOUS hai (multiple stations) — SABSE PEHLE JOURNEY_ANALYZE ya SEARCH_TRAINS tool call karo: needs_choice ke options user ko do. Station options SIRF tool result se — apni knowledge se station codes/options KABHI mat likho. Preference/date baad mein.`
+              ? ` User ne destination "${known.destinationAmbiguous}" bola jo AMBIGUOUS hai (multiple stations) — AGAR user ka current message isi journey ke baare mein hai to JOURNEY_ANALYZE ya SEARCH_TRAINS tool call karo aur needs_choice ke options user ko do. Station options SIRF tool result se — apni knowledge se station codes/options KABHI mat likho. Preference/date baad mein. Par agar current message koi ALAG sawaal hai (doosri train/PNR/status/fare/doosra route), to PEHLE us naye sawaal ka jawab do — station options us reply mein repeat mat karo. Options dete waqt sirf options do — saath mein koi denial/extra claim ("ye train wahin stop nahi karti" jaisa) mat jodo.`
               : ""
         }`
       : "",
     history.length
-      ? `Conversation history upar di gayi hai — user ka pichla context wahi se aata hai (jaise \"saturday\" pichle sawaal ka jawab hai). History + known context use karo, user se dobara wahi mat poochho jo already pata hai.`
+      ? `Conversation history upar di gayi hai — user ka pichla context wahi se aata hai (jaise \"saturday\" pichle sawaal ka jawab hai, ya \"wahi train\" = pichhli selected train). History + known context use karo, user se dobara wahi mat poochho jo already pata hai. PAR user ka CURRENT message naya/alag sawaal ho to history ki purani trains/options se uska jawab mat banao — naye sawaal ke liye naya tool call karo.`
       : "",
     "RULES:",
     "1. Railway data ke liye khud decide karke approved tools call karo — tabhi jab jawab ke liye data chahiye. Agar context/history se required info (origin/destination/date/train) already pata hai to poochho mat, seedha tool call karo.",
@@ -1289,6 +1289,8 @@ function systemPrompt(
     "15. 'Kitne time leti hai / kitna samay lagta hai' = user ke origin→destination SEGMENT ka duration (GET_TIMETABLE summary mein 'FROM→TO dep→arr (Xh YYm)' segment line hai). Poora-route duration sirf tab batao jab user 'poora route' maange.",
     "12. Jab bhi train LIST dikha rahe ho (SEARCH_TRAINS/JOURNEY_ANALYZE results): reply TEXT mein sirf 2-3 line ka summary do — count + 'Sabse fast: <number> <name> (<duration>)' top par highlight. POORI train-by-train list reply text mein MAT likho — app khud organized TABLE mein saari trains dikhata hai. User ko dobara poochna na pade. Cheapest/earliest bhi isi tarah jab relevant ho.",
     "13. Reply ke end mein PROACTIVE offer/continuation KABHI mat likho (jaise 'waise hum continue kar sakte hain', 'aap chahe to…', 'kya aapko aur kuch chahiye?', 'shall I continue?'). Sirf user ke sawaal ka jawab do — aage ka step tabhi batao jab user poochhe. (Zaroori slot-filling questions — date/station/passengers/booking-confirm — exempt hain, woh poochte raho.)",
+    "18. CONTEXT-SWITCH (sabse zaroori): user ka CURRENT message hi priority hai. Agar aapne pichhle reply mein kuch poochha tha (station options/date/confirm) par user ne uska jawab NAHI diya aur koi alag cheez/train poochh li — to PEHLE naye sawaal ka jawab do (tool call karke). Apna pending sawaal naye reply mein dobara repeat ya attach mat karo; jab user khud wapas usi journey ki baat kare tab options yaad dilao. Same chat mein topic/train badalna normal hai — 'chhodo/arré chhad' jaise words ko ignore-marker ki tarah samjho.",
+    "19. Purani search ki trains se current sawaal ka jawab MAT banao (jaise user ne fastest train poocha aur aap pichhli list ki kisi train par 'nahi, ye wahin stop nahi karti' bolo). Current sawaal ka data na mile to: pehle relevant TOOL call karo; phir bhi na mile to 1-2 line mein saaf bolo kya unavailable hai — flat 'is question ka jawab evidence mein nahi hai' jaisa kabhi nahi.",
   ]
     .filter(Boolean)
     .join("\n");
