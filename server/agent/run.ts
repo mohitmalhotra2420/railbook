@@ -1,6 +1,7 @@
 import { runUnderstand } from "../understand/index.js";
 import { understand as deterministicUnderstand, type DialogSlot, type KnownSlots, type NluResult } from "../understand/legacy-nlu.js";
 import {
+  GENERAL_FACT_RE,
   TRAIN_NAME_SUFFIX_RE,
   TRAIN_TYPE_KEYWORD_RE,
   bookingInProgress,
@@ -34,12 +35,6 @@ import { searchRailcoreTrainsByName } from "../railway/railcore.js";
 
 /** Atlas analyse intents — decideTool inhe map nahi karta (model ki zimmedari hai),
  *  par agentic engine fail ho to deterministic fallback bhi inka honest answer deta hai. */
-/* General-fact sawaal (2026-09-06 screenshot): "top speed", "kitni tez",
- * "kab chalu hui" — ye railway API/KB ka data NAHI hota. Naam-resolution
- * skip + deterministic web lookup (Wikipedia/DDG) inhi par chalta hai. */
-const GENERAL_FACT_RE =
-  /\b(top speed|max speed|average speed|kitni tez|kitna tez|speed kya|speed kitni|kab (?:shuru|chalu|start)|kitne saal|history|kab bani|pehli train|sabse pehli|kitne coach|engine ka naam|kaise kaam)\b/i;
-
 const ATLAS_PREF: Record<string, "fastest" | "cheapest" | "best"> = {
   SELECT_FASTEST: "fastest",
   SELECT_CHEAPEST: "cheapest",
@@ -880,7 +875,12 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
   const trainNo = resolveTrainNumber(req.text, ctx) ?? understood.nlu.trainNumber;
   if (trainNo) ctx.selectedTrainNumber = trainNo;
 
-  const tool = decideTool(follow, ctx, understood.nlu.intent);
+  let tool = decideTool(follow, ctx, understood.nlu.intent);
+  /* General-fact sawaal (2026-09-06 screenshot bug 1): "12014 ki top speed"
+   * par TRAIN_SCHEDULE/getTimetable chal jaata tha — user ko timetable milta
+   * tha, speed ka jawab nahi. Fact-sawal par railway tool mat chalao —
+   * deterministic web fallback (neeche) labeled fact jawab dega. */
+  if (tool && GENERAL_FACT_RE.test(String(req.text ?? ""))) tool = null;
   ctx.lastTool = tool;
 
   /* Naam ambiguous/zero tha — model skip ho chuka hai; yahan honest clarify

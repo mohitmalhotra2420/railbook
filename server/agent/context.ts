@@ -2,6 +2,13 @@ import type { DialogSlot, NluResult } from "../understand/legacy-nlu.js";
 import { nextMissing } from "../understand/legacy-nlu.js";
 import type { Station } from "../providers/types.js";
 
+/* General-fact sawaal (2026-09-06): "top speed/kitni tez/kab chalu hui" jaise
+ * sawaal railway API/KB ka data nahi hote — web lookup inhi par chalta hai.
+ * run.ts (naam-resolution skip + deterministic web fallback) aur
+ * agentic.ts (user-message fact-nudge) dono yahi use karte hain. */
+export const GENERAL_FACT_RE = /\b(top speed|max speed|average speed|kitni tez|kitna tez|speed kya|speed kitni|kab (?:shuru|chalu|start)|kitne saal|history|kab bani|pehli train|sabse pehli|kitne coach|engine ka naam|kaise kaam)\b/i;
+
+
 export type AgentToolName =
   | "searchStations"
   | "searchTrains"

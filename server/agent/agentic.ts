@@ -33,7 +33,8 @@ import { parseDatePhrase } from "../understand/legacy-dates.js";
 import { RailKitProvider } from "../railway/railkit.js";
 import type { ClassCode } from "../providers/types.js";
 import { executeTool } from "./tools.js";
-import { isQuestionPhraseNotTrainName, segmentOfStops } from "./context.js";
+import {
+  GENERAL_FACT_RE, isQuestionPhraseNotTrainName, segmentOfStops } from "./context.js";
 import { searchRailcoreTrainsByName } from "../railway/railcore.js";
 import { webSearch } from "./websearch.js";
 import { stationBoard, trainHistory } from "../railway/railkit.js";
@@ -1566,7 +1567,14 @@ export async function runAgenticTurn(input: {
       ),
     },
     ...historyTurns,
-    { role: "user", content: redact(input.text) },
+    {
+      role: "user",
+      content:
+        redact(input.text) +
+        (GENERAL_FACT_RE.test(input.text)
+          ? "\n\n(System note: ye general-fact sawaal hai — WEB_SEARCH pehla tool hai; train ka naam/number dhoondh kar train-list kaunsi? mat poochho.)"
+          : ""),
+    },
   ];
 
   const steps: ToolTraceStep[] = [];
