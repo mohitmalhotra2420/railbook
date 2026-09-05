@@ -61,6 +61,22 @@ export const env = {
   get agentAutoEnabled() {
     return (process.env.AGENT_AUTO ?? "1").trim() !== "0";
   },
+  /** Hugging Face router (OpenAI-compatible) — GLM etc. Never log these values. */
+  get hfToken() {
+    return (process.env.HF_TOKEN ?? "").trim();
+  },
+  get hfModel() {
+    return (process.env.HF_MODEL ?? "").trim();
+  },
+  get hfBaseUrl() {
+    const b = (process.env.HF_BASE_URL ?? "").trim().replace(/\/$/, "");
+    return b || "https://router.huggingface.co/v1";
+  },
+  /** Agentic engine ka model provider: "nvidia" (default, GPT-OSS-20B) | "hf" (GLM).
+   *  Railway providers isse unaffected — RailCore primary, RailKit fallback. */
+  get agenticProvider() {
+    return (process.env.AGENTIC_PROVIDER ?? "").trim().toLowerCase() || "nvidia";
+  },
   /** Secondary agentic model — GPT-OSS fail hone par ek hi retry isi se (default: Nemotron 3.5 Lightning). */
   get nvidiaFallbackModel() {
     return (process.env.NVIDIA_FALLBACK_MODEL ?? "").trim() || NVIDIA_DEFAULT_FALLBACK_MODEL;

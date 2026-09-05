@@ -1,0 +1,102 @@
+{
+  "ranAt": "2026-09-05T05:32:07.235Z",
+  "pass": 3,
+  "total": 9,
+  "skipped": [
+    "1",
+    "2",
+    "3",
+    "4",
+    "6"
+  ],
+  "results": [
+    {
+      "id": "auth",
+      "title": "HF authentication + actual model identity",
+      "pass": false,
+      "detail": "modelUsed=? | hfCalls=1",
+      "latencyMs": 217
+    },
+    {
+      "id": "5",
+      "title": "CHECK_AVAILABILITY — seat availability",
+      "pass": false,
+      "detail": "steps= | grounded=false | reply=",
+      "latencyMs": 117
+    },
+    {
+      "id": "7",
+      "title": "train comparison — 12014 vs 12030 (real data se)",
+      "pass": false,
+      "detail": "steps= | reply=",
+      "latencyMs": 147
+    },
+    {
+      "id": "8",
+      "title": "Hindi/Hinglish samajh + real tools",
+      "pass": false,
+      "detail": "steps= | ",
+      "latencyMs": 107
+    },
+    {
+      "id": "9",
+      "title": "missing date — poochhta hai, assume nahi karta",
+      "pass": false,
+      "detail": "reply=",
+      "latencyMs": 143
+    },
+    {
+      "id": "10",
+      "title": "ambiguous 'Delhi' — clarification, silent pick nahi",
+      "pass": false,
+      "detail": "delhiCodes= | ",
+      "latencyMs": 115
+    },
+    {
+      "id": "11",
+      "title": "malformed AI output — unknown tool / harmony-token / bad JSON / URL reject",
+      "pass": true,
+      "detail": "steps=BOOK_WALLET_TOOL:rejected→GET_FARE:rejected→TRACK_TRAIN:rejected",
+      "latencyMs": 6
+    },
+    {
+      "id": "12a",
+      "title": "GLM outage → deterministic fallback (real NLU + real provider data)",
+      "pass": true,
+      "detail": "engine=deterministic | reason=http_503 | reply=12030 CC: ticket ₹1275, service ₹50, total ₹1325",
+      "latencyMs": 0
+    },
+    {
+      "id": "12b",
+      "title": "GLM timeout → deterministic fallback",
+      "pass": true,
+      "detail": "engine=deterministic | reason=timeout",
+      "latencyMs": 0
+    }
+  ],
+  "calls": {
+    "hf": 6,
+    "railcore": 3,
+    "railkit": 2,
+    "other": 0,
+    "hosts": {
+      "router.huggingface.co": 6,
+      "ir.railcore.tech": 3,
+      "railkit-api.rajivdubey.dev": 2
+    }
+  },
+  "modelUsed": [
+    "zai-org/GLM-5.3-Flash"
+  ],
+  "metrics": {
+    "turns": 7,
+    "hfCalls": 4,
+    "toolCallAttempts": 3,
+    "toolExecOk": 0,
+    "toolRejected": 3,
+    "structuredJsonOk": 0,
+    "structuredJsonBad": 0
+  },
+  "leakDetected": false,
+  "hfHttp402": 6
+}

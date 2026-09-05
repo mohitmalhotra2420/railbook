@@ -1154,7 +1154,51 @@ function deterministicSummary(steps: ToolTraceStep[]): string {
 }
 
 export function agenticConfigured(): boolean {
+  if (env.agenticProvider === "hf") return Boolean(env.hfToken && env.hfModel);
   return Boolean(env.nvidiaApiKey);
+}
+
+/**
+ * Agentic model transport — OpenAI-compatible. Default: NVIDIA GPT-OSS-20B
+ * (primary + nemotron fallback model chain). AGENTIC_PROVIDER=hf par Hugging
+ * Face router se GLM chalta hai. Railway providers/tools/safety guards
+ * provider se INDEPENDENT hain — model sirf validated tool plans deta hai,
+ * execution waise hi server-side allowlist + zod se hoti hai; API keys model
+ * tak kabhi nahi jaati.
+ */
+type AgenticTransport = {
+  provider: "nvidia" | "hf";
+  url: string;
+  apiKey: string;
+  models: string[];
+  primaryModel: string;
+  /** reasoning_effort sirf NVIDIA GPT-OSS ko bhejte hain. */
+  reasoningEffort: boolean;
+};
+
+function agenticTransport(): AgenticTransport | null {
+  if (env.agenticProvider === "hf") {
+    if (!env.hfToken || !env.hfModel) return null;
+    return {
+      provider: "hf",
+      url: `${env.hfBaseUrl.replace(/\/$/, "")}/chat/completions`,
+      apiKey: env.hfToken,
+      models: [env.hfModel],
+      primaryModel: env.hfModel,
+      reasoningEffort: false,
+    };
+  }
+  if (!env.nvidiaApiKey) return null;
+  const models = [env.nvidiaModel];
+  if (env.nvidiaFallbackModel && env.nvidiaFallbackModel !== env.nvidiaModel) models.push(env.nvidiaFallbackModel);
+  return {
+    provider: "nvidia",
+    url: `${env.nvidiaBaseUrl.replace(/\/$/, "")}/chat/completions`,
+    apiKey: env.nvidiaApiKey,
+    models,
+    primaryModel: env.nvidiaModel,
+    reasoningEffort: true,
+  };
 }
 
 type NvidiaChatJson = {
@@ -1183,7 +1227,8 @@ export async function runAgenticTurn(input: {
   history?: AgenticHistoryTurn[];
 }): Promise<AgenticTurn> {
   const startedAll = Date.now();
-  if (!env.nvidiaApiKey) {
+  const transport = agenticTransport();
+  if (!transport) {
     return { ok: false, reply: null, grounded: false, steps: [], modelUsed: null, latencyMs: 0, failureReason: "missing_key" };
   }
   // Deterministic date resolver (IST) — arbitrary dates bhi; model sirf follow karta hai.
@@ -1220,12 +1265,12 @@ export async function runAgenticTurn(input: {
   const evidenceParts: string[] = [];
   let lastNeedsChoice: { city: string; stations: { code: string; name: string }[] } | null = null;
   let modelUsed: string | null = null;
-  const url = `${env.nvidiaBaseUrl.replace(/\/$/, "")}/chat/completions`;
+  const url = transport.url;
 
-  // AI chain: primary (GPT-OSS) -> fallback (Nemotron) -> deterministic (upar caller sambhalta hai).
-  const modelChain = [env.nvidiaModel];
+  // AI chain: NVIDIA = primary (GPT-OSS) -> fallback (Nemotron); HF = single GLM.
+  // Model chain poor fail ho to upar caller (runAgent) deterministic fallback chalata hai.
+  const modelChain = transport.models;
   let repaired = false;
-  if (env.nvidiaFallbackModel && env.nvidiaFallbackModel !== env.nvidiaModel) modelChain.push(env.nvidiaFallbackModel);
 
   // Vercel function wall (~30s default) — poora turn is budget ke andar raho.
   // Wall paar hua to jo tool-data mila uska summary return karo (null nahi).
@@ -1257,12 +1302,12 @@ export async function runAgenticTurn(input: {
       try {
         const res = await fetchImpl()(url, {
           method: "POST",
-          headers: { Authorization: `Bearer ${env.nvidiaApiKey}`, "Content-Type": "application/json" },
+          headers: { Authorization: `Bearer ${transport.apiKey}`, "Content-Type": "application/json" },
           body: JSON.stringify({
             model,
             temperature: 0,
-            // reasoning_effort GPT-OSS-specific hai; Nemotron use karein to bhejna nahi.
-            ...(model === env.nvidiaModel ? { reasoning_effort: "low" } : {}),
+            // reasoning_effort GPT-OSS-specific hai; HF/GLM use karein to bhejna nahi.
+            ...(transport.reasoningEffort && model === transport.primaryModel ? { reasoning_effort: "low" } : {}),
             max_tokens: 900,
             messages,
             tools: AGENTIC_TOOLS,

@@ -1,0 +1,130 @@
+{
+  "ranAt": "2026-09-05T05:25:50.609Z",
+  "pass": 7,
+  "total": 14,
+  "results": [
+    {
+      "id": "auth",
+      "title": "HF authentication + actual model identity",
+      "pass": true,
+      "detail": "modelUsed=zai-org/GLM-5.3-Flash | hfCalls=1",
+      "latencyMs": 986
+    },
+    {
+      "id": "1",
+      "title": "SEARCH_TRAINS — real RailCore search",
+      "pass": true,
+      "detail": "steps=SEARCH_TRAINS(railcore,ok)",
+      "latencyMs": 27371
+    },
+    {
+      "id": "2",
+      "title": "JOURNEY_ANALYZE — Atlas analysis",
+      "pass": true,
+      "detail": "steps=JOURNEY_ANALYZE(ok)",
+      "latencyMs": 5368
+    },
+    {
+      "id": "3",
+      "title": "TRACK_TRAIN — live status call",
+      "pass": true,
+      "detail": "steps=TRACK_TRAIN(none,fail)",
+      "latencyMs": 4179
+    },
+    {
+      "id": "4",
+      "title": "GET_FARE — CC fare with real provider data",
+      "pass": false,
+      "detail": "steps=",
+      "latencyMs": 153
+    },
+    {
+      "id": "5",
+      "title": "CHECK_AVAILABILITY — seat availability",
+      "pass": false,
+      "detail": "steps=",
+      "latencyMs": 152
+    },
+    {
+      "id": "6",
+      "title": "multi-tool — train + fare + availability (chained ya complete Atlas)",
+      "pass": false,
+      "detail": "steps= | reply=",
+      "latencyMs": 117
+    },
+    {
+      "id": "7",
+      "title": "train comparison — 12014 vs 12030 (real data se)",
+      "pass": false,
+      "detail": "steps=",
+      "latencyMs": 114
+    },
+    {
+      "id": "8",
+      "title": "Hindi/Hinglish samajh + real tools",
+      "pass": false,
+      "detail": "steps= | ",
+      "latencyMs": 113
+    },
+    {
+      "id": "9",
+      "title": "missing date — poochhta hai, assume nahi karta",
+      "pass": false,
+      "detail": "reply=",
+      "latencyMs": 153
+    },
+    {
+      "id": "10",
+      "title": "ambiguous 'Delhi' — clarification, silent pick nahi",
+      "pass": false,
+      "detail": "delhiCodes= | ",
+      "latencyMs": 155
+    },
+    {
+      "id": "11",
+      "title": "malformed AI output — unknown tool / harmony-token / bad JSON / URL reject",
+      "pass": true,
+      "detail": "steps=BOOK_WALLET_TOOL:rejected→GET_FARE:rejected→TRACK_TRAIN:rejected",
+      "latencyMs": 4
+    },
+    {
+      "id": "12a",
+      "title": "GLM outage → deterministic fallback (real NLU + real provider data)",
+      "pass": true,
+      "detail": "engine=deterministic | reason=http_503 | reply=12030 CC: ticket ₹1275, service ₹50, total ₹1325",
+      "latencyMs": 0
+    },
+    {
+      "id": "12b",
+      "title": "GLM timeout → deterministic fallback",
+      "pass": true,
+      "detail": "engine=deterministic | reason=timeout",
+      "latencyMs": 0
+    }
+  ],
+  "calls": {
+    "hf": 16,
+    "railcore": 27,
+    "railkit": 6,
+    "other": 0,
+    "hosts": {
+      "router.huggingface.co": 16,
+      "ir.railcore.tech": 27,
+      "railkit-api.rajivdubey.dev": 6
+    }
+  },
+  "modelUsed": [
+    "zai-org/GLM-5.3-Flash"
+  ],
+  "metrics": {
+    "turns": 12,
+    "hfCalls": 4,
+    "toolCallAttempts": 6,
+    "toolExecOk": 2,
+    "toolRejected": 4,
+    "structuredJsonOk": 0,
+    "structuredJsonBad": 0
+  },
+  "leakDetected": false,
+  "hfHttp402": 7
+}
