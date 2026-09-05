@@ -1064,14 +1064,12 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
     }
     const factQuery = `${subject ? subject + " " : ""}${factKeyword}`.trim().slice(0, 140);
     let webResults = await webSearch(factQuery, 3);
-    console.error(JSON.stringify({ factFallback: true, factQuery, results: webResults.length }));
     /* Naam+number wali query fail ho to bina-number retry (naam hi kaafi) —
      * e.g. "Amritsar Shatabdi 12014 top speed" 0 par "Amritsar Shatabdi top
      * speed" mil sakta hai. */
     if (!webResults.length && subject.includes(" ")) {
       const q2 = subject.replace(/ \d{5}$/, "") + " " + factKeyword;
       webResults = await webSearch(q2, 3);
-      console.error(JSON.stringify({ factFallback: true, factQuery: q2, results: webResults.length, retry: true }));
     }
     /* Disambiguation ("Top speed may refer to:") jawab nahi hota — skip. */
     const good = webResults.filter((x) => !/may refer to:/i.test(x.snippet));

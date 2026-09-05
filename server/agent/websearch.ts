@@ -34,13 +34,9 @@ async function fetchJson(url: string): Promise<unknown | null> {
       headers: { "User-Agent": "RailBook/1.0 (+https://github.com/mohitmalhotra2420/railbook; railway assistant)", Accept: "application/json" },
       signal: AbortSignal.timeout(WEB_TIMEOUT_MS),
     });
-    if (!res.ok) {
-      console.error(JSON.stringify({ webLookup: "http_error", url: String(url).slice(0, 120), status: res.status }));
-      return null;
-    }
+    if (!res.ok) return null;
     return (await res.json()) as unknown;
-  } catch (e) {
-    console.error(JSON.stringify({ webLookup: "fetch_error", url: String(url).slice(0, 120), err: String(e).slice(0, 140) }));
+  } catch {
     return null;
   }
 }
@@ -115,7 +111,6 @@ export async function webSearch(query: string, limit = 4): Promise<WebSearchResu
     const [ddg, wikiHi] = await Promise.all([ddgInstantAnswer(q), wikipediaLookup(q, "hi")]);
     results = [...wikiHi, ...ddg];
   }
-  console.error(JSON.stringify({ webLookup: "results", q: q.slice(0, 90), n: results.length }));
   /* Dedupe by URL */
   const seen = new Set<string>();
   const out: WebSearchResult[] = [];
