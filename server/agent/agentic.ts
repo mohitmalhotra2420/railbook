@@ -107,6 +107,8 @@ export type AgentTrainRow = {
   durationLabel: string | null;
   classes: string[];
   fare?: { classCode: string; amount: number } | null;
+  /* city-mode search (2026-09-05): train kis city-station se/tak hai (jaise NDLS) */
+  station?: string | null;
 };
 
 export type AgentTrainTable = {
@@ -492,6 +494,82 @@ function providerOf(): string | null {
 
 type ResolvedStn = { code: string } | { candidates: { code: string; name: string }[]; city: string } | { error: string };
 
+/* ── CITY-MODE search (user feedback 2026-09-05: "ludhiana se delhi ki
+ * fastest train" par baar-baar "kaunsa Delhi station?" MAT poochho) —
+ * ambiguous city ke stations par bounded parallel search, merged trains
+ * with per-train station tags. Info query ka seedha jawab isi se aata hai;
+ * booking intent par model options confirm kar sakta hai. */
+const CITY_SEARCH_STATION_CAP = 4;
+
+type CityTrain = {
+  number: string;
+  name: string;
+  departure: string;
+  arrival: string;
+  arrivalDayOffset: number;
+  durationMinutes: number;
+  durationLabel: string;
+  classes: string[];
+  station: string;
+};
+
+async function citySearchMerged(
+  fixedCode: string,
+  candidates: { code: string; name: string }[],
+  date: string,
+  side: "to" | "from",
+): Promise<{ trains: CityTrain[]; searched: string[]; providers: string[] }> {
+  const stations = candidates.slice(0, CITY_SEARCH_STATION_CAP);
+  const searched: string[] = [];
+  const providers = new Set<string>();
+  const trains: CityTrain[] = [];
+  /* Burst rate-limit (~6 parallel RailCore calls par "Too many requests")
+   * — stations 2-2 ke chunks mein search. */
+  const results: { st: { code: string; name: string }; sr: Awaited<ReturnType<typeof searchTrainsRouted>> | null }[] = [];
+  for (let i = 0; i < stations.length; i += 2) {
+    const chunk = stations.slice(i, i + 2);
+    const part = await Promise.all(
+      chunk.map(async (st) => {
+        try {
+          const q = side === "to" ? { from: fixedCode, to: st.code, date } : { from: st.code, to: fixedCode, date };
+          const sr = await searchTrainsRouted(q);
+          return { st, sr };
+        } catch {
+          return { st, sr: null };
+        }
+      }),
+    );
+    results.push(...part);
+  }
+  for (const r of results) {
+    if (!r.sr) continue;
+    searched.push(r.st.code);
+    if (r.sr.provider && r.sr.provider !== "none") providers.add(r.sr.provider);
+    for (const t of r.sr.trains) {
+      trains.push({
+        number: t.number,
+        name: t.name,
+        departure: t.departure,
+        arrival: t.arrival,
+        arrivalDayOffset: t.arrivalDayOffset,
+        durationMinutes: t.durationMinutes,
+        durationLabel: t.durationLabel,
+        classes: t.classes.map((c) => c.code),
+        station: r.st.code,
+      });
+    }
+  }
+  // Duration ke hisaab se sort (fastest pehle) — sabse-fast line ke liye.
+  trains.sort((a, b) => (a.durationMinutes || 9e9) - (b.durationMinutes || 9e9) || a.departure.localeCompare(b.departure));
+  return { trains, searched, providers: [...providers] };
+}
+
+function citySummaryLine(trains: CityTrain[]): string {
+  const fastest = trains[0];
+  if (!fastest) return "";
+  return ` Sabse fast: ${fastest.number} ${fastest.name} (${fastest.durationLabel}, ${fastest.station} tak).`;
+}
+
 async function resolveStationRef(raw: string): Promise<ResolvedStn> {
   const s = raw.trim();
   if (!s) return { error: "Station khaali hai." };
@@ -543,20 +621,60 @@ async function journeyAnalyze(args: {
   const fromRes = await resolveStationRef(args.origin);
   if ("error" in fromRes) return failResult(null, fromRes.error);
   if ("candidates" in fromRes) {
-    return failResult(null, `${fromRes.city} ambiguous hai — pehle user se station poochna hoga.`, {
-      needs_choice: true,
-      city: fromRes.city,
-      stations: fromRes.candidates,
-    });
+    const other = await resolveStationRef(args.destination);
+    if ("error" in other) return failResult(null, other.error);
+    if ("candidates" in other) {
+      return failResult(null, `${other.city} bhi ambiguous hai — dono city ke station options user se poochho.`, {
+        needs_choice: true,
+        city: other.city,
+        stations: other.candidates,
+      });
+    }
+    // CITY-MODE (2026-09-05): origin city sab-stations search — preference rank ke saath.
+    const merged = await citySearchMerged(other.code, fromRes.candidates, args.date, "from");
+    if (!merged.trains.length) {
+      return failResult(null, `${fromRes.city} ke kisi station se ${other.code} ki direct train nahi mili — options user se poochho.`, {
+        needs_choice: true,
+        city: fromRes.city,
+        stations: fromRes.candidates,
+      });
+    }
+    return okResult(
+      merged.providers[0] ?? null,
+      `${fromRes.city}(sab stations)→${other.code} (${args.date}): ${merged.trains.length} trains, preference=${args.preference}.${citySummaryLine(merged.trains)}`,
+      {
+        query: { from: fromRes.city, to: other.code, date: args.date, preference: args.preference },
+        city_stations_searched: merged.searched,
+        count: merged.trains.length,
+        trains: merged.trains.slice(0, 15),
+        note: "City-sab-stations search — har train ka station 'station' field mein hai. Booking ke liye exact station user se confirm hoga.",
+      },
+    );
   }
   const toRes = await resolveStationRef(args.destination);
   if ("error" in toRes) return failResult(null, toRes.error);
   if ("candidates" in toRes) {
-    return failResult(null, `${toRes.city} ambiguous hai — pehle user se station poochna hoga.`, {
-      needs_choice: true,
-      city: toRes.city,
-      stations: toRes.candidates,
-    });
+    // CITY-MODE (2026-09-05): "ludhiana se delhi fastest" jaisi info query par
+    // station MAT poochho — city ki sab stations par search karke jawab do.
+    const merged = await citySearchMerged(fromRes.code, toRes.candidates, args.date, "to");
+    if (!merged.trains.length) {
+      return failResult(null, `${fromRes.code} se ${toRes.city} ke kisi station ki direct train nahi mili — options user se poochho.`, {
+        needs_choice: true,
+        city: toRes.city,
+        stations: toRes.candidates,
+      });
+    }
+    return okResult(
+      merged.providers[0] ?? null,
+      `${fromRes.code}→${toRes.city}(sab stations) (${args.date}): ${merged.trains.length} trains, preference=${args.preference}.${citySummaryLine(merged.trains)}`,
+      {
+        query: { from: fromRes.code, to: toRes.city, date: args.date, preference: args.preference },
+        city_stations_searched: merged.searched,
+        count: merged.trains.length,
+        trains: merged.trains.slice(0, 15),
+        note: "City-sab-stations search — har train ka station 'station' field mein hai. Booking ke liye exact station user se confirm hoga.",
+      },
+    );
   }
   const from = fromRes.code;
   const to = toRes.code;
@@ -961,20 +1079,63 @@ export async function executeApprovedTool(
         const fromRes = await resolveStationRef(a.origin as string);
         if ("error" in fromRes) return failResult(null, fromRes.error);
         if ("candidates" in fromRes) {
-          return failResult(null, `${fromRes.candidates[0] && fromRes.city} — origin ambiguous, user se poochna hoga.`, {
-            needs_choice: true,
-            city: fromRes.city,
-            stations: fromRes.candidates,
-          });
+          // CITY-MODE: origin city ki sab stations par search (2026-09-05).
+          const other = await resolveStationRef(a.destination as string);
+          if ("error" in other) return failResult(null, other.error);
+          if ("candidates" in other) {
+            return failResult(null, `${other.city} bhi ambiguous hai — dono city ke station options user se poochho.`, {
+              needs_choice: true,
+              city: other.city,
+              stations: other.candidates,
+            });
+          }
+          const merged = await citySearchMerged(other.code, fromRes.candidates, a.date as string, "from");
+          if (!merged.trains.length) {
+            return failResult(null, `${fromRes.city} ke kisi station se ${other.code} ki direct train nahi mili — user se exact station poochho.`, {
+              needs_choice: true,
+              city: fromRes.city,
+              stations: fromRes.candidates,
+            });
+          }
+          return okResult(
+            merged.providers[0] ?? null,
+            `${fromRes.city}(sab stations)→${other.code} (${a.date}): ${merged.trains.length} trains.${citySummaryLine(merged.trains)}`,
+            {
+              from: fromRes.city,
+              to: other.code,
+              date: a.date,
+              count: merged.trains.length,
+              city_stations_searched: merged.searched,
+              trains: merged.trains.slice(0, 15),
+              note: "City-sab-stations search — har train ka station 'station' field mein hai. Booking ke liye exact station user se confirm hoga.",
+            },
+          );
         }
         const toRes = await resolveStationRef(a.destination as string);
         if ("error" in toRes) return failResult(null, toRes.error);
         if ("candidates" in toRes) {
-          return failResult(null, `${toRes.city} — destination ambiguous, user se poochna hoga.`, {
-            needs_choice: true,
-            city: toRes.city,
-            stations: toRes.candidates,
-          });
+          // CITY-MODE: destination city ki sab stations par search (2026-09-05).
+          const merged = await citySearchMerged(fromRes.code, toRes.candidates, a.date as string, "to");
+          if (!merged.trains.length) {
+            return failResult(null, `${fromRes.code} se ${toRes.city} ke kisi station ki direct train nahi mili — user se exact station poochho.`, {
+              needs_choice: true,
+              city: toRes.city,
+              stations: toRes.candidates,
+            });
+          }
+          return okResult(
+            merged.providers[0] ?? null,
+            `${fromRes.code}→${toRes.city}(sab stations) (${a.date}): ${merged.trains.length} trains.${citySummaryLine(merged.trains)}`,
+            {
+              from: fromRes.code,
+              to: toRes.city,
+              date: a.date,
+              count: merged.trains.length,
+              city_stations_searched: merged.searched,
+              trains: merged.trains.slice(0, 15),
+              note: "City-sab-stations search — har train ka station 'station' field mein hai. Booking ke liye exact station user se confirm hoga.",
+            },
+          );
         }
         const search = await searchTrainsRouted({
           from: fromRes.code,
@@ -1263,7 +1424,7 @@ function systemPrompt(
           known.stationPicked
             ? ` User ne abhi pichhle station-options se apni choice bheji hai — ${known.stationPicked}=${known.stationPicked === "origin" ? known.origin : known.destination} FINAL hai (server ne verify kiya). Confirm mat karo, seedha tool call karke jawab do.`
             : known.destinationAmbiguous
-              ? ` User ne destination "${known.destinationAmbiguous}" bola jo AMBIGUOUS hai (multiple stations) — SABSE PEHLE JOURNEY_ANALYZE ya SEARCH_TRAINS tool call karo: needs_choice ke options user ko do. Station options SIRF tool result se — apni knowledge se station codes/options KABHI mat likho. Preference/date baad mein.`
+              ? ` User ne destination "${known.destinationAmbiguous}" bola jo AMBIGUOUS hai (multiple stations) — SABSE PEHLE JOURNEY_ANALYZE ya SEARCH_TRAINS tool call karo destination mein wahi CITY NAAM pass karke. Tool CITY-MODE mein sab stations ka merged result laata hai (har train ke saath uska station). INFO query (fastest/time/fare/compare/list) ho to us result se SEEDHA JAWAB do — har train ke saath uska station label zaroor likho. SIRF booking intent par user se station confirm karo (options tool result ke city_stations_searched/stations se). Station options SIRF tool result se — apni knowledge se station codes/options KABHI mat likho. Ek baar poochh chuke ho to DOBARA MAT POOCHHO — result se jawab do.`
               : ""
         }`
       : "",
@@ -1282,7 +1443,7 @@ function systemPrompt(
     "8. Jab user ko station options dikhane hon (needs_choice), options Gin ke poochho.",
     "9. Date sirf Deterministic date resolver line, date map ya known context se aayegi — khud calendar math kabhi mat karo. Resolver ka result FINAL hai; ambiguous ho to user se poochho; resolver kuch na de aur user ne absolute date di ho (jaise 5 September ya 05/09/2026) to map mein nahi hogi — tab user se confirm karo. Dhyan rahe: \"next <weekday>\" = AGLE hafte ka woh din (next Saturday aane wala Saturday nahi), \"coming <weekday>\"/bela weekday = aane wala pehla.",
     "10. Booking/payment kabhi tum nahi karte — booking tool tumhare paas hai hi nahi. User ticket book karna chahe to slots (origin/destination/date/passengers) jama karo aur trains dikhaao (SEARCH_TRAINS), phir bolo ki booking app ke TrainBoard/Confirm UI se hogi.",
-    "11. Multi-station cities (Delhi, Bombay/Mumbai, Madras/Chennai, Calcutta/Kolkata…) ke liye KHUD station mat chuno — destination mein CITY NAAM hi pass karo; tool needs_choice ke saath real station options laayega, wahi user ko dikhao. Apni knowledge se station substitute (Calcutta→Howrah jaisa) kabhi nahi.",
+    "11. Multi-station cities (Delhi, Bombay/Mumbai, Madras/Chennai, Calcutta/Kolkata…) ke liye KHUD station mat chuno — tool mein CITY NAAM hi pass karo. Tool CITY-MODE mein city ki sab stations par search karke merged result laata hai: INFO query (fastest/cheapest/time/fare/compare/list) par us result se SEEDHA JAWAB do — har train ke saath uska station (jaise 'NDLS') zaroor likho, aur options repeat mat karo. SIRF BOOKING intent par user se exact station confirm karo (options sirf tool result se). Apni knowledge se station substitute (Calcutta→Howrah jaisa) kabhi nahi. Ek hi station-question user se EK hi baar — user ne jawab na diya ho to merged result se hi jawab do.",
             "16. User ne train ka NAAM bola aur known context mein uska number nahi hai (ya naam doosri train ka lag raha hai) to PEHLE TRAIN_NAME_SEARCH call karke number resolve karo, phir jo poocha uska data doosre tool se lao. Naam se multiple trains milein to user se kaunsi poochho — galat train ka data KABHI mat do.",
     "17. SIRF wahi data do jo user ne poocha. 'kitne time leti hai' = sirf duration; 'fare kitna' = sirf fare; 'platform/coach' = sirf coach position; 'kahan hai abhi' = sirf live position. Poora dump mat karo — user ne jo manga bas wahi, ek-do line mein.",
     "14. Train ka NAAM user ne bola (jaise 'swarn shatabdi', 'vande bharat') to USI train ka jawab do — known context mein trainNumber aaya hai ya list mein se naam match hua hai. Pichhli selected train se mix mat karo. Naam se train identify na ho to honestly poochho, galat train ka data mat do.",
@@ -1705,7 +1866,9 @@ export async function runAgenticTurn(input: {
                     durationLabel: t.durationLabel ?? (t.durationMinutes != null ? `${Math.floor(t.durationMinutes / 60)}h ${String(t.durationMinutes % 60).padStart(2, "0")}m` : null),
                     fare: t.cheapest ? { classCode: t.cheapest.classCode, amount: t.cheapest.fare } : null,
                   }))
-                : [];
+                : Array.isArray(d?.trains)
+                  ? (d?.trains ?? []).map((t) => ({ ...t, fare: t.fare ?? null }))
+                  : [];
           if (d && rows.length && q?.from && q?.to && q?.date) {
             const withDur = rows.filter((t) => t.durationMinutes != null);
             const fastest = withDur.length

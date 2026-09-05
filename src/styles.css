@@ -1455,3 +1455,10 @@ table.traintable {
   font-size: 11px;
   background: var(--paper);
 }
+
+/* city-mode search: train ka city-station tag (jaise "· NDLS") */
+.tt-stn {
+  font-size: 0.75rem;
+  color: var(--muted, #8a93a5);
+  font-weight: 600;
+}

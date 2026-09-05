@@ -14,6 +14,8 @@ export interface AgentTrainRow {
   durationLabel: string | null;
   classes: string[];
   fare?: { classCode: string; amount: number } | null;
+  /** city-mode search: train kis city-station se/tak (jaise NDLS) */
+  station?: string | null;
 }
 
 export interface AgentTrainTable {

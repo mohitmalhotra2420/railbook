@@ -28,6 +28,7 @@ import {
   type ToolTraceStep,
 } from "./agentic.js";
 import { routedClassBoard, routedStationSearch, searchTrainsRouted } from "../railway/router.js";
+import type { Station } from "../providers/types.js";
 import { searchRailcoreTrainsByName } from "../railway/railcore.js";
 
 /** Atlas analyse intents — decideTool inhe map nahi karta (model ki zimmedari hai),
@@ -48,6 +49,7 @@ async function atlasFallback(
   pref: "fastest" | "cheapest" | "best",
   ctx: AgentContext,
   nlu: NluResult,
+  now?: string,
 ): Promise<{ reply: string; ok: boolean; trace: ToolTraceStep; grounded: boolean; trains: AgentTrainTable | null }> {
   const trace = (ok: boolean, source: string | null, summary: string, dataPreview?: string): ToolTraceStep => ({
     step: 1,
@@ -65,10 +67,102 @@ async function atlasFallback(
     ...(dataPreview ? { dataPreview } : {}),
   });
 
-  /* 1) Ambiguous city → REAL station options ke saath clarification. */
+  /* 1) Ambiguous city → CITY-MODE (2026-09-05): info intent par city ki sab
+   * stations par search karke seedha jawab; booking intent par hi options.
+   * ("ludhiana se delhi fastest train" baar-baar station question par atak
+   * raha tha — ab nahi.) */
   const unresolved = nlu.unresolvedTo ?? nlu.unresolvedFrom ?? null;
   if (unresolved) {
     const res = await routedStationSearch(unresolved);
+    const infoIntent = nlu.intent !== "BOOK_TRAIN" && (ctx.origin || ctx.destination);
+    const otherSide = nlu.unresolvedTo ? ctx.origin : ctx.destination;
+    if (infoIntent && otherSide && res.stations.length > 1) {
+      try {
+        const cap = res.stations.slice(0, 4);
+        const side = nlu.unresolvedTo ? "to" : "from";
+        /* Info query (fastest/train list) date-agnostic timetable sawaal hai —
+         * user ne date nahi boli to AAJ ki date par search, reply mein saaf
+         * likha jaata hai. (Booking intent yahan pahunchta hi nahi.) */
+        const searchDate =
+          ctx.date ??
+          (now && /\d{4}-\d{2}-\d{2}/.test(String(now))
+            ? String(now).slice(0, 10)
+            : new Date().toISOString().slice(0, 10));
+        /* Burst rate-limit (~6 parallel par "Too many requests") — 2-2 ke
+         * chunks mein search. */
+        const results: { st: { code: string; name: string; city?: string }; sr: Awaited<ReturnType<typeof searchTrainsRouted>> | null }[] = [];
+        for (let i = 0; i < cap.length; i += 2) {
+          const chunk = cap.slice(i, i + 2);
+          const part = await Promise.all(
+            chunk.map(async (st) => {
+              try {
+                const q =
+                  side === "to"
+                    ? { from: otherSide.code, to: st.code, date: searchDate }
+                    : { from: st.code, to: otherSide.code, date: searchDate };
+                return { st, sr: await searchTrainsRouted(q) };
+              } catch {
+                return { st, sr: null };
+              }
+            }),
+          );
+          results.push(...part);
+        }
+        const merged = results
+          .flatMap((r) => (r.sr ? r.sr.trains.map((t) => ({ ...t, station: r.st.code })) : []))
+          .sort((a, b) => a.durationMinutes - b.durationMinutes);
+        if (merged.length) {
+          const top = merged[0];
+          const rows = merged
+            .slice(0, 5)
+            .map(
+              (t, i) =>
+                `${i + 1}. ${t.number} ${t.name} — ${t.departure}→${t.arrival} (${t.durationLabel}, ${t.station}${t.arrivalDayOffset ? ` +${t.arrivalDayOffset}d` : ""})`,
+            )
+            .join("; ");
+          const city = res.city ?? unresolved;
+          const dir = side === "to" ? `${otherSide.code}→${city}` : `${city}→${otherSide.code}`;
+          /* Conversation memory (standing rule): city ab resolve ho gayi —
+           * fastest train ka station ctx mein set, follow-up ("btao fastest
+           * train") isi se jawab dega. */
+          const stName = cap.find((c) => c.code === top.station)?.name ?? top.station;
+          const stObj: Station = { code: top.station, name: stName, city: String(city) };
+          if (side === "to") ctx.destination = stObj;
+          else ctx.origin = stObj;
+          if (!ctx.date) ctx.date = searchDate;
+          return {
+            reply: `${dir} (${searchDate}${ctx.dateProvided ? "" : " — aaj"}) — city ki sab stations par search kiya. Sabse fast: **${top.number} ${top.name}** — ${top.departure}→${top.arrival} (${top.durationLabel}) ${top.station} tak.${merged.length > 1 ? ` Aur options: ${rows}` : ""}`,
+            ok: true,
+            trace: trace(
+              true,
+              results.find((r) => r.sr && r.sr.provider !== "none")?.sr?.provider ?? null,
+              `${unresolved} city-mode merged search — ${merged.length} trains (${cap.map((c) => c.code).join(",")})`,
+            ),
+            grounded: true,
+            trains: {
+              from: side === "to" ? otherSide.code : city,
+              to: side === "to" ? city : otherSide.code,
+              date: searchDate,
+              fastest: merged[0]?.number ?? null,
+              rows: merged.slice(0, 8).map((t) => ({
+                number: t.number,
+                name: t.name,
+                departure: t.departure,
+                arrival: t.arrival,
+                arrivalDayOffset: t.arrivalDayOffset,
+                durationMinutes: t.durationMinutes,
+                durationLabel: t.durationLabel,
+                classes: t.classes.map((c) => c.code),
+                fare: null,
+                station: t.station,
+              })),
+            } as AgentTrainTable,
+          };
+        }
+      } catch {
+        /* city search fail — neeche options question fallback */
+      }
+    }
     const list = res.stations.slice(0, 6).map((s, i) => `${i + 1}. ${s.code} – ${s.name}`).join(", ");
     const question = list
       ? `${res.city ?? unresolved} mein kaun sa station chahiye? Options: ${list}`
@@ -801,7 +895,7 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
   // engine ka tool hai) — searchish intent + complete slots par atlasFallback
   // hi real search + table + memory dega. Warna agentic timeout par EMPTY reply.
   if ((!tool || tool === "searchTrains") && searchishIntent) {
-    const outcome = await atlasFallback(atlasPref ?? "best", ctx, understood.nlu);
+    const outcome = await atlasFallback(atlasPref ?? "best", ctx, understood.nlu, req.now);
     reply = outcome.reply;
     toolOk = outcome.ok;
     atlasTrace = outcome.trace;
