@@ -464,3 +464,76 @@ describe("SCREENSHOT #3 (2026-09-06): top speed — tool-block + irrelevant-web-
     expect(String(r.reply)).toMatch(/160 km\/h/);
   });
 });
+
+/* ══ CHATGPT-JAISA SOURCE-SCRAPE (user request 2026-09-06: "jo sites ChatGPT
+ * use karta hai wahi — question ke according khud scrape karo"). Train ka
+ * Wikipedia page (e.g. "Haridwar–Amritsar Jan Shatabdi Express") — question-
+ * relevant paragraph, number-verified (galat Una-Link page reject). */
+
+import { findWikipediaPage } from "../server/agent/websearch";
+
+describe("ChatGPT-jaisa train-page scrape (Wikipedia page, number-verified)", () => {
+  it("findWikipediaPage: mustInclude galat pehli hit ko reject karke sahi page deta hai", async () => {
+    setWebFetch(async (url: any) => {
+      const u = String(url);
+      if (u.includes("srsearch=Hw+Janshatabdi+12054") || u.includes("srsearch=Hw%20Janshatabdi%2012054") || u.includes("srsearch=")) {
+        return jsonResponse(200, {
+          query: {
+            search: [
+              { title: "Haridwar–Una Link Janshatabdi Express" },
+              { title: "Haridwar–Amritsar Jan Shatabdi Express" },
+            ],
+          },
+        });
+      }
+      if (u.includes("titles=Haridwar")) {
+        const isUna = u.includes("Una");
+        return jsonResponse(200, {
+          query: {
+            pages: {
+              p1: {
+                title: isUna ? "Haridwar–Una Link Janshatabdi Express" : "Haridwar–Amritsar Jan Shatabdi Express",
+                extract: isUna ? "The Una Link train runs elsewhere. " + "x".repeat(200) : "The 12054/12053 Amritsar–Haridwar Jan Shatabdi Express covers 407 km with average speed above 55 km/h as per Indian Railways rules. " + "y".repeat(150),
+              },
+            },
+          },
+        });
+      }
+      return jsonResponse(404, {});
+    });
+    const p = await findWikipediaPage("Hw Janshatabdi 12054", "12054");
+    expect(p).not.toBeNull();
+    expect(p!.title).toBe("Haridwar–Amritsar Jan Shatabdi Express");
+    expect(p!.extract).toContain("12054");
+  });
+
+  it("'12054 ki top speed' par train-page ka speed-paragraph (car records nahi)", async () => {
+    railcoreMock();
+    setWebFetch(async (url: any) => {
+      const u = String(url);
+      if (u.includes("srsearch=")) {
+        return jsonResponse(200, { query: { search: [{ title: "Haridwar–Amritsar Jan Shatabdi Express" }] } });
+      }
+      if (u.includes("titles=")) {
+        return jsonResponse(200, {
+          query: {
+            pages: {
+              p1: {
+                title: "Haridwar–Amritsar Jan Shatabdi Express",
+                extract:
+                  "The 12054/12053 Amritsar–Haridwar Jan Shatabdi Express is a Superfast Express train.\n\nService\nIt covers the distance of 407 kilometres at an average speed above 55 km/h, so its fare includes a Superfast surcharge.",
+              },
+            },
+          },
+        });
+      }
+      return jsonResponse(404, {});
+    });
+    const r = await runAgent({ text: "12054 ki top speed btana", now: "2026-09-06T17:05:00+05:30" });
+    const reply = String(r.reply ?? "");
+    expect(reply, reply).toMatch(/Haridwar–Amritsar Jan Shatabdi Express/);
+    expect(reply, reply).toMatch(/407 kilomet|55 km\/h/i);
+    expect(reply, reply).not.toMatch(/production car/i);
+    expect(reply, reply).toMatch(/web-scrape/i);
+  });
+});

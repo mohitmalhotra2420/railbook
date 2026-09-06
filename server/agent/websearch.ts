@@ -122,3 +122,46 @@ export async function webSearch(query: string, limit = 4): Promise<WebSearchResu
   }
   return out;
 }
+
+/* ── WIKIPEDIA PAGE-SCRAPE (user request 2026-09-06: "ChatGPT jaisa —
+ * question ke according different websites khud se scrape karo"). Har
+ * popular train ka Wikipedia page hota hai (e.g. "Haridwar–Amritsar Jan
+ * Shatabdi Express") jisme speed/rake/history/slip-coach saari details
+ * hoti hain. Ye search-query se page dhoondh kar POORA extract (full
+ * page text) laata hai — snippet se kaafi zyada. */
+
+export type WikipediaPage = {
+  title: string;
+  url: string;
+  extract: string;
+};
+
+export async function findWikipediaPage(query: string, mustInclude?: string): Promise<WikipediaPage | null> {
+  const q = query.trim().slice(0, 160);
+  if (!q) return null;
+  const base = "https://en.wikipedia.org/w/api.php";
+  const search = (await fetchJson(
+    `${base}?action=query&list=search&srsearch=${encodeURIComponent(q)}&format=json&srlimit=3&origin=*`,
+  )) as { query?: { search?: { title: string }[] } } | null;
+  const hits = search?.query?.search ?? [];
+  if (!hits.length) return null;
+  for (const hit of hits) {
+    const extracts = (await fetchJson(
+      `${base}?action=query&prop=extracts&explaintext=1&exsectionformat=plain&titles=${encodeURIComponent(hit.title)}&format=json&origin=*`,
+    )) as { query?: { pages?: Record<string, { title?: string; extract?: string; fullurl?: string } | undefined> } } | null;
+    const page = Object.values(extracts?.query?.pages ?? {})[0];
+    const extract = String(page?.extract ?? "").trim();
+    if (extract.length > 150) {
+      /* mustInclude (jaise train number) na ho to GALAT page hai — next hit
+       * try karo ("Hw Janshatabdi" search mein pehli hit Una-Link aati hai,
+       * asli Amritsar-Haridwar page 2nd par hoti hai). */
+      if (mustInclude && !extract.includes(mustInclude)) continue;
+      return {
+        title: page?.title ?? hit.title,
+        url: `https://en.wikipedia.org/wiki/${encodeURIComponent((page?.title ?? hit.title).replace(/ /g, "_"))}`,
+        extract,
+      };
+    }
+  }
+  return null;
+}

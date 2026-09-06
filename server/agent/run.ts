@@ -30,7 +30,7 @@ import {
   type ToolTraceStep,
 } from "./agentic.js";
 import { routedClassBoard, routedSchedule, routedStationSearch, routedTrainInfo, searchTrainsRouted } from "../railway/router.js";
-import { webSearch } from "./websearch.js";
+import { findWikipediaPage, webSearch } from "./websearch.js";
 import { searchRailcoreTrainsByName } from "../railway/railcore.js";
 
 /** Atlas analyse intents — decideTool inhe map nahi karta (model ki zimmedari hai),
@@ -711,6 +711,64 @@ function seedContext(req: AgentRequest): AgentContext {
   return base;
 }
 
+/* ── ChatGPT-jaisa SOURCE-SCRAPE (user request 2026-09-06): har popular
+ * train ka Wikipedia page hota hai (e.g. "Haridwar–Amritsar Jan Shatabdi
+ * Express" — speed/rake/history/slip-coach sab likha hota hai). Train ka
+ * naam dhoondh kar us page ka POORA text laate hain aur question-relevant
+ * paragraph dete hain — snippet se kaafi zyada, ChatGPT jaisa "scraped"
+ * jawab. Fail/safe par null (caller apna fallback chalata hai). */
+async function answerFromTrainPage(
+  trainName: string,
+  trainNumber: string | null,
+  questionText: string,
+): Promise<string | null> {
+  const name = trainName.trim();
+  if (name.length < 4) return null;
+  try {
+    /* Wikipedia full-text search naam+number par best chalta hai (RailCore
+     * ka naam "Hw Janshatabdi" abbreviated hota hai — "Hw Janshatabdi 12054"
+     * se "Haridwar–Amritsar Jan Shatabdi Express" milta hai, sirf naam se
+     * galat Una-Link page bhi aati hai — number-verify usse reject karega). */
+    /* Number-verify search ke ANDAR hota hai (mustInclude) — galat pehli
+     * hit reject hoke sahi page next hit se milti hai. */
+    let page = await findWikipediaPage(trainNumber ? `${name} ${trainNumber}` : name, trainNumber ?? undefined);
+    if (!page && trainNumber) page = await findWikipediaPage(name, trainNumber);
+    if (!page && !trainNumber) page = await findWikipediaPage(name);
+    if (!page) return null;
+    const paras = page.extract
+      .split(/\n\n+/)
+      .map((p) => p.replace(/\s+/g, " ").trim())
+      .filter((p) => p.length > 40);
+    if (!paras.length) return null;
+    /* Question ke hisaab se best paragraph (ChatGPT jaisa "samajh ke"). */
+    const TOPIC: { q: RegExp; p: RegExp }[] = [
+      { q: /top speed|max speed|average speed|kitni tez|kitna tez|speed kya|speed kitni/i, p: /speed|km\/h|kmph|kph/i },
+      { q: /history|kab chalu|kab shuru|kab start|kitne saal|kab bani|pehli|introduced/i, p: /introduced|inaugurat|started|commenced|began|flagged|history/i },
+      { q: /coach|rake|composition|kitne coach/i, p: /coach|rake|LHB|composition|Vande Bharat|sp ray/i },
+      { q: /catering|pantry|food|khana|khana/i, p: /pantry|catering|food|e-catering|onboard|on-board/i },
+      { q: /slip|link coach|attach/i, p: /slip|link|attach|detach/i },
+      { q: /halt|stops|route|kahan se kahan|kitne station/i, p: /halt|stop|route|station/i },
+      { q: /timing|schedule|kab nikalti|kab pahunchti/i, p: /depart|arriv|timing|schedule/i },
+    ];
+    /* Section-title leak ("Service It covers..." mein "Service" heading tha)
+     * strip karo — paragraph natural shuru ho. */
+    const stripSectionTitle = (p: string) => p.replace(/^(Service|Overview|Introduction|Background|History|Route|Timetable|Timing|Rake|Coaches|Loco link|Stops|Facilities|See also|Notes|References)\s+([A-Z])/, "$2");
+    for (const t of TOPIC) {
+      if (t.q.test(questionText)) {
+        const hit = paras.find((p) => t.p.test(p));
+        if (hit) {
+          return `Web se mila (Wikipedia — ${page.title}): ${stripSectionTitle(hit).slice(0, 700)}\n(Source: ${page.url})\n(Ye railway API ka data nahi, web-scrape ka jawab hai.)`;
+        }
+      }
+    }
+    /* Koi topic-match nahi — train ka intro (pehle 2 paragraphs). */
+    const intro = paras.slice(0, 2).map(stripSectionTitle).join(" ").slice(0, 800);
+    return `Web se mila (Wikipedia — ${page.title}): ${intro}\n(Source: ${page.url})\n(Ye railway API ka data nahi, web-scrape ka jawab hai.)`;
+  } catch {
+    return null;
+  }
+}
+
 function missingOf(known: KnownSlots): string[] {
   const missing: string[] = [];
   if (!known.from) missing.push("from");
@@ -1104,13 +1162,17 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
     /* Follow-up ("maine to top speed poochi thi?") mein number text me nahi —
      * context ki selected train se le (screenshot bug 4 fix). */
     const factNum = rawText.match(/\b(\d{5})\b/)?.[1] ?? ctx.selectedTrainNumber ?? null;
+    let factTrainName = "";
     if (factNum) {
       try {
         const info = await routedTrainInfo(factNum);
         const nm = info.info?.trainName ?? "";
         /* RailCore "SHTABDI" spelling deta hai, Wikipedia mein "Shatabdi" —
          * normalize karke hi query banao warna wiki search 0 deta hai. */
-        if (nm) subject = titleCaseWords(nm.replace(/\bSHTABDI\b/gi, "SHATABDI"));
+        if (nm) {
+          subject = titleCaseWords(nm.replace(/\bSHTABDI\b/gi, "SHATABDI"));
+          factTrainName = subject;
+        }
       } catch {
         /* naam nahi mila — number hi subject */
       }
@@ -1118,8 +1180,22 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
       else subject = `${subject} ${factNum}`;
     } else {
       const typeM = rawText.match(/\b(vande bharat|shatabdi|rajdhani|gatimaan|gatiman|duronto|tejas|garib rath|hum safar|jan shatabdi|double decker|mahamana|antyodaya|bande bharat|namma metro|namo bharat)\b/i);
-      if (typeM) subject = titleCaseWords(typeM[1]);
+      if (typeM) {
+        subject = titleCaseWords(typeM[1]);
+        factTrainName = subject;
+      }
     }
+    /* ChatGPT-jaisa SOURCE-SCRAPE (user 2026-09-06): train ka POORA Wikipedia
+     * page (speed/rake/history/slip-coach details) dhoondh kar question ke
+     * hisaab ka paragraph — generic snippet se pehle ye, kaafi zyada detail. */
+    if (factTrainName) {
+      const pageAnswer = await answerFromTrainPage(factTrainName, factNum, rawText);
+      if (pageAnswer) {
+        reply = pageAnswer;
+        toolOk = true;
+      }
+    }
+    if (!reply) {
     /* "tatkal quota kaise kaam karta hai" jaise case: factKeyword generic
      * "information" banta hai + subject khali → query "information" bekar.
      * Aise mein filler-stripped core text hi query banao. */
@@ -1162,6 +1238,7 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
       reply = `${factNum ? `Train ${factNum} ki` : "Is"} ${factKeyword === "information" ? "detail" : factKeyword} ka reliable jawab web se abhi nahi mil paya — main railway ke verified data ke bina guess nahi karunga.`;
       toolOk = false;
     }
+    } /* end if (!reply) — train-page se jawab aa gaya tha to webSearch skip */
   }
 
   /* ── UNIVERSAL WEB FALLBACK (user request 2026-09-06: "ChatGPT jaisa —
@@ -1196,7 +1273,17 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
       }
       const finalQuery = `${subject ? subject + " " : ""}${q}`.trim().slice(0, 140);
       if (finalQuery.length >= 3) {
-        const webResults = await webSearch(finalQuery, 3);
+        /* ChatGPT-jaisa train-page scrape pehle (num + naam dono hone par) —
+         * "12054 mein catering hoti hai kya" jaise sawaal train ke Wikipedia
+         * page ke relevant paragraph se aate hain. */
+        if (num && subject && subject !== num) {
+          const pageAnswer = await answerFromTrainPage(subject.replace(/ \d{5}$/, ""), num, rawText);
+          if (pageAnswer) {
+            reply = pageAnswer;
+            toolOk = true;
+          }
+        }
+        const webResults = reply ? [] : await webSearch(finalQuery, 3);
         const RAILWAY_FACT_RE2 =
           /train|rail|railway|railroad|express|locomotive|shatabdi|rajdhani|vande bharat|duronto|gatimaan|gatiman|tejas|km\/h|kmph|kph|irctc|coach|station|ticket|berth|tatkal|quota|pantry|catering/i;
         const NOT_RAILWAY_FACT_RE2 =
@@ -1211,7 +1298,8 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
           const best = good[0];
           reply = `Web se mila: ${best.snippet}\n(Source: ${best.title} — ${best.url})\n(Ye railway API ka data nahi, web-search ka jawab hai.)`;
           toolOk = true;
-        } else {
+        } else if (!reply) {
+          /* Train-page se bhi nahi aaya + web results bhi nahi — honest. */
           reply = `Is sawaal ka jawab web se abhi nahi mil paya — main guess nahi karunga. Railway ke live data (status/fare/seats) ke liye wahi poochiye, main API se nikaal leta hoon.`;
           toolOk = false;
         }
