@@ -165,3 +165,52 @@ export async function findWikipediaPage(query: string, mustInclude?: string): Pr
   }
   return null;
 }
+
+/* ── WIKIPEDIA TABLE EXTRACT (round-4: ChatGPT-jaisa "har cheez ka jawab").
+ * Superlative sawaal ("sabse lambi train kaunsi hai") ka jawab list-pages
+ * (Longest train services of Indian Railways) ke TABLE mein hota hai —
+ * explaintext tables strip kar deta hai. Wikitext parse karke top rows
+ * laate hain. */
+
+export type WikiTable = { title: string; url: string; rows: string[][] };
+
+export async function wikiTableForPage(title: string): Promise<WikiTable | null> {
+  const base = "https://en.wikipedia.org/w/api.php";
+  const wt = (await fetchJson(
+    `${base}?action=parse&page=${encodeURIComponent(title)}&prop=wikitext&format=json&origin=*`,
+  )) as { parse?: { wikitext?: { "*": string } } } | null;
+  const text = String(wt?.parse?.wikitext?.["*"] ?? "");
+  if (!text) return null;
+  const i = text.indexOf("{|");
+  if (i < 0) return null;
+  const end = text.indexOf("\n|}", i);
+  const table = text.slice(i, end > 0 ? end : undefined);
+  const clean = (s: string) =>
+    s
+      .replace(/\[\[(?:[^\]|]*\|)?([^\]|]+)\]\]/g, "$1")
+      .replace(/\{\{[^{}]*\}\}/g, " ")
+      .replace(/<br\s*\/?>/gi, " — ")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/'''?/g, "")
+      .replace(/&nbsp;/g, " ")
+      .replace(/&amp;/g, "&")
+      .replace(/\s+/g, " ")
+      .trim();
+  const rows: string[][] = [];
+  for (const chunk of table.split(/\n\|-/)) {
+    const cells: string[] = [];
+    for (const line of chunk.split("\n")) {
+      if (line.startsWith("!") || line.startsWith("|")) {
+        const c = clean(line.replace(/^[!|]/, ""));
+        if (c) cells.push(c);
+      }
+    }
+    if (cells.length) rows.push(cells);
+  }
+  if (!rows.length) return null;
+  return {
+    title,
+    url: `https://en.wikipedia.org/wiki/${encodeURIComponent(title.replace(/ /g, "_"))}`,
+    rows,
+  };
+}

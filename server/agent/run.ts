@@ -1,4 +1,5 @@
 import { runUnderstand } from "../understand/index.js";
+import { generalRailwayAnswer } from "../understand/llm.js";
 import { understand as deterministicUnderstand, type DialogSlot, type KnownSlots, type NluResult } from "../understand/legacy-nlu.js";
 import {
   GENERAL_FACT_RE,
@@ -32,6 +33,7 @@ import {
 import { routedClassBoard, routedSchedule, routedStationSearch, routedTrainInfo, searchTrainsRouted } from "../railway/router.js";
 import { findWikipediaPage, webSearch } from "./websearch.js";
 import { railKbAnswer } from "./railkb.js";
+import { wikiTableForPage } from "./websearch.js";
 import { searchRailcoreTrainsByName } from "../railway/railcore.js";
 
 /** Atlas analyse intents — decideTool inhe map nahi karta (model ki zimmedari hai),
@@ -770,6 +772,220 @@ async function answerFromTrainPage(
   }
 }
 
+/* ══ GENERAL TOPIC-PAGE ANSWER (round-4: "jaise ChatGPT answer karta hai").
+ * "sabse tez train kaunsi hai" / "railway ki shuruaat kab hui" jaise general
+ * sawaal — Hinglish query ko English mein translate karke Wikipedia ka FULL
+ * page uthata hai (snippet se kaafi zyada), relevance-verify ke saath. */
+
+const FILLER_QUERY_RE =
+  /\b(ka|ki|ke|ko|kya|kya|hai|hain|hun|tha|thi|the|se|mein|me|mai|main|par|pe|to|hi|bhi|batao|batana|btana|btaye|bataiye|bata|bataen|dikhao|dikha|chahiye|karo|karna|karke|kar|mujhe|mera|meri|mere|aap|tum|tumhara|kripya|please|kr|kro|nahi|na|haan|yan|ya|jaise|waise|bta|btao|lga|lagta|kabhi|hota|hoti|hote|milta|milti|milte|karta|karti|karte|matlab|meaning|wali|wala|wale|hua|hui|hue|jaata|jaati|jati|jata|ho|kab|kab|kahan|kahaan|kaha|kyun|kyo|kyon|kaise|kaisa|kaisi|kitna|kitni|kitne|kaun|kaunsi|kaunsa|konsi|konsa|cover|karta|karti|hu|bani|bana|bane|chalu|shuru|chali|chalati|chalata|chalti|chalta|bare|baare|baat|gaya|gayi|gaye)\b/gi;
+
+const HINGLISH_TO_EN: [RegExp, string][] = [
+  [/\bsabse\s+(tez|tezi|jaldi)\b/gi, "fastest"],
+  [/\bsabse\s+(lambi|lamba|lambe|lambee)\b/gi, "longest"],
+  [/\bsabse\s+(badi|bada|bade)\b/gi, "largest"],
+  [/\bsabse\s+(choti|chota|chote)\b/gi, "smallest"],
+  [/\bsabse\s+(sasti|sasta|saste)\b/gi, "cheapest"],
+  [/\bsabse\s+(acchi|accha|acche|achhi)\b/gi, "best"],
+  [/\bsabse\s+(purani|purana|purane)\b/gi, "oldest"],
+  [/\bsabse\s+(nayi|naya|naye)\b/gi, "newest"],
+  [/\bsabse\s+(famous|popular|mashhoor)\b/gi, "famous"],
+  [/\btez\b/gi, "fast"],
+  [/\blambi|lamba|lambe|lambee\b/gi, "longest"],
+  [/\bbadi|bada|bade\b/gi, "largest"],
+  [/\bchoti|chota|chote\b/gi, "smallest"],
+  [/\bsasti|sasta|saste\b/gi, "cheapest"],
+  [/\bpurani|purana|purane\b/gi, "oldest"],
+  [/\bnayi|naya|naye\b/gi, "newest"],
+  [/\bshuruaat|shurvat|shuruat\b/gi, "history"],
+  [/\bshuru\b/gi, "started"],
+  [/\bpehli|pehla|pehle\b/gi, "first"],
+  [/\bbani|bana|bane\b/gi, ""],
+  [/\bchali\b/gi, "ran"],
+  [/\bchalati|chalata|chalti|chalta\b/gi, "runs"],
+  [/\bindia\s+mein|india\s+me\b/gi, "india"],
+  [/\bbharat\b/gi, "india"],
+];
+
+export function cleanQueryEn(text: string): string {
+  let q = ` ${text.toLowerCase()} `;
+  q = q.replace(FILLER_QUERY_RE, " ");
+  for (const [re, en] of HINGLISH_TO_EN) q = q.replace(re, ` ${en} `);
+  return q.replace(/\s+/g, " ").trim().slice(0, 100);
+}
+
+/** Wikipedia pages mein har railway page par aane wale generic words —
+ * relevance mein inhe akela kaafi NAHI maana jaata. */
+const GENERIC_WIKI_WORDS = new Set([
+  "railway", "railways", "rail", "train", "trains", "india", "indian",
+  "station", "express", "line", "route", "coach", "service", "zone",
+  "what", "which", "when", "where", "about", "much", "many", "this",
+  "that", "tell", "show", "find", "give", "please", "have", "does",
+  "first", "history", "fastest", "longest", "largest", "oldest",
+  "started", "built", "runs", "local", "suburban", "network",
+]);
+
+export /** Translated query ke topic-words (fastest/longest/history...) — inka
+ * page mein hona relevance ka strong signal hai. */
+const TOPIC_EN_WORDS = new Set([
+  "fastest", "longest", "largest", "oldest", "smallest", "first", "history",
+  "started", "newest", "famous", "cheapest", "runs", "ran",
+]);
+
+/** Hinglish topic-words (sabse/tez/lambi/shuruaat...) — English pages mein
+ * ye kabhi nahi milte; canonical-page routing ke liye detect hote hain. */
+const HINGLISH_TOPIC_WORDS = new Set([
+  "shuruaat", "shuruat", "shurvat", "pehli", "pehla", "pehle", "purani",
+  "purana", "nayi", "naya", "sabse", "tez", "tezi", "lambi", "lamba",
+  "lambe", "badi", "bada", "sasti", "sasta", "acchi", "accha", "jaldi",
+  "mashhoor",
+]);
+
+function significantWords(text: string): string[] {
+  return Array.from(
+    new Set(
+      ` ${text.toLowerCase()} `
+        .replace(FILLER_QUERY_RE, " ")
+        .split(/[^a-z0-9]+/)
+        .filter((w) => w.length >= 4 && !GENERIC_WIKI_WORDS.has(w)),
+    ),
+  );
+}
+
+/** Relevance: significant words page mein hone chahiye — kam se kam 2 total
+ * hits AUR 1 non-generic hit (warna "first railway line" par Cherthala-
+ * station jaise irrelevant pages pass ho jaate the). Original (Hinglish)
+ * + translated (English) dono ke words dekhe jaate hain. */
+export function wikiRelevant(question: string, hay: string): boolean {
+  const h = hay.toLowerCase();
+  const content = significantWords(question); // Hinglish/EN non-generic words
+  const translated = cleanQueryEn(question).split(/\s+/);
+  const topic = translated.filter((w) => TOPIC_EN_WORDS.has(w)); // longest/history/first...
+  const generic = translated.filter((w) => GENERIC_WIKI_WORDS.has(w)); // train/india...
+  if (!content.length && !topic.length && !generic.length) return true;
+  /* Kam se kam 1 STRONG hit (content ya topic word) + kul 2 hits —
+   * Hinglish "sabse lambi" English "longest" se match hota hai, "Cherthala
+   * station" jaise generic-only pages reject ho jaate hain. */
+  const strong = [...content, ...topic].filter((w) => h.includes(w)).length;
+  const gen = generic.filter((w) => h.includes(w)).length;
+  return strong >= 1 && strong + gen >= 2;
+}
+
+const stripSectionTitle = (p: string) =>
+  p.replace(/^(Service|Overview|Introduction|Background|History|Route|Timetable|Timing|Rake|Coaches|Loco link|Stops|Facilities|See also|Notes|References)\s+([A-Z])/, "$2");
+
+export async function answerFromTopicPage(questionText: string): Promise<string | null> {
+  try {
+    if (/\b\d{5}\b/.test(questionText)) return null; // train-number sawaal train-page se aata hai
+    const q = cleanQueryEn(questionText);
+    if (q.length < 4) return null;
+
+    /* Candidate queries (ordered retry — ek query wiki-ranking par noise
+     * de sakti hai, doosri sahi page laati hai):
+     * 1. history/first-type GEnERAL sawaal (koi distinct naam nahi) →
+     *    canonical "rail transport in india" page sabse pehle.
+     * 2. poora translated query ("longest train india", "konkan railway history").
+     * 3. naam-words only ("vivek express route") — jab poore query se
+     *    ranking bigde. */
+    const contentWords = significantWords(questionText).filter((w) => !HINGLISH_TOPIC_WORDS.has(w));
+    const historyFlavored = /history|shuruaat|shuruat|pehli|pehla|first|oldest|purani|kab\s+(hui|hua|bani|shuru|chalu)/i.test(questionText);
+    const candidates: string[] = [];
+    if (historyFlavored && !contentWords.length) candidates.push("rail transport in india");
+    candidates.push(q);
+    const nameWords = cleanQueryEn(questionText)
+      .split(" ")
+      .filter((w) => w.length >= 4 && !GENERIC_WIKI_WORDS.has(w) && !TOPIC_EN_WORDS.has(w))
+      .slice(0, 3)
+      .join(" ");
+    if (nameWords && nameWords !== q) candidates.push(nameWords);
+
+    let page: { title: string; url: string; extract: string } | null = null;
+    for (const cand of candidates) {
+      const p = await findWikipediaPage(cand);
+      if (p && wikiRelevant(questionText, `${p.title} ${p.extract.slice(0, 3000)}`)) {
+        page = p;
+        break;
+      }
+    }
+    if (!page) return null;
+
+    /* ── SUPERLATIVE sawaal: page ki TABLE se top rows (round-4). "sabse
+     * lambi train" ka jawab list-page table mein hota hai — explaintext
+     * tables strip kar deta hai, wikitext se laate hain. Sirf distance/
+     * rank-type tables (km wali) — coach-code tables reject. */
+    const SUPERLATIVE_Q_RE =
+      /sabse\s+(tez|tezi|jaldi|lambi|lamba|lambe|badi|bada|bade|choti|chota|chote|purani|purana|nayi|naya|sasti|sasta|acchi|accha|famous|mashhoor)|longest|fastest|largest|oldest|smallest/i;
+    if (SUPERLATIVE_Q_RE.test(questionText)) {
+      try {
+        const tbl = await wikiTableForPage(page.title);
+        if (tbl) {
+          const dataRows = tbl.rows.filter((r) => r.length >= 3 && /\d/.test(r.join(" ")));
+          const hasDistance = tbl.rows.some((r) => /\d[\d,.]*\s*(km|kilomet|kilometer)/i.test(r.join(" ")));
+          if (dataRows.length && hasDistance) {
+            const top = dataRows
+              .slice(0, 3)
+              .map((r, idx) => `(${idx + 1}) ${r.slice(0, 5).join(" — ")}`)
+              .join("\n");
+            return `Web se mila (Wikipedia — ${tbl.title}, top rows):\n${top}\n(Source: ${tbl.url})\n(Ye railway API ka data nahi, web-scrape ka jawab hai.)`;
+          }
+        }
+      } catch {
+        /* table nahi mili — paragraph se try */
+      }
+    }
+
+    const paras = page.extract
+      .split(/\n\n+/)
+      .map((p) => p.replace(/\s+/g, " ").trim())
+      .filter((p) => p.length > 40);
+    if (!paras.length) return null;
+    /* Meta-paragraph ("This article lists...") jawab nahi hota — skip. */
+    const META_PARA_RE = /this article|this list|this page lists|the following (is|are|list)|below is a list|^this is a list/i;
+    const content = paras.filter((p) => !META_PARA_RE.test(p));
+    if (!content.length) return null;
+    const TOPIC: { q: RegExp; p: RegExp }[] = [
+      { q: /sabse tez|fastest|top speed|kitni tez|speed|kitna tez|tez train/i, p: /fastest|speed|km\/h|kmph|kph/i },
+      { q: /sabse lamb|longest|kitna lamba|kitni lambi|lambai/i, p: /longest|route|kilomet|\bkm\b/i },
+      { q: /history|shuruaat|shuruat|pehli|pehla|first|oldest|kab hui|kab hua|kab bani|kab shuru|kahan bani|introduced/i, p: /first|introduced|began|commenced|established|opened|inaugurat|founded|history|started/i },
+      { q: /kitne|how much|how many|number of|kitna hota/i, p: /\d{2,}/ },
+      { q: /station|junction|platform/i, p: /station|platform|terminal|junction/i },
+      { q: /coach|rake|composition/i, p: /coach|rake|LHB|composition/i },
+      { q: /route|kahan se kahan|covers|kitna route/i, p: /route|connects|between|covers|via/i },
+    ];
+    for (const t of TOPIC) {
+      if (t.q.test(questionText)) {
+        /* Score-based pick: topic-pattern ki SABSE ZYADA matches wala para
+         * (pehla-match intro para se galti se match ho jaata tha). */
+        let best: string | null = null;
+        let bestScore = 0;
+        for (const p of content) {
+          const score = (p.match(new RegExp(t.p.source, "gi")) ?? []).length;
+          if (score > bestScore) {
+            bestScore = score;
+            best = p;
+          }
+        }
+        if (best) {
+          const ans = `Web se mila (Wikipedia — ${page.title}): ${stripSectionTitle(best).slice(0, 700)}\n(Source: ${page.url})\n(Ye railway API ka data nahi, web-scrape ka jawab hai.)`;
+          /* Superlative sawaal ka jawab superlative word ke bina adhoora hai
+           * (history-para galti se match ho jaata tha) — next layer (LLM)
+           * ko chance do. */
+          const supW = cleanQueryEn(questionText).match(/fastest|longest|largest|oldest|smallest|newest|cheapest/);
+          if (supW && !new RegExp(supW[0], "i").test(ans)) return null;
+          return ans;
+        }
+      }
+    }
+    const intro = content.slice(0, 2).map(stripSectionTitle).join(" ").slice(0, 800);
+    const introAns = `Web se mila (Wikipedia — ${page.title}): ${intro}\n(Source: ${page.url})\n(Ye railway API ka data nahi, web-scrape ka jawab hai.)`;
+    const supW2 = cleanQueryEn(questionText).match(/fastest|longest|largest|oldest|smallest|newest|cheapest/);
+    if (supW2 && !new RegExp(supW2[0], "i").test(introAns)) return null;
+    return introAns;
+  } catch {
+    return null;
+  }
+}
+
 function missingOf(known: KnownSlots): string[] {
   const missing: string[] = [];
   if (!known.from) missing.push("from");
@@ -981,7 +1197,7 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
    * list nahi — jawab maangte hain. Atlas-guard + naam-clarify-guard dono
    * yahi use karte hain. */
   const GENERAL_QUESTION_RE =
-    /\b(kya hota|kya hoti|kya hote|ka matlab|what is|kya hai|kaise hota|kaise hoti|kab banta|kab khulta|kab milta|kab milti|kitna hota|kitni hoti|matlab kya)\b/i;
+    /\b(kya hota|kya hoti|kya hote|ka matlab|what is|kya hai|kaise hota|kaise hoti|kab banta|kab khulta|kab milta|kab milti|kitna hota|kitni hoti|matlab kya|sabse\s+(tez|tezi|jaldi|lambi|lamba|lambe|badi|bada|bade|choti|chota|chote|sasti|sasta|saste|acchi|accha|acche|achhi|famous|popular|purani|purana|purane|nayi|naya|naye)|kaunsi hai|kaun sa hai|kaun si hai|kitne hain|kitni hai|kitna hai|kab hui|kab hua|kab bani|kab shuru|kab chalu|kahan bani|kitna lamba|kitni lambi|kitna route|kitna cover|cover karta|cover karti|pehli|pehla|shuruaat|ke bare mein|ke baare mein)\b/i;
   const hasJourneyContext = Boolean(
     ctx.origin || ctx.destination || ctx.selectedTrainNumber || /\b\d{5}\b/.test(String(req.text ?? "")),
   );
@@ -1256,13 +1472,50 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
       reply = `Web se mila: ${best.snippet}\n(Source: ${best.title} — ${best.url})\n(Ye railway API ka live data nahi, web-search ka jawab hai.)`;
       toolOk = true;
     } else {
-      /* Web timeout / 0 results / sab irrelevant (car records jaise) —
-       * EMPTY reply kabhi nahi (screenshot #3: timeout par khali jawab
-       * gaya tha). Honest denial — guess nahi. */
-      reply = `${factNum ? `Train ${factNum} ki` : "Is"} ${factKeyword === "information" ? "detail" : factKeyword} ka reliable jawab web se abhi nahi mil paya — main railway ke verified data ke bina guess nahi karunga.`;
-      toolOk = false;
+      /* Round-4 (ChatGPT-jaisa): fact-web fail hone par general sawaal
+       * ("mumbai local ki pehli service kab shuru hui") ko topic-page
+       * (Wikipedia full page) + LLM layers se jawab milne ka mauka do. */
+      if (!factNum) {
+        const topicAnswer = await answerFromTopicPage(String(req.text ?? ""));
+        if (topicAnswer) {
+          reply = topicAnswer;
+          toolOk = true;
+        } else {
+          const LLM_EXCLUDE_RE =
+            /\b(live|abhi kahan|abhi kaha|running status|pnr\s*status|pnr check|seat avail|availability|avl|kiraya|current fare|aaj ka fare|aaj ka rate)\b|\d{5,}/i;
+          if (!LLM_EXCLUDE_RE.test(String(req.text ?? ""))) {
+            const aiAnswer = await generalRailwayAnswer(String(req.text ?? ""));
+            if (aiAnswer) {
+              reply = `${aiAnswer}\n(AI ka general jawab — live data nahi; important details IRCTC/official source se verify karein.)`;
+              toolOk = true;
+            }
+          }
+        }
+      }
+      if (!reply) {
+        /* Web timeout / 0 results / sab irrelevant (car records jaise) —
+         * EMPTY reply kabhi nahi (screenshot #3: timeout par khali jawab
+         * gaya tha). Honest denial — guess nahi. */
+        reply = `${factNum ? `Train ${factNum} ki` : "Is"} ${factKeyword === "information" ? "detail" : factKeyword} ka reliable jawab web se abhi nahi mil paya — main railway ke verified data ke bina guess nahi karunga.`;
+        toolOk = false;
+      }
     }
     } /* end if (!reply) — train-page se jawab aa gaya tha to webSearch skip */
+  }
+
+  /* Concept-question par tool ka "Train number chahiye" fail-reply hatao —
+   * universal KB/web/LLM fallback ko jawab dene do (round-4: "vivek express
+   * kitna lamba route cover karta hai" → TRAIN_INFO tool fail ho jaata tha). */
+  if (
+    reply &&
+    /^train number chahiye/i.test(String(reply).trim()) &&
+    GENERAL_QUESTION_RE.test(String(req.text ?? "")) &&
+    !hasJourneyContext
+  ) {
+    reply = null;
+    tool = null;
+    toolOk = null;
+    detTrains = null;
   }
 
   /* ── UNIVERSAL WEB FALLBACK (user request 2026-09-06: "ChatGPT jaisa —
@@ -1274,9 +1527,9 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
   if (!reply && !tool && !factWebTried) {
     const rawText = String(req.text ?? "").trim();
     const RAILWAY_Q_RE =
-      /\b(train|trains|rail|railway|railways|irctc|station|stations|coach|coaches|pnr|tatkal|berth|seat|seats|fare|quota|platform|locomotive|engine|express|shatabdi|rajdhani|vande bharat|bande bharat|duronto|garib rath|tejas|gatimaan|gatiman|metro|waiting list|rac|gnwl|pqwl|rlwl|tqwl|wl|arp|chart|catering|pantry|blanket|bedroll|reservation|sleeper|class|classes|1a|2a|3a|cc|ec|2s|vistadome|lhb|icf|tte|gauge|concession|refund|cancellation|helpline|madad|ecatering)\b/i;
+      /\b(train|trains|rail|railway|railways|railroad|irctc|station|stations|coach|coaches|pnr|tatkal|berth|berths|seat|seats|fare|quota|platform|locomotive|engine|express|shatabdi|rajdhani|vande bharat|bande bharat|duronto|garib rath|tejas|gatimaan|gatiman|metro|local|suburban|line|lines|route|routes|network|zone|zones|gauge|waiting list|rac|gnwl|pqwl|rlwl|tqwl|wl|arp|chart|catering|pantry|blanket|bedroll|reservation|sleeper|class|classes|1a|2a|3a|cc|ec|2s|vistadome|lhb|icf|tte|concession|refund|cancellation|helpline|madad|ecatering|vivek|gatimaan)\b/i;
     const QUESTION_RE =
-      /\b(kya|kaise|kaisa|kab|kahan|kahaan|kitna|kitni|kitne|kaun|kaunsi|kyun|kyu|kyon|why|how|what|when|where|which|does|can|batao|batana|btana|btaye|bataiye|bata|dikhao|dikha|bataen|suchi|list|sab|sare|kaun se|milta|milti|milte|hoti|hota|hote|matlab|meaning)\b/i;
+      /\b(kya|kaise|kaisa|kab|kahan|kahaan|kitna|kitni|kitne|kaun|kaunsi|kyun|kyu|kyon|why|how|what|when|where|which|does|can|batao|batana|btana|btaye|bataiye|bata|bataen|dikhao|dikha|suchi|list|sab|sare|kaun se|milta|milti|milte|hoti|hota|hote|matlab|meaning|sabse|pehli|pehla|pehle|shuruaat|shuru|history|samjhao|samjha|explain|kaunsi)\b/i;
     if (RAILWAY_Q_RE.test(rawText) && QUESTION_RE.test(rawText) && !/\b(live status|running status|abhi kahan|kaha hai|kahan hai)\b/i.test(rawText)) {
       /* ── LOCAL RAILWAY KNOWLEDGE BASE (user 2026-09-06: "AI ke paas har
        * cheez ka answer ho"). Sleeper/tatkal/RAC/classes jaise general
@@ -1316,7 +1569,23 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
             toolOk = true;
           }
         }
-        const webResults = reply ? [] : await webSearch(finalQuery, 3);
+        /* General topic sawaal (no train number): "sabse tez train" /
+         * "railway ki shuruaat" — Hinglish→English query se Wikipedia ka
+         * full page, relevance-verified (round-4). */
+        if (!reply) {
+          const topicAnswer = await answerFromTopicPage(rawText);
+          if (topicAnswer) {
+            reply = topicAnswer;
+            toolOk = true;
+          }
+        }
+        /* Superlative sawaal ("sabse tez train") par wiki-page se jawab nahi
+         * mila → snippet bhi unreliable (meta/intro text) — seedha LLM layer
+         * (fastest/largest jaise common superlatives LLM sahi jaanta hai,
+         * labeled). */
+        const superlativeQ =
+          /sabse\s+(tez|tezi|jaldi|lambi|lamba|badi|bada|purani|purana|nayi|naya|sasti|sasta|acchi|accha|famous|mashhoor)|fastest|longest|largest|oldest/i.test(rawText);
+        const webResults = reply || superlativeQ ? [] : await webSearch(finalQuery, 3);
         const RAILWAY_FACT_RE2 =
           /train|rail|railway|railroad|express|locomotive|shatabdi|rajdhani|vande bharat|duronto|gatimaan|gatiman|tejas|km\/h|kmph|kph|irctc|coach|station|ticket|berth|tatkal|quota|pantry|catering/i;
         const NOT_RAILWAY_FACT_RE2 =
@@ -1325,17 +1594,34 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
           const hay = `${x.title} ${x.snippet}`;
           if (/may refer to:/i.test(x.snippet)) return false;
           if (NOT_RAILWAY_FACT_RE2.test(hay)) return false;
-          return RAILWAY_FACT_RE2.test(hay);
+          if (!RAILWAY_FACT_RE2.test(hay)) return false;
+          /* Relevance: sawaal ke significant words snippet mein hone chahiye
+           * (Sikhism-Iraq wala irrelevant-snippet bug). */
+          return wikiRelevant(rawText, hay);
         });
         if (good.length) {
           const best = good[0];
           reply = `Web se mila: ${best.snippet}\n(Source: ${best.title} — ${best.url})\n(Ye railway API ka data nahi, web-search ka jawab hai.)`;
           toolOk = true;
         } else if (!reply) {
-          /* Train-page se bhi nahi aaya + web results bhi nahi — honest
-           * (screenshot #4: confusing "live data wahi poochiye" line hatai). */
-          reply = `Ye main abhi confirm nahi kar paya — guess nahi karunga. Live train data (status/fare/seats) API se nikaal leta hoon; ya sawaal thode alag shabdon se poochein.`;
-          toolOk = false;
+          /* CHATGPT-JAISA FINAL LAYER (round-4: "AI ke paas har cheez ka
+           * answer ho"): KB + train-page + topic-page + web sab fail —
+           * phir LLM general railway knowledge se jawab, clearly labeled.
+           * Live/booking-critical par KABHI nahi (rule 15) — wahan sirf API. */
+          const LLM_EXCLUDE_RE =
+            /\b(live|abhi kahan|abhi kaha|running status|pnr\s*status|pnr check|seat avail|availability|avl|kiraya|current fare|aaj ka fare|aaj ka rate)\b|\d{5,}/i;
+          if (!LLM_EXCLUDE_RE.test(rawText)) {
+            const aiAnswer = await generalRailwayAnswer(rawText);
+            if (aiAnswer) {
+              reply = `${aiAnswer}\n(AI ka general jawab — live data nahi; important details IRCTC/official source se verify karein.)`;
+              toolOk = true;
+            }
+          }
+          if (!reply) {
+            /* LLM bhi nahi — honest denial (screenshot #4). */
+            reply = `Ye main abhi confirm nahi kar paya — guess nahi karunga. Live train data (status/fare/seats) API se nikaal leta hoon; ya sawaal thode alag shabdon se poochein.`;
+            toolOk = false;
+          }
         }
       } /* end if (!reply) — KB se jawab aaya to web skip */
       }
@@ -1355,9 +1641,22 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
     (understood.nlu.intent !== "OUT_OF_DOMAIN" || railwayishText) &&
     String(req.text ?? "").trim().length > 1
   ) {
-    reply =
-      "Ye sawaal main theek se samajh nahi paya. Railway ke live data (train status, fare, seat availability, PNR) par turant poochho — wahi API se nikaalta hoon. Ya apna sawaal thoda saaf shabdon mein poochein.";
-    toolOk = false;
+    /* Pehle LLM se general jawab try (round-4 ChatGPT-jaisa) — live-critical
+     * par nahi. Fail tabhi honest "samajh nahi paya". */
+    const SN_LLM_EXCLUDE_RE =
+      /\b(live|abhi kahan|abhi kaha|running status|pnr\s*status|pnr check|seat avail|availability|avl|kiraya|current fare|book|booking|ticket kharid|reserve)\b|\d{5,}/i;
+    let snAnswer: string | null = null;
+    if (railwayishText && !SN_LLM_EXCLUDE_RE.test(String(req.text ?? ""))) {
+      snAnswer = await generalRailwayAnswer(String(req.text ?? ""));
+    }
+    if (snAnswer) {
+      reply = `${snAnswer}\n(AI ka general jawab — live data nahi; important details IRCTC/official source se verify karein.)`;
+      toolOk = true;
+    } else {
+      reply =
+        "Ye sawaal main theek se samajh nahi paya. Railway ke live data (train status, fare, seat availability, PNR) par turant poochho — wahi API se nikaalta hoon. Ya apna sawaal thoda saaf shabdon mein poochein.";
+      toolOk = false;
+    }
   }
 
   // lines KABHI nahi bhejna — resume mechanism band.

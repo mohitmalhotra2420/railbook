@@ -169,3 +169,74 @@ export async function extractWithLlm(input: {
     clearTimeout(timer);
   }
 }
+
+/* ── GENERAL RAILWAY QA (user request 2026-09-06 round-4: "jaise ChatGPT
+ * answer karta hai — AI ke paas har cheez ka answer ho"). Ye Wahi NLU
+ * provider/model (NVIDIA, env.nluModel) reuse karta hai — koi alag model
+ * nahi. Sirf tab chalta hai jab KB + web dono fail ho jayein; live data
+ * (status/fare/seats/PNR) par KABHI nahi (rule 15) — wo sirf API se. */
+
+let generalQaFetch: typeof fetch | null = null;
+
+/** Test hook — LLM HTTP call inject karne ke liye (websearch setWebFetch jaisa). */
+export function setLlmFetch(fn: typeof fetch | null): void {
+  generalQaFetch = fn;
+}
+
+const RAILBOOK_QA_PROMPT = [
+  "Tu RailBook hai — Indian Railways ka expert assistant. Hinglish (Roman Hindi) mein baat karta hai.",
+  "User ka GENERAL railway/trains sawaal hai. 3-6 lines mein seedha, saaf jawab de — Hinglish (Roman script) mein.",
+  "Rules:",
+  "- Sirf well-established, stable railway facts bata (classes, history, rules, famous trains, technology, zones).",
+  "- Koi exact number ya fact GUESS mat kar — jo confidently pata nahi, wo mat bata.",
+  "- Superlative claims (sabse tez/lambi/badi train, sabse bada station) par EXTRA careful — naam bilkul sure ho tabhi bata, warna bol ke user web se verify kare.",
+  "- LIVE data (running status, aaj ka delay, current fare, seat availability, PNR status) kabhi guess nahi — bol de ki ye live API se poochha jaata hai.",
+  "- Agar poora jawab hi reliably nahi pata, seedha bol: \"Ye main abhi confirm nahi kar paya.\"",
+  "- Sirf user ke pooche sawaal ka jawab de — koi booking form ya extra sawaal nahi.",
+].join("\n");
+
+export async function generalRailwayAnswer(question: string): Promise<string | null> {
+  const apiKey = env.nvidiaApiKey;
+  const model = env.nluModel;
+  /* Test-hook set ho to env-key check skip (prod mein hook null hota hai
+   * aur wahi env-gate lagta hai). */
+  if (!generalQaFetch && (!apiKey || !model)) return null;
+  const q = question.trim().slice(0, 500);
+  if (!q) return null;
+  const started = Date.now();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 20_000);
+  try {
+    const payload = {
+      model,
+      temperature: 0,
+      ...(model.startsWith("openai/gpt-oss") ? { reasoning_effort: "low" as const } : {}),
+      max_tokens: 500,
+      messages: [
+        { role: "system", content: RAILBOOK_QA_PROMPT },
+        { role: "user", content: q },
+      ],
+    };
+    const res = await (generalQaFetch ?? fetch)(chatUrl(), {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      console.error(`[nvidia-qa] status=${res.status} latency=${Date.now() - started}ms`);
+      return null;
+    }
+    const data = (await res.json()) as { choices?: { message?: { content?: string | null } }[] };
+    const text = String(data?.choices?.[0]?.message?.content ?? "").trim();
+    if (text.length < 10) return null;
+    console.error(`[nvidia-qa] ok latency=${Date.now() - started}ms chars=${text.length}`);
+    return text;
+  } catch (err) {
+    const name = err instanceof Error ? err.name : "error";
+    console.error(`[nvidia-qa] fail reason=${name === "AbortError" ? "timeout" : "network"} latency=${Date.now() - started}ms`);
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}

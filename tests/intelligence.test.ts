@@ -14,6 +14,7 @@ import { understand } from "../server/understand/legacy-nlu";
 import { setAgenticNvidiaFetch, executeApprovedTool } from "../server/agent/agentic";
 import { setRailcoreFetch } from "../server/railway/railcore";
 import { setWebFetch } from "../server/agent/websearch";
+import { setLlmFetch } from "../server/understand/llm";
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -609,5 +610,162 @@ describe("SCREENSHOT #4 (2026-09-06): railway-knowledge KB + class-questions boo
     const reply = String(r.reply ?? "");
     expect(reply, reply).toMatch(/WAP-7/i);
     expect(reply, reply).toMatch(/6350 hp/i);
+  });
+});
+
+
+/* ══ ROUND-4 (2026-09-06): "Jaise ChatGPT — railway ka KUCHH BHI poocho,
+ * API se na mile to web se" — wiki topic-page + table-extract + LLM layer ══ */
+
+describe("ROUND-4: ChatGPT-jaisa universal railway knowledge", () => {
+  afterEach(() => {
+    setLlmFetch(null);
+  });
+
+  /** Wiki mock helper: search→titles, extracts→text, parse→wikitext. */
+  function wikiMock(opts: {
+    searchHits?: Record<string, string[]>; // srsearch-substring → titles
+    extracts?: Record<string, string>; // title → extract
+    wikitext?: Record<string, string>; // title → wikitext
+    snippets?: Record<string, { title: string; snippet: string }[]>; // for wikipediaLookup (exintro)
+  }): void {
+    setWebFetch(async (input: any) => {
+      const url = String(input);
+      if (url.includes("duckduckgo.com")) return jsonResponse(200, {});
+      const u = new URL(url);
+      if (u.searchParams.get("action") === "parse") {
+        const page = u.searchParams.get("page") ?? "";
+        const wt = opts.wikitext?.[page];
+        if (wt) return jsonResponse(200, { parse: { title: page, wikitext: { "*": wt } } });
+        return jsonResponse(200, { parse: { title: page, wikitext: { "*": "" } } });
+      }
+      if (u.searchParams.get("list") === "search") {
+        const q = (u.searchParams.get("srsearch") ?? "").toLowerCase();
+        for (const [needle, titles] of Object.entries(opts.searchHits ?? {})) {
+          if (q.includes(needle)) return jsonResponse(200, { query: { search: titles.map((t) => ({ title: t })) } });
+        }
+        return jsonResponse(200, { query: { search: [] } });
+      }
+      if (u.searchParams.get("prop") === "extracts") {
+        const titles = (u.searchParams.get("titles") ?? "").split("|");
+        const pages: Record<string, { title: string; extract?: string; fullurl?: string }> = {};
+        for (const t of titles) {
+          if (u.searchParams.get("exintro") !== null && u.searchParams.get("exintro") !== "1") break;
+          const ex = opts.extracts?.[t];
+          if (ex) pages[String(Object.keys(pages).length + 1)] = { title: t, extract: ex };
+        }
+        if (u.searchParams.get("exintro") === "1") {
+          // wikipediaLookup path — use snippets map
+          const out: Record<string, { title: string; extract?: string }> = {};
+          for (const t of titles) {
+            for (const [, arr] of Object.entries(opts.snippets ?? {})) {
+              const hit = arr.find((x) => x.title === t);
+              if (hit) out[String(Object.keys(out).length + 1)] = { title: t, extract: hit.snippet };
+            }
+          }
+          return jsonResponse(200, { query: { pages: out } });
+        }
+        return jsonResponse(200, { query: { pages } });
+      }
+      return jsonResponse(404, {});
+    });
+  }
+
+  it("'sabse lambi train kaunsi hai' → Wikipedia TABLE se top rows (slot-ask nahi)", async () => {
+    wikiMock({
+      searchHits: { "longest train": ["Longest train services of Indian Railways"] },
+      extracts: {
+        "Longest train services of Indian Railways":
+          "This article lists the longest passenger rail services that are currently scheduled and running directly between two cities. Services that require railcar exchanges, coach changes, shunting or station transfers are not listed here.",
+      },
+      wikitext: {
+        "Longest train services of Indian Railways": [
+          '{| class="wikitable sortable"',
+          "! No.",
+          "! Train name/No.",
+          "! Distance",
+          "|-",
+          "| 1",
+          "| 22503/22504 [[Dibrugarh–Kanyakumari Vivek Express|Dibrugarh–Kanyakumari Vivek Superfast Express]]",
+          "| 4,154.1&nbsp;km",
+          "|-",
+          "| 2",
+          "| [[Himsagar Express]]",
+          "| 3,788.7&nbsp;km",
+          "|}",
+        ].join("\n"),
+      },
+    });
+    const r = await runAgent({ text: "sabse lambi train kaunsi hai india mein", now: "2026-09-06T20:00:00+05:30" });
+    const reply = String(r.reply ?? "");
+    expect(reply, reply).toMatch(/Vivek/i);
+    expect(reply, reply).toMatch(/4,154/);
+    expect(reply, reply).toMatch(/web-scrape ka jawab/i);
+    expect(reply, reply).not.toMatch(/Kahan se jaana|Kahan se jaana hai/i);
+  });
+
+  it("'sabse tez train' wiki fail → LLM layer (labeled), denial nahi", async () => {
+    setWebFetch(async () => jsonResponse(200, { query: { search: [] } }));
+    setLlmFetch(async () =>
+      jsonResponse(200, {
+        choices: [{ message: { content: "Sabse tez train India ki Vande Bharat Express hai — 160 km/h operational speed." } }],
+      }),
+    );
+    const r = await runAgent({ text: "sabse tez train kaunsi hai india mein", now: "2026-09-06T20:00:00+05:30" });
+    const reply = String(r.reply ?? "");
+    expect(reply, reply).toMatch(/Vande Bharat/i);
+    expect(reply, reply).toMatch(/AI ka general jawab/i);
+    expect(reply, reply).not.toMatch(/confirm nahi kar paya/i);
+    expect(reply, reply).not.toMatch(/Kahan se jaana/i);
+  });
+
+  it("KB-miss + web-miss concept ('bifurcation') → LLM layer se jawab", async () => {
+    setWebFetch(async () => jsonResponse(200, { query: { search: [] } }));
+    setLlmFetch(async () =>
+      jsonResponse(200, {
+        choices: [{ message: { content: "Bifurcation railway mein ek line ka do alag routes mein baant na hota hai — slip coach isse juda concept hai." } }],
+      }),
+    );
+    const r = await runAgent({ text: "railway mein bifurcation kya hota hai", now: "2026-09-06T20:00:00+05:30" });
+    const reply = String(r.reply ?? "");
+    expect(reply, reply).toMatch(/Bifurcation/i);
+    expect(reply, reply).toMatch(/AI ka general jawab/i);
+  });
+
+  it("irrelevant wiki page (Sikhism/Iraq) REJECT — relevance guard", async () => {
+    wikiMock({
+      searchHits: {
+        "rail transport in india": [],
+        "first railway line india": ["Sikhism in Iraq"],
+      },
+      extracts: {
+        "Sikhism in Iraq":
+          "Sikhism has a historical presence in Iraq because of the founder Guru Nanak's travels throughout the region in the sixteenth century.",
+      },
+    });
+    setLlmFetch(async () =>
+      jsonResponse(200, {
+        choices: [{ message: { content: "India ki pehli railway line 16 April 1853 ko Bombay (Mumbai) se Thane tak khuli thi — 34 km." } }],
+      }),
+    );
+    const r = await runAgent({ text: "first railway line india mein kahan bani thi", now: "2026-09-06T20:00:00+05:30" });
+    const reply = String(r.reply ?? "");
+    expect(reply, reply).not.toMatch(/Sikhism|Iraq/i);
+    expect(reply, reply).toMatch(/1853|AI ka general jawab/i);
+  });
+
+  it("'vivek express kitna lamba route' → wiki answer ('Train number chahiye' fail nahi)", async () => {
+    wikiMock({
+      searchHits: { vivek: ["Vivek Express"] },
+      extracts: {
+        "Vivek Express":
+          "Vivek Express refers to a series of Indian Railways express trains.\n\nThe 22503/22504 Dibrugarh–Kanyakumari Vivek Express covers the longest route in Indian Railways, approximately 4,154 km.",
+      },
+    });
+    const r = await runAgent({ text: "vivek express kitna lamba route cover karta hai", now: "2026-09-06T20:00:00+05:30" });
+    const reply = String(r.reply ?? "");
+    expect(reply, reply).toMatch(/Vivek/i);
+    expect(reply, reply).toMatch(/4,154|longest/i);
+    expect(reply, reply).not.toMatch(/Train number chahiye/i);
   });
 });
