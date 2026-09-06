@@ -588,4 +588,26 @@ describe("SCREENSHOT #4 (2026-09-06): railway-knowledge KB + class-questions boo
     const reply = String(r.reply ?? "");
     expect(reply, reply).not.toMatch(/sawaal main theek se samajh nahi/i);
   });
+
+  /* ── prod-fix round (post-deploy verify): 2 aur leaks ── */
+
+  it("'vande bharat kya hoti hai' → KB concept jawab, 10-train clarify list NAHI", async () => {
+    setWebFetch(async () => {
+      throw new Error("network timeout");
+    });
+    const r = await runAgent({ text: "vande bharat kya hoti hai", now: "2026-09-06T19:30:00+05:30" });
+    const reply = String(r.reply ?? "");
+    expect(reply, reply).toMatch(/semi-high-speed|semi high speed/i);
+    expect(reply, reply).not.toMatch(/trains mili|kaunsi\?/i);
+  });
+
+  it("'engine wap7 ka matlab' → KB se loco jawab (matlab QUESTION_RE mein ab hai)", async () => {
+    setWebFetch(async () => {
+      throw new Error("network timeout");
+    });
+    const r = await runAgent({ text: "engine wap7 ka matlab", now: "2026-09-06T19:30:00+05:30" });
+    const reply = String(r.reply ?? "");
+    expect(reply, reply).toMatch(/WAP-7/i);
+    expect(reply, reply).toMatch(/6350 hp/i);
+  });
 });

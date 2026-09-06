@@ -976,6 +976,22 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
   if (tool && GENERAL_FACT_RE.test(String(req.text ?? ""))) tool = null;
   ctx.lastTool = tool;
 
+  /* Concept-question detector (2026-09-06 #4/#7): "2s class kya hoti hai" /
+   * "vande bharat kya hoti hai" jaise sawaal search/booking ya naam-clarify
+   * list nahi — jawab maangte hain. Atlas-guard + naam-clarify-guard dono
+   * yahi use karte hain. */
+  const GENERAL_QUESTION_RE =
+    /\b(kya hota|kya hoti|kya hote|ka matlab|what is|kya hai|kaise hota|kaise hoti|kab banta|kab khulta|kab milta|kab milti|kitna hota|kitni hoti|matlab kya)\b/i;
+  const hasJourneyContext = Boolean(
+    ctx.origin || ctx.destination || ctx.selectedTrainNumber || /\b\d{5}\b/.test(String(req.text ?? "")),
+  );
+  /* Train-NAAM resolve ne concept-Q par "10 trains mili — kaunsi?" clarify
+   * de di thi (vande bharat) — concept par list NAHI, jawab chahiye. Universal
+   * KB/web fallback ko reply dene do. */
+  if (nameClarify && GENERAL_QUESTION_RE.test(String(req.text ?? "")) && !hasJourneyContext) {
+    nameClarify = null;
+  }
+
   /* Naam ambiguous/zero tha — model skip ho chuka hai; yahan honest clarify
    * hi final reply hai (koi tool call NAHI, koi galat train ka data NAHI). */
   if (nameClarify) {
@@ -1022,11 +1038,6 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
    * jaana hai?"). General-question pattern + koi journey context (route/
    * train number) nahi → search MAT karo — universal KB/web fallback ko
    * reply dene do. */
-  const GENERAL_QUESTION_RE =
-    /\b(kya hota|kya hoti|kya hote|ka matlab|what is|kya hai|kaise hota|kaise hoti|kab banta|kab khulta|kab milta|kab milti|kitna hota|kitni hoti|matlab kya)\b/i;
-  const hasJourneyContext = Boolean(
-    ctx.origin || ctx.destination || ctx.selectedTrainNumber || /\b\d{5}\b/.test(String(req.text ?? "")),
-  );
   if (GENERAL_QUESTION_RE.test(String(req.text ?? "")) && !hasJourneyContext) {
     /* concept-question — atlasFallback skip */
   } else if ((!tool || tool === "searchTrains") && searchishIntent) {
@@ -1265,7 +1276,7 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
     const RAILWAY_Q_RE =
       /\b(train|trains|rail|railway|railways|irctc|station|stations|coach|coaches|pnr|tatkal|berth|seat|seats|fare|quota|platform|locomotive|engine|express|shatabdi|rajdhani|vande bharat|bande bharat|duronto|garib rath|tejas|gatimaan|gatiman|metro|waiting list|rac|gnwl|pqwl|rlwl|tqwl|wl|arp|chart|catering|pantry|blanket|bedroll|reservation|sleeper|class|classes|1a|2a|3a|cc|ec|2s|vistadome|lhb|icf|tte|gauge|concession|refund|cancellation|helpline|madad|ecatering)\b/i;
     const QUESTION_RE =
-      /\b(kya|kaise|kaisa|kab|kahan|kahaan|kitna|kitni|kitne|kaun|kaunsi|kyun|kyu|kyon|why|how|what|when|where|which|does|can|batao|batana|btana|btaye|bataiye|bata|dikhao|dikha|bataen|suchi|list|sab|sare|kaun se|milta|milti|milte|hoti|hota|hote)\b/i;
+      /\b(kya|kaise|kaisa|kab|kahan|kahaan|kitna|kitni|kitne|kaun|kaunsi|kyun|kyu|kyon|why|how|what|when|where|which|does|can|batao|batana|btana|btaye|bataiye|bata|dikhao|dikha|bataen|suchi|list|sab|sare|kaun se|milta|milti|milte|hoti|hota|hote|matlab|meaning)\b/i;
     if (RAILWAY_Q_RE.test(rawText) && QUESTION_RE.test(rawText) && !/\b(live status|running status|abhi kahan|kaha hai|kahan hai)\b/i.test(rawText)) {
       /* ── LOCAL RAILWAY KNOWLEDGE BASE (user 2026-09-06: "AI ke paas har
        * cheez ka answer ho"). Sleeper/tatkal/RAC/classes jaise general
@@ -1335,7 +1346,15 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
    * jaise sawaal par EMPTY reply -> client 'Kahan se kahan jaana hai?'
    * dikha deta tha). Railway-domain ka koi bhi sawaal kabhi EMPTY reply
    * ke saath nahi jata — honest general jawab. */
-  if (!reply && understood.nlu.intent !== "OUT_OF_DOMAIN" && String(req.text ?? "").trim().length > 1) {
+  /* Railway-keyword ho toh OUT_OF_DOMAIN classification bhi override —
+   * NLU galat off-domain bol sakta hai ("engine wap7 ka matlab"), par sawaal
+   * railway ka hai toh EMPTY kabhi nahi (#7). */
+  const railwayishText = /\b(train|trains|rail|railway|railways|irctc|station|coach|coaches|pnr|tatkal|berth|seat|seats|fare|quota|platform|engine|locomotive|express|shatabdi|rajdhani|vande bharat|bande bharat|duronto|garib rath|tejas|gatimaan|gatiman|sleeper|class|classes|wl|rac|gnwl|pqwl|rlwl|tqwl|arp|chart|catering|pantry|blanket|bedroll|reservation|concession|refund|cancellation|helpline|madad|ecatering|tte|gauge|lhb|icf|vistadome|1a|2a|3a|cc|ec|2s)\b/i.test(String(req.text ?? ""));
+  if (
+    !reply &&
+    (understood.nlu.intent !== "OUT_OF_DOMAIN" || railwayishText) &&
+    String(req.text ?? "").trim().length > 1
+  ) {
     reply =
       "Ye sawaal main theek se samajh nahi paya. Railway ke live data (train status, fare, seat availability, PNR) par turant poochho — wahi API se nikaalta hoon. Ya apna sawaal thoda saaf shabdon mein poochein.";
     toolOk = false;
