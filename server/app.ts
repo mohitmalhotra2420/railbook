@@ -604,6 +604,42 @@ export function createApp() {
     res.json({ options: BERTH_OPTIONS[klass as ClassCode] });
   });
 
+  /* Round-7 diagnostics: prod datacenter se kaunsi scrape-site reachable hai.
+   * Fixed targets only (no params — SSRF nahi), read-only. */
+  app.get("/api/debug/scrape-health", async (_req, res) => {
+    const probe = async (url: string, marker?: string) => {
+      const started = Date.now();
+      try {
+        const r = await fetch(url, {
+          headers: {
+            "User-Agent":
+              "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-IN,en;q=0.9,hi;q=0.8",
+            Referer: new URL(url).origin + "/",
+          },
+          signal: AbortSignal.timeout(20000),
+        });
+        const body = await r.text();
+        return {
+          url,
+          httpStatus: r.status,
+          latencyMs: Date.now() - started,
+          bodyLength: body.length,
+          markerFound: marker ? body.includes(marker) : null,
+        };
+      } catch (err) {
+        return { url, error: String(err).slice(0, 200), latencyMs: Date.now() - started };
+      }
+    };
+    const results = await Promise.all([
+      probe("https://erail.in/train-fare/12054", "Total fare for"),
+      probe("https://railenquiry.in/station/KIP", "Railway Station"),
+      probe("https://www.railyatri.in/seat-availability/12054"),
+    ]);
+    res.json({ from: "render-prod", at: new Date().toISOString(), results });
+  });
+
   app.get("/api/wallet", (_req, res) => {
     res.json({ wallet: getWallet() });
   });
