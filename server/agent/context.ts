@@ -47,6 +47,9 @@ export interface AgentContext {
   pendingAsk: DialogSlot;
   lastTool: AgentToolName;
   lastToolOk: boolean | null;
+  /** Round-8: "nayi baat/reset" command isi turn par context fresh hua —
+   * one-shot client signal (input par seedContext strip kar deta hai). */
+  justReset?: boolean;
 }
 
 export function emptyAgentContext(): AgentContext {
@@ -325,6 +328,25 @@ export function mergeAgentContext(
     lastTrainNumbers: [...prev.lastTrainNumbers],
     lastTrains: [...(prev.lastTrains ?? [])],
   };
+  /* Round-8 (topic-switch): poora NAYA route (from+to dono, dono pichle se
+   * alag) + user ne koi train number/nahi bola → purani selected train
+   * stale hai — clear (warna nayi journey par purani train ka data aa jaata).
+   * EXCEPTION: pichhla intent selected-train ka INFO ask tha (availability/
+   * fare/live/timetable) — tab user route/date usi sawaal ko complete kar
+   * raha hai, train retain karni hai (slot-resume flow). */
+  const INFO_INTENTS_ON_SELECTED_TRAIN = new Set([
+    "CHECK_AVAILABILITY",
+    "CHECK_FARE",
+    "LIVE_TRAIN_STATUS",
+    "TRAIN_SCHEDULE",
+    "TRAIN_HISTORY",
+    "COACH_POSITION",
+  ]);
+  const fullNewRoute =
+    Boolean(nlu.from && nlu.to) &&
+    (!prev.origin || prev.origin.code !== nlu.from!.code) &&
+    (!prev.destination || prev.destination.code !== nlu.to!.code) &&
+    !INFO_INTENTS_ON_SELECTED_TRAIN.has(String(prev.intent ?? ""));
   if (nlu.intent && nlu.intent !== "NONE" && nlu.intent !== "CONFIRM_YES" && nlu.intent !== "CONFIRM_NO") {
     next.intent = nlu.intent;
   }
@@ -345,6 +367,14 @@ export function mergeAgentContext(
   }
   if (extra?.selectedTrainNumber) next.selectedTrainNumber = extra.selectedTrainNumber;
   if (extra?.selectedTrainName) next.selectedTrainName = extra.selectedTrainName;
+  /* Round-8: naya poora route + user ne koi train number NAHI bola →
+   * selected train reset. (resolveTrainNumber ka fallback pichhli selected
+   * train return kar deta hai — isliye explicit number check.) */
+  const explicitTrainSpoken = /\b\d{5}\b/.test(text) || Boolean(extra?.selectedTrainNumber);
+  if (fullNewRoute && !explicitTrainSpoken) {
+    next.selectedTrainNumber = null;
+    next.selectedTrainName = null;
+  }
   if (extra?.lastTrainNumbers?.length) next.lastTrainNumbers = extra.lastTrainNumbers;
   if (extra?.bookingStage) next.bookingStage = extra.bookingStage;
   else if (next.origin || next.destination || next.dateProvided) {

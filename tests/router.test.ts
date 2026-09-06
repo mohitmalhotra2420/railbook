@@ -873,3 +873,167 @@ Total fare for 1 Adult
     expect(by("3A")?.general).toBe(1810);
   });
 });
+
+/* ------------------------------------------------------------------ */
+/* Round-8 (2026-09-06): arrival-at-station + reset + topic-switch    */
+/* ------------------------------------------------------------------ */
+
+const R8_SCHEDULE = {
+  success: true,
+  data: {
+    train_number: "18310",
+    train_name: "Jammu Tawi - Sambalpur Express",
+    stops: [
+      { station_code: "JAT", station_name: "Jammu Tawi", arrival_time: "00:00", departure_time: "14:20", day: 1 },
+      { station_code: "ASR", station_name: "Amritsar Jn", arrival_time: "20:00", departure_time: "20:35", day: 1 },
+      { station_code: "LDH", station_name: "Ludhiana Jn", arrival_time: "23:00", departure_time: "23:10", day: 1 },
+      { station_code: "CDG", station_name: "Chandigarh", arrival_time: "01:22", departure_time: "01:45", day: 2 },
+    ],
+  },
+};
+
+function r8Env() {
+  process.env.RAILWAY_PROVIDER = "railcore";
+  process.env.RAILCORE_API_KEY = "rk_live_test";
+  process.env.RAILKIT_API_KEY = "";
+  process.env.NVIDIA_API_KEY = "";
+  setRailcoreFetch(async (url: unknown) =>
+    String(url).includes("/schedule") ? jsonResponse(200, R8_SCHEDULE) : jsonResponse(500, { success: false }),
+  );
+  /* Web-scrape fallbacks bhi down (network-isolated test). */
+  setScrapeFetch(async () => jsonResponse(500, { success: false }));
+  setRailkitSdk(failingSdk() as never);
+  setProvider(null);
+}
+
+describe("24. Round-8: arrival-at-station (screenshot fixes)", () => {
+  it("24a. '18310 cdg kitne baje pahunchegi' → sirf CDG arrival/departure", async () => {
+    r8Env();
+    const app = createApp();
+    const res = await request(app).post("/api/agent").send({
+      text: "18310 cdg kitne baje pahunchegi ?",
+      now: "2026-09-06T18:30:00.000Z",
+    });
+    expect(res.body.reply).toContain("Chandigarh (CDG)");
+    expect(res.body.reply).toContain("arrival 01:22");
+    expect(res.body.reply).toContain("departure 01:45");
+    expect(res.body.reply).not.toContain("Kahan se");
+    expect(res.body.context.selectedTrainNumber).toBe("18310");
+  });
+
+  it("24b. context-train + 'Sirf cdg ka btao kitne baje arrival hai' → arrival, not 'Kahan se jana hai?'", async () => {
+    r8Env();
+    const app = createApp();
+    const res = await request(app).post("/api/agent").send({
+      text: "Sirf cdg ka btao kitne baje arrival hai",
+      context: { selectedTrainNumber: "18310", selectedTrainName: "Jammu Tawi - Sambalpur Express", intent: "TRAIN_SCHEDULE" },
+      now: "2026-09-06T18:30:00.000Z",
+    });
+    expect(res.body.reply).toContain("arrival 01:22");
+    expect(res.body.reply).not.toMatch(/Kahan se jana/);
+  });
+
+  it("24c. '18310 ka cdg arrival btao' → arrival, NOT live-status", async () => {
+    r8Env();
+    const app = createApp();
+    const res = await request(app).post("/api/agent").send({
+      text: "18310 ka cdg arrival btao",
+      now: "2026-09-06T18:30:00.000Z",
+    });
+    expect(res.body.reply).toContain("arrival 01:22");
+    expect(res.body.reply).not.toMatch(/On time|last |delay/i);
+  });
+
+  it("24d. 'At what time 18310 reach chandigarh' (English) → arrival, no route dump", async () => {
+    r8Env();
+    const app = createApp();
+    const res = await request(app).post("/api/agent").send({
+      text: "At what time 18310 reach chandigarh",
+      now: "2026-09-06T18:30:00.000Z",
+    });
+    expect(res.body.reply).toContain("arrival 01:22");
+    expect(res.body.reply).not.toContain("Route:");
+    expect(res.body.reply).not.toContain("Kahan se kahan");
+  });
+
+  it("24e. '18310 kahan hai' → live flow, precheck hijack NAHI hota", async () => {
+    r8Env();
+    const app = createApp();
+    const res = await request(app).post("/api/agent").send({
+      text: "18310 kahan hai abhi",
+      now: "2026-09-06T18:30:00.000Z",
+    });
+    expect(res.body.reply).not.toContain("arrival 01:22");
+  });
+
+  it("24f. '18310 ka jalandhar arrival' — route-par-nahi stop → honest, no invention", async () => {
+    r8Env();
+    const app = createApp();
+    const res = await request(app).post("/api/agent").send({
+      text: "18310 ka delhi arrival btao",
+      now: "2026-09-06T18:30:00.000Z",
+    });
+    expect(res.body.reply).not.toContain("arrival 01:22");
+  });
+});
+
+describe("25. Round-8: reset command + topic-switch", () => {
+  it("25a. 'nayi baat' → fresh context + justReset flag", async () => {
+    r8Env();
+    const app = createApp();
+    const res = await request(app).post("/api/agent").send({
+      text: "nayi baat",
+      context: { selectedTrainNumber: "18310", origin: { code: "JAT", name: "Jammu Tawi", city: "Jammu" }, dateProvided: true, date: "2026-09-10" },
+      now: "2026-09-06T18:30:00.000Z",
+    });
+    expect(res.body.context.selectedTrainNumber).toBeNull();
+    expect(res.body.context.origin).toBeNull();
+    expect(res.body.context.dateProvided).toBe(false);
+    expect(res.body.context.justReset).toBe(true);
+    expect(String(res.body.reply)).toMatch(/bhool/i);
+  });
+
+  it("25b. 'reset kar do' bhi kaam karta hai", async () => {
+    r8Env();
+    const app = createApp();
+    const res = await request(app).post("/api/agent").send({ text: "reset kar do", now: "2026-09-06T18:30:00.000Z" });
+    expect(res.body.context.justReset).toBe(true);
+  });
+
+  it("25c. mergeAgentContext: poora naya route + no train spoken → selectedTrain clear", async () => {
+    const { mergeAgentContext, emptyAgentContext } = await import("../server/agent/context");
+    const prev = { ...emptyAgentContext(), selectedTrainNumber: "18310", origin: { code: "JAT", name: "Jammu Tawi", city: "Jammu" } as never, destination: { code: "CDG", name: "Chandigarh", city: "Chandigarh" } as never };
+    const next = mergeAgentContext(
+      prev,
+      { from: { code: "ASR", name: "Amritsar Jn", city: "Amritsar" } as never, to: { code: "NDLS", name: "New Delhi", city: "Delhi" } as never, intent: "SEARCH_TRAIN" } as never,
+      "amritsar se new delhi kal",
+    );
+    expect(next.selectedTrainNumber).toBeNull();
+  });
+
+  it("25d. naya route PAR train number bhi bola → selectedTrain RAKHTA hai", async () => {
+    const { mergeAgentContext, emptyAgentContext } = await import("../server/agent/context");
+    const prev = { ...emptyAgentContext(), origin: { code: "JAT", name: "Jammu Tawi", city: "Jammu" } as never };
+    const next = mergeAgentContext(
+      prev,
+      { from: { code: "ASR", name: "Amritsar Jn", city: "Amritsar" } as never, to: { code: "NDLS", name: "New Delhi", city: "Delhi" } as never, intent: "SEARCH_TRAIN" } as never,
+      "12014 amritsar se new delhi",
+    );
+    expect(next.selectedTrainNumber).toBe("12014");
+  });
+});
+
+describe("26. Round-8: station-code pehchaan (cdg jaise codes)", () => {
+  it("26a. findStationsInText ab codes bhi pakadta hai (cdg/umb/jat)", async () => {
+    const { findStationsInText } = await import("../src/ai/stations");
+    const codes = findStationsInText("18310 cdg se umb kitne baje pahunchegi").map((s) => s.code);
+    expect(codes).toContain("CDG");
+    expect(codes).toContain("UMB");
+  });
+
+  it("26b. random words code nahi bante (false-positive guard)", async () => {
+    const { findStationsInText } = await import("../src/ai/stations");
+    const codes = findStationsInText("kya baat hai yaar kitna accha hai").map((s) => s.code);
+    expect(codes).toHaveLength(0);
+  });
+});

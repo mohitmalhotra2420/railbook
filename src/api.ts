@@ -45,8 +45,11 @@ export interface AgentContextClient {
   paxProvided?: boolean;
   classCode?: string | null;
   selectedTrainNumber?: string | null;
+  selectedTrainName?: string | null;
   bookingStage?: string | null;
   pendingAsk?: string | null;
+  /** Round-8: "nayi baat/reset" one-shot signal — client apne journey slots clear kare. */
+  justReset?: boolean;
 }
 
 export interface AdminModel {

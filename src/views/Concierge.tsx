@@ -53,12 +53,73 @@ function progressStep(flow: string): number {
   return 0;
 }
 
+/* ══ ROUND-8 (2026-09-06): MEMORY PERSISTENCE ════════════════════
+ * User feedback: refresh/app-band ke baad agent sab bhool jaata tha —
+ * kaunsi train chal rahi thi, kya baat ho rahi thi. Ab chat history +
+ * agent context localStorage mein save hote hain (7 din) aur app khulte
+ * hi restore — refresh ke baad bhi "hum 18310 ki baat kar rahe the"
+ * yaad rehta hai. Blocks (train-tables) persist nahi hote — sirf text. */
+const MEMORY_KEY = "railbook.memory.v1";
+const MEMORY_MAX_AGE_MS = 7 * 24 * 3600 * 1000;
+const MEMORY_MAX_MESSAGES = 120;
+
+type PersistedMemory = {
+  savedAt: number;
+  messages: ChatMessage[];
+  agentCtx: import("../api").AgentContextClient | null;
+};
+
+function readPersistedMemory(): PersistedMemory | null {
+  try {
+    const raw = localStorage.getItem(MEMORY_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as PersistedMemory | null;
+    if (!parsed || typeof parsed.savedAt !== "number") return null;
+    if (Date.now() - parsed.savedAt > MEMORY_MAX_AGE_MS) {
+      localStorage.removeItem(MEMORY_KEY);
+      return null;
+    }
+    const msgs = Array.isArray(parsed.messages)
+      ? parsed.messages
+          .filter((m) => m && (m.role === "user" || m.role === "assistant") && typeof m.text === "string")
+          .map((m) => ({ id: String(m.id ?? Math.random()), role: m.role, text: m.text }))
+      : [];
+    return { savedAt: parsed.savedAt, messages: msgs.slice(-MEMORY_MAX_MESSAGES), agentCtx: parsed.agentCtx ?? null };
+  } catch {
+    return null;
+  }
+}
+
+let memoryCache: PersistedMemory | null | undefined;
+function persistedMemory(): PersistedMemory | null {
+  if (memoryCache === undefined) memoryCache = readPersistedMemory();
+  return memoryCache;
+}
+
+function writePersistedMemory(msgs: ChatMessage[], agentCtx: import("../api").AgentContextClient | null): void {
+  try {
+    const slim: PersistedMemory = {
+      savedAt: Date.now(),
+      messages: msgs
+        .filter((m) => !m.pending)
+        .slice(-MEMORY_MAX_MESSAGES)
+        .map((m) => ({ id: m.id, role: m.role, text: m.text })),
+      agentCtx,
+    };
+    localStorage.setItem(MEMORY_KEY, JSON.stringify(slim));
+  } catch {
+    /* private-mode/quota — chat in-memory hi chalta rahega */
+  }
+}
+
 export function Concierge() {
   const booking = useBooking();
-  const { state, wallet, go, setFrom, setTo, setDate, setPassengerCount, searchRoute, selectTrain, selectClass, selectSeat, updatePassenger, goReview, confirm, retrieve } = booking;
+  const { state, wallet, go, setFrom, setTo, setDate, setPassengerCount, resetJourney, searchRoute, selectTrain, selectClass, selectSeat, updatePassenger, goReview, confirm, retrieve } = booking;
   const [prefs, setPrefs] = useState<Prefs>({});
   const [lastAsked, setLastAsked] = useState<DialogSlot>(null);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  /* Round-8: refresh ke baad bhi conversation + agent-context yaad —
+   * localStorage se restore (7 din tak). */
+  const [messages, setMessages] = useState<ChatMessage[]>(() => persistedMemory()?.messages ?? []);
   const [seenSession, setSeenSession] = useState(state.sessionId);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
@@ -85,8 +146,9 @@ export function Concierge() {
   });
   const handleTextRef = useRef<(text: string) => void>(() => undefined);
   const lastFactTrainRef = useRef<string | null>(null);
-  /** Last server-side AI agent context — sent back each turn so multi-turn state survives. */
-  const agentCtxRef = useRef<import("../api").AgentContextClient | null>(null);
+  /** Last server-side AI agent context — sent back each turn so multi-turn state survives.
+   * Round-8: persisted memory se initialize — refresh par bhi train/topic yaad. */
+  const agentCtxRef = useRef<import("../api").AgentContextClient | null>(persistedMemory()?.agentCtx ?? null);
   const saved = loadTravellers();
 
   const voice = useVoiceInput(
@@ -101,6 +163,11 @@ export function Concierge() {
   useEffect(() => {
     scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: "smooth" });
   }, [messages, busy, thinking]);
+
+  /* Round-8: har turn ke baad chat + context localStorage mein save. */
+  useEffect(() => {
+    writePersistedMemory(messages, agentCtxRef.current);
+  }, [messages]);
 
   async function applyTurn(turn: AssistantTurn, userText = "") {
     setPrefs(turn.prefs);
@@ -656,6 +723,15 @@ export function Concierge() {
         if (agentRes.reply) {
           if (agentRes.context) agentCtxRef.current = agentRes.context;
           const c = agentRes.context;
+          /* Round-8: "nayi baat/reset" — server ne context fresh kiya, client
+           * apne journey slots/selection bhi clear kare (warna known.from
+           * agle turn mein stale slots wapas seed kar deta). */
+          if (c?.justReset) {
+            resetJourney();
+            journeyRef.current = { from: null, to: null, date: "", dateProvided: false };
+            lastFactTrainRef.current = null;
+            agentCtxRef.current = { ...c, justReset: false };
+          }
           if (c?.selectedTrainNumber) lastFactTrainRef.current = c.selectedTrainNumber;
           // Multi-turn slots flow into the deterministic booking engine.
           if (c?.origin && c.origin.code !== state.from?.code) setFrom(c.origin);

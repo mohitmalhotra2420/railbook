@@ -31,6 +31,7 @@ import {
   type ToolTraceStep,
 } from "./agentic.js";
 import { routedClassBoard, routedSchedule, routedStationSearch, routedTrainInfo, searchTrainsRouted } from "../railway/router.js";
+import { webSourceLabel } from "../railway/webscrape.js";
 import {findWikipediaPage, webSearch, generalWebSearch, scrapeWebPage } from "./websearch.js";
 import { railKbAnswer } from "./railkb.js";
 import { wikiTableForPage } from "./websearch.js";
@@ -700,7 +701,12 @@ function tableFromSearch(
 }
 
 function seedContext(req: AgentRequest): AgentContext {
-  const base = req.context ? { ...req.context } : emptyAgentContext();
+  /* Round-8: partial client-context bhi safe — empty base par overlay
+   * (warna missing lastTrainNumbers par [...undefined] crash). */
+  const base: AgentContext = { ...emptyAgentContext(), ...(req.context ?? {}) };
+  /* Round-8: justReset one-shot flag hai — client ke stored context se
+   * dobara input par nahi aana chahiye. */
+  delete base.justReset;
   if (req.known?.from) base.origin = req.known.from;
   if (req.known?.to) base.destination = req.known.to;
   if (req.known?.date) {
@@ -1094,6 +1100,102 @@ function missingOf(known: KnownSlots): string[] {
   return missing;
 }
 
+/* ═══════════════════════════════════════════════════════════════════
+ * ROUND-8 (2026-09-06, screenshot-driven fixes):
+ *  (a) "nayi baat/reset" topic-switch command
+ *  (b) "{train} {station} kitne baje pahunchegi / arrival / reach" —
+ *      deterministic arrival-at-station jawab (LLM ise live-status bana
+ *      deta tha / "Kahan se jana hai?" pooch deta tha)
+ * ═══════════════════════════════════════════════════════════════════ */
+
+/** "nayi baat" / "reset" / "shuru se" — poora context reset. */
+const RESET_COMMAND_RE =
+  /^(?:(?:nayi|nayaa|naya|navi)\s+(?:baat|baatcheet|topic|shuruaat|shuruat)|reset(?:\s+kar)?(?:\s+(?:do|doon|dijiye|doonga))?(?:\s+do)?|shuru\s+se|start\s+over|fresh\s+start|sab\s+bhul\s+(?:jao|gaye|jaao)|bhul\s+jao\s+sab|naya\s+session)[\s.!]*$/i;
+
+export function isResetCommand(text: string): boolean {
+  return RESET_COMMAND_RE.test(String(text ?? "").trim());
+}
+
+/** Arrival-at-station sawaal (live-status "kahan hai" isse match nahi hota —
+ * "kab/kitne baje + pahunchegi" arrival hai, "kahan hai" live). */
+const ARRIVAL_QUESTION_RE =
+  /\b(arrival|arrive[sn]?|reach(?:es|ed)?|pahunch\w*|pahuch\w*|kitne\s+baje|kab\s+pahunch|what\s+time|kya\s+time\s+(?:pahunch|reach|aayegi|aayega))\b/i;
+
+/* Token-extraction fillers — inme se koi station nahi hota. */
+const ARRIVAL_FILLER = new Set([
+  "ka","ki","ke","ko","kya","kitne","kitna","kitni","baje","batao","btao","btana","btado","bata","batado","hai","hain","hogi","hoga","hongi","kar","karo","kab","time","sirf","bass","bas","meri","mera","tell","me","please","train","trains","se","par","pe","pr","at","what","the","of","in","on","is","ye","yeh","wali","wala","aaj","kal","jaa","jana","jaana","gaadi","gadi","express","mail","superfast","rajdhani","shatabdi","vande","jan","spl","cc","ec","sl","ea","2a","3a","1a","gen","general","ac","chair","car","sleeper","pahunchegi","pahunchega","pahuchegi","pahuchega","pahunchne","pahuchne","pahunchti","pahunchta","pahunchengi","pahunchenge","arrival","arrive","arrives","reach","reaches","reached","will","would","she","he","it","this","that","when","how","much","hour","hours","der","late","approximately","approx","around","about","mujhe","hai","ka","ki",
+]);
+
+/** Train-number hatake, filler hatake bache hue alpha tokens — inhe schedule
+ * stops ke codes/naamon se match karenge (code "cdg" ya naam "chandigarh"). */
+function arrivalStationTokens(text: string): string[] {
+  const t = String(text ?? "").replace(/\d{5}/g, " ").toLowerCase();
+  return (t.match(/[a-z\u0900-\u097F]{2,}/g) ?? []).filter((w) => !ARRIVAL_FILLER.has(w));
+}
+
+export type ArrivalAtStation = {
+  reply: string;
+  trainNumber: string;
+  trainName: string | null;
+};
+
+/** Deterministic arrival-at-station jawab — screenshot ke saare cases:
+ * "18310 cdg kitne baje pahunchegi?", "18310 ka cdg arrival btao",
+ * "Sirf cdg ka btao kitne baje arrival hai" (context-train), "At what time
+ * 18310 reach chandigarh". Confidence-gated: arrival-words + train + ek token
+ * jo route ke kisi stop se match ho — warna normal flow. */
+export async function arrivalAtStationTurn(
+  text: string,
+  ctx: AgentContext,
+): Promise<ArrivalAtStation | null> {
+  const raw = String(text ?? "");
+  if (!ARRIVAL_QUESTION_RE.test(raw)) return null;
+  const trainNo = resolveTrainNumber(raw, ctx);
+  if (!trainNo) return null;
+  const tokens = arrivalStationTokens(raw);
+  if (tokens.length === 0) return null;
+
+  const routed = await routedSchedule(trainNo);
+  const schedule = routed.schedule;
+  if (!schedule || !("stops" in schedule) || !schedule.stops?.length) return null;
+  const stops = schedule.stops;
+
+  const clean = (s: string) => s.toLowerCase().replace(/[^a-z\u0900-\u097F]/g, "");
+  const matchStop = (tok: string) =>
+    stops.find(
+      (st) =>
+        st.code.toLowerCase() === tok ||
+        (tok.length >= 4 &&
+          (clean(st.name).includes(clean(tok)) || clean(st.name).startsWith(clean(tok)))),
+    );
+
+  /* Multiple tokens match karein (jaise "jammu se cdg") to LAST wala —
+   * "X se Y pahunchegi" mein destination aakhri aata hai. */
+  let stop: (typeof stops)[number] | null = null;
+  for (const tok of tokens) {
+    const m = matchStop(tok);
+    if (m) stop = m;
+  }
+  if (!stop) return null;
+
+  /* Source-stop par arrival 00:00 API placeholder hai — hide. */
+  const isSource = stops[0] === stop;
+  const isLast = stops[stops.length - 1] === stop;
+  const arr = stop.arrival && !(isSource && stop.arrival === "00:00") ? stop.arrival : null;
+  const dep = stop.departure && !(isLast && stop.departure === "00:00") ? stop.departure : null;
+  if (!arr && !dep) return null;
+  const dayTag = typeof (stop as { day?: number }).day === "number" && (stop as { day?: number }).day! > 1 ? ` (Day ${(stop as { day?: number }).day})` : "";
+  const timing = [arr ? `arrival ${arr}` : null, dep ? `departure ${dep}` : null]
+    .filter(Boolean)
+    .join(", ");
+  const name = "trainName" in schedule ? String(schedule.trainName ?? "") : "";
+  return {
+    reply: `${trainNo}${name ? ` ${name}` : ""} — ${stop.name} (${stop.code}): ${timing}${dayTag}.${webSourceLabel(routed.provider)}`,
+    trainNumber: trainNo,
+    trainName: name || null,
+  };
+}
+
 export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
   const seeded = seedContext(req);
 
@@ -1140,6 +1242,81 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
       }
     } catch {
       /* optional hai — normal flow continue */
+    }
+  }
+
+  /* ── ROUND-8a: "nayi baat / reset" — topic-switch command. Client is
+   * response par apne booking slots bhi clear karta hai (justReset flag). */
+  if (isResetCommand(req.text)) {
+    const det = await deterministicUnderstand(req.text, {
+      now: req.now ? new Date(req.now) : undefined,
+      lastAsked: req.lastAsked ?? null,
+      known: { from: seeded.origin, to: seeded.destination, date: seeded.date, passengerCount: seeded.passengers },
+    });
+    return {
+      nlu: det,
+      source: "nlu",
+      context: { ...emptyAgentContext(), justReset: true },
+      tool: null,
+      toolOk: null,
+      reply: "Theek hai — purani baat poora bhool gayi (train, stations, date sab clear). Nayi baat shuru kariye — kaunsi train ya kahan se kahan jaana hai?",
+      interrupt: false,
+      resumeAsk: null,
+      resumeText: null,
+      trains: null,
+      confirmBook: false,
+      missingFields: [],
+      modelUsed: null,
+      latencyMs: 0,
+      failureReason: null,
+      engine: "deterministic",
+      agenticFailureReason: null,
+      grounded: true,
+    };
+  }
+
+  /* ── ROUND-8b (screenshot fix): "{train} {station} kitne baje pahunchegi" —
+   * deterministic arrival-at-station. Pehle ye (confidence-gated) chalta hai,
+   * taaki LLM ise live-status na bana de aur "Kahan se jana hai?" na pooche. */
+  if (!nameClarify && !isBookingMutation(req)) {
+    try {
+      const arrival = await arrivalAtStationTurn(req.text, seeded);
+      if (arrival) {
+        const det = await deterministicUnderstand(req.text, {
+          now: req.now ? new Date(req.now) : undefined,
+          lastAsked: req.lastAsked ?? null,
+          known: { from: seeded.origin, to: seeded.destination, date: seeded.date, passengerCount: seeded.passengers },
+        });
+        const ctxArr = mergeAgentContext(seeded, det, req.text, {
+          selectedTrainNumber: arrival.trainNumber,
+          selectedTrainName: arrival.trainName,
+        });
+        if (!ctxArr.intent || ctxArr.intent === "NONE") ctxArr.intent = "TRAIN_SCHEDULE";
+        ctxArr.pendingAsk = null;
+        void neverAutoBook(det.intent, req.bookingFlow);
+        return {
+          nlu: det,
+          source: "nlu",
+          context: ctxArr,
+          tool: "getTimetable",
+          toolOk: true,
+          reply: arrival.reply,
+          interrupt: false,
+          resumeAsk: null,
+          resumeText: null,
+          trains: null,
+          confirmBook: false,
+          missingFields: [],
+          modelUsed: null,
+          latencyMs: 0,
+          failureReason: null,
+          engine: "deterministic",
+          agenticFailureReason: null,
+          grounded: true,
+        };
+      }
+    } catch {
+      /* precheck optional hai — normal flow continue */
     }
   }
 

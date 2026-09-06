@@ -51,6 +51,9 @@ export type BookingAction =
   | { type: "SWAP_ENDS" }
   | { type: "SET_DATE"; date: string }
   | { type: "SET_PASSENGER_COUNT"; count: number }
+  /* Round-8: "nayi baat/reset" — poora journey context clear (session/wallet
+   * context ke bahar hain, waise bhi preserve hote hain). */
+  | { type: "RESET_JOURNEY" }
   | { type: "SEARCH_START"; date?: string }
   | {
       type: "SEARCH_SUCCESS";
@@ -167,6 +170,8 @@ export function bookingReducer(
   switch (action.type) {
     case "HYDRATE":
       return action.snapshot;
+    case "RESET_JOURNEY":
+      return { ...initialBooking(""), sessionId: state.sessionId };
     case "SET_FROM":
       return { ...state, from: action.station, error: null };
     case "SET_TO":

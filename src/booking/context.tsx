@@ -40,6 +40,8 @@ interface BookingCtx {
   swap: () => void;
   setDate: (d: string) => void;
   setPassengerCount: (n: number) => void;
+  /** Round-8: "nayi baat/reset" command — journey slots/selection sab clear. */
+  resetJourney: () => void;
   search: () => Promise<void>;
   searchRoute: (from: Station, to: Station, date: string) => Promise<void>;
   /** Show an already-fetched provider result (e.g. from the autonomous agent) without a second search. */
@@ -314,6 +316,7 @@ export function BookingProvider({ children }: { children: ReactNode }) {
       swap: () => dispatch({ type: "SWAP_ENDS" }),
       setDate,
       setPassengerCount: (count) => dispatch({ type: "SET_PASSENGER_COUNT", count }),
+      resetJourney: () => dispatch({ type: "RESET_JOURNEY" }),
       search,
       searchRoute: runSearch,
       showResults,

@@ -318,7 +318,11 @@ export function webSourceLabel(provider: string): string {
           ? "confirmtkt.com"
           : provider === "web_railyatri"
             ? "railyatri.in"
-            : null;
+            : provider === "web_railenquiry"
+              ? "railenquiry.in"
+              : provider === "web_erail"
+                ? "erail.in"
+                : null;
   return site ? ` (Source: ${site} — railway API se nahi, verified web site se.)` : "";
 }
 

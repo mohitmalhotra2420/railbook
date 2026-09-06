@@ -60,6 +60,8 @@ export interface AgentContext {
   pendingAsk: DialogSlot;
   lastTool: AgentToolName;
   lastToolOk: boolean | null;
+  /** Round-8: "nayi baat/reset" one-shot client signal. */
+  justReset?: boolean;
 }
 
 export function emptyAgentContext(): AgentContext {
@@ -237,6 +239,22 @@ export function mergeAgentContext(
     lastTrainNumbers: [...prev.lastTrainNumbers],
     lastTrains: [...(prev.lastTrains ?? [])],
   };
+  /* Round-8 (topic-switch): poora naya route + koi train reference nahi →
+   * purani selected train clear. EXCEPTION: pichhla intent selected-train
+   * ka INFO ask tha (availability/fare/...) — slot-resume, train retain. */
+  const INFO_INTENTS_ON_SELECTED_TRAIN = new Set([
+    "CHECK_AVAILABILITY",
+    "CHECK_FARE",
+    "LIVE_TRAIN_STATUS",
+    "TRAIN_SCHEDULE",
+    "TRAIN_HISTORY",
+    "COACH_POSITION",
+  ]);
+  const fullNewRoute =
+    Boolean(nlu.from && nlu.to) &&
+    (!prev.origin || prev.origin.code !== nlu.from!.code) &&
+    (!prev.destination || prev.destination.code !== nlu.to!.code) &&
+    !INFO_INTENTS_ON_SELECTED_TRAIN.has(String(prev.intent ?? ""));
   if (nlu.intent && nlu.intent !== "NONE" && nlu.intent !== "CONFIRM_YES" && nlu.intent !== "CONFIRM_NO") {
     next.intent = nlu.intent;
   }
@@ -257,6 +275,13 @@ export function mergeAgentContext(
   }
   if (extra?.selectedTrainNumber) next.selectedTrainNumber = extra.selectedTrainNumber;
   if (extra?.selectedTrainName) next.selectedTrainName = extra.selectedTrainName;
+  /* Round-8: naya poora route + explicit train number nahi bola → selected
+   * train clear (resolveTrainNumber ka fallback stale train de deta hai). */
+  const explicitTrainSpoken = /\b\d{5}\b/.test(text) || Boolean(extra?.selectedTrainNumber);
+  if (fullNewRoute && !explicitTrainSpoken) {
+    next.selectedTrainNumber = null;
+    next.selectedTrainName = null;
+  }
   if (extra?.lastTrainNumbers?.length) next.lastTrainNumbers = extra.lastTrainNumbers;
   if (extra?.bookingStage) next.bookingStage = extra.bookingStage;
   else if (next.origin || next.destination || next.dateProvided) {

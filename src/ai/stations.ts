@@ -58,6 +58,31 @@ export const CLIENT_STATIONS: Station[] = [
 ];
 
 const ALIASES: Record<string, string> = {
+  /* Round-8 (2026-09-06, screenshot fix): station CODES bhi aliases mein —
+   * "18310 cdg kitne baje pahunchegi" jaisi queries mein "cdg" pehle kabhi
+   * station nahi pakda jaata tha (sirf "chandigarh"/"chd" pakadte the).
+   * Word-boundary scan (findStationsInText) — random substring false-positive nahi. */
+  jat: "JAT",
+  svdk: "SVDK",
+  cdg: "CDG",
+  jp: "JP",
+  gkp: "GKP",
+  bbs: "BBS",
+  adi: "ADI",
+  ngp: "NGP",
+  tvc: "TVC",
+  kcvl: "KCVL",
+  bza: "BZA",
+  hw: "HW",
+  sre: "SRE",
+  rpj: "RPJ",
+  bti: "BTI",
+  fzr: "FZR",
+  fzp: "FZP",
+  ptk: "PTK",
+  ptkc: "PTKC",
+  ers: "ERS",
+  ern: "ERN",
   "new delhi": "NDLS",
   "nayi dilli": "NDLS",
   ndls: "NDLS",
