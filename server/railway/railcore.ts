@@ -199,6 +199,18 @@ function parseAvail(row: unknown): { status: AvailabilityStatus; seats?: number;
   const text = String(o.availability_text ?? o.text ?? o.status ?? "").toUpperCase();
   const status = String(o.status ?? "").toUpperCase();
   if (text.includes("NOT AVAILABLE") || status === "NOT_AVAILABLE") return { status: "NOT_AVAILABLE" };
+  /* Real-life statuses (2026-09-06 live pakda: 12014 aaj "TRAIN DEPARTED"
+   * thi — ye UNKNOWN ban raha tha aur availability poora fail dikhati thi).
+   * Train gayi/cancelled/chart ban gaya = us class ki seat ab book nahi hoti. */
+  if (
+    text.includes("TRAIN DEPARTED") ||
+    text.includes("TRAIN CANCELLED") ||
+    text.includes("CANCELLED") ||
+    text.includes("CHART PREPARED") ||
+    text.includes("REGRET")
+  ) {
+    return { status: "NOT_AVAILABLE" };
+  }
   if (status === "AVAILABLE" || text.includes("AVAILABLE")) {
     const n =
       typeof o.available_count === "number"
