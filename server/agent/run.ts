@@ -1002,10 +1002,28 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
   if (tool === "getCoachPosition" && !trainNo) {
     reply = "Kaunsi train ki coach position? 5-digit train number boliye.";
   } else if (tool && tool !== "searchTrains") {
+    /* FARE AUTO-ROUTE (user report 2026-09-06: "12014 ki CC fare" par
+     * stations missing the — deterministic path RAILWAY CALL hi nahi karta
+     * tha, seedha "unavailable" bol deta tha). Agentic path jaisa hi:
+     * stations missing + train number hai → timetable se first/last stop. */
+    let fareOrigin = ctx.origin?.code ?? null;
+    let fareDestination = ctx.destination?.code ?? null;
+    if ((tool === "getFare" || tool === "getAvailability") && trainNo && (!fareOrigin || !fareDestination)) {
+      try {
+        const sched = await routedSchedule(trainNo);
+        const stops = sched.schedule && "stops" in sched.schedule ? sched.schedule.stops ?? [] : [];
+        if (stops.length) {
+          fareOrigin = fareOrigin ?? stops[0].code;
+          fareDestination = fareDestination ?? stops[stops.length - 1].code;
+        }
+      } catch {
+        /* timetable nahi mili — seedha ctx ke stations se try */
+      }
+    }
     const result = await executeTool(tool as ToolName, {
       query: req.text,
-      origin: ctx.origin?.code,
-      destination: ctx.destination?.code,
+      origin: fareOrigin ?? undefined,
+      destination: fareDestination ?? undefined,
       date: ctx.date ?? undefined,
       trainNumber: trainNo,
       classCode: ctx.classCode ?? undefined,
@@ -1014,7 +1032,11 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
     });
     toolOk = result.ok;
     ctx.lastToolOk = result.ok;
-    reply = result.ok ? result.summary : factReplyUnavailable(follow ?? tool);
+    /* Fail par executeTool ka SAHI summary prefer karo (user report
+     * 2026-09-06): "Train, date, stations chahiye" jaisa actionable message
+     * factReplyUnavailable ke generic "Fare abhi available nahi hai" se
+     * overwrite ho raha tha — user ko lagta tha fare API se hi nahi aa raha! */
+    reply = result.ok ? result.summary : result.summary || factReplyUnavailable(follow ?? tool);
     if (result.ok && tool === "getLiveStatus") {
       reply = `${result.summary}\n(Live railway data — gadh ke nahi.)`;
     }
