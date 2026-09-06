@@ -533,47 +533,54 @@ function parseFareCell(raw: string): number | null {
 }
 
 export function parseErailFare(html: string, trainNumber: string, sourceUrl: string): ScrapedFare | null {
-  const marker = html.indexOf("Total fare for");
-  if (marker < 0) return null;
-  const tblStart = html.lastIndexOf("<table", marker);
-  const tblEnd = tblStart < 0 ? -1 : html.indexOf("</table>", tblStart);
-  if (tblStart < 0 || tblEnd < 0 || tblEnd < tblStart) return null;
-  const tbl = html.slice(tblStart, tblEnd);
-  const rows = [...tbl.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi)]
-    .map((rm) =>
-      [...rm[1].matchAll(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi)].map((cm) =>
-        cm[1].replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim(),
-      ),
-    )
-    .filter((cells) => cells.length > 0);
+  /* Round-7b: erail ka fare-table layout vary karta hai — Render body mein
+   * fare-classes table "Total fare for" marker ke BAAD aati hai, sandbox body
+   * mein PEHLE. Isliye marker sirf page-confirm ke liye, fare-table dhoondhne
+   * ke liye saari tables scan — jo General/Tatkal + class-header de wahi. */
+  if (!html.includes("Total fare for")) return null;
+  const tables = [...html.matchAll(/<table[^>]*>([\s\S]*?)<\/table>/gi)].map((m) => m[1]);
 
-  /* Header row: pehla cell khali/label, baaki sab short uppercase tokens. */
-  const header = rows.find((cells) => {
-    if (cells.length < 2) return false;
-    const rest = cells.slice(1);
-    return rest.length >= 1 && rest.every((c) => /^[A-Z0-9]{1,3}$/.test(c));
-  });
-  if (!header) return null;
+  for (const tbl of tables) {
+    const rows = [...tbl.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi)]
+      .map((rm) =>
+        [...rm[1].matchAll(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi)].map((cm) =>
+          cm[1].replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim(),
+        ),
+      )
+      .filter((cells) => cells.length > 0);
+    if (rows.length === 0) continue;
 
-  const classCols: { index: number; code: string }[] = [];
-  header.slice(1).forEach((code, i) => {
-    if (KNOWN_IR_CLASSES.has(code)) classCols.push({ index: i + 1, code });
-  });
-  if (classCols.length === 0) return null;
+    /* Header row: pehla cell khali/label, baaki sab short uppercase tokens. */
+    const header = rows.find((cells) => {
+      if (cells.length < 2) return false;
+      const rest = cells.slice(1);
+      return rest.length >= 1 && rest.every((c) => /^[A-Z0-9]{1,3}$/.test(c));
+    });
+    if (!header) continue;
 
-  const quotaRow = (label: string): string[] | null =>
-    rows.find((cells) => cells[0]?.toLowerCase() === label) ?? null;
-  const general = quotaRow("general");
-  const tatkal = quotaRow("tatkal");
+    const classCols: { index: number; code: string }[] = [];
+    header.slice(1).forEach((code, i) => {
+      if (KNOWN_IR_CLASSES.has(code)) classCols.push({ index: i + 1, code });
+    });
+    if (classCols.length === 0) continue;
 
-  const classes: ScrapedFareClass[] = classCols.map(({ index, code }) => ({
-    code,
-    general: general ? parseFareCell(general[index] ?? "") : null,
-    tatkal: tatkal ? parseFareCell(tatkal[index] ?? "") : null,
-  }));
-  /* Kisi bhi class mein fare na mile to page useless hai. */
-  if (!classes.some((c) => c.general != null || c.tatkal != null)) return null;
-  return { trainNumber, classes, provider: "web_erail", sourceUrl };
+    const quotaRow = (label: string): string[] | null =>
+      rows.find((cells) => cells[0]?.toLowerCase() === label) ?? null;
+    const general = quotaRow("general");
+    const tatkal = quotaRow("tatkal");
+    if (!general && !tatkal) continue;
+
+    const classes: ScrapedFareClass[] = classCols.map(({ index, code }) => ({
+      code,
+      general: general ? parseFareCell(general[index] ?? "") : null,
+      tatkal: tatkal ? parseFareCell(tatkal[index] ?? "") : null,
+    }));
+    /* Kisi bhi class mein fare na mile to ye table fare-table nahi. */
+    if (classes.some((c) => c.general != null || c.tatkal != null)) {
+      return { trainNumber, classes, provider: "web_erail", sourceUrl };
+    }
+  }
+  return null;
 }
 
 export async function scrapeTrainFareWeb(trainNumber: string): Promise<ScrapedFare | null> {

@@ -834,3 +834,42 @@ describe("22. Round-7b: availability without railkit key (prod shape)", () => {
     expect(res.body.bookable).toBe(false);
   });
 });
+
+describe("23. Round-7c: erail fare-table layout variance (Render body)", () => {
+  /* Render body: fare-classes table "Total fare for" marker ke BAAD —
+   * pehle wali table mein sirf stations + Adult/Child selectors. */
+  const ERail_RENDER_LAYOUT = `<html><body>
+<table><tr><td>Amritsar Jn Beas Jalandhar City</td><td>Haridwar Jn</td></tr>
+<tr><td>Adult 0 Adult 1</td><td>Child 0 Child 1</td></tr></table>
+Total fare for 1 Adult
+<table><tr><th></th><th>CC</th><th>2S</th><th>GN</th></tr>
+<tr><td>General</td><td>650</td><td>205</td><td>140</td></tr>
+<tr><td>Tatkal</td><td>825</td><td>220</td><td>-</td></tr></table>
+</body></html>`;
+
+  it("23a. parseErailFare finds fare table after marker (Render layout)", async () => {
+    const { parseErailFare } = await import("../server/railway/webscrape");
+    const f = parseErailFare(ERail_RENDER_LAYOUT, "12054", "u");
+    expect(f).not.toBeNull();
+    const cc = f?.classes.find((c) => c.code === "CC");
+    expect(cc?.general).toBe(650);
+    expect(cc?.tatkal).toBe(825);
+    const twoS = f?.classes.find((c) => c.code === "2S");
+    expect(twoS?.general).toBe(205);
+  });
+
+  it("23b. multi-class train parse (12958 shape: 1A/2A/3A with gaps)", async () => {
+    const { parseErailFare } = await import("../server/railway/webscrape");
+    const html = `<html><body>Total fare for<table>
+<tr><th></th><th>1A</th><th>2A</th><th>3A</th></tr>
+<tr><td>General</td><td>3,945</td><td></td><td>1,810</td></tr>
+<tr><td>Tatkal</td><td>-</td><td>2,415</td><td>1,810</td></tr></table></body></html>`;
+    const f = parseErailFare(html, "12958", "u");
+    const by = (c: string) => f?.classes.find((x) => x.code === c);
+    expect(by("1A")?.general).toBe(3945);
+    expect(by("1A")?.tatkal).toBeNull();
+    expect(by("2A")?.general).toBeNull();
+    expect(by("2A")?.tatkal).toBe(2415);
+    expect(by("3A")?.general).toBe(1810);
+  });
+});
