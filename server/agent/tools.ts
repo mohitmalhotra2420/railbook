@@ -201,6 +201,17 @@ export async function executeTool(
         args.classCode as ClassCode,
       );
       if (row.status === "UNKNOWN") {
+        /* Round-7: API-fail par erail.in se fare-only row aayi — seats nahi,
+         * par fare bhi na batana data chhupana hota. */
+        if (row.source === "web_erail" && row.fare > 0) {
+          return {
+            ok: true,
+            tool,
+            summary: `${args.trainNumber} ${args.classCode}: live seat availability nahi mili (API down), par fare ₹${row.fare} (web: erail.in)`,
+            data: row,
+            provider: providerOf(),
+          };
+        }
         return { ok: false, tool, summary: "Availability unavailable.", data: row, provider: providerOf() };
       }
       return {
@@ -239,7 +250,7 @@ export async function executeTool(
       return {
         ok: true,
         tool,
-        summary: `${args.trainNumber} ${args.classCode}: ticket ₹${fare.baseFare}, service ₹${fare.serviceFee}, total ₹${fare.total}`,
+        summary: `${args.trainNumber} ${args.classCode}: ticket ₹${fare.baseFare}, service ₹${fare.serviceFee}, total ₹${fare.total}${fare.source === "web_erail" ? " · (fare web-scrape: erail.in — exact booking fare thoda alag ho sakta hai)" : ""}`,
         data: fare,
         provider: providerOf(),
       };

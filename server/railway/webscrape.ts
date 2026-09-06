@@ -498,3 +498,120 @@ export async function scrapeLiveStatusRailEnquiry(trainNumber: string): Promise<
   if (!html) return null;
   return parseRailEnquiryLive(html, num, sourceUrl);
 }
+
+/* ------------------------------------------------------------------ */
+/* Round-7 (2026-09-06): FARE web-fallback — erail.in/train-fare/{num} */
+/* ------------------------------------------------------------------ */
+/* erail ka fare page poora SSR deta hai — classes header + quota rows:
+ *   ROW ['', 'CC', '2S', 'GN']            ← classes (last col kabhi quota-tag)
+ *   ROW ['General', '650', '205', '140']
+ *   ROW ['Tatkal', '825', '220', '-']
+ * Sirf known IR classes hi columns maante hain ('GN' jaise tags skip).
+ * Availability numbers erail/confirmTkt/sab mirrors client-side (auth API)
+ * se laate hain — SSR availability source exist nahi karta (round-7 research). */
+
+export type ScrapedFareClass = {
+  code: string;
+  general: number | null;
+  tatkal: number | null;
+};
+
+export type ScrapedFare = {
+  trainNumber: string;
+  classes: ScrapedFareClass[];
+  provider: "web_erail";
+  sourceUrl: string;
+};
+
+const KNOWN_IR_CLASSES = new Set(["1A", "2A", "3A", "3E", "SL", "CC", "EC", "2S", "EA"]);
+
+function parseFareCell(raw: string): number | null {
+  const cleaned = raw.replace(/[₹,\s]/g, "");
+  if (!cleaned || cleaned === "-") return null;
+  const n = Number.parseInt(cleaned, 10);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+export function parseErailFare(html: string, trainNumber: string, sourceUrl: string): ScrapedFare | null {
+  const marker = html.indexOf("Total fare for");
+  if (marker < 0) return null;
+  const tblStart = html.lastIndexOf("<table", marker);
+  const tblEnd = tblStart < 0 ? -1 : html.indexOf("</table>", tblStart);
+  if (tblStart < 0 || tblEnd < 0 || tblEnd < tblStart) return null;
+  const tbl = html.slice(tblStart, tblEnd);
+  const rows = [...tbl.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi)]
+    .map((rm) =>
+      [...rm[1].matchAll(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi)].map((cm) =>
+        cm[1].replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim(),
+      ),
+    )
+    .filter((cells) => cells.length > 0);
+
+  /* Header row: pehla cell khali/label, baaki sab short uppercase tokens. */
+  const header = rows.find((cells) => {
+    if (cells.length < 2) return false;
+    const rest = cells.slice(1);
+    return rest.length >= 1 && rest.every((c) => /^[A-Z0-9]{1,3}$/.test(c));
+  });
+  if (!header) return null;
+
+  const classCols: { index: number; code: string }[] = [];
+  header.slice(1).forEach((code, i) => {
+    if (KNOWN_IR_CLASSES.has(code)) classCols.push({ index: i + 1, code });
+  });
+  if (classCols.length === 0) return null;
+
+  const quotaRow = (label: string): string[] | null =>
+    rows.find((cells) => cells[0]?.toLowerCase() === label) ?? null;
+  const general = quotaRow("general");
+  const tatkal = quotaRow("tatkal");
+
+  const classes: ScrapedFareClass[] = classCols.map(({ index, code }) => ({
+    code,
+    general: general ? parseFareCell(general[index] ?? "") : null,
+    tatkal: tatkal ? parseFareCell(tatkal[index] ?? "") : null,
+  }));
+  /* Kisi bhi class mein fare na mile to page useless hai. */
+  if (!classes.some((c) => c.general != null || c.tatkal != null)) return null;
+  return { trainNumber, classes, provider: "web_erail", sourceUrl };
+}
+
+export async function scrapeTrainFareWeb(trainNumber: string): Promise<ScrapedFare | null> {
+  const num = String(trainNumber ?? "").trim();
+  if (!/^\d{4,6}$/.test(num)) return null;
+  const sourceUrl = `https://erail.in/train-fare/${num}`;
+  const html = await fetchHtml(sourceUrl);
+  if (!html) return null;
+  return parseErailFare(html, num, sourceUrl);
+}
+
+/* ------------------------------------------------------------------ */
+/* Round-7: STATION-LOOKUP web-fallback — railenquiry.in/station/{CODE} */
+/* ------------------------------------------------------------------ */
+/* Title format: "<title>{Name} ({CODE}) Railway Station</title>" (SSR). */
+
+export type ScrapedStation = {
+  code: string;
+  name: string;
+  city: string;
+  provider: "web_railenquiry";
+  sourceUrl: string;
+};
+
+export function parseRailEnquiryStation(html: string, code: string, sourceUrl: string): ScrapedStation | null {
+  const m = html.match(/<title>([^<]{2,80}?)\s*\(([A-Za-z]{2,5})\)\s*Railway\s+Station<\/title>/i);
+  if (!m) return null;
+  const name = m[1].replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
+  if (!name || /^railway/i.test(name)) return null;
+  if (m[2].toUpperCase() !== code.toUpperCase()) return null;
+  return { code: code.toUpperCase(), name, city: name, provider: "web_railenquiry", sourceUrl };
+}
+
+export async function scrapeStationLookupWeb(code: string): Promise<ScrapedStation | null> {
+  const c = String(code ?? "").trim();
+  if (!/^[A-Za-z]{2,5}$/.test(c)) return null;
+  const sourceUrl = `https://railenquiry.in/station/${c.toUpperCase()}`;
+  const html = await fetchHtml(sourceUrl);
+  if (!html) return null;
+  return parseRailEnquiryStation(html, c, sourceUrl);
+}

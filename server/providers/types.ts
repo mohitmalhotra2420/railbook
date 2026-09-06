@@ -34,6 +34,9 @@ export interface ClassAvailability {
   /** Asked segment ka data RailCore ne nahi diya (NOT_FOUND) — ye row train
    * ke first/last stop (endpoints) ki availability hai, labeled dikhna hai. */
   segmentNote?: string;
+  /** Round-7: fare API-fail par erail.in scrape se aaya (status UNKNOWN,
+   * fare-only). Seats is case mein nahi hote. */
+  source?: "web_erail";
 }
 
 export interface TrainResult {
@@ -71,6 +74,8 @@ export interface FareBreakdown {
   railwayAvailable?: boolean;
   /** Fare kyun nahi mila (endpoint band / quota khatam) — honest user message. */
   unavailableReason?: string;
+  /** Round-7: erail.in web-scrape se aaya (API-fail fallback). */
+  source?: "web_erail";
 }
 
 export interface PassengerInput {

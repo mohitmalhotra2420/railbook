@@ -1,4 +1,11 @@
-import { scrapeCoachPositionWeb, scrapeLiveStatusWeb, scrapeTrainScheduleWeb, scrapeLiveStatusRailEnquiry } from "./webscrape.js";
+import {
+  scrapeCoachPositionWeb,
+  scrapeLiveStatusWeb,
+  scrapeTrainScheduleWeb,
+  scrapeLiveStatusRailEnquiry,
+  scrapeTrainFareWeb,
+  scrapeStationLookupWeb,
+} from "./webscrape.js";
 import { env } from "../env.js";
 import { searchStations as searchLocalStations } from "../data/stations.js";
 import {
@@ -68,7 +75,8 @@ export type ServedProvider =
   | "web_confirmtkt"
   | "web_trainspnrstatus"
   | "web_railyatri"
-  | "web_railenquiry";
+  | "web_railenquiry"
+  | "web_erail";
 
 export type LastRailwayLog = {
   railwayProvider: ServedProvider;
@@ -112,6 +120,64 @@ export type StationSearchResult = {
   provider: ServedProvider;
 };
 
+/* Round-7: erail.in fare-scrape helper — API-fail hone par hi call hota hai.
+ * Quota GN → General column, Tatkal → Tatkal column. */
+async function erailFareForClass(
+  trainNumber: string,
+  classCode: string,
+  quotaCode: string,
+): Promise<number | null> {
+  try {
+    const scraped = await scrapeTrainFareWeb(trainNumber);
+    if (!scraped) return null;
+    const row = scraped.classes.find((c) => c.code === String(classCode).toUpperCase());
+    if (!row) return null;
+    const quotaUpper = String(quotaCode ?? "GN").toUpperCase();
+    if (quotaUpper === "TQ" || quotaUpper === "TATKAL") return row.tatkal ?? row.general;
+    return row.general ?? row.tatkal;
+  } catch {
+    return null;
+  }
+}
+
+/* Round-7: erail fare ko FareBreakdown shape mein. Service fee erail batata
+ * nahi — 0, total = per-passenger fare × passengers. */
+async function erailFareBreakdown(
+  trainNumber: string,
+  date: string,
+  classCode: ClassCode,
+  passengerCount: number,
+): Promise<FareBreakdown | null> {
+  const perPax = await erailFareForClass(trainNumber, classCode, "GN");
+  if (perPax == null) return null;
+  const pax = Math.max(1, passengerCount || 1);
+  return {
+    trainNumber,
+    date,
+    classCode,
+    passengerCount: pax,
+    baseFare: perPax,
+    serviceFee: 0,
+    total: perPax * pax,
+    currency: "INR",
+    railwayAvailable: true,
+    source: "web_erail",
+  };
+}
+
+/* Round-7: code-like query par local/API kuch nahi diya — railenquiry.in
+ * station page se real name verify karke lo (SSR title-parse). */
+async function stationWebLookup(codeLike: string): Promise<Station | null> {
+  if (!/^[A-Za-z]{2,5}$/.test(codeLike)) return null;
+  try {
+    const scraped = await scrapeStationLookupWeb(codeLike);
+    if (!scraped) return null;
+    return { code: scraped.code, name: scraped.name, city: scraped.city };
+  } catch {
+    return null;
+  }
+}
+
 export async function routedStationSearch(q: string): Promise<StationSearchResult> {
   const started = Date.now();
   const query = q.trim();
@@ -143,10 +209,28 @@ export async function routedStationSearch(q: string): Promise<StationSearchResul
     if (pick.kind === "single") {
       return { stations: pick.stations, needChoice: false, provider: "railkit_fallback" };
     }
+    /* Round-7: local bhi empty — code-like query par railenquiry web lookup. */
+    if (local.length === 0) {
+      const web = await stationWebLookup(query);
+      if (web) {
+        logServed("web_railenquiry", "stationSearch", started, true, "api_and_local_empty");
+        return { stations: [web], needChoice: false, provider: "web_railenquiry" };
+      }
+    }
     return { stations: local, needChoice: false, provider: "railkit_fallback" };
   }
 
   const local = await searchRailkitStations(query);
+  /* Round-7: railkit sirf placeholder de raha ({name===code}) ya empty —
+   * code-like query par railenquiry station page se real name. */
+  const realHits = local.filter((s) => s.name && s.name !== s.code);
+  if (realHits.length === 0) {
+    const web = await stationWebLookup(query);
+    if (web) {
+      logServed("web_railenquiry", "stationSearch", started, true, "local_placeholder_only");
+      return { stations: [web], needChoice: false, provider: "web_railenquiry" };
+    }
+  }
   return { stations: local, needChoice: false, provider: env.provider === "railkit" ? "railkit" : "local" };
 }
 
@@ -553,13 +637,19 @@ export class FallbackRailwayProvider implements RailwayProvider {
       return unknown;
     }
     const fb = await this.kit.getAvailability(trainNumber, date, from, to, classCode, quotaCode);
-    logServed(
-      fb.status === "UNKNOWN" ? "none" : "railkit_fallback",
-      "availability",
-      started,
-      fb.status !== "UNKNOWN",
-      "railcore_unusable",
-    );
+    if (fb.status !== "UNKNOWN") {
+      logServed("railkit_fallback", "availability", started, true, "railcore_unusable");
+      return fb;
+    }
+    /* Round-7: dono API fail — erail.in se class-ka fare to nikaal lo.
+     * Seats ka number koi bhi public site SSR nahi deti (sab client-side
+     * auth API), isliye status UNKNOWN hi rehta hai — fare-only row. */
+    const webFare = await erailFareForClass(trainNumber, classCode, quotaCode);
+    if (webFare != null) {
+      logServed("web_erail", "availability", started, false, "fare_only_no_seats");
+      return { ...fb, fare: webFare, source: "web_erail" };
+    }
+    logServed("none", "availability", started, false, "railcore_unusable");
     return fb;
   }
 
@@ -580,12 +670,28 @@ export class FallbackRailwayProvider implements RailwayProvider {
       }
     }
     if (!env.railkitApiKey) {
+      /* Round-7: railkit key nahi — erail.in fare-scrape last resort. */
+      const web = await erailFareBreakdown(trainNumber, date, classCode, passengerCount);
+      if (web) {
+        logServed("web_erail", "fare", started, true, "both_unavailable");
+        return web;
+      }
       const empty = await this.core.getFare(trainNumber, date, from, to, classCode, passengerCount);
       logServed("none", "fare", started, false, "both_unavailable");
       return empty;
     }
     const fb = await this.kit.getFare(trainNumber, date, from, to, classCode, passengerCount);
-    logServed("railkit_fallback", "fare", started, Boolean(fb.railwayAvailable), "railcore_unusable");
+    if (fb.railwayAvailable) {
+      logServed("railkit_fallback", "fare", started, true, "railcore_unusable");
+      return fb;
+    }
+    /* Round-7: railkit bhi fail — erail.in fare-scrape. */
+    const web = await erailFareBreakdown(trainNumber, date, classCode, passengerCount);
+    if (web) {
+      logServed("web_erail", "fare", started, true, "railcore_unusable");
+      return web;
+    }
+    logServed("none", "fare", started, false, "railcore_unusable");
     return fb;
   }
 

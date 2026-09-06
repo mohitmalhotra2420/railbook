@@ -6,7 +6,7 @@ import { setRailcoreFetch, resetRailcoreBookings } from "../server/railway/railc
 import { setScrapeFetch } from "../server/railway/webscrape";
 import { setRailkitSdk, resetRailkitBookings } from "../server/railway/railkit";
 import { setProvider } from "../server/providers/index";
-import { getLastRailwayLog, FallbackRailwayProvider } from "../server/railway/router";
+import { getLastRailwayLog, FallbackRailwayProvider, routedStationSearch } from "../server/railway/router";
 import { pickStations, scoreStation, stationSearchQuery } from "../server/railway/station-resolve";
 import { understand } from "../src/ai/nlu";
 import { planTurn } from "../src/ai/orchestrate";
@@ -642,5 +642,150 @@ describe("17–18. date behaviour unchanged", () => {
     expect(env.nvidiaBaseUrl).toBe("https://integrate.api.nvidia.com/v1");
     if (prevModel != null) process.env.NVIDIA_MODEL = prevModel;
     if (prevBase != null) process.env.NVIDIA_BASE_URL = prevBase;
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Round-7 (2026-09-06): fare + station-lookup web fallback            */
+/* ------------------------------------------------------------------ */
+
+const ERail_FARE_HTML = `<html><body>
+<table class="fare"><tr><th></th><th>CC</th><th>2S</th><th>GN</th></tr>
+<tr><td>General</td><td>650</td><td>205</td><td>140</td></tr>
+<tr><td>Tatkal</td><td>825</td><td>220</td><td>-</td></tr></table>
+Total fare for 1 Adult</body></html>`;
+
+function htmlResponse(html: string) {
+  return new Response(html, { status: 200, headers: { "Content-Type": "text/html" } });
+}
+
+describe("21. Round-7 web fallback: erail fare + railenquiry station", () => {
+  it("21a. parseErailFare extracts class fares, skips non-class columns (GN)", async () => {
+    const { parseErailFare } = await import("../server/railway/webscrape");
+    const f = parseErailFare(ERail_FARE_HTML, "12054", "https://erail.in/train-fare/12054");
+    expect(f?.provider).toBe("web_erail");
+    const cc = f?.classes.find((c) => c.code === "CC");
+    expect(cc?.general).toBe(650);
+    expect(cc?.tatkal).toBe(825);
+    const twoS = f?.classes.find((c) => c.code === "2S");
+    expect(twoS?.general).toBe(205);
+    expect(twoS?.tatkal).toBe(220);
+    expect(f?.classes.find((c) => c.code === "GN")).toBeUndefined();
+  });
+
+  it("21b. parseErailFare returns null without fare table marker", async () => {
+    const { parseErailFare } = await import("../server/railway/webscrape");
+    expect(parseErailFare("<html><body>nothing here</body></html>", "1", "u")).toBeNull();
+  });
+
+  it("21c. availability: both APIs fail → erail fare-only row (status UNKNOWN, fare filled)", async () => {
+    process.env.RAILWAY_PROVIDER = "railcore";
+    process.env.RAILCORE_API_KEY = "rk_live_test";
+    process.env.RAILKIT_API_KEY = "rk_test";
+    setRailcoreFetch(async () => jsonResponse(500, { success: false }));
+    setRailkitSdk(failingSdk() as never);
+    setScrapeFetch(async (url: unknown) =>
+      String(url).includes("erail.in/train-fare/") ? htmlResponse(ERail_FARE_HTML) : jsonResponse(500, {}),
+    );
+    setProvider(null);
+    const app = createApp();
+    const res = await request(app).get("/api/availability").query({
+      trainNumber: "12054",
+      date: FUTURE,
+      from: "ASR",
+      to: "HW",
+      classCode: "CC",
+    });
+    expect(res.body.availability.status).toBe("UNKNOWN");
+    expect(res.body.availability.fare).toBe(650);
+    expect(res.body.availability.source).toBe("web_erail");
+    expect(res.body.bookable).toBe(false);
+    expect(getLastRailwayLog()?.railwayProvider).toBe("web_erail");
+  });
+
+  it("21d. availability: both APIs fail + scrape fail → plain UNKNOWN (test-19 contract)", async () => {
+    process.env.RAILWAY_PROVIDER = "railcore";
+    process.env.RAILCORE_API_KEY = "rk_live_test";
+    process.env.RAILKIT_API_KEY = "rk_test";
+    setRailcoreFetch(async () => jsonResponse(500, { success: false }));
+    setRailkitSdk(failingSdk() as never);
+    setScrapeFetch(async () => jsonResponse(500, { success: false }));
+    setProvider(null);
+    const app = createApp();
+    const res = await request(app).get("/api/availability").query({
+      trainNumber: "12054",
+      date: FUTURE,
+      from: "ASR",
+      to: "HW",
+      classCode: "CC",
+    });
+    expect(res.body.availability.status).toBe("UNKNOWN");
+    expect(res.body.availability.fare).toBe(0);
+    expect(res.body.availability.source).toBeUndefined();
+  });
+
+  it("21e. fare: both APIs fail → erail breakdown (railwayAvailable true, source web_erail)", async () => {
+    process.env.RAILWAY_PROVIDER = "railcore";
+    process.env.RAILCORE_API_KEY = "rk_live_test";
+    process.env.RAILKIT_API_KEY = "rk_test";
+    setRailcoreFetch(async () => jsonResponse(500, { success: false }));
+    setRailkitSdk(failingSdk() as never);
+    setScrapeFetch(async (url: unknown) =>
+      String(url).includes("erail.in/train-fare/") ? htmlResponse(ERail_FARE_HTML) : jsonResponse(500, {}),
+    );
+    setProvider(null);
+    const app = createApp();
+    const res = await request(app).get("/api/fare").query({
+      trainNumber: "12054",
+      date: FUTURE,
+      from: "ASR",
+      to: "HW",
+      classCode: "CC",
+      passengers: 2,
+    });
+    expect(res.body.fare.baseFare).toBe(650);
+    expect(res.body.fare.total).toBe(1300);
+    expect(res.body.fare.railwayAvailable).toBe(true);
+    expect(res.body.fare.source).toBe("web_erail");
+    expect(getLastRailwayLog()?.railwayProvider).toBe("web_erail");
+  });
+
+  it("21f. station lookup: local placeholder-only + code query → railenquiry real name", async () => {
+    process.env.RAILWAY_PROVIDER = "railkit";
+    process.env.RAILKIT_API_KEY = "rk_test";
+    setScrapeFetch(async (url: unknown) =>
+      String(url).includes("railenquiry.in/station/")
+        ? htmlResponse("<html><head><title>Khalilpur (KIP) Railway Station</title></head></html>")
+        : jsonResponse(500, {}),
+    );
+    const r = await routedStationSearch("KIP");
+    expect(r.provider).toBe("web_railenquiry");
+    expect(r.needChoice).toBe(false);
+    expect(r.stations[0]?.code).toBe("KIP");
+    expect(r.stations[0]?.name).toBe("Khalilpur");
+  });
+
+  it("21g. station lookup: scrape fail → placeholder passthrough, no crash", async () => {
+    process.env.RAILWAY_PROVIDER = "railkit";
+    process.env.RAILKIT_API_KEY = "rk_test";
+    setScrapeFetch(async () => jsonResponse(500, { success: false }));
+    const r = await routedStationSearch("KIP");
+    expect(r.provider === "local" || r.provider === "railkit" || r.provider === "none").toBe(true);
+    expect(r.stations.length).toBeGreaterThanOrEqual(0);
+  });
+
+  it("21h. parseRailEnquiryStation validates code match + rejects junk", async () => {
+    const { parseRailEnquiryStation } = await import("../server/railway/webscrape");
+    const ok = parseRailEnquiryStation(
+      "<html><head><title>Ambala Cant Jn (UMB) Railway Station</title></head></html>",
+      "UMB",
+      "https://railenquiry.in/station/UMB",
+    );
+    expect(ok?.name).toBe("Ambala Cant Jn");
+    expect(ok?.code).toBe("UMB");
+    expect(ok?.provider).toBe("web_railenquiry");
+    /* Galat code match → null (invented data nahi). */
+    expect(parseRailEnquiryStation("<title>XYZ (ABC) Railway Station</title>", "UMB", "u")).toBeNull();
+    expect(parseRailEnquiryStation("<title>Railway Station</title>", "UMB", "u")).toBeNull();
   });
 });
