@@ -52,9 +52,13 @@ async function fetchHtml(url: string): Promise<string | null> {
       headers: { "User-Agent": UA, "Accept-Language": "en-IN,en;q=0.9", Accept: "text/html" },
       signal: AbortSignal.timeout(SCRAPE_TIMEOUT_MS),
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      console.error(JSON.stringify({ scrape: "http_error", url: String(url).slice(0, 100), status: res.status }));
+      return null;
+    }
     return await res.text();
-  } catch {
+  } catch (e) {
+    console.error(JSON.stringify({ scrape: "fetch_error", url: String(url).slice(0, 100), err: String(e).slice(0, 120) }));
     return null;
   }
 }
