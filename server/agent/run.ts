@@ -31,6 +31,7 @@ import {
 } from "./agentic.js";
 import { routedClassBoard, routedSchedule, routedStationSearch, routedTrainInfo, searchTrainsRouted } from "../railway/router.js";
 import { findWikipediaPage, webSearch } from "./websearch.js";
+import { railKbAnswer } from "./railkb.js";
 import { searchRailcoreTrainsByName } from "../railway/railcore.js";
 
 /** Atlas analyse intents — decideTool inhe map nahi karta (model ki zimmedari hai),
@@ -1016,7 +1017,19 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
   // tool === "searchTrains" ka deterministic executor hai hi nahi (agentic
   // engine ka tool hai) — searchish intent + complete slots par atlasFallback
   // hi real search + table + memory dega. Warna agentic timeout par EMPTY reply.
-  if ((!tool || tool === "searchTrains") && searchishIntent) {
+  /* Screenshot fix (2026-09-06 #4): "2s class kya hoti hai" jaisa
+   * concept-question bhi SEARCH intent ban jaata tha → slot-ask ("Kahan se
+   * jaana hai?"). General-question pattern + koi journey context (route/
+   * train number) nahi → search MAT karo — universal KB/web fallback ko
+   * reply dene do. */
+  const GENERAL_QUESTION_RE =
+    /\b(kya hota|kya hoti|kya hote|ka matlab|what is|kya hai|kaise hota|kaise hoti|kab banta|kab khulta|kab milta|kab milti|kitna hota|kitni hoti|matlab kya)\b/i;
+  const hasJourneyContext = Boolean(
+    ctx.origin || ctx.destination || ctx.selectedTrainNumber || /\b\d{5}\b/.test(String(req.text ?? "")),
+  );
+  if (GENERAL_QUESTION_RE.test(String(req.text ?? "")) && !hasJourneyContext) {
+    /* concept-question — atlasFallback skip */
+  } else if ((!tool || tool === "searchTrains") && searchishIntent) {
     const outcome = await atlasFallback(atlasPref ?? "best", ctx, understood.nlu);
     reply = outcome.reply;
     toolOk = outcome.ok;
@@ -1250,14 +1263,23 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
   if (!reply && !tool && !factWebTried) {
     const rawText = String(req.text ?? "").trim();
     const RAILWAY_Q_RE =
-      /\b(train|trains|rail|railway|railways|irctc|station|coach|coaches|pnr|tatkal|berth|seat|seats|fare|quota|platform|locomotive|engine|express|shatabdi|rajdhani|vande bharat|bande bharat|duronto|garib rath|tejas|gatimaan|gatiman|metro|railway station|waiting list|rac|chart|catering|pantry|blanket|reservation)\b/i;
+      /\b(train|trains|rail|railway|railways|irctc|station|stations|coach|coaches|pnr|tatkal|berth|seat|seats|fare|quota|platform|locomotive|engine|express|shatabdi|rajdhani|vande bharat|bande bharat|duronto|garib rath|tejas|gatimaan|gatiman|metro|waiting list|rac|gnwl|pqwl|rlwl|tqwl|wl|arp|chart|catering|pantry|blanket|bedroll|reservation|sleeper|class|classes|1a|2a|3a|cc|ec|2s|vistadome|lhb|icf|tte|gauge|concession|refund|cancellation|helpline|madad|ecatering)\b/i;
     const QUESTION_RE =
       /\b(kya|kaise|kaisa|kab|kahan|kahaan|kitna|kitni|kitne|kaun|kaunsi|kyun|kyu|kyon|why|how|what|when|where|which|does|can|batao|batana|btana|btaye|bataiye|bata|dikhao|dikha|bataen|suchi|list|sab|sare|kaun se|milta|milti|milte|hoti|hota|hote)\b/i;
     if (RAILWAY_Q_RE.test(rawText) && QUESTION_RE.test(rawText) && !/\b(live status|running status|abhi kahan|kaha hai|kahan hai)\b/i.test(rawText)) {
+      /* ── LOCAL RAILWAY KNOWLEDGE BASE (user 2026-09-06: "AI ke paas har
+       * cheez ka answer ho"). Sleeper/tatkal/RAC/classes jaise general
+       * sawaal web se PEHLE stable local KB se — turant, offline, reliable. */
+      const kbAnswer = railKbAnswer(rawText);
+      if (kbAnswer) {
+        reply = kbAnswer;
+        toolOk = true;
+      }
+      if (!reply) {
       /* Query banao: filler hatao, train ka naam/number prepend (trainInfo
        * se — ChatGPT jaisa "samajh ke" search karne ke liye subject chahiye). */
       const FILLER_RE =
-        /\b(ka|ki|ke|ko|kya|kya|hai|hain|hun|tha|thi|the|se|mein|me|mai|main|par|pe|to|hi|bhi|batao|batana|btana|btaye|bataiye|bata|bataen|dikhao|dikha|chahiye|karo|karna|karke|kar|mujhe|mera|meri|mere|aap|tum|tumhara|kripya|please|kr|kro|nahi|na|haan|yan|ya|jaise|waise|bta|btao|lga|lagta|kabhi)\b/gi;
+        /\b(ka|ki|ke|ko|kya|kya|hai|hain|hun|tha|thi|the|se|mein|me|mai|main|par|pe|to|hi|bhi|batao|batana|btana|btaye|bataiye|bata|bataen|dikhao|dikha|chahiye|karo|karna|karke|kar|mujhe|mera|meri|mere|aap|tum|tumhara|kripya|please|kr|kro|nahi|na|haan|yan|ya|jaise|waise|bta|btao|lga|lagta|kabhi|hota|hoti|hote|milta|milti|milte|karta|karti|karte|matlab|meaning|walI|wala|wale)\b/gi;
       let q = rawText.replace(FILLER_RE, " ").replace(/\s+/g, " ").trim().slice(0, 100);
       const num = rawText.match(/\b\d{5}\b/)?.[1] ?? ctx.selectedTrainNumber ?? null;
       let subject = "";
@@ -1299,12 +1321,24 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
           reply = `Web se mila: ${best.snippet}\n(Source: ${best.title} — ${best.url})\n(Ye railway API ka data nahi, web-search ka jawab hai.)`;
           toolOk = true;
         } else if (!reply) {
-          /* Train-page se bhi nahi aaya + web results bhi nahi — honest. */
-          reply = `Is sawaal ka jawab web se abhi nahi mil paya — main guess nahi karunga. Railway ke live data (status/fare/seats) ke liye wahi poochiye, main API se nikaal leta hoon.`;
+          /* Train-page se bhi nahi aaya + web results bhi nahi — honest
+           * (screenshot #4: confusing "live data wahi poochiye" line hatai). */
+          reply = `Ye main abhi confirm nahi kar paya — guess nahi karunga. Live train data (status/fare/seats) API se nikaal leta hoon; ya sawaal thode alag shabdon se poochein.`;
           toolOk = false;
         }
+      } /* end if (!reply) — KB se jawab aaya to web skip */
       }
     }
+  }
+
+  /* ── FINAL SAFETY NET (screenshot 2026-09-06 #4: "gnwl kya hota hai"
+   * jaise sawaal par EMPTY reply -> client 'Kahan se kahan jaana hai?'
+   * dikha deta tha). Railway-domain ka koi bhi sawaal kabhi EMPTY reply
+   * ke saath nahi jata — honest general jawab. */
+  if (!reply && understood.nlu.intent !== "OUT_OF_DOMAIN" && String(req.text ?? "").trim().length > 1) {
+    reply =
+      "Ye sawaal main theek se samajh nahi paya. Railway ke live data (train status, fare, seat availability, PNR) par turant poochho — wahi API se nikaalta hoon. Ya apna sawaal thoda saaf shabdon mein poochein.";
+    toolOk = false;
   }
 
   // lines KABHI nahi bhejna — resume mechanism band.

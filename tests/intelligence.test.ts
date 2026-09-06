@@ -537,3 +537,55 @@ describe("ChatGPT-jaisa train-page scrape (Wikipedia page, number-verified)", ()
     expect(reply, reply).toMatch(/web-scrape/i);
   });
 });
+
+/* ══ SCREENSHOT REGRESSION #4 (2026-09-06, Screenshot_20260906-181539) ══════
+ * "Sleeper class kya hota hai train mein" → "web se nahi mil paya" (web
+ * query bigdi thi) + "2s class kya hoti hai" → booking slot-ask ("Kahan se
+ * jaana hai?"). User: "AI ke paas har cheez ka answer ho — railway ka kuch
+ * bhi pooch sakta hai". */
+
+describe("SCREENSHOT #4 (2026-09-06): railway-knowledge KB + class-questions booking nahi", () => {
+  it("'Sleeper class kya hota hai train mein' → KB se instant jawab (web fail nahi)", async () => {
+    setWebFetch(async () => {
+      throw new Error("network timeout");
+    });
+    const r = await runAgent({ text: "Sleeper class kya hota hai train mein", now: "2026-09-06T18:15:00+05:30" });
+    const reply = String(r.reply ?? "");
+    expect(reply, reply).toMatch(/Sleeper class \(SL\)/i);
+    expect(reply, reply).toMatch(/non-AC sleeper coach/i);
+    expect(reply, reply).not.toMatch(/nahi mil paya/i);
+  });
+
+  it("'2s class kya hoti hai' → KB jawab, 'Kahan se jaana hai?' NAHI (booking-slot galti nahi)", async () => {
+    setWebFetch(async () => {
+      throw new Error("network timeout");
+    });
+    const r = await runAgent({ text: "2s class kya hoti hai", now: "2026-09-06T18:15:00+05:30" });
+    const reply = String(r.reply ?? "");
+    expect(reply, reply).toMatch(/Second Sitting/i);
+    expect(reply, reply).not.toMatch(/Kahan se jaana|Departure station bataiye/i);
+  });
+
+  it("tatkal/rac/gnwl/chart concepts — KB se turant", async () => {
+    setWebFetch(async () => {
+      throw new Error("network timeout");
+    });
+    for (const [q, re] of [
+      ["tatkal quota kya hota hai", /1 din pehle/i],
+      ["rac kya hota hai", /Reservation Against Cancellation/i],
+      ["gnwl kya hota hai", /GNWL/i],
+      ["chart kab banta hai", /Reservation Chart/i],
+      ["ac coach mein blanket milti hai kya", /Bedding/i],
+    ] as const) {
+      const r = await runAgent({ text: q, now: "2026-09-06T18:15:00+05:30" });
+      expect(String(r.reply ?? ""), q).toMatch(re);
+    }
+  });
+
+  it("REAL search ab bhi hota hai — class-question guard overreach nahi", async () => {
+    railcoreMock();
+    const r = await runAgent({ text: "amritsar se new delhi ki train dikhao", now: "2026-09-06T18:15:00+05:30" });
+    const reply = String(r.reply ?? "");
+    expect(reply, reply).not.toMatch(/sawaal main theek se samajh nahi/i);
+  });
+});
