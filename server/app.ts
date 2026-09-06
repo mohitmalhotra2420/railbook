@@ -609,16 +609,17 @@ export function createApp() {
   app.get("/api/debug/scrape-health", async (_req, res) => {
     /* (a) REAL production path — scrapeTrainFareWeb (fetchHtml full fingerprint) */
     const t1 = Date.now();
-    const { scrapeTrainFareWeb } = await import("./railway/webscrape.js");
+    const { scrapeTrainFareWeb, parseErailFare } = await import("./railway/webscrape.js");
     const real = await scrapeTrainFareWeb("12054");
     const realResult = {
       latencyMs: Date.now() - t1,
       result: real ? { classes: real.classes } : null,
     };
 
-    /* (b) raw fetch with fetchHtml's EXACT headers (isolate header vs code issue) */
+    /* (b) same fetch, body captured + parseErailFare run inline — pinpoints
+     * whether body differs ya parse fail. */
     const t2 = Date.now();
-    let rawFingerprint: Record<string, unknown>;
+    let bodyProbe: Record<string, unknown>;
     try {
       const r = await fetch("https://erail.in/train-fare/12054", {
         headers: {
@@ -637,21 +638,25 @@ export function createApp() {
         signal: AbortSignal.timeout(20000),
       });
       const body = await r.text();
-      rawFingerprint = {
+      bodyProbe = {
         httpStatus: r.status,
         latencyMs: Date.now() - t2,
         bodyLength: body.length,
-        hasFareTable: body.includes("Total fare for"),
+        hasMarker: body.includes("Total fare for"),
+        hasTableTag: /<table/i.test(body),
+        title: (body.match(/<title>([^<]*)<\/title>/i)?.[1] ?? "").slice(0, 120),
+        parseResult: parseErailFare(body, "12054", "dbg"),
+        snippet: body.replace(/\s+/g, " ").slice(0, 400),
       };
     } catch (err) {
-      rawFingerprint = { error: String(err).slice(0, 300), latencyMs: Date.now() - t2 };
+      bodyProbe = { error: String(err).slice(0, 300), latencyMs: Date.now() - t2 };
     }
 
     res.json({
       from: "render-prod",
       at: new Date().toISOString(),
       realScrapeTrainFareWeb: realResult,
-      rawFetchFullFingerprint: rawFingerprint,
+      bodyProbe,
     });
   });
 
