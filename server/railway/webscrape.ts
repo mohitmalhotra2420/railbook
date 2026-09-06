@@ -16,10 +16,14 @@
  * COACH POSITION (2026-09-06, user: "har cheez API fail par web se"):
  *   - trainspnrstatus.com/train-coach-position/<num> (SSR coach boxes)
  *
- * Data types jo WEB se KABHI nahi (safety): live status, fare, seats/
- * availability, PNR, booking — sirf railway API se.
+ * LIVE STATUS (2026-09-06, user ne booking-critical scraping bhi authorize ki):
+ *   - railyatri.in/live-train-status/<num>-<name> (SSR __NEXT_DATA__.ltsData —
+ *     NTES-based: current station, delay, ETA, upcoming stations)
+ *   NOTE: fare/seat-availability ke liye abhi koi publicly accessible SSR
+ *   source nahi mila (ConfirmTkt 404-shell, ixigo/trainspnrstatus 403,
+ *   RailYatri availability client-side API auth-dependent) — wo sirf API se.
  *
- * Bot-block/parse-change par [] — honest empty, koi crash nahi. */
+ * Bot-block/parse-change par null/[] — honest empty, koi crash nahi. */
 
 export type ScrapedStop = {
   code: string;
@@ -312,6 +316,121 @@ export function webSourceLabel(provider: string): string {
         ? "trainspnrstatus.com"
         : provider === "web_confirmtkt"
           ? "confirmtkt.com"
-          : null;
+          : provider === "web_railyatri"
+            ? "railyatri.in"
+            : null;
   return site ? ` (Source: ${site} — railway API se nahi, verified web site se.)` : "";
+}
+
+/* ── LIVE STATUS via RailYatri SSR (user-authorized booking-critical scrape,
+ * 2026-09-06). Page /live-train-status/<num>-<name> poora __NEXT_DATA__
+ * embed karta hai jisme pageProps.ltsData = NTES-based live position hai:
+ * delay, current station, eta/etd, upcoming_stations, update_time. */
+
+export type ScrapedLiveStatus = {
+  trainNumber: string;
+  trainName: string;
+  status: string;
+  delayMinutes: number | null;
+  lastUpdatedAt: string | null;
+  currentStation: string | null;
+  nextStation: string | null;
+  journeyDate: string | null;
+  provider: "web_railyatri";
+  sourceUrl: string;
+};
+
+type LtsData = {
+  success?: boolean;
+  train_number?: string;
+  train_name?: string;
+  delay?: number;
+  update_time?: string;
+  current_station_code?: string;
+  current_station_name?: string;
+  at_src?: boolean;
+  at_dstn?: boolean;
+  ahead_distance_text?: string;
+  title?: string;
+  new_message?: string;
+  awaiting_update?: boolean;
+  next_station_code?: string;
+  next_station_name?: string;
+  eta?: string;
+  etd?: string;
+  status?: string;
+  train_start_date?: string;
+  upcoming_stations?: { station_code?: string; station_name?: string; eta?: string }[];
+};
+
+function parseNextData(html: string): Record<string, unknown> | null {
+  const m = html.match(/<script id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/);
+  if (!m) return null;
+  try {
+    const parsed = JSON.parse(m[1]) as unknown;
+    if (parsed && typeof parsed === "object") return parsed as Record<string, unknown>;
+  } catch {
+    /* malformed JSON — parse fail, honest null */
+  }
+  return null;
+}
+
+export function parseRailYatriLive(html: string, trainNumber: string, sourceUrl: string): ScrapedLiveStatus | null {
+  const root = parseNextData(html);
+  if (!root) return null;
+  const props = root.props as Record<string, unknown> | undefined;
+  const pageProps = props?.pageProps as Record<string, unknown> | undefined;
+  const lts = pageProps?.ltsData as LtsData | undefined;
+  if (!lts || lts.success !== true) return null;
+  const delay = typeof lts.delay === "number" ? lts.delay : null;
+  const currentName = String(lts.current_station_name ?? "").replace(/~+$/, "").trim();
+  const currentCode = String(lts.current_station_code ?? "").trim();
+  const upcoming = Array.isArray(lts.upcoming_stations) ? lts.upcoming_stations : [];
+  const next = upcoming[0];
+  const nextLabel = next
+    ? `${String(next.station_name ?? "").replace(/~+$/, "").trim() || next.station_code || ""}${next.eta ? ` (${next.eta})` : ""}`.trim()
+    : null;
+  /* "Train starts at 17:00" (12951 jab tak start na ho) jaise short-form
+   * payloads: position fields nahi hote, title/new_message/next_station
+   * hi asli live info hai — reject mat karo. */
+  const title = String(lts.title ?? "").trim();
+  const msg = String(lts.new_message ?? "").trim();
+  const nextFallback = String(lts.next_station_name ?? lts.next_station_code ?? "").replace(/~+$/, "").trim();
+  if (!currentName && !currentCode && delay === null && upcoming.length === 0 && !title && !nextFallback) return null;
+  const status = lts.at_dstn
+    ? "Journey completed"
+    : title
+      ? msg ? `${title} — ${msg}` : title
+      : lts.status === "T" && currentName
+        ? `Running — near ${currentName}${lts.ahead_distance_text ? `, ${lts.ahead_distance_text}` : ""}`
+        : lts.status === "A" && currentName
+          ? `At ${currentName}`
+          : lts.status === "S" || (lts.at_src && !currentName)
+            ? "At source"
+            : String(lts.status ?? "").trim() || "Running";
+  return {
+    trainNumber: String(lts.train_number ?? trainNumber),
+    trainName: String(lts.train_name ?? "").trim(),
+    status,
+    delayMinutes: delay,
+    lastUpdatedAt: String(lts.update_time ?? "").trim() || null,
+    currentStation: currentName || currentCode || null,
+    nextStation: nextLabel || nextFallback || null,
+    journeyDate: String(lts.train_start_date ?? "").trim() || null,
+    provider: "web_railyatri",
+    sourceUrl,
+  };
+}
+
+/** URL pattern: /live-train-status/<num>-<name-slug> — naam approximate bhi
+ * chalta hai (server number se match karta hai), par bilkul naam ke bina 404. */
+export async function scrapeLiveStatusWeb(trainNumber: string, trainName?: string | null): Promise<ScrapedLiveStatus | null> {
+  const num = String(trainNumber ?? "").trim();
+  if (!/^\d{4,6}$/.test(num)) return null;
+  const name = String(trainName ?? "").trim().replace(/[^\p{L}\p{N}\s-]/gu, "").replace(/\s+/g, "-");
+  if (!name) return null;
+  const sourceUrl = `https://www.railyatri.in/live-train-status/${num}-${name}`;
+  const html = await fetchHtml(sourceUrl);
+  if (!html) return null;
+  return parseRailYatriLive(html, num, sourceUrl);
 }

@@ -76,3 +76,92 @@ describe("WEB-SCRAPE fallback (API-first policy, user 2026-09-06)", () => {
     expect(String(r.reply)).toContain("trainspnrstatus.com");
   });
 });
+
+/* ── LIVE-STATUS SCRAPE tests (user request 2026-09-06: booking-critical bhi
+ * authorize — live/fare/availability). RailYatri SSR __NEXT_DATA__.ltsData —
+ * mocked HTML, live network nahi. (fare/availability ke liye koi accessible
+ * SSR source nahi — sirf live-status RailYatri se scrape hota hai.) */
+
+import { parseRailYatriLive, scrapeLiveStatusWeb } from "../server/railway/webscrape";
+
+const ltsPage = (lts: object) =>
+  `<!DOCTYPE html><html><body><script id="__NEXT_DATA__" type="application/json">${JSON.stringify({
+    props: { pageProps: { ltsData: lts } },
+  })}</script></body></html>`;
+
+describe("RailYatri live-status scrape (booking-critical, user-authorized 2026-09-06)", () => {
+  it("running train: delay + current station + upcoming next", () => {
+    const html = ltsPage({
+      success: true,
+      train_number: "12054",
+      train_name: "Jan Shatabdi Express",
+      status: "T",
+      delay: 0,
+      current_station_code: "SRE",
+      current_station_name: "SAHARANPUR~",
+      ahead_distance_text: "4 kms ahead",
+      update_time: "2026-09-06 12:06:00 +0530",
+      train_start_date: "2026-09-06",
+      upcoming_stations: [{ station_code: "RKSH", station_name: "ROORKEE~", eta: "12:50" }],
+    });
+    const r = parseRailYatriLive(html, "12054", "https://www.railyatri.in/live-train-status/12054-x");
+    expect(r).not.toBeNull();
+    expect(r!.provider).toBe("web_railyatri");
+    expect(r!.status).toMatch(/Running — near SAHARANPUR/);
+    expect(r!.currentStation).toBe("SAHARANPUR");
+    expect(r!.nextStation).toBe("ROORKEE (12:50)");
+    expect(r!.delayMinutes).toBe(0);
+  });
+
+  it("completed journey: at_dstn → Journey completed", () => {
+    const r = parseRailYatriLive(
+      ltsPage({ success: true, train_number: "12014", train_name: "Amritsar Shatabdi", at_dstn: true, delay: 8, current_station_name: "NEW DELHI" }),
+      "12014",
+      "u",
+    );
+    expect(r!.status).toBe("Journey completed");
+    expect(r!.delayMinutes).toBe(8);
+  });
+
+  it("not-started train: title/new_message (12951 'Train starts at 17:00')", () => {
+    const r = parseRailYatriLive(
+      ltsPage({
+        success: true,
+        train_number: "12951",
+        train_name: "Mumbai Central - New Delhi Rajdhani Express",
+        at_src: true,
+        title: "Train starts at 17:00",
+        new_message: "Train hasn't started yet. But all looks good.",
+        next_station_name: "BORIVALI~",
+      }),
+      "12951",
+      "u",
+    );
+    expect(r!.status).toMatch(/Train starts at 17:00/);
+    expect(r!.nextStation).toBe("BORIVALI");
+    expect(r!.delayMinutes).toBeNull();
+  });
+
+  it("success:false / empty payload → null (honest, koi fake nahi)", () => {
+    expect(parseRailYatriLive(ltsPage({ success: false }), "1", "u")).toBeNull();
+    expect(parseRailYatriLive("<html>no next data</html>", "1", "u")).toBeNull();
+    expect(parseRailYatriLive(ltsPage({ success: true, train_number: "9", train_name: "X" }), "9", "u")).toBeNull();
+  });
+
+  it("scrapeLiveStatusWeb: naam ke bina null; naam ke saath URL mein slug", async () => {
+    expect(await scrapeLiveStatusWeb("12054", null)).toBeNull();
+    expect(await scrapeLiveStatusWeb("abc", "Some Train")).toBeNull();
+    setScrapeFetch(async (url: any) => {
+      if (String(url).includes("/live-train-status/12054-Jan-Shatabdi-Express")) {
+        return htmlResponse(
+          ltsPage({ success: true, train_number: "12054", status: "T", delay: 3, current_station_name: "UMB~" }),
+        );
+      }
+      return ({ ok: false, status: 404, text: async () => "", json: async () => ({}) }) as unknown as Response;
+    });
+    const r = await scrapeLiveStatusWeb("12054", "Jan Shatabdi Express");
+    expect(r!.trainNumber).toBe("12054");
+    expect(r!.delayMinutes).toBe(3);
+    expect(r!.provider).toBe("web_railyatri");
+  });
+});

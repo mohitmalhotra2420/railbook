@@ -1,4 +1,4 @@
-import { scrapeCoachPositionWeb, scrapeTrainScheduleWeb } from "./webscrape.js";
+import { scrapeCoachPositionWeb, scrapeLiveStatusWeb, scrapeTrainScheduleWeb } from "./webscrape.js";
 import { env } from "../env.js";
 import { searchStations as searchLocalStations } from "../data/stations.js";
 import {
@@ -58,7 +58,16 @@ function enrichClusterHits(query: string, hits: Station[]): Station[] {
   return extra.length ? [...hits, ...extra] : hits;
 }
 
-export type ServedProvider = "railcore" | "railkit_fallback" | "railkit" | "local" | "none" | "web_ixigo" | "web_confirmtkt" | "web_trainspnrstatus";
+export type ServedProvider =
+  | "railcore"
+  | "railkit_fallback"
+  | "railkit"
+  | "local"
+  | "none"
+  | "web_ixigo"
+  | "web_confirmtkt"
+  | "web_trainspnrstatus"
+  | "web_railyatri";
 
 export type LastRailwayLog = {
   railwayProvider: ServedProvider;
@@ -145,7 +154,7 @@ export type RoutedLive = {
   provider: ServedProvider;
 };
 
-export async function routedLiveStatus(number: string, dateYmd?: string): Promise<RoutedLive> {
+export async function routedLiveStatus(number: string, dateYmd?: string, trainNameHint?: string | null): Promise<RoutedLive> {
   const started = Date.now();
   if (railcoreIsPrimary()) {
     const primary = await railcoreLive(number, dateYmd);
@@ -157,6 +166,26 @@ export async function routedLiveStatus(number: string, dateYmd?: string): Promis
     if (fb) {
       logServed("railkit_fallback", "liveStatus", started, true, "railcore_unusable");
       return { live: fb, provider: "railkit_fallback" };
+    }
+    /* Web-scrape fallback (user-authorized 2026-09-06, booking-critical bhi):
+     * dono API fail par RailYatri SSR live-status. Naam URL mein chahiye —
+     * pehle caller ka hint (context ki selected train), warna RailCore
+     * trainInfo (alag endpoint, live down hone par bhi chal sakta hai). */
+    let trainName: string | null = String(trainNameHint ?? "").trim() || null;
+    if (!trainName) {
+      try {
+        const info = await railcoreTrainInfo(number);
+        trainName = info?.trainName ?? null;
+      } catch {
+        trainName = null;
+      }
+    }
+    if (trainName) {
+      const scraped = await scrapeLiveStatusWeb(number, trainName);
+      if (scraped) {
+        logServed("web_railyatri", "liveStatus", started, true, "api_both_failed");
+        return { live: scraped, provider: "web_railyatri" };
+      }
     }
     logServed("none", "liveStatus", started, false, "both_failed");
     return { live: null, provider: "none" };

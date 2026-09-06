@@ -10,6 +10,7 @@ import {
   getLastRailwayLog,
 } from "../railway/router.js";
 import { webSourceLabel } from "../railway/webscrape.js";
+import { todayYmd } from "../util.js";
 import { getWallet } from "../wallet.js";
 import type { ClassCode } from "../providers/types.js";
 import { isForbiddenMoneyTool, segmentOfStops } from "./context.js";
@@ -48,6 +49,9 @@ export async function executeTool(
     destination?: string;
     date?: string;
     trainNumber?: string;
+    /** Context ki selected train ka naam — live-status web-scrape fallback
+     * (RailYatri) URL mein train ke saath naam chahiye hota hai. */
+    trainName?: string;
     classCode?: string;
     passengers?: number;
     pnr?: string;
@@ -98,16 +102,17 @@ export async function executeTool(
     }
     if (tool === "getLiveStatus") {
       if (!args.trainNumber) return { ok: false, tool, summary: "Train number chahiye.", data: null, provider: null };
-      const routed = await routedLiveStatus(args.trainNumber, args.date);
+      const routed = await routedLiveStatus(args.trainNumber, args.date, args.trainName);
       if (!routed.live) {
         return { ok: false, tool, summary: "Live status unavailable.", data: null, provider: routed.provider };
       }
       const live = routed.live as { trainNumber?: string; trainName?: string; status?: string; currentStation?: string | null; nextStation?: string | null; delayMinutes?: number | null };
       const delay = live.delayMinutes != null ? `, delay ${live.delayMinutes} min` : "";
+      const nextBit = live.nextStation ? `, next ${live.nextStation}` : "";
       return {
         ok: true,
         tool,
-        summary: `${live.trainNumber ?? args.trainNumber} ${live.trainName ?? ""} — ${live.status ?? "status nahi"}${live.currentStation ? `, last ${live.currentStation}` : ""}${delay}`.trim(),
+        summary: `${live.trainNumber ?? args.trainNumber} ${live.trainName ?? ""} — ${live.status ?? "status nahi"}${live.currentStation ? `, last ${live.currentStation}` : ""}${nextBit}${delay}${webSourceLabel(routed.provider)}`.trim(),
         data: live,
         provider: routed.provider,
       };
@@ -181,12 +186,16 @@ export async function executeTool(
       };
     }
     if (tool === "getAvailability") {
-      if (!args.trainNumber || !args.date || !args.origin || !args.destination || !args.classCode) {
+      /* Screenshot fix (2026-09-06): user ne date nahi boli to aaj default —
+       * "12054 ki seat availability?" par date ke liye reject karna galat UX
+       * tha. (Route run.ts auto-route karta hai; class hi real ask hai.) */
+      const date = args.date ?? todayYmd();
+      if (!args.trainNumber || !date || !args.origin || !args.destination || !args.classCode) {
         return { ok: false, tool, summary: "Train, date, stations aur class chahiye.", data: null, provider: null };
       }
       const row = await getProvider().getAvailability(
         args.trainNumber,
-        args.date,
+        date,
         args.origin,
         args.destination,
         args.classCode as ClassCode,
@@ -197,18 +206,20 @@ export async function executeTool(
       return {
         ok: true,
         tool,
-        summary: `${args.trainNumber} ${args.classCode}: ${row.status}${row.seats != null ? ` · ${row.seats} seats` : ""}${row.fare > 0 ? ` · ₹${row.fare}` : ""}`,
+        summary: `${args.trainNumber} ${args.classCode}: ${row.status}${row.seats != null ? ` · ${row.seats} seats` : ""}${row.fare > 0 ? ` · ₹${row.fare}` : ""}${row.segmentNote ? ` · (${args.origin}→${args.destination} segment ka direct data nahi — train ki ${row.segmentNote} availability)` : ""}`,
         data: row,
         provider: providerOf(),
       };
     }
     if (tool === "getFare") {
-      if (!args.trainNumber || !args.date || !args.origin || !args.destination || !args.classCode) {
+      /* Date aaj default (screenshot fix 2026-09-06) — availability jaisa hi. */
+      const date = args.date ?? todayYmd();
+      if (!args.trainNumber || !date || !args.origin || !args.destination || !args.classCode) {
         return { ok: false, tool, summary: "Train, date, stations aur class chahiye.", data: null, provider: null };
       }
       const fare = await getProvider().getFare(
         args.trainNumber,
-        args.date,
+        date,
         args.origin,
         args.destination,
         args.classCode as ClassCode,

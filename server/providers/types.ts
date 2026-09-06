@@ -31,6 +31,9 @@ export interface ClassAvailability {
   fare: number;
   quota?: string;
   date?: string;
+  /** Asked segment ka data RailCore ne nahi diya (NOT_FOUND) — ye row train
+   * ke first/last stop (endpoints) ki availability hai, labeled dikhna hai. */
+  segmentNote?: string;
 }
 
 export interface TrainResult {

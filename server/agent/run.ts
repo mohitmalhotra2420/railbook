@@ -887,6 +887,29 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
   if (trainNo) ctx.selectedTrainNumber = trainNo;
 
   let tool = decideTool(follow, ctx, understood.nlu.intent);
+  /* ── AVAILABILITY/FARE SLOT-RESUME (screenshot fix 2026-09-06, bug (c)):
+   * pichhle turn ne availability/fare ke liye slots/class maange the
+   * (lastToolOk=false); user ka agla message "Date aaj ki ludhiana se hw ki"
+   * NLU ko naya SEARCH_TRAIN lagta hai — par asal mein wo pichhle sawaal
+   * ke slots ka jawab hai (route+date ab ctx mein merge ho chuke hain).
+   * Naya train number text mein na ho to availability/fare RESUME karo,
+   * naya train-search mat chalao ("Kahan jaana hai?" ghalat jawab tha). */
+  const prevFailedSlotTool =
+    (seeded2.lastTool === "getAvailability" || seeded2.lastTool === "getFare") && seeded2.lastToolOk === false
+      ? seeded2.lastTool
+      : null;
+  const textHasNewTrainNo = /\b\d{4,6}\b/.test(String(req.text ?? ""));
+  if (
+    prevFailedSlotTool &&
+    ctx.selectedTrainNumber &&
+    !textHasNewTrainNo &&
+    (understood.nlu.intent === "SEARCH_TRAIN" ||
+      understood.nlu.intent === "BOOK_TRAIN" ||
+      understood.nlu.intent === "NONE") &&
+    (ctx.classCode || (ctx.origin && ctx.destination) || ctx.dateProvided)
+  ) {
+    tool = prevFailedSlotTool;
+  }
   /* General-fact sawaal (2026-09-06 screenshot bug 1): "12014 ki top speed"
    * par TRAIN_SCHEDULE/getTimetable chal jaata tha — user ko timetable milta
    * tha, speed ka jawab nahi. Fact-sawal par railway tool mat chalao —
@@ -1001,6 +1024,16 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
 
   if (tool === "getCoachPosition" && !trainNo) {
     reply = "Kaunsi train ki coach position? 5-digit train number boliye.";
+  } else if ((tool === "getAvailability" || tool === "getFare") && trainNo && !ctx.classCode) {
+    /* ── SMART SLOT-ASK (screenshot fix 2026-09-06, bug (b)): "12054 ki seat
+     * availability?" par poora "Train, date, stations aur class chahiye" nahi —
+     * train context mein hai, date aaj default, stations auto-route honge;
+     * sirf CLASS poochho. (Agla "CC" jaisa jawab resume se availability
+     * chala dega — upar slot-resume + tools.ts aaj-default.) */
+    const routeBit = ctx.origin && ctx.destination ? ` ${ctx.origin.code}→${ctx.destination.code}` : "";
+    const dateBit = ctx.date ? ` ${ctx.date}` : "";
+    reply = `${trainNo}${routeBit}${dateBit} ki kaunsi class — CC, EC, SL, 2A, 3A?`;
+    ctx.lastToolOk = false;
   } else if (tool && tool !== "searchTrains") {
     /* FARE AUTO-ROUTE (user report 2026-09-06: "12014 ki CC fare" par
      * stations missing the — deterministic path RAILWAY CALL hi nahi karta
@@ -1026,6 +1059,7 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
       destination: fareDestination ?? undefined,
       date: ctx.date ?? undefined,
       trainNumber: trainNo,
+      trainName: ctx.selectedTrainName ?? undefined,
       classCode: ctx.classCode ?? undefined,
       passengers: ctx.passengers ?? 1,
       pnr: understood.nlu.pnr,

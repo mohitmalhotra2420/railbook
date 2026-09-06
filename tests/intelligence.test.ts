@@ -267,3 +267,110 @@ describe("question-phrase guard: naam vs question", () => {
     expect(reply, reply).toMatch(/12054|Route|stops/i);
   });
 });
+
+/* ══ SCREENSHOT REGRESSION #2 (2026-09-06, Screenshot_20260906-115134) ══════
+ * Bug (b): "12054 ki seat availability?" — train context mein tha, phir bhi
+ *          "Train, date, stations aur class chahiye" (sab maanga). Ab sirf
+ *          class poochna chahiye (date aaj default, stations auto-route).
+ * Bug (c): "Date aaj ki ludhiana se hw ki" — NLU ne naya SEARCH_TRAIN banaya
+ *          + "hw" (Haridwar) 2-letter code resolve nahi hua → "Kahan jaana
+ *          hai?". Ab: hw→HW resolve + availability slot-RESUME. */
+
+function railcoreAvailMock(): void {
+  setRailcoreFetch(async (input) => {
+    const url = new URL(String(input));
+    const p = url.pathname;
+    if (p.endsWith("/stations/search")) {
+      return jsonResponse(200, { success: true, data: { results: [] } });
+    }
+    const sched = p.match(/\/trains\/(\d+)\/schedule$/);
+    if (sched && sched[1] === "12054") {
+      return jsonResponse(200, {
+        success: true,
+        data: {
+          train_number: "12054",
+          train_name: "JAN SHATABDI EXPRESS",
+          running_days: ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"],
+          classes: ["2S", "CC"],
+          total_duration_minutes: 315,
+          stops: [
+            { station_code: "ASR", station_name: "AMRITSAR JN", arrival_time: null, departure_time: "06:15", day: 1 },
+            { station_code: "LDH", station_name: "LUDHIANA JN", arrival_time: "07:58", departure_time: "08:00", day: 1 },
+            { station_code: "HW", station_name: "HARIDWAR JN", arrival_time: "11:30", departure_time: null, day: 1 },
+          ],
+        },
+      });
+    }
+    if (p.endsWith("/availability/seats")) {
+      const from = url.searchParams.get("from");
+      const to = url.searchParams.get("to");
+      if (from === "LDH" && to === "HW") {
+        /* RailCore real behavior: intermediate segment = NOT_FOUND */
+        return jsonResponse(404, { success: false, error: { code: "NOT_FOUND", message: "Resource not found" } });
+      }
+      return jsonResponse(200, {
+        success: true,
+        data: {
+          train_number: url.searchParams.get("train_number"),
+          from_station_code: from,
+          to_station_code: to,
+          journey_date: url.searchParams.get("date"),
+          quota: "GN",
+          classes: [
+            { class_code: "CC", status: "AVAILABLE", availability_text: "AVAILABLE 112", total_fare: 650 },
+          ],
+        },
+      });
+    }
+    return jsonResponse(404, { success: false, error: { message: "unknown endpoint" } });
+  });
+}
+
+describe("SCREENSHOT #2 (2026-09-06): availability UX + hw-code + slot-resume", () => {
+  it("'ludhiana se hw ki' — 2-letter station code HW resolve hota hai", () => {
+    const r = understand("ludhiana se hw ki train", { now: new Date("2026-09-06T11:51:00+05:30"), lastAsked: null, known: {} });
+    expect(r.from?.code).toBe("LDH");
+    expect(r.to?.code).toBe("HW");
+  });
+
+  it("bug (b): '12054 ki seat availability?' — sirf CLASS poochho, sab nahi", async () => {
+    railcoreAvailMock();
+    const r = await runAgent({ text: "12054 ki seat availability?", now: "2026-09-06T11:52:00+05:30" });
+    const reply = String(r.reply ?? "");
+    expect(reply, reply).toMatch(/kaunsi class/i);
+    expect(reply, reply).not.toMatch(/Train, date, stations aur class chahiye/i);
+  });
+
+  it("bug (c): 'Date aaj ki ludhiana se hw ki' — availability RESUME, 'Kahan jaana hai?' nahi", async () => {
+    railcoreAvailMock();
+    const t2 = await runAgent({ text: "12054 ki seat availability?", now: "2026-09-06T11:52:00+05:30" });
+    const t3 = await runAgent({
+      text: "Date aaj ki ludhiana se hw ki",
+      context: t2.context as never,
+      known: {},
+      now: "2026-09-06T11:53:00+05:30",
+    });
+    const reply = String(t3.reply ?? "");
+    expect(reply, reply).toMatch(/12054/);
+    expect(reply, reply).toMatch(/kaunsi class/i);
+    expect(reply, reply).not.toMatch(/Kahan jaana|station bataiye/i);
+    expect(t3.context?.origin?.code).toBe("LDH");
+    expect(t3.context?.destination?.code).toBe("HW");
+  });
+
+  it("T4 'CC' — availability aati hai + LDH→HW NOT_FOUND par ASR→HW segment-fallback label", async () => {
+    railcoreAvailMock();
+    const t2 = await runAgent({ text: "12054 ki seat availability?", now: "2026-09-06T11:52:00+05:30" });
+    const t3 = await runAgent({
+      text: "Date aaj ki ludhiana se hw ki",
+      context: t2.context as never,
+      known: {},
+      now: "2026-09-06T11:53:00+05:30",
+    });
+    const t4 = await runAgent({ text: "CC", context: t3.context as never, known: {}, now: "2026-09-06T11:54:00+05:30" });
+    const reply = String(t4.reply ?? "");
+    expect(reply, reply).toMatch(/12054 CC: AVAILABLE/i);
+    expect(reply, reply).toMatch(/ASR→HW/);
+    expect(reply, reply).toMatch(/LDH→HW segment ka direct data nahi/i);
+  });
+});

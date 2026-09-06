@@ -1,6 +1,6 @@
 import type { ClassCode, Station } from "../providers/types.js";
 import { parseDatePhrase, type DateHit } from "./legacy-dates.js";
-import { findStationsInText, matchStation } from "./legacy-stations.js";
+import { findStationsInText, matchStation, stationByCode } from "./legacy-stations.js";
 import { isOutOfDomain } from "./domain.js";
 import { routeRailwayIntent } from "./toolRoute.js";
 
@@ -224,6 +224,10 @@ function cleanPlace(raw: string): string {
 
 function looksLikePlace(raw: string): boolean {
   const q = cleanPlace(raw);
+  /* Screenshot fix (2026-09-06): "ludhiana se hw ki" mein "hw" (Haridwar) ko
+   * length<3 guard block kar deta tha — 2-letter railway codes (HW, BVI…)
+   * genuine stations hain. Exact known code match hamesha place hai. */
+  if (/^[a-z]{2}$/i.test(q) && stationByCode(q)) return true;
   if (q.length < 3) return false;
   if (NOT_PLACE.test(q)) return false;
   if (/^\d/.test(q)) return false;

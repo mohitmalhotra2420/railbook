@@ -531,7 +531,7 @@ export class RailCoreProvider implements RailwayProvider {
       fare: 0,
     };
     const started = Date.now();
-    const res = await railcoreRequest("/availability/seats", {
+    let res = await railcoreRequest("/availability/seats", {
       train_number: trainNumber,
       from,
       to,
@@ -539,6 +539,37 @@ export class RailCoreProvider implements RailwayProvider {
       class: classCode,
       quota: quotaCode || "GN",
     });
+    /* SEGMENT FALLBACK (user report 2026-09-06): RailCore availability sirf
+     * train endpoints (e.g. 12054 ASR→HW) pe deta hai — intermediate segment
+     * (LDH→HW) par NOT_FOUND. Endpoints se retry karke train-level
+     * availability do, segment-note ke saath (fake nahi — labeled). */
+    let segmentNote: string | undefined;
+    if (!res.ok && /not[_ ]?found/i.test(String(failReason(res.json) ?? ""))) {
+      try {
+        const sched = await trainSchedule(trainNumber);
+        const stops = sched?.stops ?? [];
+        if (stops.length >= 2) {
+          const first = stops[0].code;
+          const last = stops[stops.length - 1].code;
+          if (first !== from || last !== to) {
+            const retry = await railcoreRequest("/availability/seats", {
+              train_number: trainNumber,
+              from: first,
+              to: last,
+              date,
+              class: classCode,
+              quota: quotaCode || "GN",
+            });
+            if (retry.ok) {
+              res = retry;
+              segmentNote = `${first}→${last}`;
+            }
+          }
+        }
+      } catch {
+        /* schedule nahi mila — unknown hi rahega */
+      }
+    }
     logCall("availability", started, res.ok, res.ok ? null : failReason(res.json));
     if (!res.ok) return unknown;
     const d = asObj(unwrap(res.json));
@@ -558,6 +589,7 @@ export class RailCoreProvider implements RailwayProvider {
       fare: Number.isFinite(fare) && fare > 0 ? fare : 0,
         quota: String(d.quota ?? quotaCode ?? "GN"),
       date: String(d.journey_date ?? date),
+      segmentNote,
     };
   }
 
