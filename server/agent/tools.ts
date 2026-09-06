@@ -215,7 +215,15 @@ export async function executeTool(
         args.passengers ?? 1,
       );
       if (!fare.railwayAvailable && fare.baseFare <= 0) {
-        return { ok: false, tool, summary: "Fare unavailable.", data: fare, provider: providerOf() };
+        return {
+          ok: false,
+          tool,
+          summary: fare.unavailableReason
+            ? `Fare abhi available nahi hai — ${fare.unavailableReason}. Approx figure invent nahi karunga.`
+            : "Fare abhi available nahi hai. Approx figure invent nahi karunga.",
+          data: fare,
+          provider: providerOf(),
+        };
       }
       return {
         ok: true,

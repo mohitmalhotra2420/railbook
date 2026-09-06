@@ -66,6 +66,8 @@ export interface FareBreakdown {
   currency: "INR";
   /** False when RailKit fareLookup did not return a real railway fare. */
   railwayAvailable?: boolean;
+  /** Fare kyun nahi mila (endpoint band / quota khatam) — honest user message. */
+  unavailableReason?: string;
 }
 
 export interface PassengerInput {

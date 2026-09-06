@@ -1185,7 +1185,12 @@ export async function executeApprovedTool(
           (a.class_code as string).toUpperCase() as ClassCode,
           (a.passengers as number | undefined) ?? 1,
         );
-        if (!fare.railwayAvailable && fare.baseFare <= 0) return failResult(providerOf(), `Fare unavailable (${ctx.origin}→${ctx.destination}, ${ctx.date}) — andaza nahi lagaunga.`, fare);
+        if (!fare.railwayAvailable && fare.baseFare <= 0)
+          return failResult(
+            providerOf(),
+            `Fare unavailable (${ctx.origin}→${ctx.destination}, ${ctx.date})${fare.unavailableReason ? ` — ${fare.unavailableReason}` : ""} — andaza nahi lagaunga.`,
+            fare,
+          );
         return okResult(
           providerOf(),
           `${a.train_number} ${(a.class_code as string).toUpperCase()} ${ctx.origin}→${ctx.destination} (${ctx.date}${ctx.autoRoute ? ", poora route" : ""}${ctx.autoDate ? ", aaj ke liye" : ""}): ticket ₹${fare.baseFare}, service ₹${fare.serviceFee}, total ₹${fare.total}${(a.passengers as number | undefined) ? ` (${a.passengers} pax)` : ""}.`,

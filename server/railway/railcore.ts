@@ -1,5 +1,5 @@
 import { env } from "../env.js";
-import { durationLabel, hash32, uid } from "../util.js";
+import { durationLabel, hash32, todayYmd, uid } from "../util.js";
 import {
   CLASS_LABELS,
   type AvailabilityStatus,
@@ -299,15 +299,51 @@ function mapLivePayload(d: Record<string, unknown>, number: string, dateYmd?: st
   };
 }
 
+/** /running ka NTES-style format (pd.trainCurrentPosition) — RailCore ne
+ * 2026-09-06 mein pakda: /live bina date ke 400 deta hai, /running ka payload
+ * poora alag structure mein aata hai. Ye usse RailcoreLiveStatus banata hai. */
+function mapRunningPayload(raw: unknown, number: string, dateYmd?: string): RailcoreLiveStatus | null {
+  const d = asObj(raw);
+  const pd = asObj(d.pd);
+  const tcp = asObj(pd.trainCurrentPosition);
+  const position = String(tcp.currentPosition ?? "").trim();
+  const lastStationName = String(tcp.lastStationName ?? "").trim();
+  const trainNo = String(tcp.trainNo ?? pd.trainNo ?? "").trim() || number;
+  if (!position && !lastStationName) return null;
+  return {
+    trainNumber: trainNo,
+    trainName: "",
+    status: position || "unknown",
+    delayMinutes: null,
+    lastUpdatedAt: String(pd.lastUpdatedOn ?? "").trim() || null,
+    currentStation: lastStationName || null,
+    nextStation: String(tcp.nextPTTStationName ?? tcp.nextWTTStationName ?? tcp.nextWTTStation ?? "").trim() || null,
+    journeyDate: dateYmd ?? null,
+  };
+}
+
 export async function liveTrainStatus(number: string, dateYmd?: string): Promise<RailcoreLiveStatus | null> {
   const started = Date.now();
-  let res = await railcoreRequest(`/trains/${encodeURIComponent(number)}/live`, dateYmd ? { date: dateYmd } : {});
-  if (!res.ok) {
-    res = await railcoreRequest(`/trains/${encodeURIComponent(number)}/running`, dateYmd ? { date: dateYmd } : {});
+  /* RailCore contract change (2026-09-06 live pakda): /live ab "date" query
+   * REQUIRED hai — bina date ke 400 "query parameter 'date' is required".
+   * User ne date na boli ho toh aaj (IST) default bhejo. */
+  const date = dateYmd ?? todayYmd();
+  const res1 = await railcoreRequest(`/trains/${encodeURIComponent(number)}/live`, { date });
+  const live = res1.ok ? mapLivePayload(asObj(unwrap(res1.json)), number, date) : null;
+  if (isUsableLive(live)) {
+    logCall("liveStatus", started, true, null);
+    return live;
   }
-  logCall("liveStatus", started, res.ok, res.ok ? null : failReason(res.json));
-  if (!res.ok) return null;
-  return mapLivePayload(asObj(unwrap(res.json)), number, dateYmd);
+  /* Fallback /running — alag format (pd.trainCurrentPosition), apna parser. */
+  const res2 = await railcoreRequest(`/trains/${encodeURIComponent(number)}/running`, { date });
+  const running = res2.ok ? mapRunningPayload(unwrap(res2.json), number, date) : null;
+  if (isUsableLive(running)) {
+    logCall("liveStatus", started, true, "running_format");
+    return running;
+  }
+  const any = live ?? running;
+  logCall("liveStatus", started, Boolean(any), any ? null : failReason(res2.ok ? res2.json : res1.json));
+  return any;
 }
 
 export async function trainInfo(number: string): Promise<{ trainNumber: string; trainName: string; runningDays: string[] } | null> {
@@ -542,7 +578,12 @@ export class RailCoreProvider implements RailwayProvider {
       quota: "GN",
     });
     logCall("fare", started, res.ok, res.ok ? null : failReason(res.json));
-    if (!res.ok) return empty;
+    /* RailCore ne /fares/estimate endpoint hata diya (2026-09-06 live pakda:
+     * 404 NOT_FOUND). Honest reason user tak jaaye. */
+    if (!res.ok) {
+      const reason = failReason(res.json);
+      return { ...empty, unavailableReason: `RailCore fare endpoint unavailable${reason ? ` (${reason})` : ""}` };
+    }
     const d = asObj(unwrap(res.json));
     const fares = Array.isArray(d.fares) ? d.fares : [];
     const hit = fares.find((f) => String(asObj(f).class_code).toUpperCase() === classCode) ?? fares[0];

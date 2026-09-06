@@ -793,7 +793,20 @@ export class RailKitProvider implements RailwayProvider {
       const res = await sdk.fareLookup(trainNumber, from, to, ymdToDmy(date), classCode, "GN");
       logCall("fareLookup", started, Boolean(res?.success));
       const perPax = res?.success ? railwayFareFrom(res.data) : 0;
-      if (!perPax) return empty;
+      if (!perPax) {
+        /* SDK error (jaise "Usage limit exceeded for current billing cycle") —
+         * user ko honest reason do, sirf "unavailable" nahi. */
+        const sdkErr = String((res as { error?: unknown } | null)?.error ?? "").trim();
+        const quota = /usage limit exceeded/i.test(sdkErr);
+        return {
+          ...empty,
+          unavailableReason: quota
+            ? "RailKit ka is-billing-cycle ka usage limit khatam ho gaya hai (next reset ~20 Sep) — fare abhi nahi milegi"
+            : sdkErr
+              ? `RailKit fareLookup fail: ${sdkErr.slice(0, 120)}`
+              : "RailKit se fare data nahi mila",
+        };
+      }
       const base = perPax * count;
       return {
         ...empty,
