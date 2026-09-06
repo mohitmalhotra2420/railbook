@@ -754,6 +754,36 @@ describe("ROUND-4: ChatGPT-jaisa universal railway knowledge", () => {
     expect(reply, reply).toMatch(/1853|AI ka general jawab/i);
   });
 
+  it("ROUND-5: general web SCRAPE — Bing result → page text → labeled answer", async () => {
+    /* Bing se railway result + uska page-scrape — dono mock. Question aisa
+     * jo KB miss kare ("password reset" KB/wiki mein nahi). */
+    setWebFetch(async (input: any) => {
+      const url = String(input);
+      if (url.includes("bing.com/search")) {
+        const html = [
+          '<li class="b_algo">',
+          '<h2><a href="https://contents.irctc.co.in/en/faq.html">How to reset IRCTC password</a></h2>',
+          '<p>IRCTC password reset steps: forgot password link on the login page.</p>',
+          "</li>",
+        ].join("");
+        /* HTML mock — jsonResponse JSON.stringify kar deta (escaped quotes
+         * regex tod dete hain), isliye raw Response. */
+        return new Response(html, { status: 200 });
+      }
+      if (url.includes("contents.irctc.co.in")) {
+        const html =
+          "<html><body><p>To reset your IRCTC password, open the IRCTC login page and click the Forgot Password link, then enter your user ID and the OTP sent to your registered mobile number.</p></body></html>";
+        return new Response(html, { status: 200 });
+      }
+      return new Response("{}", { status: 404 });
+    });
+    const r = await runAgent({ text: "irctc password reset kaise kare", now: "2026-09-06T21:00:00+05:30" });
+    const reply = String(r.reply ?? "");
+    expect(reply, reply).toMatch(/Web se scrape karke mila \(contents\.irctc\.co\.in\)/i);
+    expect(reply, reply).toMatch(/Forgot Password|password reset/i);
+    expect(reply, reply).toMatch(/web-scrape ka jawab/i);
+  });
+
   it("'vivek express kitna lamba route' → wiki answer ('Train number chahiye' fail nahi)", async () => {
     wikiMock({
       searchHits: { vivek: ["Vivek Express"] },

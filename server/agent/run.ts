@@ -31,7 +31,7 @@ import {
   type ToolTraceStep,
 } from "./agentic.js";
 import { routedClassBoard, routedSchedule, routedStationSearch, routedTrainInfo, searchTrainsRouted } from "../railway/router.js";
-import { findWikipediaPage, webSearch } from "./websearch.js";
+import {findWikipediaPage, webSearch, generalWebSearch, scrapeWebPage } from "./websearch.js";
 import { railKbAnswer } from "./railkb.js";
 import { wikiTableForPage } from "./websearch.js";
 import { searchRailcoreTrainsByName } from "../railway/railcore.js";
@@ -856,7 +856,17 @@ function significantWords(text: string): string[] {
  * hits AUR 1 non-generic hit (warna "first railway line" par Cherthala-
  * station jaise irrelevant pages pass ho jaate the). Original (Hinglish)
  * + translated (English) dono ke words dekhe jaate hain. */
-export function wikiRelevant(question: string, hay: string): boolean {
+export /** Word-boundary hit (plural-tolerant) — substring flukes ("city limits"
+ * par "limit", "Indian" par "india") se bachne ke liye. */
+function wordHit(hay: string, w: string): boolean {
+  try {
+    return new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}s?\\b`, "i").test(hay);
+  } catch {
+    return hay.toLowerCase().includes(w.toLowerCase());
+  }
+}
+
+function wikiRelevant(question: string, hay: string): boolean {
   const h = hay.toLowerCase();
   const content = significantWords(question); // Hinglish/EN non-generic words
   const translated = cleanQueryEn(question).split(/\s+/);
@@ -866,8 +876,8 @@ export function wikiRelevant(question: string, hay: string): boolean {
   /* Kam se kam 1 STRONG hit (content ya topic word) + kul 2 hits —
    * Hinglish "sabse lambi" English "longest" se match hota hai, "Cherthala
    * station" jaise generic-only pages reject ho jaate hain. */
-  const strong = [...content, ...topic].filter((w) => h.includes(w)).length;
-  const gen = generic.filter((w) => h.includes(w)).length;
+  const strong = [...content, ...topic].filter((w) => wordHit(h, w)).length;
+  const gen = generic.filter((w) => wordHit(h, w)).length;
   return strong >= 1 && strong + gen >= 2;
 }
 
@@ -908,6 +918,13 @@ export async function answerFromTopicPage(questionText: string): Promise<string 
       }
     }
     if (!page) return null;
+
+    /* RULE/how-much sawaal ("luggage limit kitni hai") par kisi ek STATION
+     * ka page galat granularity hai — us station ki cloakroom se relevant
+     * shabd mil bhi jaate hain to answer nahi hota. Reject → scrape/LLM. */
+    const RULE_Q_RE =
+      /kitna|kitni|kitne|limit|charge|charges|rule|rules|slab|kaise|how to|kya karna|process|banaye|banane|steps|allowed|permission/i;
+    if (RULE_Q_RE.test(questionText) && /railway station|junction$/i.test(page.title)) return null;
 
     /* ── SUPERLATIVE sawaal: page ki TABLE se top rows (round-4). "sabse
      * lambi train" ka jawab list-page table mein hota hai — explaintext
@@ -967,20 +984,102 @@ export async function answerFromTopicPage(questionText: string): Promise<string 
         }
         if (best) {
           const ans = `Web se mila (Wikipedia — ${page.title}): ${stripSectionTitle(best).slice(0, 700)}\n(Source: ${page.url})\n(Ye railway API ka data nahi, web-scrape ka jawab hai.)`;
-          /* Superlative sawaal ka jawab superlative word ke bina adhoora hai
-           * (history-para galti se match ho jaata tha) — next layer (LLM)
-           * ko chance do. */
-          const supW = cleanQueryEn(questionText).match(/fastest|longest|largest|oldest|smallest|newest|cheapest/);
-          if (supW && !new RegExp(supW[0], "i").test(ans)) return null;
+          /* ANSWER-VALIDATION (round-5): chuna hua paragraph sawaal ke kisi
+           * strong word (content/topic) ko address nahi karta to ye jawab
+           * adhoora hai ("luggage limit" par Tirupati-station intro aata
+           * tha) — next layer (scrape/LLM) ko chance do. */
+          const strongWords = [
+            ...significantWords(questionText),
+            ...cleanQueryEn(questionText).split(/\s+/).filter((w) => TOPIC_EN_WORDS.has(w)),
+          ];
+          if (strongWords.length > 0 && !strongWords.some((w) => wordHit(ans, w))) {
+            return null;
+          }
           return ans;
         }
       }
     }
     const intro = content.slice(0, 2).map(stripSectionTitle).join(" ").slice(0, 800);
     const introAns = `Web se mila (Wikipedia — ${page.title}): ${intro}\n(Source: ${page.url})\n(Ye railway API ka data nahi, web-scrape ka jawab hai.)`;
-    const supW2 = cleanQueryEn(questionText).match(/fastest|longest|largest|oldest|smallest|newest|cheapest/);
-    if (supW2 && !new RegExp(supW2[0], "i").test(introAns)) return null;
+    const strongWords2 = [
+      ...significantWords(questionText),
+      ...cleanQueryEn(questionText).split(/\s+/).filter((w) => TOPIC_EN_WORDS.has(w)),
+    ];
+    if (strongWords2.length > 0 && !strongWords2.some((w) => wordHit(introAns, w))) {
+      return null;
+    }
     return introAns;
+  } catch {
+    return null;
+  }
+}
+
+/* ══ GENERAL WEB SCRAPE (round-5: "jaise ChatGPT kahin se bhi scrap karke
+ * le aata hai"). Wikipedia/topic-page sab fail → general web search
+ * (DDG-lite/Bing) → top relevant pages SCRAPE → question-keyword scored
+ * best paragraph → labeled jawab. Sirf universal fallback mein — API/tool
+ * ke answer na milne par hi, booking-critical kabhi nahi. */
+
+const RAILWAY_DOMAIN_HINT_RE =
+  /irctc|indianrail|erail\.|etrain\.|ixigo|confirmtkt|railyatri|railrestro|findmytrain|travelkhana|zoop|railrecipe|\.in\//i;
+
+async function answerFromWebScrape(questionText: string): Promise<string | null> {
+  try {
+    if (/\b\d{5}\b/.test(questionText)) return null; // train-number sawaal train-page se
+    const contentWords = significantWords(questionText).filter((w) => !HINGLISH_TOPIC_WORDS.has(w));
+    const q0 = cleanQueryEn(questionText);
+    if (q0.length < 4) return null;
+    /* Query: content-words AAGE (engines leading keywords ko heavy weight
+     * dete hain) + "indian railways" anchor — warna "railway luggage" par
+     * Amtrak/BNSF jaise US results aate hain. */
+    const rest = q0.split(/\s+/).filter((w) => w.length >= 3 && !contentWords.includes(w));
+    const q = [...contentWords, ...rest.slice(0, 3), "indian railways"].join(" ").slice(0, 120);
+    const topicWords = q0.split(/\s+/).filter((w) => TOPIC_EN_WORDS.has(w));
+    const genericWords = q0.split(/\s+/).filter((w) => GENERIC_WIKI_WORDS.has(w) && w.length >= 4);
+    const results = await generalWebSearch(q, 6);
+    if (!results.length) return null;
+    /* SNIPPET-RANKING: result ka title+snippet sawaal ke words ko address
+     * na kare (US-railway / Amazon-luggage jaisa noise) to SCRAPE hi mat
+     * karo — engine ranking par bharosa nahi. Score 0 = filter out. */
+    const ranked = results
+      .map((r) => {
+        const hay = `${r.title} ${r.snippet}`;
+        let s = 0;
+        for (const w of contentWords) if (wordHit(hay, w)) s += 2;
+        for (const w of topicWords) if (wordHit(hay, w)) s += 2;
+        for (const w of genericWords) if (wordHit(hay, w)) s += 1;
+        if (RAILWAY_DOMAIN_HINT_RE.test(r.url)) s += 2;
+        return { r, s };
+      })
+      .filter((x) => x.s >= 2)
+      .sort((a, b) => b.s - a.s)
+      .map((x) => x.r);
+    if (!ranked.length) return null;
+    let best: { para: string; url: string; title: string; score: number } | null = null;
+    for (const r of ranked.slice(0, 2)) {
+      const text = await scrapeWebPage(r.url);
+      if (!text) continue;
+      const paras = text
+        .split("\n")
+        .map((p) => p.replace(/\s+/g, " ").trim())
+        .filter((p) => p.length > 60 && p.length < 1200);
+      for (const p of paras) {
+        let score = 0;
+        for (const w of contentWords) if (wordHit(p, w)) score += 3;
+        for (const w of topicWords) if (wordHit(p, w)) score += 3;
+        for (const w of genericWords) if (wordHit(p, w)) score += 1;
+        if (score > (best?.score ?? 0)) best = { para: p, url: r.url, title: r.title, score };
+      }
+    }
+    /* Threshold: kam se kam 2 strong hits (ya 1 content + kuch generic). */
+    if (!best || best.score < 6) return null;
+    let host = best.url;
+    try {
+      host = new URL(best.url).hostname.replace(/^www\./, "");
+    } catch {
+      /* keep url */
+    }
+    return `Web se scrape karke mila (${host}): ${best.para.slice(0, 700)}\n(Source: ${best.title} — ${best.url})\n(Ye railway API ka data nahi — web-scrape ka jawab hai; important details official source se verify karein.)`;
   } catch {
     return null;
   }
@@ -1569,15 +1668,36 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
             toolOk = true;
           }
         }
-        /* General topic sawaal (no train number): "sabse tez train" /
-         * "railway ki shuruaat" — Hinglish→English query se Wikipedia ka
-         * full page, relevance-verified (round-4). */
-        if (!reply) {
+        /* ROUND-5 ("jaise ChatGPT kahin se bhi scrap karke laata hai"):
+         * general web search (DDG-lite/Bing) → top pages SCRAPE →
+         * question-keyword scored paragraph. HOW-TO / RULE sawaal
+         * ("luggage limit", "irctc account kaise banaye") par scrape
+         * PEHLE — aise jawab blogs/official sites par hote hain, Wikipedia
+         * par nahi. Knowledge sawaal par wiki pehle. */
+        const RULE_HOWTO_Q =
+          /kitna|kitni|kitne|limit|charge|charges|rule|rules|slab|kaise|how to|kya karna|process|banaye|banane|steps|allowed|permission|kab tak|deadline/i.test(rawText);
+        const tryScrape = async (): Promise<void> => {
+          if (reply) return;
+          const scrapeAnswer = await answerFromWebScrape(rawText);
+          if (scrapeAnswer) {
+            reply = scrapeAnswer;
+            toolOk = true;
+          }
+        };
+        const tryTopic = async (): Promise<void> => {
+          if (reply) return;
           const topicAnswer = await answerFromTopicPage(rawText);
           if (topicAnswer) {
             reply = topicAnswer;
             toolOk = true;
           }
+        };
+        if (RULE_HOWTO_Q) {
+          await tryScrape();
+          await tryTopic();
+        } else {
+          await tryTopic();
+          await tryScrape();
         }
         /* Superlative sawaal ("sabse tez train") par wiki-page se jawab nahi
          * mila → snippet bhi unreliable (meta/intro text) — seedha LLM layer

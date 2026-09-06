@@ -214,3 +214,130 @@ export async function wikiTableForPage(title: string): Promise<WikiTable | null>
     rows,
   };
 }
+
+/* ══ GENERAL WEB SEARCH + PAGE SCRAPE (round-5, user: "jaise ChatGPT kahin
+ * se bhi scrap karke le aata hai — mera AI bhi railway/trains related web
+ * se scrap kare, jo user pooche — sirf API se answer na mile tab").
+ *
+ * Engines (datacenter-safe, keyless):
+ *   1. DDG-lite (lite.duckduckgo.com, POST HTML) — clean direct URLs
+ *   2. Bing HTML (b_algo blocks, u=a1 base64url redirect decode)
+ * Dono bot-block hone par [] (caller — wiki/LLM — apna kaam karta hai). */
+
+const BROWSER_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
+
+function decodeEntities(s: string): string {
+  return s
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#0?39;|&apos;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&nbsp;|&#160;/gi, " ")
+    .replace(/&#0?183;|&middot;/g, "·");
+}
+
+function stripTags(s: string): string {
+  return decodeEntities(String(s ?? "").replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
+}
+
+async function webFetchText(url: string, init?: RequestInit, timeoutMs = 9000): Promise<string | null> {
+  try {
+    const res = await (webFetchImpl ?? globalThis.fetch.bind(globalThis))(url, {
+      ...init,
+      headers: { "User-Agent": BROWSER_UA, "Accept-Language": "en,hi;q=0.8", ...(init?.headers ?? {}) },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!res.ok) return null;
+    return await res.text();
+  } catch {
+    return null;
+  }
+}
+
+/** DDG-lite HTML se results (anchors + snippets). */
+async function ddgLiteSearch(query: string): Promise<WebSearchResult[]> {
+  const body = `q=${encodeURIComponent(query)}`;
+  const html = await webFetchText("https://lite.duckduckgo.com/lite/", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+  });
+  if (!html) return [];
+  const out: WebSearchResult[] = [];
+  const anchorRe = /<a[^>]+href="(http[^"]+)"[^>]*>(.*?)<\/a>/gi;
+  const snipRe = /<td[^>]*class="result-snippet"[^>]*>(.*?)<\/td>/gi;
+  const snips: string[] = [];
+  let sm: RegExpExecArray | null;
+  while ((sm = snipRe.exec(html)) !== null) snips.push(stripTags(sm[1]));
+  let am: RegExpExecArray | null;
+  let idx = 0;
+  while ((am = anchorRe.exec(html)) !== null) {
+    const url = am[1];
+    const title = stripTags(am[2]);
+    if (/duckduckgo\.com|\/y\.js|ad_domain/i.test(url)) continue;
+    if (!title || title.length < 8) continue;
+    out.push({ title: title.slice(0, 120), url, snippet: clip(snips[idx] ?? "", 300) });
+    idx++;
+    if (out.length >= 6) break;
+  }
+  return out;
+}
+
+/** Bing HTML se results — b_algo blocks, u=a1<base64url> redirect decode. */
+async function bingSearch(query: string): Promise<WebSearchResult[]> {
+  const html = await webFetchText(`https://www.bing.com/search?q=${encodeURIComponent(query)}&count=10`);
+  if (!html) return [];
+  const out: WebSearchResult[] = [];
+  const blocks = html.split('<li class="b_algo"');
+  for (let i = 1; i < blocks.length && out.length < 6; i++) {
+    const b = blocks[i].split("</li>")[0];
+    const am = /<a[^>]+href="([^"]+)"[^>]*>(.*?)<\/a>/i.exec(b);
+    if (!am) continue;
+    let url = decodeEntities(am[1]);
+    const um = /[?&]u=a1([^&]+)/.exec(url);
+    if (um) {
+      try {
+        const b64 = um[1].replace(/-/g, "+").replace(/_/g, "/");
+        url = Buffer.from(b64, "base64").toString("utf8");
+      } catch {
+        continue;
+      }
+    }
+    if (!/^https?:\/\//i.test(url) || /bing\.com|microsoft\.com/i.test(url)) continue;
+    const sm = /<p[^>]*>(.*?)<\/p>/i.exec(b);
+    out.push({ title: clip(stripTags(am[2]), 120), url, snippet: clip(sm ? stripTags(sm[1]) : "", 300) });
+  }
+  return out;
+}
+
+/** General web search — Bing primary (stable, no bot-challenge), DDG-lite
+ * fallback (rate-limit ho sakta hai). Wikipedia ke baad (universal fallback
+ * mein) hi chalta hai — booking-critical kabhi nahi. */
+export async function generalWebSearch(query: string, limit = 5): Promise<WebSearchResult[]> {
+  const q = query.trim().slice(0, 150);
+  if (!q) return [];
+  let results = await bingSearch(q);
+  if (!results.length) results = await ddgLiteSearch(q);
+  return results.slice(0, limit);
+}
+
+/** Web page HTML → clean text (scripts/styles/nav/footer strip). */
+export async function scrapeWebPage(url: string): Promise<string | null> {
+  const html = await webFetchText(url, { method: "GET" }, 11000);
+  if (!html) return null;
+  const text = html
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<noscript[\s\S]*?<\/noscript>/gi, " ")
+    .replace(/<(header|footer|nav|aside|form)[\s\S]*?<\/\1>/gi, " ")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|li|h[1-6]|tr|section|article)>/gi, "\n")
+    .replace(/<[^>]+>/g, " ");
+  const clean = decodeEntities(text)
+    .split("\n")
+    .map((l) => l.replace(/\s+/g, " ").trim())
+    .filter((l) => l.length > 2)
+    .join("\n");
+  return clean.slice(0, 40000) || null;
+}
