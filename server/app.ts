@@ -638,15 +638,27 @@ export function createApp() {
         signal: AbortSignal.timeout(20000),
       });
       const body = await r.text();
+      /* step-by-step parse diagnostics — kaunsa step fail ho raha hai */
+      const marker = body.indexOf("Total fare for");
+      const tblStart = marker >= 0 ? body.lastIndexOf("<table", marker) : -1;
+      const tblEnd = tblStart >= 0 ? body.indexOf("</table>", tblStart) : -1;
+      const tbl = tblStart >= 0 && tblEnd > tblStart ? body.slice(tblStart, tblEnd) : "";
+      const rows = [...tbl.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi)].map((rm) =>
+        [...rm[1].matchAll(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi)].map((cm) =>
+          cm[1].replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim(),
+        ),
+      );
       bodyProbe = {
         httpStatus: r.status,
         latencyMs: Date.now() - t2,
         bodyLength: body.length,
-        hasMarker: body.includes("Total fare for"),
-        hasTableTag: /<table/i.test(body),
-        title: (body.match(/<title>([^<]*)<\/title>/i)?.[1] ?? "").slice(0, 120),
+        hasMarker: marker >= 0,
+        markerIdx: marker,
+        tblStart,
+        tblEnd,
+        rowCount: rows.length,
+        rowCells: rows.slice(0, 10).map((c) => c.join(" | ").slice(0, 120)),
         parseResult: parseErailFare(body, "12054", "dbg"),
-        snippet: body.replace(/\s+/g, " ").slice(0, 400),
       };
     } catch (err) {
       bodyProbe = { error: String(err).slice(0, 300), latencyMs: Date.now() - t2 };
