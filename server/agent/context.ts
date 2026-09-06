@@ -107,7 +107,17 @@ export function classifyFollowUp(text: string): FollowUp {
   ) {
     return "live";
   }
-  if (/\b(coach(?:es)?\s*(?:position|layout|composition)?|dibba|dabba)\b/.test(t) || /कोच|डिब्बा/.test(text)) return "coach";
+  /* Screenshot fix (2026-09-06 universal-web round): "ac coach mein blanket
+   * milti hai kya" jaise GENERAL sawaal ko coach-POSITION mat samjho —
+   * "coach" akela tabhi coach-tool hai jab position/layout/composition ke
+   * saath ho, ya command ho (question/andar/mein words nahi). */
+  if (
+    /\b(coach(?:es)?\s*(?:position|layout|composition)|dibba|dabba)\b/.test(t) ||
+    /कोच|डिब्बा/.test(text) ||
+    (/\bcoach(?:es)?\b/.test(t) && !/\b(kya|kaise|kab|kitna|kitni|kaun|kyun|milti|milta|milte|hoti|hota|hote|mein|me|andar|andar|catering|pantry|blanket|facility|facilities|khana|food|service)\b/i.test(t))
+  ) {
+    return "coach";
+  }
   // User feedback (2026-09-06): "kon kon se stops / har stop ka naam / poora
   // timetable / route" — ye sab TIMETABLE follow-up hai, journey-slot sawaal nahi.
   if (

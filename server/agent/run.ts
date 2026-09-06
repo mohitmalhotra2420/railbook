@@ -1089,7 +1089,9 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
    * verified sites se le aaye"): "top speed / kitni tez / kab chalu hui" jaise
    * sawaal API/KB se aate hi nahi. Model timeout par bhi jawab mile —
    * deterministic web lookup (Wikipedia/DDG), SAAPH label ke saath. */
+  let factWebTried = false;
   if (!reply && !tool && GENERAL_FACT_RE.test(String(req.text ?? ""))) {
+    factWebTried = true;
     /* English query banwao — live test: Hinglish raw text par DDG/Wikipedia
      * 0 results dete hain, "Amritsar Shatabdi 12014 top speed" par dete hain. */
     const rawText = String(req.text ?? "");
@@ -1118,7 +1120,14 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
       const typeM = rawText.match(/\b(vande bharat|shatabdi|rajdhani|gatimaan|gatiman|duronto|tejas|garib rath|hum safar|jan shatabdi|double decker|mahamana|antyodaya|bande bharat|namma metro|namo bharat)\b/i);
       if (typeM) subject = titleCaseWords(typeM[1]);
     }
-    const factQuery = `${subject ? subject + " " : ""}${factKeyword}`.trim().slice(0, 140);
+    /* "tatkal quota kaise kaam karta hai" jaise case: factKeyword generic
+     * "information" banta hai + subject khali → query "information" bekar.
+     * Aise mein filler-stripped core text hi query banao. */
+    const CORE_FILLER_RE =
+      /\b(ka|ki|ke|ko|kya|hai|hain|hun|tha|thi|the|se|mein|me|mai|main|par|pe|to|hi|bhi|batao|batana|btana|btaye|bataiye|bata|dikhao|dikha|chahiye|karo|karna|kar|mujhe|mera|meri|aap|kripya|please|kr|kro|nahi|na|haan|yan|ya|jaise|bta|btao)\b/gi;
+    const coreText = rawText.replace(CORE_FILLER_RE, " ").replace(/\s+/g, " ").trim();
+    const queryTail = factKeyword !== "information" || subject ? factKeyword : coreText;
+    const factQuery = `${subject ? subject + " " : ""}${queryTail}`.trim().slice(0, 140);
     let webResults = await webSearch(factQuery, 3);
     /* Naam+number wali query fail ho to bina-number retry (naam hi kaafi) —
      * e.g. "Amritsar Shatabdi 12014 top speed" 0 par "Amritsar Shatabdi top
@@ -1152,6 +1161,61 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
        * gaya tha). Honest denial — guess nahi. */
       reply = `${factNum ? `Train ${factNum} ki` : "Is"} ${factKeyword === "information" ? "detail" : factKeyword} ka reliable jawab web se abhi nahi mil paya — main railway ke verified data ke bina guess nahi karunga.`;
       toolOk = false;
+    }
+  }
+
+  /* ── UNIVERSAL WEB FALLBACK (user request 2026-09-06: "ChatGPT jaisa —
+   * koi bhi railway sawaal, API se jawab na mile to khud web se dhoondh ke
+   * laana"). General-fact keywords se aage: jab tak reply nahi bani, koi
+   * tool nahi chala, aur railway-domain ka QUESTION hai — web search se
+   * jawab try karo (labeled, 1 call). Booking-critical (live/fare/seats/
+   * PNR) par kabhi nahi — wahan verified API/scrape hi (rule 15). */
+  if (!reply && !tool && !factWebTried) {
+    const rawText = String(req.text ?? "").trim();
+    const RAILWAY_Q_RE =
+      /\b(train|trains|rail|railway|railways|irctc|station|coach|coaches|pnr|tatkal|berth|seat|seats|fare|quota|platform|locomotive|engine|express|shatabdi|rajdhani|vande bharat|bande bharat|duronto|garib rath|tejas|gatimaan|gatiman|metro|railway station|waiting list|rac|chart|catering|pantry|blanket|reservation)\b/i;
+    const QUESTION_RE =
+      /\b(kya|kaise|kaisa|kab|kahan|kahaan|kitna|kitni|kitne|kaun|kaunsi|kyun|kyu|kyon|why|how|what|when|where|which|does|can|batao|batana|btana|btaye|bataiye|bata|dikhao|dikha|bataen|suchi|list|sab|sare|kaun se|milta|milti|milte|hoti|hota|hote)\b/i;
+    if (RAILWAY_Q_RE.test(rawText) && QUESTION_RE.test(rawText) && !/\b(live status|running status|abhi kahan|kaha hai|kahan hai)\b/i.test(rawText)) {
+      /* Query banao: filler hatao, train ka naam/number prepend (trainInfo
+       * se — ChatGPT jaisa "samajh ke" search karne ke liye subject chahiye). */
+      const FILLER_RE =
+        /\b(ka|ki|ke|ko|kya|kya|hai|hain|hun|tha|thi|the|se|mein|me|mai|main|par|pe|to|hi|bhi|batao|batana|btana|btaye|bataiye|bata|bataen|dikhao|dikha|chahiye|karo|karna|karke|kar|mujhe|mera|meri|mere|aap|tum|tumhara|kripya|please|kr|kro|nahi|na|haan|yan|ya|jaise|waise|bta|btao|lga|lagta|kabhi)\b/gi;
+      let q = rawText.replace(FILLER_RE, " ").replace(/\s+/g, " ").trim().slice(0, 100);
+      const num = rawText.match(/\b\d{5}\b/)?.[1] ?? ctx.selectedTrainNumber ?? null;
+      let subject = "";
+      if (num) {
+        try {
+          const info = await routedTrainInfo(num);
+          const nm = info.info?.trainName ?? "";
+          if (nm) subject = titleCaseWords(nm.replace(/\bSHTABDI\b/gi, "SHATABDI"));
+        } catch {
+          /* naam nahi mila */
+        }
+        subject = subject ? `${subject} ${num}` : num;
+      }
+      const finalQuery = `${subject ? subject + " " : ""}${q}`.trim().slice(0, 140);
+      if (finalQuery.length >= 3) {
+        const webResults = await webSearch(finalQuery, 3);
+        const RAILWAY_FACT_RE2 =
+          /train|rail|railway|railroad|express|locomotive|shatabdi|rajdhani|vande bharat|duronto|gatimaan|gatiman|tejas|km\/h|kmph|kph|irctc|coach|station|ticket|berth|tatkal|quota|pantry|catering/i;
+        const NOT_RAILWAY_FACT_RE2 =
+          /\b(production cars?|street-legal|automobiles?|motorcycles?|aircraft|bicycles?|speedboats?|birds?)\b/i;
+        const good = webResults.filter((x) => {
+          const hay = `${x.title} ${x.snippet}`;
+          if (/may refer to:/i.test(x.snippet)) return false;
+          if (NOT_RAILWAY_FACT_RE2.test(hay)) return false;
+          return RAILWAY_FACT_RE2.test(hay);
+        });
+        if (good.length) {
+          const best = good[0];
+          reply = `Web se mila: ${best.snippet}\n(Source: ${best.title} — ${best.url})\n(Ye railway API ka data nahi, web-search ka jawab hai.)`;
+          toolOk = true;
+        } else {
+          reply = `Is sawaal ka jawab web se abhi nahi mil paya — main guess nahi karunga. Railway ke live data (status/fare/seats) ke liye wahi poochiye, main API se nikaal leta hoon.`;
+          toolOk = false;
+        }
+      }
     }
   }
 
