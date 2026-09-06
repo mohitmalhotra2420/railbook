@@ -181,8 +181,15 @@ async function atlasFallback(
     ...(dataPreview ? { dataPreview } : {}),
   });
 
-  /* 1) Ambiguous city → REAL station options ke saath clarification. */
-  const unresolved = nlu.unresolvedTo ?? nlu.unresolvedFrom ?? null;
+  /* 1) Ambiguous city → REAL station options ke saath clarification.
+   * Round-9 (Agra-bug): pending cluster-city bhi — "agra se delhi" mein
+   * Delhi ka choice dene ke baad Agra bhool jaata tha. */
+  const unresolved =
+    nlu.unresolvedTo ??
+    nlu.unresolvedFrom ??
+    ctx.pendingDestinationChoice ??
+    ctx.pendingOriginChoice ??
+    null;
   if (unresolved) {
     const res = await routedStationSearch(unresolved);
     const list = res.stations.slice(0, 6).map((s, i) => `${i + 1}. ${s.code} – ${s.name}`).join(", ");
@@ -1351,7 +1358,10 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
           classCode: ctx.classCode ?? det.classCodes?.[0] ?? null,
           passengers: ctx.passengers ?? det.passengerCount ?? null,
           stationPicked: stationPick ? (stationPick.side === "to" ? "destination" : "origin") : null,
-          destinationAmbiguous: !ctx.destination && det.unresolvedTo ? det.unresolvedTo : null,
+          /* Round-9 (Agra-bug): pending cluster-city context se — turn-1 ka
+           * unresolved "Agra" turn-2 tak yaad rahe. */
+          destinationAmbiguous: !ctx.destination ? (ctx.pendingDestinationChoice ?? det.unresolvedTo ?? null) : null,
+          originAmbiguous: !ctx.origin ? (ctx.pendingOriginChoice ?? det.unresolvedFrom ?? null) : null,
         },
       });
       // Station-pick already resolve ho chuka hai (server-verified) par model

@@ -62,6 +62,9 @@ export interface AgentContext {
   lastToolOk: boolean | null;
   /** Round-8: "nayi baat/reset" one-shot client signal. */
   justReset?: boolean;
+  /** Round-9 (Agra-bug): cluster-city jiska station abhi choose nahi hua. */
+  pendingOriginChoice?: string | null;
+  pendingDestinationChoice?: string | null;
 }
 
 export function emptyAgentContext(): AgentContext {
@@ -230,7 +233,7 @@ export function resolveTrainNumber(text: string, ctx: AgentContext): string | un
 
 export function mergeAgentContext(
   prev: AgentContext,
-  nlu: Pick<NluResult, "intent" | "from" | "to" | "date" | "passengerCount" | "classCodes" | "trainNumber" | "pnr">,
+  nlu: Pick<NluResult, "intent" | "from" | "to" | "date" | "passengerCount" | "classCodes" | "trainNumber" | "pnr" | "unresolvedFrom" | "unresolvedTo">,
   text: string,
   extra?: { selectedTrainNumber?: string | null; selectedTrainName?: string | null; lastTrainNumbers?: string[]; bookingStage?: BookingStage },
 ): AgentContext {
@@ -239,6 +242,15 @@ export function mergeAgentContext(
     lastTrainNumbers: [...prev.lastTrainNumbers],
     lastTrains: [...(prev.lastTrains ?? [])],
   };
+  /* Round-9 (Agra-bug): unresolved cluster-city yaad rakho, resolve par clear. */
+  if (nlu.from) next.pendingOriginChoice = null;
+  else if (nlu.unresolvedFrom && /^[A-Za-z\u0900-\u097F][A-Za-z\u0900-\u097F .]{1,28}$/.test(nlu.unresolvedFrom)) {
+    next.pendingOriginChoice = nlu.unresolvedFrom;
+  }
+  if (nlu.to) next.pendingDestinationChoice = null;
+  else if (nlu.unresolvedTo && /^[A-Za-z\u0900-\u097F][A-Za-z\u0900-\u097F .]{1,28}$/.test(nlu.unresolvedTo)) {
+    next.pendingDestinationChoice = nlu.unresolvedTo;
+  }
   /* Round-8 (topic-switch): poora naya route + koi train reference nahi →
    * purani selected train clear. EXCEPTION: pichhla intent selected-train
    * ka INFO ask tha (availability/fare/...) — slot-resume, train retain. */
@@ -260,6 +272,9 @@ export function mergeAgentContext(
   }
   if (nlu.from) next.origin = nlu.from;
   if (nlu.to) next.destination = nlu.to;
+  /* Round-9: slot kisi bhi raaste se bhara to pending clear. */
+  if (next.origin) next.pendingOriginChoice = null;
+  if (next.destination) next.pendingDestinationChoice = null;
   if (nlu.date) {
     next.date = nlu.date;
     next.dateProvided = true;

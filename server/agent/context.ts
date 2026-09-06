@@ -50,6 +50,12 @@ export interface AgentContext {
   /** Round-8: "nayi baat/reset" command isi turn par context fresh hua —
    * one-shot client signal (input par seedContext strip kar deta hai). */
   justReset?: boolean;
+  /** Round-9 (2026-09-06, Agra-bug): cluster-city jiska station abhi choose
+   * nahi hua (jaise "Agra" → AGC/AF/AGA). NLU ka unresolvedFrom sirf usi turn
+   * mein jeevta tha — doosri cluster-city (Delhi) ke choice ke baad origin
+   * bhool jaata tha ("Kahan se jana hai?"). Ab context mein persist hota hai. */
+  pendingOriginChoice?: string | null;
+  pendingDestinationChoice?: string | null;
 }
 
 export function emptyAgentContext(): AgentContext {
@@ -319,7 +325,7 @@ export function resolveTrainNumber(text: string, ctx: AgentContext): string | un
 
 export function mergeAgentContext(
   prev: AgentContext,
-  nlu: Pick<NluResult, "intent" | "from" | "to" | "date" | "passengerCount" | "classCodes" | "trainNumber" | "pnr">,
+  nlu: Pick<NluResult, "intent" | "from" | "to" | "date" | "passengerCount" | "classCodes" | "trainNumber" | "pnr" | "unresolvedFrom" | "unresolvedTo">,
   text: string,
   extra?: { selectedTrainNumber?: string | null; selectedTrainName?: string | null; lastTrainNumbers?: string[]; bookingStage?: BookingStage },
 ): AgentContext {
@@ -328,6 +334,16 @@ export function mergeAgentContext(
     lastTrainNumbers: [...prev.lastTrainNumbers],
     lastTrains: [...(prev.lastTrains ?? [])],
   };
+  /* Round-9 (Agra-bug): unresolved cluster-city context mein yaad rakho —
+   * station choose hote hi clear. */
+  if (nlu.from) next.pendingOriginChoice = null;
+  else if (nlu.unresolvedFrom && /^[A-Za-z\u0900-\u097F][A-Za-z\u0900-\u097F .]{1,28}$/.test(nlu.unresolvedFrom)) {
+    next.pendingOriginChoice = nlu.unresolvedFrom;
+  }
+  if (nlu.to) next.pendingDestinationChoice = null;
+  else if (nlu.unresolvedTo && /^[A-Za-z\u0900-\u097F][A-Za-z\u0900-\u097F .]{1,28}$/.test(nlu.unresolvedTo)) {
+    next.pendingDestinationChoice = nlu.unresolvedTo;
+  }
   /* Round-8 (topic-switch): poora NAYA route (from+to dono, dono pichle se
    * alag) + user ne koi train number/nahi bola → purani selected train
    * stale hai — clear (warna nayi journey par purani train ka data aa jaata).
@@ -352,6 +368,9 @@ export function mergeAgentContext(
   }
   if (nlu.from) next.origin = nlu.from;
   if (nlu.to) next.destination = nlu.to;
+  /* Round-9: station-pick ya kisi bhi raaste se slot bhar gaya to pending clear. */
+  if (next.origin) next.pendingOriginChoice = null;
+  if (next.destination) next.pendingDestinationChoice = null;
   if (nlu.date) {
     next.date = nlu.date;
     next.dateProvided = true;

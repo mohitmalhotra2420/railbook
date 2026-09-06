@@ -1299,6 +1299,8 @@ function systemPrompt(
     /** User ne ambiguous city bola hai (jaise "Delhi") jo abhi resolve NAHI hui —
      *  sabse pehle station choice resolve karo, preference/date baad mein. */
     destinationAmbiguous?: string | null;
+    /** Round-9 (Agra-bug): origin-side ambiguous city (jaise "Agra"). */
+    originAmbiguous?: string | null;
   },
   dateHint: { kind: "date"; date: string } | { kind: "ambiguous"; options: { date: string; label: string }[] } | null,
   history: AgenticHistoryTurn[] = [],
@@ -1328,7 +1330,9 @@ function systemPrompt(
             ? ` User ne abhi pichhle station-options se apni choice bheji hai — ${known.stationPicked}=${known.stationPicked === "origin" ? known.origin : known.destination} FINAL hai (server ne verify kiya). Confirm mat karo, seedha tool call karke jawab do.`
             : known.destinationAmbiguous
               ? ` User ne destination "${known.destinationAmbiguous}" bola jo AMBIGUOUS hai (multiple stations) — AGAR user ka current message isi journey ke baare mein hai to JOURNEY_ANALYZE ya SEARCH_TRAINS tool call karo aur needs_choice ke options user ko do. Station options SIRF tool result se — apni knowledge se station codes/options KABHI mat likho. Preference/date baad mein. Par agar current message koi ALAG sawaal hai (doosri train/PNR/status/fare/doosra route), to PEHLE us naye sawaal ka jawab do — station options us reply mein repeat mat karo. Options dete waqt sirf options do — saath mein koi denial/extra claim ("ye train wahin stop nahi karti" jaisa) mat jodo.`
-              : ""
+              : known.originAmbiguous
+                  ? ` User ne ORIGIN "${known.originAmbiguous}" bola jo AMBIGUOUS hai (multiple stations — jaise Agra mein AGC/AF/AGA) — AGAR user ka current message isi journey ke baare mein hai to SEARCH_STATIONS ya JOURNEY_ANALYZE se REAL station options lao aur user se poochho kaunsa. Station options SIRF tool result se — apni knowledge se codes/options KABHI mat likho. Origin station choose hone tak search complete nahi hogi — generic "Kahan se jana hai?" MAT poochho (city pata hai, sirf station chunna hai).`
+                  : ""
         }`
       : "",
     history.length
@@ -1534,6 +1538,9 @@ export async function runAgenticTurn(input: {
     stationPicked?: "origin" | "destination" | null;
     /** Ambiguous city (jaise "Delhi") jo abhi resolve nahi hui. */
     destinationAmbiguous?: string | null;
+    /** Round-9 (Agra-bug): ORIGIN-side ambiguous city (jaise "Agra") —
+     * doosri side ke choice ke baad bhi yaad rehti hai. */
+    originAmbiguous?: string | null;
   };
   /** Prior conversation turns (multi-turn state) — redacted, capped, sent before the current user message. */
   history?: AgenticHistoryTurn[];
@@ -1566,6 +1573,7 @@ export async function runAgenticTurn(input: {
           passengers: input.known?.passengers ?? null,
           stationPicked: input.known?.stationPicked ?? null,
           destinationAmbiguous: input.known?.destinationAmbiguous ?? null,
+          originAmbiguous: input.known?.originAmbiguous ?? null,
         },
         dateHint,
         historyTurns,
@@ -1932,6 +1940,34 @@ export async function runAgenticTurn(input: {
       lastNeedsChoice = null; // model ne dikhayi — aage model ka jawab hi final
     }
 
+    // Round-9 (Agra-bug): ORIGIN-side ambiguous city hai (server ko pata) par
+    // model ne generic "Kahan se jana hai? Departure station bataiye" poochha
+    // ya options nahi diye — REAL station options relay karo (grounding se pehle,
+    // kyunki aisa reply "grounded" hota hai aur niche nahi phansta).
+    if (input.known?.originAmbiguous && !lastNeedsChoice) {
+      try {
+        const res = await resolveStationRef(input.known.originAmbiguous);
+        if ("candidates" in res && res.candidates.length) {
+          const mentioned = res.candidates.filter((x) => clean.toUpperCase().includes(x.code.toUpperCase())).length;
+          if (mentioned < Math.min(2, res.candidates.length)) {
+            const lines = res.candidates.map((x, i) => `${i + 1}. ${x.code} – ${x.name}`).join("\n");
+            const relay = `**${res.city} se jaana hai — kaunsa station?**\n${lines}\nKripya number ya station code bata do.`;
+            return {
+              ok: true,
+              reply: relay,
+              grounded: true,
+              steps,
+              modelUsed,
+              latencyMs: Date.now() - startedAll,
+              failureReason: "origin_choice_relayed_deterministically",
+            };
+          }
+        }
+      } catch {
+        /* station API fail — model reply as-is */
+      }
+    }
+
     const check = groundingCheck(clean, steps, [...evidenceParts, ...messages.map((m) => m.content ?? "")]);
     if (!check.grounded) {
       // Ungrounded output — deterministic, provider-backed replacement.
@@ -1966,6 +2002,28 @@ export async function runAgenticTurn(input: {
               modelUsed,
               latencyMs: Date.now() - startedAll,
               failureReason: `ungrounded_options_replaced:${check.evidence}`,
+            };
+          }
+        } catch {
+          /* station API fail — generic summary (neeche) */
+        }
+      }
+      // Round-9 (Agra-bug): ORIGIN ambiguous — model ne generic "Kahan se jana
+      // hai?" poochha ya khud ke options likhe — REAL options relay karo.
+      if (input.known?.originAmbiguous) {
+        try {
+          const res = await resolveStationRef(input.known.originAmbiguous);
+          if ("candidates" in res && res.candidates.length) {
+            const lines = res.candidates.map((x, i) => `${i + 1}. ${x.code} – ${x.name}`).join("\n");
+            const relay = `**${res.city} se jaana hai — kaunsa station?**\n${lines}\nKripya number ya station code bata do.`;
+            return {
+              ok: true,
+              reply: relay,
+              grounded: true,
+              steps,
+              modelUsed,
+              latencyMs: Date.now() - startedAll,
+              failureReason: `origin_choice_relayed:${check.evidence}`,
             };
           }
         } catch {

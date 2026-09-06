@@ -1037,3 +1037,66 @@ describe("26. Round-8: station-code pehchaan (cdg jaise codes)", () => {
     expect(codes).toHaveLength(0);
   });
 });
+
+describe("27. Round-9: Agra origin-cluster bug (multi-turn station choice)", () => {
+  /* Prod bug (2026-09-06): "agra se delhi kal ki train" → Delhi options →
+   * user "new delhi" → "Kahan se jaana hai? Departure station bataiye."
+   * (Agra bhool gaya). Fix: unresolved cluster-city AgentContext mein
+   * persist hoti hai (pendingOrigin/ChoiceChoice). */
+  it("27a. 'agra se delhi kal ki train' → Delhi options + dono pending yaad", async () => {
+    r8Env();
+    const app = createApp();
+    const res = await request(app).post("/api/agent").send({
+      text: "agra se delhi kal ki train",
+      now: "2026-09-06T18:30:00.000Z",
+    });
+    expect(res.body.reply).toContain("NDLS");
+    expect(res.body.reply).toContain("DLI");
+    expect(res.body.context.pendingOriginChoice).toBe("Agra");
+    expect(res.body.context.pendingDestinationChoice).toBe("Delhi");
+    expect(res.body.context.origin).toBeNull();
+  });
+
+  it("27b. turn-2 'new delhi' → AGRA options (NOT 'Kahan se jaana hai?')", async () => {
+    r8Env();
+    const app = createApp();
+    const res = await request(app).post("/api/agent").send({
+      text: "new delhi",
+      lastAsked: "to",
+      context: { date: "2026-09-08", dateProvided: true, pendingOriginChoice: "Agra", pendingDestinationChoice: "Delhi", intent: "SEARCH_TRAIN" },
+      now: "2026-09-06T18:30:00.000Z",
+    });
+    expect(res.body.reply).toContain("AGC");
+    expect(res.body.reply).not.toMatch(/Kahan se jaana hai/);
+    expect(res.body.context.destination).toMatchObject({ code: "NDLS" });
+    expect(res.body.context.pendingOriginChoice).toBe("Agra");
+    expect(res.body.context.pendingDestinationChoice).toBeNull();
+  });
+
+  it("27c. turn-3 'agra cantt' → AGC→NDLS search chalti hai (origin set)", async () => {
+    r8Env();
+    const app = createApp();
+    const res = await request(app).post("/api/agent").send({
+      text: "agra cantt",
+      lastAsked: "from",
+      context: { date: "2026-09-08", dateProvided: true, pendingOriginChoice: "Agra", destination: { code: "NDLS", name: "New Delhi", city: "Delhi" } },
+      now: "2026-09-06T18:30:00.000Z",
+    });
+    expect(res.body.context.origin).toMatchObject({ code: "AGC" });
+    expect(res.body.context.pendingOriginChoice).toBeNull();
+    expect(res.body.reply).not.toMatch(/Kahan se jaana hai|Kahan jaana hai/);
+    /* Search honestly chali (providers down par AGC → NDLS attempt dikhta hai). */
+    expect(String(res.body.reply)).toMatch(/AGC → NDLS/);
+  });
+
+  it("27d. mergeAgentContext: pending persist + station bharne par clear", async () => {
+    const { mergeAgentContext, emptyAgentContext } = await import("../server/agent/context");
+    const prev = { ...emptyAgentContext(), pendingOriginChoice: "Agra", pendingDestinationChoice: "Delhi" };
+    const kept = mergeAgentContext(prev, { intent: "SEARCH_TRAIN", unresolvedFrom: "Agra" } as never, "kal ki train");
+    expect(kept.pendingOriginChoice).toBe("Agra");
+    const picked = mergeAgentContext(kept, { intent: "SEARCH_TRAIN", from: { code: "AGC", name: "Agra Cantt", city: "Agra" } as never, to: { code: "NDLS", name: "New Delhi", city: "Delhi" } as never } as never, "agra cantt se new delhi");
+    expect(picked.pendingOriginChoice).toBeNull();
+    expect(picked.pendingDestinationChoice).toBeNull();
+    expect(picked.origin).toMatchObject({ code: "AGC" });
+  });
+});
