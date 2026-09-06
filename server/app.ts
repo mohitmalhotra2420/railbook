@@ -607,37 +607,52 @@ export function createApp() {
   /* Round-7 diagnostics: prod datacenter se kaunsi scrape-site reachable hai.
    * Fixed targets only (no params — SSRF nahi), read-only. */
   app.get("/api/debug/scrape-health", async (_req, res) => {
-    const probe = async (url: string, marker?: string) => {
-      const started = Date.now();
-      try {
-        const r = await fetch(url, {
-          headers: {
-            "User-Agent":
-              "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Accept-Language": "en-IN,en;q=0.9,hi;q=0.8",
-            Referer: new URL(url).origin + "/",
-          },
-          signal: AbortSignal.timeout(20000),
-        });
-        const body = await r.text();
-        return {
-          url,
-          httpStatus: r.status,
-          latencyMs: Date.now() - started,
-          bodyLength: body.length,
-          markerFound: marker ? body.includes(marker) : null,
-        };
-      } catch (err) {
-        return { url, error: String(err).slice(0, 200), latencyMs: Date.now() - started };
-      }
+    /* (a) REAL production path — scrapeTrainFareWeb (fetchHtml full fingerprint) */
+    const t1 = Date.now();
+    const { scrapeTrainFareWeb } = await import("./railway/webscrape.js");
+    const real = await scrapeTrainFareWeb("12054");
+    const realResult = {
+      latencyMs: Date.now() - t1,
+      result: real ? { classes: real.classes } : null,
     };
-    const results = await Promise.all([
-      probe("https://erail.in/train-fare/12054", "Total fare for"),
-      probe("https://railenquiry.in/station/KIP", "Railway Station"),
-      probe("https://www.railyatri.in/seat-availability/12054"),
-    ]);
-    res.json({ from: "render-prod", at: new Date().toISOString(), results });
+
+    /* (b) raw fetch with fetchHtml's EXACT headers (isolate header vs code issue) */
+    const t2 = Date.now();
+    let rawFingerprint: Record<string, unknown>;
+    try {
+      const r = await fetch("https://erail.in/train-fare/12054", {
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          Accept:
+            "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+          "Accept-Language": "en-IN,en;q=0.9,hi;q=0.8",
+          "Sec-Fetch-Dest": "document",
+          "Sec-Fetch-Mode": "navigate",
+          "Sec-Fetch-Site": "same-origin",
+          "Sec-Fetch-User": "?1",
+          "Upgrade-Insecure-Requests": "1",
+          Referer: "https://erail.in/",
+        },
+        signal: AbortSignal.timeout(20000),
+      });
+      const body = await r.text();
+      rawFingerprint = {
+        httpStatus: r.status,
+        latencyMs: Date.now() - t2,
+        bodyLength: body.length,
+        hasFareTable: body.includes("Total fare for"),
+      };
+    } catch (err) {
+      rawFingerprint = { error: String(err).slice(0, 300), latencyMs: Date.now() - t2 };
+    }
+
+    res.json({
+      from: "render-prod",
+      at: new Date().toISOString(),
+      realScrapeTrainFareWeb: realResult,
+      rawFetchFullFingerprint: rawFingerprint,
+    });
   });
 
   app.get("/api/wallet", (_req, res) => {
