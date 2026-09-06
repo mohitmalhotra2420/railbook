@@ -336,7 +336,7 @@ export type ScrapedLiveStatus = {
   currentStation: string | null;
   nextStation: string | null;
   journeyDate: string | null;
-  provider: "web_railyatri";
+  provider: "web_railyatri" | "web_railenquiry";
   sourceUrl: string;
 };
 
@@ -433,4 +433,68 @@ export async function scrapeLiveStatusWeb(trainNumber: string, trainName?: strin
   const html = await fetchHtml(sourceUrl);
   if (!html) return null;
   return parseRailYatriLive(html, num, sourceUrl);
+}
+
+
+/* ── RAILENQUIRY.IN LIVE STATUS (round-6, NTES-question se nikla discovery):
+ * enquiry.indianrail.gov.in (NTES) datacenter IPs par firewall-level drop
+ * karta hai (TLS handshake hi nahi hota) — anti-bot evasion nahi karenge.
+ * railenquiry.in usi enquiry-data ka SSR mirror hai: number-only URL
+ * (/runningstatus/12958 — trainName hint ki zaroorat NAHI), plain HTML mein
+ * "+7 Mins Late · RUNNING · KHALILPUR · Departed from X(CODE) at HH:MM". */
+
+export function parseRailEnquiryLive(html: string, trainNumber: string, sourceUrl: string): ScrapedLiveStatus | null {
+  const text = html
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, "\n");
+  const lines = text
+    .split("\n")
+    .map((l) => l.replace(/&nbsp;/gi, " ").replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+  if (!lines.length) return null;
+  const hay = lines.join(" | ");
+
+  /* Train naam: <title>12958 Swrn J Rajdhani Live Train Running Status</title> */
+  const title = (/\<title\>\s*([\s\S]+?)\<\/title\>/i.exec(html)?.[1] ?? "").trim();
+  const tm = new RegExp(`^\\s*${trainNumber}\\s+(.+?)\\s+Live Train Running Status\\s*$`, "i").exec(title);
+  const trainName = tm ? tm[1].trim() : `Train ${trainNumber}`;
+
+  const delayM = /([+-]?\d+)\s*Mins\s*Late/i.exec(hay);
+  const onTime = /\bOn Time\b/i.test(hay);
+  const delayMinutes = delayM ? Number(delayM[1].replace("+", "")) : onTime ? 0 : null;
+
+  const runM = /RUNNING\s*·\s*([A-Za-z .'-]+)/i.exec(hay);
+  const depM = /Departed from ([A-Za-z .'-]+?)\s*\(([A-Z]{2,10})\)\s*at\s*(\d{1,2}:\d{2})\s*([\d]{2}-\w{3})/i.exec(hay);
+  const arrM = /Arrived at ([A-Za-z .'-]+?)\s*\(([A-Z]{2,10})\)/i.exec(hay);
+  const currentStation = depM ? depM[1].trim() : arrM ? arrM[1].trim() : runM ? runM[1].trim() : null;
+
+  let status: string | null = null;
+  if (depM) status = `Departed from ${depM[1].trim()} (${depM[2]}) at ${depM[3]} ${depM[4]}`;
+  else if (arrM) status = `Arrived at ${arrM[1].trim()} (${arrM[2]})`;
+  else if (runM) status = `Running · ${runM[1].trim()}`;
+  else if (onTime) status = "On time";
+  if (!status && delayMinutes == null) return null;
+
+  return {
+    trainNumber,
+    trainName,
+    status: status ?? `${delayMinutes} mins late`,
+    delayMinutes,
+    lastUpdatedAt: depM ? `${depM[3]} ${depM[4]}` : null,
+    currentStation,
+    nextStation: null,
+    journeyDate: null,
+    provider: "web_railenquiry",
+    sourceUrl,
+  };
+}
+
+export async function scrapeLiveStatusRailEnquiry(trainNumber: string): Promise<ScrapedLiveStatus | null> {
+  const num = String(trainNumber ?? "").trim();
+  if (!/^\d{4,6}$/.test(num)) return null;
+  const sourceUrl = `https://railenquiry.in/runningstatus/${num}`;
+  const html = await fetchHtml(sourceUrl);
+  if (!html) return null;
+  return parseRailEnquiryLive(html, num, sourceUrl);
 }

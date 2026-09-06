@@ -1,4 +1,4 @@
-import { scrapeCoachPositionWeb, scrapeLiveStatusWeb, scrapeTrainScheduleWeb } from "./webscrape.js";
+import { scrapeCoachPositionWeb, scrapeLiveStatusWeb, scrapeTrainScheduleWeb, scrapeLiveStatusRailEnquiry } from "./webscrape.js";
 import { env } from "../env.js";
 import { searchStations as searchLocalStations } from "../data/stations.js";
 import {
@@ -67,7 +67,8 @@ export type ServedProvider =
   | "web_ixigo"
   | "web_confirmtkt"
   | "web_trainspnrstatus"
-  | "web_railyatri";
+  | "web_railyatri"
+  | "web_railenquiry";
 
 export type LastRailwayLog = {
   railwayProvider: ServedProvider;
@@ -186,6 +187,13 @@ export async function routedLiveStatus(number: string, dateYmd?: string, trainNa
         logServed("web_railyatri", "liveStatus", started, true, "api_both_failed");
         return { live: scraped, provider: "web_railyatri" };
       }
+    }
+    /* railenquiry.in (round-6): number-only URL — trainName hint na mile
+     * tab bhi chalta hai (RailYatri ko naam URL mein chahiye). */
+    const reScraped = await scrapeLiveStatusRailEnquiry(number);
+    if (reScraped) {
+      logServed("web_railenquiry", "liveStatus", started, true, "api_both_failed");
+      return { live: reScraped, provider: "web_railenquiry" };
     }
     logServed("none", "liveStatus", started, false, "both_failed");
     return { live: null, provider: "none" };

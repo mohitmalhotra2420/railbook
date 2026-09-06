@@ -15,6 +15,7 @@ import { setAgenticNvidiaFetch, executeApprovedTool } from "../server/agent/agen
 import { setRailcoreFetch } from "../server/railway/railcore";
 import { setWebFetch } from "../server/agent/websearch";
 import { setLlmFetch } from "../server/understand/llm";
+import { parseRailEnquiryLive } from "../server/railway/webscrape";
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -797,5 +798,41 @@ describe("ROUND-4: ChatGPT-jaisa universal railway knowledge", () => {
     expect(reply, reply).toMatch(/Vivek/i);
     expect(reply, reply).toMatch(/4,154|longest/i);
     expect(reply, reply).not.toMatch(/Train number chahiye/i);
+  });
+});
+
+/* ══ ROUND-6 (NTES question): railenquiry.in live-status fallback ══
+ * NTES (enquiry.indianrail.gov.in) datacenter IPs par TLS-level drop karta
+ * hai — anti-bot evasion nahi karenge. railenquiry.in (SSR mirror,
+ * number-only URL) last-resort live fallback hai. */
+
+describe("ROUND-6: railenquiry.in live-status scrape fallback", () => {
+  it("parse: +7 Mins Late / RUNNING / Departed — sab fields", () => {
+    const html = [
+      "<html><head><title>12958 Swrn J Rajdhani Live Train Running Status</title></head><body>",
+      "<div>NDLS NEW DELHI SBIB SABARMATI BG</div>",
+      "<div>+7 Mins Late</div>",
+      "<div>RUNNING · KHALILPUR</div>",
+      "<div>Departed from KHALILPUR(KIP) at 21:19 06-Sep</div>",
+      "</body></html>",
+    ].join("");
+    const r = parseRailEnquiryLive(html, "12958", "https://railenquiry.in/runningstatus/12958");
+    expect(r, "parsed").not.toBeNull();
+    expect(r!.trainName).toBe("Swrn J Rajdhani");
+    expect(r!.delayMinutes).toBe(7);
+    expect(r!.currentStation).toBe("KHALILPUR");
+    expect(r!.status).toMatch(/Departed from KHALILPUR \(KIP\) at 21:19/);
+    expect(r!.provider).toBe("web_railenquiry");
+  });
+
+  it("parse: On Time + garbage/empty HTML → null ya honest fallback", () => {
+    const html =
+      "<html><head><title>12054 Hw Janshatabdi Live Train Running Status</title></head><body><div>On Time</div></body></html>";
+    const r = parseRailEnquiryLive(html, "12054", "https://x");
+    expect(r, "on-time parse").not.toBeNull();
+    expect(r!.delayMinutes).toBe(0);
+    expect(r!.status).toBe("On time");
+    const bad = parseRailEnquiryLive("<html></html>", "12054", "https://x");
+    expect(bad, "empty → null").toBeNull();
   });
 });

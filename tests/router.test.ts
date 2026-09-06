@@ -3,6 +3,7 @@ import request from "supertest";
 import { createApp } from "../server/app";
 import { env } from "../server/env";
 import { setRailcoreFetch, resetRailcoreBookings } from "../server/railway/railcore";
+import { setScrapeFetch } from "../server/railway/webscrape";
 import { setRailkitSdk, resetRailkitBookings } from "../server/railway/railkit";
 import { setProvider } from "../server/providers/index";
 import { getLastRailwayLog, FallbackRailwayProvider } from "../server/railway/router";
@@ -40,6 +41,7 @@ function failingSdk(overrides: Record<string, unknown> = {}) {
 
 afterEach(() => {
   setRailcoreFetch(null);
+  setScrapeFetch(null);
   setRailkitSdk(null);
   resetRailcoreBookings();
   resetRailkitBookings();
@@ -385,6 +387,8 @@ describe("RailCore HTTP + RailKit fallback", () => {
     process.env.RAILKIT_API_KEY = "rk_test";
     setRailcoreFetch(async () => jsonResponse(500, { success: false }));
     setRailkitSdk(failingSdk() as never);
+    /* Web-scrape fallback bhi fail ho (network-dependent test na bane) */
+    setScrapeFetch(async () => jsonResponse(500, { success: false }));
     setProvider(null);
     const app = createApp();
     const trains = await request(app).get("/api/trains").query({ from: "ASR", to: "LDH", date: FUTURE });
