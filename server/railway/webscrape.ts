@@ -48,8 +48,27 @@ export function setScrapeFetch(fn: typeof fetch | null): void {
 
 async function fetchHtml(url: string): Promise<string | null> {
   try {
+    const host = (() => {
+      try {
+        return new URL(String(url)).hostname;
+      } catch {
+        return "";
+      }
+    })();
+    /* Full browser fingerprint — kuch CDNs (trainspnrstatus) incomplete
+     * headers par 403 dete hain. Referer host ka khud ka page hai. */
     const res = await (scrapeFetchImpl ?? globalThis.fetch.bind(globalThis))(url, {
-      headers: { "User-Agent": UA, "Accept-Language": "en-IN,en;q=0.9", Accept: "text/html" },
+      headers: {
+        "User-Agent": UA,
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-IN,en;q=0.9,hi;q=0.8",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "same-origin",
+        "Sec-Fetch-User": "?1",
+        "Upgrade-Insecure-Requests": "1",
+        Referer: "https://" + host + "/",
+      },
       signal: AbortSignal.timeout(SCRAPE_TIMEOUT_MS),
     });
     if (!res.ok) {
