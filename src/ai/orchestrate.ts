@@ -922,6 +922,20 @@ function switchIntent(
     return { text: "Train number kya hai? 5-digit number likho — jaise 12054.", prefs, apply, ask: "trainNumber" };
   }
   if (nlu.intent === "TRAIN_SCHEDULE") {
+    /* Screenshot fix (2026-09-06 #3): "12054 ki top speed btana" client NLU
+     * TRAIN_SCHEDULE de deta hai → timetable dikh jata tha, fact ka jawab
+     * nahi. General-fact words + train number par timetable NAHI — honest
+     * redirect (server /api/agent fact web-search karta hai). */
+    const GENERAL_FACT_WORDS =
+      /\b(top speed|max speed|average speed|kitni tez|kitna tez|speed kya|speed kitni|kab shuru|kab chalu|kab start|kitne saal|kab bani|history|kitne coach|engine ka naam)\b/i;
+    if (nlu.trainNumber && GENERAL_FACT_WORDS.test(text)) {
+      return {
+        text: `Train ${nlu.trainNumber} ka ye fact (speed/history jaisa) railway API se nahi aata — web search se aata hai, jo abhi available nahi hai. Thodi der baad dobara poochein.`,
+        prefs,
+        apply,
+        ask: null,
+      };
+    }
     if (nlu.trainNumber) {
       return {
         text: `Train ${nlu.trainNumber} ka timetable nikal raha hoon.`,

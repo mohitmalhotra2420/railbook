@@ -1127,12 +1127,31 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
       const q2 = subject.replace(/ \d{5}$/, "") + " " + factKeyword;
       webResults = await webSearch(q2, 3);
     }
-    /* Disambiguation ("Top speed may refer to:") jawab nahi hota — skip. */
-    const good = webResults.filter((x) => !/may refer to:/i.test(x.snippet));
+    /* Disambiguation ("Top speed may refer to:") jawab nahi hota — skip.
+     * Screenshot fix (2026-09-06 #3): "12054 ki top speed" par pehla web
+     * result "production car speed records" (Wikipedia) tha — bilkul
+     * irrelevant. Ab railway-relevance filter: snippet/title mein railway
+     * context hona chahiye, car/automotive jaise non-railway results reject. */
+    const RAILWAY_FACT_RE =
+      /train|rail|railway|railroad|express|locomotive|shatabdi|rajdhani|vande bharat|duronto|gatimaan|gatiman|tejas|km\/h|kmph|kph|irctc|coach/i;
+    const NOT_RAILWAY_FACT_RE =
+      /\b(production cars?|street-legal|automobiles?|cars?|motorcycles?|aircraft|bicycles?|speedboats?|birds?)\b/i;
+    const good = webResults.filter((x) => {
+      const hay = `${x.title} ${x.snippet}`;
+      if (/may refer to:/i.test(x.snippet)) return false;
+      if (NOT_RAILWAY_FACT_RE.test(hay)) return false;
+      return RAILWAY_FACT_RE.test(hay);
+    });
     if (good.length) {
       const best = good[0];
       reply = `Web se mila: ${best.snippet}\n(Source: ${best.title} — ${best.url})\n(Ye railway API ka live data nahi, web-search ka jawab hai.)`;
       toolOk = true;
+    } else {
+      /* Web timeout / 0 results / sab irrelevant (car records jaise) —
+       * EMPTY reply kabhi nahi (screenshot #3: timeout par khali jawab
+       * gaya tha). Honest denial — guess nahi. */
+      reply = `${factNum ? `Train ${factNum} ki` : "Is"} ${factKeyword === "information" ? "detail" : factKeyword} ka reliable jawab web se abhi nahi mil paya — main railway ke verified data ke bina guess nahi karunga.`;
+      toolOk = false;
     }
   }
 

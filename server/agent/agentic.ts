@@ -1755,7 +1755,30 @@ export async function runAgenticTurn(input: {
           if (!args.origin && input.known?.origin) args = { ...args, origin: input.known.origin };
           if (!args.destination && input.known?.destination) args = { ...args, destination: input.known.destination };
         }
-        const result = await executeApprovedTool(toolName, args);
+        /* Screenshot fix (2026-09-06 #3): "12054 ki top speed btana" par
+         * model ne GET_TIMETABLE chala diya — user ko timetable dikha, speed
+         * ka jawab nahi. System-note soft guidance se model nahi ruka, isliye
+         * HARD guard: general-fact sawaal par railway data tools reject (sirf
+         * WEB_SEARCH + train ka naam dhoondhne wale tools allowed). */
+        let result: ApprovedToolResult;
+        if (
+          GENERAL_FACT_RE.test(input.text) &&
+          toolName !== "WEB_SEARCH" &&
+          toolName !== "GET_TRAIN_INFO" &&
+          toolName !== "TRAIN_NAME_SEARCH" &&
+          toolName !== "GENERAL_RAILWAY_ANSWER"
+        ) {
+          result = {
+            ok: false,
+            source: null,
+            summary:
+              "Ye general-fact sawaal (top speed / history / coaches / locomotive) hai — railway data tools (timetable/live/fare) iska jawab NAHI dete. WEB_SEARCH use karo: train ka naam + number + fact (jaise 'Jan Shatabdi Express 12054 top speed').",
+            data: null,
+            rejected: "general_fact_tool_block",
+          };
+        } else {
+          result = await executeApprovedTool(toolName, args);
+        }
         // Structured table capture (user feedback 2026-09-05): SEARCH/JOURNEY
         // success par rows nikalo — client proper <table> render karega, aur
         // run.ts inhi se ctx memory (lastTrainNumbers/fastest) bharta hai.

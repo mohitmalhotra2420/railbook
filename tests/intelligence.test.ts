@@ -374,3 +374,93 @@ describe("SCREENSHOT #2 (2026-09-06): availability UX + hw-code + slot-resume", 
     expect(reply, reply).toMatch(/LDH→HW segment ka direct data nahi/i);
   });
 });
+
+/* ══ SCREENSHOT REGRESSION #3 (2026-09-06, Screenshot_20260906-165721) ══════
+ * "12054 ki top speed btana" → (1) agentic ne GET_TIMETABLE chala diya
+ * (timetable dikha, speed ka jawab nahi); (2) web-search se pehla result
+ * "List of production car speed records" (Wikipedia) — bilkul irrelevant —
+ * unfiltered chala gaya; (3) web timeout par reply EMPTY — client fallthrough
+ * "Kahan se kahan jaana hai?" dikhata tha. */
+
+describe("SCREENSHOT #3 (2026-09-06): top speed — tool-block + irrelevant-web-filter + never-empty", () => {
+  it("irrelevant web results (car speed records) reject — honest jawab, car-wala NAHI", async () => {
+    railcoreMock();
+    setWebFetch(async (url: any) => {
+      const u = String(url);
+      if (u.includes("api.duckduckgo.com")) {
+        return jsonResponse(200, {
+          AbstractText: "",
+          AbstractURL: "",
+          Heading: "",
+        });
+      }
+      if (u.includes("wikipedia.org")) {
+        return jsonResponse(200, {
+          query: {
+            search: [
+              {
+                title: "List of production car speed records",
+                snippet:
+                  "This is a list of the world's record-breaking top speeds achieved by street-legal production cars (as opposed to concept cars or modified cars).",
+                url: "https://en.wikipedia.org/wiki/List_of_production_car_speed_records",
+              },
+            ],
+          },
+        });
+      }
+      return jsonResponse(404, {});
+    });
+    const r = await runAgent({ text: "12054 ki top speed btana", now: "2026-09-06T16:57:00+05:30" });
+    const reply = String(r.reply ?? "");
+    expect(reply, "reply kabhi empty nahi").toMatch(/.+/);
+    expect(reply, reply).not.toMatch(/production car|street-legal/i);
+    expect(reply, reply).toMatch(/nahi mil paya|guess nahi/i);
+  });
+
+  it("web timeout / 0 results par EMPTY nahi — honest denial", async () => {
+    railcoreMock();
+    setWebFetch(async () => {
+      throw new Error("network timeout");
+    });
+    const r = await runAgent({ text: "12054 ki top speed btana", now: "2026-09-06T16:57:00+05:30" });
+    const reply = String(r.reply ?? "");
+    expect(reply, "reply kabhi empty nahi").toMatch(/.+/);
+    expect(reply, reply).toMatch(/nahi mil paya/i);
+  });
+
+  it("complaint follow-up ('Maine to top speed poochi hai lekin') par 'Kahan se kahan jaana hai?' NAHI", async () => {
+    railcoreMock();
+    setWebFetch(async () => {
+      throw new Error("network timeout");
+    });
+    const t1 = await runAgent({ text: "12054 ki top speed btana", now: "2026-09-06T16:57:00+05:30" });
+    const t2 = await runAgent({
+      text: "Maine to top speed poochi hai lekin",
+      context: t1.context as never,
+      known: {},
+      now: "2026-09-06T16:58:00+05:30",
+    });
+    const reply = String(t2.reply ?? "");
+    expect(reply, "reply kabhi empty nahi").toMatch(/.+/);
+    expect(reply, reply).not.toMatch(/Kahan se kahan jaana|station bataiye/i);
+    expect(reply, reply).toMatch(/top speed|nahi mil paya/i);
+  });
+
+  it("railway-relevant web result ab bhi aata hai (filter overreach nahi)", async () => {
+    railcoreMock();
+    setWebFetch(async (url: any) => {
+      const u = String(url);
+      if (u.includes("api.duckduckgo.com")) {
+        return jsonResponse(200, {
+          AbstractText: "The Gatimaan Express is India's fastest train with a top speed of 160 km/h.",
+          AbstractURL: "https://en.wikipedia.org/wiki/Gatimaan_Express",
+          Heading: "Gatimaan Express",
+        });
+      }
+      if (u.includes("wikipedia.org")) return jsonResponse(200, { query: { search: [] } });
+      return jsonResponse(404, {});
+    });
+    const r = await runAgent({ text: "gatimaan ki top speed kitni hai", now: "2026-09-06T16:57:00+05:30" });
+    expect(String(r.reply)).toMatch(/160 km\/h/);
+  });
+});
