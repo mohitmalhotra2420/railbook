@@ -71,13 +71,9 @@ async function fetchHtml(url: string): Promise<string | null> {
       },
       signal: AbortSignal.timeout(SCRAPE_TIMEOUT_MS),
     });
-    if (!res.ok) {
-      console.error(JSON.stringify({ scrape: "http_error", url: String(url).slice(0, 100), status: res.status }));
-      return null;
-    }
+    if (!res.ok) return null;
     return await res.text();
-  } catch (e) {
-    console.error(JSON.stringify({ scrape: "fetch_error", url: String(url).slice(0, 100), err: String(e).slice(0, 120) }));
+  } catch {
     return null;
   }
 }
