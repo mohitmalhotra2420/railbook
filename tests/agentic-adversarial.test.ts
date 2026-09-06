@@ -20,6 +20,7 @@ import {
 } from "../server/agent/agentic";
 import { resetRailcoreBookings, setRailcoreFetch } from "../server/railway/railcore";
 import { setRailkitSdk, type RailkitSdk } from "../server/railway/railkit";
+import { setScrapeFetch } from "../server/railway/webscrape";
 import { setProvider } from "../server/providers/index";
 
 const NOW = "2026-09-04T04:00:00.000Z"; // Friday, 09:30 IST
@@ -43,6 +44,7 @@ afterEach(() => {
   setAgenticNvidiaFetch(null);
   setRailcoreFetch(null);
   setRailkitSdk(null);
+  setScrapeFetch(null);
   resetRailcoreBookings();
   process.env.RAILWAY_PROVIDER = "mock";
   process.env.RAILCORE_API_KEY = "";
@@ -361,6 +363,9 @@ describe("TEST 4: RailCore primary -> RailKit fallback (no fake data)", () => {
 describe("TEST 5: both providers fail -> tool says unavailable, never invents", () => {
   it("search/journey/fare/availability all fail honestly", async () => {
     railcoreDown(); // RailKit key intentionally unset -> both providers down
+    /* Round-7: erail web-fallback bhi down hona chahiye — warna sandbox se
+     * real network aake fare de deta hai aur honest-unavailable contract tootta hai. */
+    setScrapeFetch(async () => new Response("", { status: 500 }));
     const search = await executeApprovedTool("SEARCH_TRAINS", { origin: "ASR", destination: "NDLS", date: "2026-09-05" });
     expect(search.ok).toBe(false);
     expect(search.summary).toMatch(/unavailable/i);
