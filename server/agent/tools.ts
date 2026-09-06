@@ -9,6 +9,7 @@ import {
   routedTrainInfo,
   getLastRailwayLog,
 } from "../railway/router.js";
+import { webSourceLabel } from "../railway/webscrape.js";
 import { getWallet } from "../wallet.js";
 import type { ClassCode } from "../providers/types.js";
 import { isForbiddenMoneyTool, segmentOfStops } from "./context.js";
@@ -124,7 +125,7 @@ export async function executeTool(
       return {
         ok: true,
         tool,
-        summary: `Train ${routed.coachPosition.trainNumber} mein ${coaches.length} coaches hain (engine se): ${coaches.map((c) => c.name).join(", ")}${counts ? ` — ${counts}` : ""}.`,
+        summary: `Train ${routed.coachPosition.trainNumber} mein ${coaches.length} coaches hain (engine se): ${coaches.map((c) => c.name).join(", ")}${counts ? ` — ${counts}` : ""}.${webSourceLabel(routed.provider)}`,
         data: routed.coachPosition,
         provider: routed.provider,
       };
@@ -136,7 +137,7 @@ export async function executeTool(
         return {
           ok: Boolean(info.info),
           tool,
-          summary: info.info ? `${info.info.trainNumber} ${info.info.trainName}` : "Train info nahi mili.",
+          summary: info.info ? `${info.info.trainNumber} ${info.info.trainName}${webSourceLabel(info.provider)}` : "Train info nahi mili.",
           data: info.info,
           provider: info.provider,
         };
@@ -168,10 +169,7 @@ export async function executeTool(
         : "";
       /* Web-scrape fallback (2026-09-06): API fail par verified site se aaya
        * data — source label reply mein saaf dikhe. */
-      const webSource =
-        /^web_/.test(routed.provider)
-          ? ` (Source: ${routed.provider === "web_ixigo" ? "ixigo.com" : routed.provider === "web_trainspnrstatus" ? "trainspnrstatus.com" : "confirmtkt.com"} — railway API se nahi, verified web site se.)`
-          : "";
+      const webSource = webSourceLabel(routed.provider);
       return {
         ok: Boolean(routed.schedule),
         tool,

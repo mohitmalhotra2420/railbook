@@ -1,4 +1,4 @@
-import { scrapeTrainScheduleWeb } from "./webscrape.js";
+import { scrapeCoachPositionWeb, scrapeTrainScheduleWeb } from "./webscrape.js";
 import { env } from "../env.js";
 import { searchStations as searchLocalStations } from "../data/stations.js";
 import {
@@ -245,14 +245,29 @@ export async function routedTrainInfo(number: string): Promise<{
         provider: "railkit_fallback",
       };
     }
+    /* VERIFIED-SITE WEB SCRAPING (2026-09-06): API dono fail → schedule-page
+     * scrape se train ka naam. runningDays scrape se nahi aata — [] honest. */
+    const sc = await scrapeTrainScheduleWeb(number);
+    if (sc?.trainName) {
+      logServed(sc.provider, "trainInfo", started, true, "railcore+railkit_failed → web-scrape");
+      return { info: { trainNumber: number, trainName: sc.trainName, runningDays: [] }, provider: sc.provider };
+    }
     logServed("none", "trainInfo", started, false, "both_failed");
     return { info: null, provider: "none" };
   }
   const fb = await railkitSchedule(number);
-  return {
-    info: fb ? { trainNumber: fb.trainNumber, trainName: fb.trainName, runningDays: [] } : null,
-    provider: fb ? "railkit" : "none",
-  };
+  if (fb) {
+    return {
+      info: { trainNumber: fb.trainNumber, trainName: fb.trainName, runningDays: [] },
+      provider: "railkit",
+    };
+  }
+  const sc2 = await scrapeTrainScheduleWeb(number);
+  if (sc2?.trainName) {
+    logServed(sc2.provider, "trainInfo", started, true, "railkit_failed → web-scrape");
+    return { info: { trainNumber: number, trainName: sc2.trainName, runningDays: [] }, provider: sc2.provider };
+  }
+  return { info: null, provider: "none" };
 }
 
 export type RoutedCoachPosition = {
@@ -273,8 +288,27 @@ export async function routedCoachPosition(number: string, stationCode?: string):
       logServed("railcore", "coachPosition", started, true);
       return { coachPosition: primary, provider: "railcore" };
     }
-    logServed("none", "coachPosition", started, false, "railcore_unavailable");
+    /* VERIFIED-SITE WEB SCRAPING (2026-09-06): RailCore coach-position fail
+     * (ya train missing) → trainspnrstatus SSR boxes se layout. Labeled. */
+    const sc = await scrapeCoachPositionWeb(number);
+    if (sc) {
+      logServed(sc.provider, "coachPosition", started, true, "railcore_failed → web-scrape");
+      return {
+        coachPosition: { trainNumber: sc.trainNumber, stationCode: stationCode ?? null, coaches: sc.coaches },
+        provider: sc.provider,
+      };
+    }
+    logServed("none", "coachPosition", started, false, "railcore+web_failed");
     return { coachPosition: null, provider: "none" };
+  }
+  /* RailCore configured nahi — phir bhi web se dekh lo (API-first policy). */
+  const sc2 = await scrapeCoachPositionWeb(number);
+  if (sc2) {
+    logServed(sc2.provider, "coachPosition", started, true, "no_railcore → web-scrape");
+    return {
+      coachPosition: { trainNumber: sc2.trainNumber, stationCode: stationCode ?? null, coaches: sc2.coaches },
+      provider: sc2.provider,
+    };
   }
   logServed("none", "coachPosition", started, false, "coach_position_unsupported");
   return { coachPosition: null, provider: "none" };

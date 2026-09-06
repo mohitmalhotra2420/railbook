@@ -29,6 +29,7 @@ import {
   getLastRailwayLog,
   searchTrainsRouted,
 } from "../railway/router.js";
+import { webSourceLabel } from "../railway/webscrape.js";
 import { parseDatePhrase } from "../understand/legacy-dates.js";
 import { RailKitProvider } from "../railway/railkit.js";
 import type { ClassCode } from "../providers/types.js";
@@ -976,7 +977,7 @@ export async function executeApprovedTool(
         const coaches = Array.isArray(cp.coaches) ? cp.coaches : [];
         return okResult(
           res.provider,
-          `${a.train_number}: ${coaches.length} coaches.`,
+          `${a.train_number}: ${coaches.length} coaches (engine se): ${coaches.map((c: { name: string }) => c.name).join(", ")}.${webSourceLabel(res.provider)}`,
           { trainNumber: a.train_number, stationCode: cp.stationCode ?? null, coaches },
         );
       }
@@ -1085,7 +1086,7 @@ export async function executeApprovedTool(
       case "GET_TRAIN_INFO": {
         const res = await routedTrainInfo(a.train_number as string);
         return res.info
-          ? okResult(res.provider, `${res.info.trainNumber} ${res.info.trainName}.`, res.info)
+          ? okResult(res.provider, `${res.info.trainNumber} ${res.info.trainName}.${webSourceLabel(res.provider)}`, res.info)
           : failResult(res.provider, "Train info nahi mili.");
       }
       case "GET_TIMETABLE": {
@@ -1108,9 +1109,7 @@ export async function executeApprovedTool(
         }
         const segLine = seg ? `, ${seg.from}→${seg.to} ${seg.departure}→${seg.arrival} (${seg.durationLabel})` : "";
         // Web-scrape fallback (2026-09-06): verified-site data — label saaf.
-        const webLine = /^web_/.test(res.provider)
-          ? ` (Source: ${res.provider === "web_ixigo" ? "ixigo.com" : res.provider === "web_trainspnrstatus" ? "trainspnrstatus.com" : "confirmtkt.com"} — railway API se nahi, verified web site se.)`
-          : "";
+        const webLine = webSourceLabel(res.provider);
         return okResult(
           res.provider,
           `${a.train_number} ${name} — ${stops.length} stops${segLine}.${webLine}`,

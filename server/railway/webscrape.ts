@@ -11,6 +11,13 @@
  * Sources (dono SSR — plain HTML mein poora timetable milta hai):
  *   1. ixigo.com/trains/<num>      (Stn Code|Stn Name|Arrives|Departs|…)
  *   2. confirmtkt.com/train-schedule/<num> (Station Name - Code|Arrives|Departs)
+ *   3. trainspnrstatus.com/train-schedule/<num> ([#, NAME, CODE, arr, dep])
+ *
+ * COACH POSITION (2026-09-06, user: "har cheez API fail par web se"):
+ *   - trainspnrstatus.com/train-coach-position/<num> (SSR coach boxes)
+ *
+ * Data types jo WEB se KABHI nahi (safety): live status, fare, seats/
+ * availability, PNR, booking — sirf railway API se.
  *
  * Bot-block/parse-change par [] — honest empty, koi crash nahi. */
 
@@ -33,9 +40,15 @@ const UA =
   "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 const SCRAPE_TIMEOUT_MS = 9000;
 
+/* Tests inject karte hain (setWebFetch pattern). */
+let scrapeFetchImpl: typeof fetch | null = null;
+export function setScrapeFetch(fn: typeof fetch | null): void {
+  scrapeFetchImpl = fn ?? globalThis.fetch.bind(globalThis);
+}
+
 async function fetchHtml(url: string): Promise<string | null> {
   try {
-    const res = await fetch(url, {
+    const res = await (scrapeFetchImpl ?? globalThis.fetch.bind(globalThis))(url, {
       headers: { "User-Agent": UA, "Accept-Language": "en-IN,en;q=0.9", Accept: "text/html" },
       signal: AbortSignal.timeout(SCRAPE_TIMEOUT_MS),
     });
@@ -212,4 +225,74 @@ export async function scrapeTrainScheduleWeb(trainNumber: string): Promise<Scrap
     if (parsed) return parsed;
   }
   return null;
+}
+
+
+/* ── COACH POSITION web-scrape (user request 2026-09-06: "pehle API, fail
+ * par verified site se") — trainspnrstatus.com SSR coach boxes:
+ *   <button aria-label="Select coach C5">...<span class="text-lg">C5</span>
+ *   <span ...>CC</span> ... Pos <!-- -->12</button>
+ * Live-verified 2026-09-06: 12014 → 18 coaches LPR,E2,E1,C14…C1,LPR. */
+
+export type ScrapedCoach = {
+  name: string;
+  classCode: string;
+  positionFromEngine: number;
+  sequence: number;
+};
+
+export type ScrapedCoachPosition = {
+  trainNumber: string;
+  trainName: string | null;
+  coaches: ScrapedCoach[];
+  provider: "web_trainspnrstatus";
+  sourceUrl: string;
+};
+
+/** Site labels → standard class codes (UNRESERVED → UR). */
+function normalizeCoachClass(label: string): string {
+  const t = String(label ?? "").trim().toUpperCase();
+  if (t === "UNRESERVED" || t === "GEN" || t === "GENERAL") return "UR";
+  return t || "??";
+}
+
+function parseCoachSpnr(html: string, trainNumber: string): ScrapedCoachPosition | null {
+  const coaches: ScrapedCoach[] = [];
+  const re =
+    /aria-label="Select coach ([A-Z0-9]+)"[\s\S]*?<span class="text-lg">[^<]*<\/span><span class="text-\[10px\][^"]*">([^<]*)<\/span>[\s\S]*?Pos <!-- -->(\d+)<\/div><\/button>/g;
+  for (const m of html.matchAll(re)) {
+    const pos = Number(m[3]);
+    if (!Number.isFinite(pos) || pos < 1) continue;
+    coaches.push({ name: m[1], classCode: normalizeCoachClass(m[2]), positionFromEngine: pos, sequence: pos });
+  }
+  if (!coaches.length) return null;
+  coaches.sort((a, b) => a.sequence - b.sequence);
+  return {
+    trainNumber,
+    trainName: trainNameFromHtml(html),
+    coaches,
+    provider: "web_trainspnrstatus",
+    sourceUrl: `https://www.trainspnrstatus.com/train-coach-position/${trainNumber}`,
+  };
+}
+
+export async function scrapeCoachPositionWeb(trainNumber: string): Promise<ScrapedCoachPosition | null> {
+  const num = String(trainNumber ?? "").trim();
+  if (!/^\d{4,6}$/.test(num)) return null;
+  const html = await fetchHtml(`https://www.trainspnrstatus.com/train-coach-position/${num}`);
+  if (!html) return null;
+  return parseCoachSpnr(html, num);
+}
+
+/** Shared source-label — tools.ts / agentic.ts replies mein lagta hai. */
+export function webSourceLabel(provider: string): string {
+  const site =
+    provider === "web_ixigo"
+      ? "ixigo.com"
+      : provider === "web_trainspnrstatus"
+        ? "trainspnrstatus.com"
+        : provider === "web_confirmtkt"
+          ? "confirmtkt.com"
+          : null;
+  return site ? ` (Source: ${site} — railway API se nahi, verified web site se.)` : "";
 }

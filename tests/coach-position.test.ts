@@ -3,12 +3,14 @@ import request from "supertest";
 import { createApp } from "../server/app";
 import { coachPosition, resetRailcoreBookings, setRailcoreFetch } from "../server/railway/railcore";
 import { routedCoachPosition } from "../server/railway/router";
+import { setScrapeFetch } from "../server/railway/webscrape";
 import { executeTool } from "../server/agent/tools";
 import { routeRailwayIntent } from "../server/understand/toolRoute";
 import { setProvider } from "../server/providers/index";
 
 afterEach(() => {
   setRailcoreFetch(null);
+  setScrapeFetch(null);
   resetRailcoreBookings();
   process.env.RAILWAY_PROVIDER = "mock";
   process.env.RAILCORE_API_KEY = "";
@@ -120,12 +122,16 @@ describe("RailCore coach position", () => {
     expect(seenStation).toBe("");
   });
 
-  it("router stays honestly 'none' without a RailCore key", async () => {
+  it("router: no RailCore key → web-scrape last-resort (scrape bhi fail = honest none)", async () => {
+    /* 2026-09-06 (user: API-first, fail par verified site): key na ho to
+     * router ab web-scrape try karta hai. Yahan scrape fetch bhi fail —
+     * tab hi honest none. */
     process.env.RAILWAY_PROVIDER = "railcore";
     process.env.RAILCORE_API_KEY = "";
     setRailcoreFetch(async () => {
       throw new Error("network must not be touched without a key");
     });
+    setScrapeFetch(async () => ({ ok: false, status: 404, text: async () => "", json: async () => ({}) }) as unknown as Response);
     const routed = await routedCoachPosition("12014", "LDH");
     expect(routed.coachPosition).toBeNull();
     expect(routed.provider).toBe("none");
