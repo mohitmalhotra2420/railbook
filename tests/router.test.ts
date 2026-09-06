@@ -789,3 +789,48 @@ describe("21. Round-7 web fallback: erail fare + railenquiry station", () => {
     expect(parseRailEnquiryStation("<title>Railway Station</title>", "UMB", "u")).toBeNull();
   });
 });
+
+describe("22. Round-7b: availability without railkit key (prod shape)", () => {
+  it("22a. railcore fail + no RAILKIT_API_KEY → erail fare-only row", async () => {
+    process.env.RAILWAY_PROVIDER = "railcore";
+    process.env.RAILCORE_API_KEY = "rk_live_test";
+    process.env.RAILKIT_API_KEY = "";
+    setRailcoreFetch(async () => jsonResponse(500, { success: false }));
+    setScrapeFetch(async (url: unknown) =>
+      String(url).includes("erail.in/train-fare/") ? htmlResponse(ERail_FARE_HTML) : jsonResponse(500, {}),
+    );
+    setProvider(null);
+    const app = createApp();
+    const res = await request(app).get("/api/availability").query({
+      trainNumber: "12054",
+      date: FUTURE,
+      from: "ASR",
+      to: "HW",
+      classCode: "CC",
+    });
+    expect(res.body.availability.status).toBe("UNKNOWN");
+    expect(res.body.availability.fare).toBe(650);
+    expect(res.body.availability.source).toBe("web_erail");
+    expect(getLastRailwayLog()?.railwayProvider).toBe("web_erail");
+  });
+
+  it("22b. railcore fail + no railkit + scrape fail → plain UNKNOWN", async () => {
+    process.env.RAILWAY_PROVIDER = "railcore";
+    process.env.RAILCORE_API_KEY = "rk_live_test";
+    process.env.RAILKIT_API_KEY = "";
+    setRailcoreFetch(async () => jsonResponse(500, { success: false }));
+    setScrapeFetch(async () => jsonResponse(500, { success: false }));
+    setProvider(null);
+    const app = createApp();
+    const res = await request(app).get("/api/availability").query({
+      trainNumber: "12054",
+      date: FUTURE,
+      from: "ASR",
+      to: "HW",
+      classCode: "CC",
+    });
+    expect(res.body.availability.status).toBe("UNKNOWN");
+    expect(res.body.availability.fare).toBe(0);
+    expect(res.body.bookable).toBe(false);
+  });
+});

@@ -633,6 +633,12 @@ export class FallbackRailwayProvider implements RailwayProvider {
       }
     }
     if (!env.railkitApiKey) {
+      /* Round-7: railkit key hi nahi — erail.in se fare to nikaal lo. */
+      const webFareNoKit = await erailFareForClass(trainNumber, classCode, quotaCode);
+      if (webFareNoKit != null) {
+        logServed("web_erail", "availability", started, false, "fare_only_no_seats");
+        return { ...unknown, fare: webFareNoKit, source: "web_erail" };
+      }
       logServed("none", "availability", started, false, "both_unavailable");
       return unknown;
     }
