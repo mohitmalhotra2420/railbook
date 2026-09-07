@@ -238,7 +238,7 @@ export async function executeTool(
       return {
         ok: true,
         tool,
-        summary: `${args.trainNumber} ${args.classCode}: ${row.status}${row.seats != null ? ` · ${row.seats} seats` : ""}${row.fare > 0 ? ` · ₹${row.fare}` : ""}${row.segmentNote ? ` · (${args.origin}→${args.destination} segment ka direct data nahi — train ki ${row.segmentNote} availability)` : ""}`,
+        summary: `${args.trainNumber} ${args.classCode}: ${row.status}${row.seats != null ? ` · ${row.seats} seats` : ""}${row.waitlist != null ? ` · WL ${row.waitlist}` : ""}${row.rac != null ? ` · RAC ${row.rac}` : ""}${row.fare > 0 ? ` · ₹${row.fare}` : ""}${row.source === "web_railyatri" ? " · (Source: railyatri.in — IRCTC data, railway API down tha; booking se pehle IRCTC par confirm karein)" : ""}${row.segmentNote ? ` · (${args.origin}→${args.destination} segment ka direct data nahi — train ki ${row.segmentNote} availability)` : ""}`,
         data: row,
         provider: providerOf(),
       };
@@ -271,7 +271,7 @@ export async function executeTool(
       return {
         ok: true,
         tool,
-        summary: `${args.trainNumber} ${args.classCode}: ticket ₹${fare.baseFare}, service ₹${fare.serviceFee}, total ₹${fare.total}${fare.source === "web_erail" ? " · (fare web-scrape: erail.in — exact booking fare thoda alag ho sakta hai)" : ""}`,
+        summary: `${args.trainNumber} ${args.classCode}: ticket ₹${fare.baseFare}, service ₹${fare.serviceFee}, total ₹${fare.total}${fare.source === "web_erail" ? " · (fare web-scrape: erail.in — exact booking fare thoda alag ho sakta hai)" : fare.source === "web_railyatri" ? " · (fare web-scrape: railyatri.in/IRCTC — railway API down tha)" : ""}`,
         data: fare,
         provider: providerOf(),
       };

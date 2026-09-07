@@ -1215,9 +1215,10 @@ export async function executeApprovedTool(
             (a.quota as string | undefined) ?? "GN",
           );
           if (!board.classes.length) return failResult(board.provider, `Availability unavailable (${ctx.origin}→${ctx.destination}, ${ctx.date}).`);
+          const boardWeb = board.classes.find((c) => c.source === "web_railyatri" && c.status !== "UNKNOWN");
           return okResult(
             board.provider,
-            `${a.train_number} ${ctx.origin}→${ctx.destination} (${ctx.date}${ctx.autoDate ? ", aaj ke liye" : ""}): ${board.classes.map((c) => `${c.code} ${c.status}${c.seats != null ? ` ${c.seats}` : ""}`).join(", ")}.`,
+            `${a.train_number} ${ctx.origin}→${ctx.destination} (${ctx.date}${ctx.autoDate ? ", aaj ke liye" : ""}): ${board.classes.map((c) => `${c.code} ${c.status}${c.seats != null ? ` ${c.seats}` : ""}${c.waitlist != null ? ` WL${c.waitlist}` : ""}${c.rac != null ? ` RAC${c.rac}` : ""}`).join(", ")}.${boardWeb ? ` (Source: railyatri.in — IRCTC data, railway API down tha${boardWeb.webNote && /as of/i.test(boardWeb.webNote) ? `, ${boardWeb.webNote.match(/as of[^)]*/i)?.[0]}` : ""}.)` : ""}`,
             { train_number: a.train_number, date: ctx.date, resolvedRoute: { origin: ctx.origin, destination: ctx.destination, autoDate: ctx.autoDate }, classes: board.classes },
           );
         }
@@ -1231,8 +1232,8 @@ export async function executeApprovedTool(
         );
         if (row.status === "UNKNOWN") return failResult(providerOf(), `Availability unavailable (${ctx.origin}→${ctx.destination}, ${ctx.date}) — invent nahi karunga.`, row);
         return okResult(
-          providerOf(),
-          `${a.train_number} ${code} ${ctx.origin}→${ctx.destination} (${ctx.date}${ctx.autoDate ? ", aaj ke liye" : ""}): ${row.status}${row.seats != null ? `, ${row.seats} seats` : ""}${row.fare > 0 ? `, ₹${row.fare}` : ""}.`,
+          row.source === "web_railyatri" ? "web_railyatri" : providerOf(),
+          `${a.train_number} ${code} ${ctx.origin}→${ctx.destination} (${ctx.date}${ctx.autoDate ? ", aaj ke liye" : ""}): ${row.status}${row.seats != null ? `, ${row.seats} seats` : ""}${row.waitlist != null ? `, WL ${row.waitlist}` : ""}${row.rac != null ? `, RAC ${row.rac}` : ""}${row.fare > 0 ? `, ₹${row.fare}` : ""}.${row.source === "web_railyatri" ? ` (Source: railyatri.in — IRCTC data, railway API down tha${row.webNote && /as of/i.test(row.webNote) ? `, ${row.webNote.match(/as of[^)]*/i)?.[0]}` : ""}; booking se pehle IRCTC par confirm karein.)` : ""}`,
           { ...row, resolvedRoute: { origin: ctx.origin, destination: ctx.destination, date: ctx.date, autoDate: ctx.autoDate } },
         );
       }
@@ -1257,7 +1258,7 @@ export async function executeApprovedTool(
           );
         return okResult(
           providerOf(),
-          `${a.train_number} ${(a.class_code as string).toUpperCase()} ${ctx.origin}→${ctx.destination} (${ctx.date}${ctx.autoRoute ? ", poora route" : ""}${ctx.autoDate ? ", aaj ke liye" : ""}): ticket ₹${fare.baseFare}, service ₹${fare.serviceFee}, total ₹${fare.total}${(a.passengers as number | undefined) ? ` (${a.passengers} pax)` : ""}.`,
+          `${a.train_number} ${(a.class_code as string).toUpperCase()} ${ctx.origin}→${ctx.destination} (${ctx.date}${ctx.autoRoute ? ", poora route" : ""}${ctx.autoDate ? ", aaj ke liye" : ""}): ticket ₹${fare.baseFare}, service ₹${fare.serviceFee}, total ₹${fare.total}${(a.passengers as number | undefined) ? ` (${a.passengers} pax)` : ""}.${fare.source === "web_railyatri" ? " (Source: railyatri.in — IRCTC fare, railway API down tha; exact booking fare thoda alag ho sakta hai.)" : fare.source === "web_erail" ? " (Source: erail.in — poore route ka fare, railway API down tha; exact booking fare alag ho sakta hai.)" : ""}`,
           { ...fare, resolvedRoute: { origin: ctx.origin, destination: ctx.destination, date: ctx.date, autoRoute: ctx.autoRoute, autoDate: ctx.autoDate } },
         );
       }

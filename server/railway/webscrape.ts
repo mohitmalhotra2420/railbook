@@ -605,7 +605,7 @@ export type ScrapedStation = {
   code: string;
   name: string;
   city: string;
-  provider: "web_railenquiry";
+  provider: "web_railenquiry" | "web_erail";
   sourceUrl: string;
 };
 
@@ -625,4 +625,194 @@ export async function scrapeStationLookupWeb(code: string): Promise<ScrapedStati
   const html = await fetchHtml(sourceUrl);
   if (!html) return null;
   return parseRailEnquiryStation(html, c, sourceUrl);
+}
+
+/* ── SEAT AVAILABILITY via RailYatri SA JSON (Round-16, user request
+ * 2026-09-07: "api fail ho jaaye to seat availability ... web se scrape").
+ * railyatri.in ka seat-availability page client-side jo endpoint call
+ * karta hai (sa.railyatri.in/api/v3/seat/availability/<train>/<date>/
+ * <from>/<to>/<class>/<quota>.json) — keyless, IRCTC-sourced (cached,
+ * `last_updated_at` ke saath). 6 din ki rows aati hain; hum maangi hui
+ * date ki row lete hain. Status text "AVAILABLE-0288" / "RAC 12" /
+ * "GNWL45/WL20" / "REGRET" / "NOT AVAILABLE" / "TRAIN DEPARTED". */
+
+export type ScrapedSeatAvailability = {
+  trainNumber: string;
+  date: string; // YYYY-MM-DD
+  classCode: string;
+  quota: string;
+  statusText: string; // raw IRCTC-style string
+  status: "AVAILABLE" | "RAC" | "WAITLIST" | "NOT_AVAILABLE" | "UNKNOWN";
+  seats: number | null;
+  rac: number | null;
+  waitlist: number | null;
+  ticketFare: number | null;
+  totalFare: number | null;
+  lastUpdatedAt: string | null;
+  cacheText: string | null;
+  provider: "web_railyatri";
+  sourceUrl: string;
+};
+
+export function parseIrctcAvailabilityText(raw: string): Pick<ScrapedSeatAvailability, "status" | "seats" | "rac" | "waitlist"> {
+  const t = String(raw ?? "").trim().toUpperCase();
+  const num = (re: RegExp) => {
+    const m = t.match(re);
+    return m ? Number(m[1]) : null;
+  };
+  if (/^(AVAILABLE|AVL|CURR_AVBL)/.test(t)) return { status: "AVAILABLE", seats: num(/(\d+)/), rac: null, waitlist: null };
+  if (/^RAC/.test(t)) return { status: "RAC", seats: null, rac: num(/RAC\s*-?\s*(\d+)/), waitlist: null };
+  if (/WL\s*-?\s*\d+/.test(t) || /^(GNWL|RLWL|PQWL|TQWL|RSWL|RQWL|CKWL)/.test(t)) {
+    /* "GNWL45/WL20" — current WL (second number) hi user ke liye matter karta hai. */
+    const all = [...t.matchAll(/WL\s*-?\s*(\d+)/g)].map((m) => Number(m[1]));
+    return { status: "WAITLIST", seats: null, rac: null, waitlist: all.length ? all[all.length - 1] : null };
+  }
+  if (/REGRET|NOT AVAILABLE|TRAIN DEPARTED|CHARTING DONE|CLASS NOT EXIST|NOT_AVAILABLE/.test(t)) {
+    return { status: "NOT_AVAILABLE", seats: 0, rac: null, waitlist: null };
+  }
+  return { status: "UNKNOWN", seats: null, rac: null, waitlist: null };
+}
+
+const SA_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+function ryDateKey(ymd: string): string {
+  /* API rows "8-9-2026" (D-M-YYYY, no padding) dete hain. */
+  const m = ymd.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return ymd;
+  return `${Number(m[3])}-${Number(m[2])}-${m[1]}`;
+}
+
+export async function scrapeSeatAvailabilityWeb(
+  trainNumber: string,
+  dateYmd: string,
+  from: string,
+  to: string,
+  classCode: string,
+  quota = "GN",
+): Promise<ScrapedSeatAvailability | null> {
+  const num = String(trainNumber).trim();
+  if (!/^\d{5}$/.test(num) || !/^\d{4}-\d{2}-\d{2}$/.test(dateYmd)) return null;
+  const f = String(from).toUpperCase();
+  const t = String(to).toUpperCase();
+  const c = String(classCode).toUpperCase();
+  const q = String(quota || "GN").toUpperCase();
+  const url =
+    `https://sa.railyatri.in/api/v3/seat/availability/${num}/${dateYmd}/${f}/${t}/${c}/${q}.json` +
+    `?device_type_id=6&utm_source=dweb_sa&user_id=-2345434&authentication_token=&train_search=true&train_source=${f}&train_destination=${t}`;
+  try {
+    const res = await (scrapeFetchImpl ?? globalThis.fetch.bind(globalThis))(url, {
+      headers: { "User-Agent": UA, Accept: "application/json", Referer: "https://www.railyatri.in/" },
+      signal: AbortSignal.timeout(SCRAPE_TIMEOUT_MS),
+    });
+    if (!res.ok) return null;
+    const j = (await res.json()) as {
+      success?: boolean;
+      error?: string | null;
+      seat_availibility?: {
+        availablity_date?: string;
+        availablity_status?: string;
+        seat_avl?: number | null;
+        ticket_fare?: number | null;
+        total_fare?: number | null;
+        last_updated_at?: string | null;
+        cache_text?: string | null;
+      }[];
+    } | null;
+    const rows = j?.seat_availibility ?? [];
+    if (!j?.success || !rows.length) return null;
+    const want = ryDateKey(dateYmd);
+    const row = rows.find((r) => String(r.availablity_date ?? "").trim() === want) ?? null;
+    if (!row) return null;
+    const statusText = String(row.availablity_status ?? "").trim();
+    if (!statusText) return null;
+    const parsed = parseIrctcAvailabilityText(statusText);
+    if (parsed.status === "UNKNOWN") return null;
+    /* FRESHNESS guard: RailYatri cache purana ho sakta hai ("As of 16 days
+     * ago" dekha) — booking-critical data 24h se purana kabhi nahi dete;
+     * stale = null (honest UNKNOWN upar). Timestamp parse na ho to bhi null. */
+    const updatedMs = Date.parse(String(row.last_updated_at ?? "").replace(" +0530", "+05:30").replace(" ", "T"));
+    if (!Number.isFinite(updatedMs) || Date.now() - updatedMs > SA_MAX_AGE_MS) return null;
+    /* Journey date beet chuki ho to bhi nahi. */
+    if (Date.parse(`${dateYmd}T23:59:59+05:30`) < Date.now()) return null;
+    const seats = parsed.status === "AVAILABLE" && typeof row.seat_avl === "number" ? row.seat_avl : parsed.seats;
+    return {
+      trainNumber: num,
+      date: dateYmd,
+      classCode: c,
+      quota: q,
+      statusText,
+      status: parsed.status,
+      seats,
+      rac: parsed.rac,
+      waitlist: parsed.waitlist,
+      ticketFare: typeof row.ticket_fare === "number" ? row.ticket_fare : null,
+      totalFare: typeof row.total_fare === "number" ? row.total_fare : null,
+      lastUpdatedAt: row.last_updated_at ?? null,
+      cacheText: row.cache_text ?? null,
+      provider: "web_railyatri",
+      sourceUrl: `https://www.railyatri.in/seat-availability/${num}`,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/* ── STATION NAME SEARCH via erail.in station list (Round-16). erail.in
+ * apni site ke liye poori ~9000-station "CODE,Name,CODE,Name…" list
+ * (/js/cmp/stations.js) serve karta hai — local DB (~70 stations) aur
+ * railenquiry (sirf code→name) ke baad NAME-search ke liye yahi last
+ * resort. Ek baar fetch, 6 ghante memory cache. */
+
+let erailStationsCache: { at: number; list: { code: string; name: string }[] } | null = null;
+const ERAIL_STATIONS_TTL_MS = 6 * 60 * 60 * 1000;
+
+export async function erailStationList(): Promise<{ code: string; name: string }[]> {
+  if (erailStationsCache && Date.now() - erailStationsCache.at < ERAIL_STATIONS_TTL_MS) return erailStationsCache.list;
+  const html = await fetchHtml("https://erail.in/js/cmp/stations.js?v=092f8");
+  if (!html) return erailStationsCache?.list ?? [];
+  const m = html.match(/StationsData\s*=\s*"([^"]+)"/);
+  if (!m) return erailStationsCache?.list ?? [];
+  const parts = m[1].split(",");
+  const list: { code: string; name: string }[] = [];
+  for (let i = 0; i + 1 < parts.length; i += 2) {
+    const code = parts[i].trim();
+    const name = parts[i + 1].trim();
+    if (/^[A-Z]{1,5}$/.test(code) && name && !/^\d+$/.test(name)) list.push({ code, name });
+  }
+  if (list.length > 1000) erailStationsCache = { at: Date.now(), list };
+  return list;
+}
+
+export function _setErailStationsCacheForTests(list: { code: string; name: string }[] | null): void {
+  erailStationsCache = list ? { at: Date.now(), list } : null;
+}
+
+/** Name/code search — exact code, phir name-prefix, phir name-contains.
+ * "Jn"/"Junction" normalize. Max `limit` results. */
+export async function scrapeStationSearchWeb(query: string, limit = 6): Promise<ScrapedStation[]> {
+  const q = query.trim().toLowerCase().replace(/\s+/g, " ");
+  if (q.length < 2) return [];
+  const list = await erailStationList();
+  if (!list.length) return [];
+  const norm = (n: string) => n.toLowerCase().replace(/\bjn\b/g, "junction").replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
+  const qn = norm(q);
+  const scored: { s: { code: string; name: string }; score: number }[] = [];
+  for (const s of list) {
+    const n = norm(s.name);
+    let score = 0;
+    if (s.code.toLowerCase() === q) score = 100;
+    else if (n === qn) score = 90;
+    else if (n.startsWith(qn + " ")) score = 80;
+    else if (n.startsWith(qn)) score = 70;
+    else if (new RegExp(`\\b${qn.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(n)) score = 50;
+    if (score) scored.push({ s, score });
+  }
+  scored.sort((a, b) => b.score - a.score || a.s.name.length - b.s.name.length);
+  return scored.slice(0, limit).map(({ s }) => ({
+    code: s.code,
+    name: s.name,
+    city: s.name.replace(/\s+(Jn|Junction|Cantt|City|Terminus|Central|Town|Road|Halt|H)$/i, "").trim() || s.name,
+    provider: "web_erail",
+    sourceUrl: "https://erail.in/",
+  }));
 }

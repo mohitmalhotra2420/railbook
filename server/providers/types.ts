@@ -35,8 +35,10 @@ export interface ClassAvailability {
    * ke first/last stop (endpoints) ki availability hai, labeled dikhna hai. */
   segmentNote?: string;
   /** Round-7: fare API-fail par erail.in scrape se aaya (status UNKNOWN,
-   * fare-only). Seats is case mein nahi hote. */
-  source?: "web_erail";
+   * fare-only). Round-16: "web_railyatri" = seats+status RailYatri SA
+   * (IRCTC-sourced, cached) se — `webNote` mein last-updated. */
+  source?: "web_erail" | "web_railyatri";
+  webNote?: string;
 }
 
 export interface TrainResult {
@@ -75,7 +77,7 @@ export interface FareBreakdown {
   /** Fare kyun nahi mila (endpoint band / quota khatam) — honest user message. */
   unavailableReason?: string;
   /** Round-7: erail.in web-scrape se aaya (API-fail fallback). */
-  source?: "web_erail";
+  source?: "web_erail" | "web_railyatri";
 }
 
 export interface PassengerInput {
