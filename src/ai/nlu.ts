@@ -125,7 +125,7 @@ const NUM_WORDS: Record<string, number> = {
 
 const TICKET_UNIT = /(?:logon ke|logon|logs?|passengers?|pax|people|persons?|tickets?|seats?|टिकटें?|टिकिट|सीटें?|लोगों?)/i;
 
-const FILLER = /मुझे|मैने|मैं|main|mujhe|kal|aaj|parso|आज|कल|परसों|परसो/g;
+const FILLER = /मुझे|मैने|मैं|main|mujhe|kal|aaj|parso|आज|कल|परसों|परसो|मेरे को|मुझको|मेरी|मेरा|हमें|हमको/g;
 
 const CLASS_MAP: Array<{ re: RegExp; code: ClassCode }> = [
   { re: /\b(executive(?:\s+chair(?:\s+car)?)?|ec)\b/, code: "EC" },
