@@ -844,4 +844,44 @@ describe("agent integration: agentic path + deterministic fallback", () => {
     const turn = await runAgenticTurn({ text: "amritsar se delhi kal jaana hai", now: NOW, known: { origin: "ASR", destination: "NDLS", date: null, dateProvided: false } });
     expect(turn.steps.find((s) => s.tool === "SEARCH_TRAINS")?.ok).toBe(true);
   });
+
+  it("Round-16i: CHECK_AVAILABILITY / GET_FARE without date → rejected (date_required), model asks date+class", async () => {
+    railcoreMock();
+    const fed: any[] = [];
+    setAgenticNvidiaFetch(async (_input, init) => {
+      const body = JSON.parse(String(init?.body));
+      const toolMsgs = body.messages.filter((m: any) => m.role === "tool");
+      fed.push(...toolMsgs.map((m: any) => JSON.parse(m.content)));
+      if (toolMsgs.length === 0) {
+        return chatResponse({
+          tool_calls: [
+            toolCall("CHECK_AVAILABILITY", { train_number: "12014", date: "2026-09-04", class_code: "CC" }),
+            toolCall("GET_FARE", { train_number: "12014", date: "2026-09-04", class_code: "CC" }),
+          ],
+        });
+      }
+      return chatResponse({ content: "12014 CC ka availability kis date ka chahiye? (aaj/kal/parso ya tareekh)" });
+    });
+    const turn = await runAgenticTurn({ text: "12014 CC ki seat batao", now: NOW, known: { trainNumber: "12014", classCode: "CC", date: null, dateProvided: false } });
+    for (const name of ["CHECK_AVAILABILITY", "GET_FARE"]) {
+      const st = turn.steps.find((s) => s.tool === name);
+      expect(st?.ok).toBe(false);
+      expect(st?.summary).toMatch(/DATE MISSING/);
+    }
+    expect(fed.every((f) => /DATE MISSING/.test(f.summary))).toBe(true);
+    expect(turn.reply).toMatch(/kis date/i);
+    expect(turn.reply).not.toMatch(/\b\d{2,3} seats?\b|₹/);
+  });
+
+  it("Round-16i: '12014 CC kal ki seat' → resolver date → CHECK_AVAILABILITY allowed", async () => {
+    railcoreMock();
+    setAgenticNvidiaFetch(async (_input, init) => {
+      const body = JSON.parse(String(init?.body));
+      const toolMsgs = body.messages.filter((m: any) => m.role === "tool").length;
+      if (toolMsgs === 0) return chatResponse({ tool_calls: [toolCall("CHECK_AVAILABILITY", { train_number: "12014", date: "2026-09-05", origin: "ASR", destination: "NDLS", class_code: "CC" })] });
+      return chatResponse({ content: "12014 CC ASR→NDLS 2026-09-05: AVAILABLE, 47 seats." });
+    });
+    const turn = await runAgenticTurn({ text: "12014 CC kal ki seat batao", now: NOW, known: { trainNumber: "12014", classCode: "CC", date: null, dateProvided: false } });
+    expect(turn.steps.find((s) => s.tool === "CHECK_AVAILABILITY")?.ok).toBe(true);
+  });
 });

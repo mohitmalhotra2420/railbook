@@ -1436,7 +1436,7 @@ function systemPrompt(
     "1. Railway data ke liye khud decide karke approved tools call karo — tabhi jab jawab ke liye data chahiye. Agar context/history se required info (origin/destination/date/train) already pata hai to poochho mat, seedha tool call karo.",
     "2. Fastest/cheapest/earliest/best/compare/alternative-dates/connecting routes ke liye JOURNEY_ANALYZE use karo (yeh deterministic Atlas engine hai — uske output par explain karo).",
     "3. Multi-step tool calling allowed + encouraged hai: pehle SEARCH_TRAINS, phir results dekh kar zaroorat ke hisaab se GET_TIMETABLE / GET_FARE / CHECK_AVAILABILITY / GET_TRAIN_INFO call karo. Ek tool call mein sab na mile to agla tool call karo.",
-    "3b. User sirf train number + class poochhe (route/date na de) to bhi GET_FARE / CHECK_AVAILABILITY turant bulao — route/date optional hain, server timetable se route aur aaj ki date khud lagata hai. Missing slots ki bhikh mat maango.",
+    "3b. User sirf train number + class poochhe (route na de) to bhi GET_FARE / CHECK_AVAILABILITY bulao — route optional hai, server timetable se route khud lagata hai. Par DATE zaroori hai: Known context mein date=- ho aur user ne is message mein date na di ho to tool call MAT karo (server reject karega) — sirf date poochho (class bhi missing ho to saath mein). Aaj ki date kabhi assume mat karo.",
     "4. Sirf tool results ke facts bolo. Train number, naam, time, fare, seats, delay, STATION CODE — kuch bhi invent mat karo. Station codes/options sirf tool results se; apni knowledge se station code mat banao.",
     "5. Required info (origin/destination/date/train number/PNR) genuinely missing ho to POOCHHO — journey/book intent ke liye DATE sabse pehle poochho (sabse zaroori slot) — Known context mein date=- ho aur user ne is message mein bhi date na di ho to SEARCH_TRAINS/JOURNEY_ANALYZE call MAT karo (server reject karega), sirf date poochho; station ambiguity ho to usi ek line mein saath mein poochho (jaise: \"Kis date ko jaana hai? Aur Delhi mein kaunsa station — NDLS, DLI?\"). Aaj ki date silently assume mat karo. Station options sirf tool result (needs_choice) ya well-known stations se bolo — airport/foreign codes (BCT jaise) kabhi Delhi ke options mein mat likho.",
     "6. Data na mile to saaf bolo ki unavailable hai — kabhi fake number/seats/fare mat banao, aur train/station ka naam ya code khud se guess mat karo (sab kuch sirf tool result se).",
@@ -1958,6 +1958,21 @@ export async function runAgenticTurn(input: {
               "Ye general-fact sawaal (top speed / history / coaches / locomotive) hai — railway data tools (timetable/live/fare) iska jawab NAHI dete. WEB_SEARCH use karo: train ka naam + number + fact (jaise 'Jan Shatabdi Express 12054 top speed').",
             data: null,
             rejected: "general_fact_tool_block",
+          };
+        } else if (
+          (toolName === "CHECK_AVAILABILITY" || toolName === "GET_FARE") &&
+          input.known?.dateProvided === false &&
+          dateHint?.kind !== "date"
+        ) {
+          /* Round-16i (user 2026-09-08 "wahan bhi date mandatory"): specific
+           * train ki seat/fare bhi bina date ke nahi — aaj assume nahi. */
+          const tn = String(args.train_number ?? input.known?.trainNumber ?? "");
+          result = {
+            ok: false,
+            source: null,
+            summary: `DATE MISSING — ${tn ? tn + " ki " : ""}${toolName === "GET_FARE" ? "fare" : "seat availability"} ke liye journey date chahiye; aaj ki date assume karke check MAT karo. Reply mein SIRF poochho: "Kis date ka ${toolName === "GET_FARE" ? "fare" : "availability"} chahiye? (aaj/kal/parso ya tareekh)" — class bhi missing ho to usi line mein saath poochho. Koi number/andaza nahi.`,
+            data: null,
+            rejected: "date_required",
           };
         } else if (
           (toolName === "SEARCH_TRAINS" || toolName === "JOURNEY_ANALYZE") &&

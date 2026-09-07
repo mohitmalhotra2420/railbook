@@ -1634,15 +1634,20 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
 
   if (tool === "getCoachPosition" && !trainNo) {
     reply = "Kaunsi train ki coach position? 5-digit train number boliye.";
-  } else if ((tool === "getAvailability" || tool === "getFare") && trainNo && !ctx.classCode) {
-    /* ── SMART SLOT-ASK (screenshot fix 2026-09-06, bug (b)): "12054 ki seat
-     * availability?" par poora "Train, date, stations aur class chahiye" nahi —
-     * train context mein hai, date aaj default, stations auto-route honge;
-     * sirf CLASS poochho. (Agla "CC" jaisa jawab resume se availability
-     * chala dega — upar slot-resume + tools.ts aaj-default.) */
+  } else if ((tool === "getAvailability" || tool === "getFare") && trainNo && (!ctx.classCode || !ctx.dateProvided)) {
+    /* ── SMART SLOT-ASK (screenshot fix 2026-09-06, bug (b)): train context
+     * mein hai, stations auto-route honge; sirf jo missing hai wahi poochho.
+     * Round-16i: DATE bhi mandatory (aaj default nahi) — class ke saath ek
+     * hi line mein. (Agla "CC"/"kal" jaisa jawab slot-resume se tool chala dega.) */
     const routeBit = ctx.origin && ctx.destination ? ` ${ctx.origin.code}→${ctx.destination.code}` : "";
-    const dateBit = ctx.date ? ` ${ctx.date}` : "";
-    reply = `${trainNo}${routeBit}${dateBit} ki kaunsi class — CC, EC, SL, 2A, 3A?`;
+    const what = tool === "getFare" ? "fare" : "availability";
+    if (!ctx.dateProvided && !ctx.classCode) {
+      reply = `${trainNo}${routeBit} ka ${what} — kis date ka chahiye (aaj/kal/parso ya tareekh), aur kaunsi class — CC, EC, SL, 2A, 3A?`;
+    } else if (!ctx.dateProvided) {
+      reply = `${trainNo}${routeBit} ${ctx.classCode} ka ${what} kis date ka chahiye — aaj, kal, parso ya tareekh batao.`;
+    } else {
+      reply = `${trainNo}${routeBit} ${ctx.date} ki kaunsi class — CC, EC, SL, 2A, 3A?`;
+    }
     ctx.lastToolOk = false;
   } else if (tool && tool !== "searchTrains") {
     /* FARE AUTO-ROUTE (user report 2026-09-06: "12014 ki CC fare" par
