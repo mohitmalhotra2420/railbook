@@ -419,3 +419,12 @@ describe("agent context + follow-ups", () => {
     expect(decideTool("fare", { ...ctx, classCode: "CC", date: "2026-08-20", dateProvided: true, selectedTrainNumber: "12014" })).toBe("getFare");
   });
 });
+
+describe("Round-16d: comparison is NOT a local UI query", () => {
+  it("'better hai yan' / 2 numbers → compare (goes to agent)", () => {
+    expect(classifyFollowUp("12053 better hai yan 12014 ?")).toBe("compare");
+    expect(classifyFollowUp("12053 better hai ludhiana jaane ke liye yan 12014?")).toBe("compare");
+    expect(classifyFollowUp("12053 vs 12014 kaunsi better")).toBe("compare");
+    expect(classifyFollowUp("aur koi train hai?")).toBe("more_trains");
+  });
+});

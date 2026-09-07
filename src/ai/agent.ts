@@ -99,6 +99,7 @@ export type FollowUp =
   | "bookings"
   | "wallet"
   | "more_trains"
+  | "compare"
   | "train_pick"
   | "guide"
   | null;
@@ -143,11 +144,14 @@ export function classifyFollowUp(text: string): FollowUp {
   ) {
     return "train_pick";
   }
+  /* Round-16d (user screenshot 2026-09-08: "12053 better hai yan 12014?" →
+   * "evidence mein 12014 nahi hai"): comparison ab alag kind hai — ye LOCAL UI
+   * query NAHI hai, agent ko jaana chahiye jo dono trains ka data laata hai. */
   if (
-    /\b(kaunsi better|kaun better|compare|recommend)\b/.test(t) ||
+    /\b(kaunsi better|kaun better|kon better|better hai|compare|recommend|behtar)\b/.test(t) ||
     ((/\b(ya|yan|vs|aur|or)\b/.test(t) || /\bkon si\b/.test(t)) && (t.match(/\b\d{5}\b/g) ?? []).length >= 2)
   ) {
-    return "more_trains";
+    return "compare";
   }
   return null;
 }

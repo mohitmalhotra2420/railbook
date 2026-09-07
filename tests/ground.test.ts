@@ -42,3 +42,15 @@ describe("grounded RailCore answers", () => {
     expect(text).toMatch(/^Nahi/);
   });
 });
+
+describe("Round-16d: compare questions never grounded from ONE schedule (user screenshot 2026-09-08)", () => {
+  it("2 train numbers → null (agent handles)", () => {
+    expect(shouldGroundFact("12053 better hai yan 12014 ?", null)).toBeNull();
+    expect(shouldGroundFact("12053 better hai ludhiana jaane ke liye yan 12014?", "12053")).toBeNull();
+    expect(shouldGroundFact("12053 vs 12014", null)).toBeNull();
+  });
+  it("single train fact still grounds", () => {
+    expect(shouldGroundFact("12053 ludhiana rukti hai?", null)).toEqual({ train: "12053" });
+    expect(shouldGroundFact("ye ludhiana rukti hai?", "12053")).toEqual({ train: "12053" });
+  });
+});

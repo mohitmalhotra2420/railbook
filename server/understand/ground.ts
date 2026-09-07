@@ -4,7 +4,12 @@ import { stripFences } from "./parse-json.js";
 
 export function shouldGroundFact(text: string, lastFactTrain?: string | null): { train: string } | null {
   const t = text.toLowerCase();
-  const nums = [...t.matchAll(/\b(\d{5})\b/g)].map((m) => m[1]);
+  const nums = [...new Set([...t.matchAll(/\b(\d{5})\b/g)].map((m) => m[1]))];
+  /* Round-16d: 2+ trains ka sawaal (compare/"ya"/"better") ek train ke schedule
+   * se ground nahi ho sakta — model "evidence mein X nahi hai" bol deta tha.
+   * Aise sawaal agent ke liye chhod do. */
+  if (nums.length >= 2) return null;
+  if (/\b(better|behtar|compare|recommend|kaunsi|kaun si|kon si|konsi|vs)\b/.test(t) && /\b(ya|yan|or|vs)\b/.test(t)) return null;
   const train = nums[0] || (lastFactTrain ?? "").trim() || "";
   if (!/^\d{5}$/.test(train)) return null;
   if (
@@ -108,7 +113,10 @@ Return ONLY JSON: {"reply":"..."}`;
       choices?: { message?: { content?: string | null; reasoning_content?: string | null } }[];
     };
     const msg = json.choices?.[0]?.message;
-    const reply = parseReply(msg?.content ?? "") || parseReply(msg?.reasoning_content ?? "");
+    let reply = parseReply(msg?.content ?? "") || parseReply(msg?.reasoning_content ?? "");
+    /* Flat "evidence mein nahi hai" jaisa jawab user ko kabhi nahi — null lautao
+     * taaki client agent/deterministic path par gir jaaye. */
+    if (reply && /\bevidence\b/i.test(reply)) reply = null;
     return { reply, latencyMs, ok: Boolean(reply) };
   } catch {
     return { reply: null, latencyMs: Date.now() - started, ok: false };

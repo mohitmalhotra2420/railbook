@@ -478,7 +478,7 @@ export function planTurn(input: TurnInput): AssistantTurn {
     }
     return { text: "Kaunsi train ki seats? 5-digit number boliye.", prefs, apply, ask: "trainNumber" };
   }
-  if ((follow === "more_trains" || nlu.intent === "COMPARE_TRAINS" || nlu.intent === "SELECT_BEST") && input.booking.trains.length) {
+  if ((follow === "more_trains" || follow === "compare" || nlu.intent === "COMPARE_TRAINS" || nlu.intent === "SELECT_BEST") && input.booking.trains.length) {
     const nums = spokenTrainNumbers(input.text);
     if (nums.length >= 2) {
       const a = input.booking.trains.find((t) => t.number === nums[0]);
@@ -493,7 +493,7 @@ export function planTurn(input: TurnInput): AssistantTurn {
       }
       return namedTrainCompareTurn(input.text, prefs, apply);
     }
-    if (nlu.intent === "COMPARE_TRAINS" || follow === "more_trains") {
+    if (nlu.intent === "COMPARE_TRAINS" || follow === "more_trains" || follow === "compare") {
       const pool = filterTrains(input.booking.trains, prefs);
       return { text: "Yeh aur trains hain (provider list se):", blocks: [{ type: "more", trains: pool }], prefs, ask: "train" };
     }
