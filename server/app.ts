@@ -62,6 +62,46 @@ export function createApp() {
   });
   app.use(express.json({ limit: "256kb" }));
 
+  /* Round-13 (diagnostic): AI engine live-check — minimal NIM call, no tools.
+   * ?model= (default primary), ?timeoutMs= (default 30000). Sirf status/latency
+   * return karta hai — koi data/key expose nahi. */
+  app.get("/api/ai-ping", async (req, res) => {
+    const model = String(req.query.model ?? process.env.NVIDIA_MODEL ?? "").trim();
+    const timeoutMs = Math.min(Math.max(Number(req.query.timeoutMs ?? 30000) || 30000, 2000), 60000);
+    const base = String(process.env.NVIDIA_BASE_URL ?? "https://integrate.api.nvidia.com/v1").replace(/\/$/, "");
+    const key = process.env.NVIDIA_API_KEY ?? "";
+    if (!model || !key) {
+      res.status(400).json({ ok: false, error: "model/key missing" });
+      return;
+    }
+    const started = Date.now();
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const r = await fetch(`${base}/chat/completions`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ model, messages: [{ role: "user", content: "Reply with exactly: OK" }], max_tokens: 5, temperature: 0 }),
+        signal: controller.signal,
+      });
+      const latencyMs = Date.now() - started;
+      let snippet = "";
+      let errText = "";
+      try {
+        const j = (await r.json()) as { choices?: { message?: { content?: string } }[]; error?: { message?: string } };
+        snippet = String(j.choices?.[0]?.message?.content ?? "").slice(0, 40);
+        errText = String(j.error?.message ?? "");
+      } catch {
+        /* body parse fail */
+      }
+      res.json({ ok: r.ok, status: r.status, latencyMs, model, snippet, error: errText || undefined });
+    } catch (e) {
+      res.json({ ok: false, status: 0, latencyMs: Date.now() - started, model, error: e instanceof Error && e.name === "AbortError" ? `timeout>${timeoutMs}ms` : "network" });
+    } finally {
+      clearTimeout(timer);
+    }
+  });
+
   app.get("/api/health", (_req, res) => {
     const p = getProvider();
     const block = railcoreBlockState();
