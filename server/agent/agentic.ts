@@ -1486,19 +1486,25 @@ type AgenticTransport = {
   primaryModel: string;
   /** reasoning_effort sirf NVIDIA GPT-OSS ko bhejte hain. */
   reasoningEffort: boolean;
+  /** Round-13b: cross-provider fallback — NVIDIA chain ke END mein HF model
+   * (GLM) bhi jodo jab dono providers configured hon. NIM catalogue drift
+   * (deepseek hang, purane models 410) se resilient: ek provider down ho
+   * to doosra jawab de. Model -> HF endpoint routing loop mein hoti hai. */
+  hfFallback: { model: string; url: string; apiKey: string } | null;
 };
 
 function agenticTransport(): AgenticTransport | null {
   if (env.agenticProvider === "hf") {
-    if (!env.hfToken || !env.hfModel) return null;
-    return {
-      provider: "hf",
-      url: `${env.hfBaseUrl.replace(/\/$/, "")}/chat/completions`,
-      apiKey: env.hfToken,
-      models: [env.hfModel],
-      primaryModel: env.hfModel,
-      reasoningEffort: false,
-    };
+  if (!env.hfToken || !env.hfModel) return null;
+  return {
+    provider: "hf",
+    url: `${env.hfBaseUrl.replace(/\/$/, "")}/chat/completions`,
+    apiKey: env.hfToken,
+    models: [env.hfModel],
+    primaryModel: env.hfModel,
+    reasoningEffort: false,
+    hfFallback: null,
+  };
   }
   if (!env.nvidiaApiKey) return null;
   // BENCHMARK-ONLY (AGENTIC_MODEL): single-model chain, sirf benchmark scripts set karte hain.
@@ -1507,13 +1513,20 @@ function agenticTransport(): AgenticTransport | null {
   const models = benchOverride
     ? [benchOverride]
     : [env.nvidiaModel, ...(env.nvidiaFallbackModel && env.nvidiaFallbackModel !== env.nvidiaModel ? [env.nvidiaFallbackModel] : [])];
+  /* Round-13b: HF (GLM) chain ke end mein — NIM drift par bhi agentic zinda
+   * rahe (ai-ping prod: deepseek-v4-flash hang, llama/qwen/kimi 410/404). */
+  const hfFallback =
+    env.hfToken && env.hfModel && !benchOverride && !models.includes(env.hfModel)
+      ? { model: env.hfModel, url: `${env.hfBaseUrl.replace(/\/$/, "")}/chat/completions`, apiKey: env.hfToken }
+      : null;
   return {
     provider: "nvidia",
     url: `${env.nvidiaBaseUrl.replace(/\/$/, "")}/chat/completions`,
     apiKey: env.nvidiaApiKey,
-    models,
+    models: hfFallback ? [...models, hfFallback.model] : models,
     primaryModel: benchOverride || env.nvidiaModel,
     reasoningEffort: true,
+    hfFallback,
   };
 }
 
@@ -1626,6 +1639,11 @@ export async function runAgenticTurn(input: {
     let msg: { content?: string | null; reasoning_content?: string | null; tool_calls?: ChatMsg["tool_calls"] } | undefined;
     let lastFailure: string | null = null;
     for (const model of modelChain) {
+      /* Round-13b: HF fallback model chain ke end mein — uska endpoint/key
+       * alag hai (HF router), baaki sab NVIDIA NIM par. */
+      const hf = transport.hfFallback && model === transport.hfFallback.model ? transport.hfFallback : null;
+      const callUrl = hf ? hf.url : url;
+      const callKey = hf ? hf.apiKey : transport.apiKey;
       /* Round-13 (prod incident 2026-09-07): primary model deepseek-v4-flash
        * NIM par hang ho raha tha — 40s timeout poora budget kha jata tha aur
        * fallback ko ~5s hi milte the (dono timeout). Ab har agle model ke
@@ -1638,9 +1656,9 @@ export async function runAgenticTurn(input: {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), agenticTimeoutMs);
       try {
-        const res = await fetchImpl()(url, {
+        const res = await fetchImpl()(callUrl, {
           method: "POST",
-          headers: { Authorization: `Bearer ${transport.apiKey}`, "Content-Type": "application/json" },
+          headers: { Authorization: `Bearer ${callKey}`, "Content-Type": "application/json" },
           body: JSON.stringify({
             model,
             temperature: 0,
