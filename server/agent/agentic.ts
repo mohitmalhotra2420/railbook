@@ -1941,7 +1941,16 @@ export async function runAgenticTurn(input: {
     const demandsKnownInfo =
       /(route|origin|destination|date|tarikh|class|train\s*(?:number|no|ka\s*n))?[^.?!\n]{0,28}(chahiye|bolo|batao|bataye|poochh?o?|missing|dena)[^.?!\n]{0,28}/i.test(clean) &&
       /(route|origin|destination|date|tarikh|class|train)/i.test(clean);
-    const asksInsteadOfAnswering = okSteps.length > 0 && demandsKnownInfo;
+    /* Round-14 (prod 2026-09-07, Muse): "Delhi mein kaunsa station chahiye? DLI/NDLS/NZM…"
+     * LEGIT clarification hai (SEARCH_STATIONS ok + ambiguous city) — par
+     * "destination … chahiye" regex ise 'asked instead of answered' maan kar
+     * reply ko "• Delhi: 14 stations mile." (raw summary) se replace kar deta
+     * tha. Station-choice sawaal jisme real station codes hain → exempt. */
+    const isStationChoiceQuestion =
+      /kaun\s*s[aie]\s+station|which station|station\s+(?:chahiye|chun|choose|select|batao|bataye)/i.test(clean) &&
+      (clean.match(/\b[A-Z]{2,5}\b/g) ?? []).length >= 3 &&
+      steps.some((st) => st.tool === "SEARCH_STATIONS" || st.tool === "SEARCH_TRAINS" || st.tool === "JOURNEY_ANALYZE");
+    const asksInsteadOfAnswering = okSteps.length > 0 && demandsKnownInfo && !isStationChoiceQuestion;
     if (asksInsteadOfAnswering) {
       if (!repaired && step < MAX_STEPS) {
         repaired = true;
