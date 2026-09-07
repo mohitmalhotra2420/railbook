@@ -1522,6 +1522,60 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
     const trainNo = resolveTrainNumber(req.text, ctx) ?? det.trainNumber;
     if (trainNo) ctx.selectedTrainNumber = trainNo;
 
+    /* ── ROUND-13d: LIVE fast-path — "18310 kahan hai abhi" jaisi UNAMBIGUOUS
+     * query par LLM round-trip (10s+) bekar hai. Train number + live-phrase,
+     * aur number ke siwaay sirf stopwords bache (koi station/city token nahi)
+     * → seedha getLiveStatus tool, instant deterministic. Messy/ambiguous
+     * ("18310 cdg kahan hai", typo wali) query ab bhi agentic jaati hai. */
+    const LIVE_PHRASE_RE = /\b(kahan hai|kahaan hai|kaha hai|abhi kahan|abhi kaha|kahan tak|kahan pahunchi|live status|running status|live hai)\b/i;
+    if (trainNo && LIVE_PHRASE_RE.test(req.text)) {
+      const liveStop = new Set([
+        "kahan", "kahaan", "kaha", "hai", "hain", "abhi", "kya", "live", "status", "running",
+        "right", "now", "ab", "tell", "me", "batao", "bata", "bataiye", "btado", "dijiye",
+        "position", "currently", "train", "no", "number", "ki", "ka", "ke", "the", "is",
+        "meri", "mera", "se", "par", "pe", "rahi", "gayi", "gai", "kar", "karo", "kahan", "hai",
+      ]);
+      const leftovers = String(req.text)
+        .toLowerCase()
+        .split(/[^a-z0-9]+/)
+        .filter(Boolean)
+        .filter((t) => t !== String(trainNo).toLowerCase() && !liveStop.has(t));
+      if (!leftovers.length) {
+        try {
+          const liveResult = await executeTool("getLiveStatus", {
+            trainNumber: trainNo,
+            trainName: ctx.selectedTrainName ?? undefined,
+          });
+          if (liveResult.ok && liveResult.summary) {
+            ctx.intent = "LIVE_TRAIN_STATUS";
+            ctx.pendingAsk = null;
+            return {
+              nlu: det,
+              source: "nlu",
+              context: ctx,
+              tool: "getLiveStatus",
+              toolOk: true,
+              reply: `${liveResult.summary}\n(Live railway data — gadh ke nahi.)`,
+              interrupt: false,
+              resumeAsk: null,
+              resumeText: null,
+              trains: null,
+              confirmBook: false,
+              missingFields: [],
+              modelUsed: null,
+              latencyMs: 0,
+              failureReason: null,
+              engine: "deterministic",
+              agenticFailureReason: null,
+              grounded: true,
+            };
+          }
+        } catch {
+          /* live fast-path fail — normal agentic flow continue */
+        }
+      }
+    }
+
     const capture: SearchCapture = { table: null };
     try {
       const turn = await runAgenticTurn({

@@ -612,7 +612,15 @@ describe("agent integration: agentic path + deterministic fallback", () => {
       });
     });
     const app = createApp();
-    const res = await request(app).post("/api/agent").send({ text: "12014 abhi kaha hai?", now: NOW });
+    /* ROUND-13d: unambiguous "number + kaha hai" ab INSTANT deterministic
+     * fast-path se (getLiveStatus tool) — LLM round-trip skip. Station-token
+     * ("ambala") wali query fast-path skip karti hai -> agentic trace. */
+    const fast = await request(app).post("/api/agent").send({ text: "12014 abhi kaha hai?", now: NOW });
+    expect(fast.status).toBe(200);
+    expect(fast.body.engine).toBe("deterministic");
+    expect(fast.body.tool).toBe("getLiveStatus");
+    expect(fast.body.grounded).toBe(true);
+    const res = await request(app).post("/api/agent").send({ text: "12014 ambala kahan hai?", now: NOW });
     expect(res.status).toBe(200);
     expect(res.body.engine).toBe("agentic_tool_calling");
     expect(res.body.grounded).toBe(true);
