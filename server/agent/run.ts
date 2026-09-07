@@ -1214,8 +1214,19 @@ export async function departureFromStationTurn(
 
   /* 2) Live current position vs asked stop — route-order se Haan/Abhi-nahi. */
   if (live?.currentStation) {
-    const cur = norm(live.currentStation);
-    const curIdx = stops.findIndex((st) => norm(st.name) === cur || norm(st.name).startsWith(cur) || cur.startsWith(norm(st.name)));
+    /* Round-11b: live aur schedule ke naam alag hote hain ("Jalandhar Cant"
+     * vs "JALANDHAR CITY") — station-type suffix strip karke match karo,
+     * warna order compare hi nahi hota tha. */
+    const strip = (s: string) => norm(s).replace(/(?:city|cantt|cant|junction|jn|terminal|road|east|west|north|south)+$/g, "");
+    const curNorm = norm(live.currentStation);
+    const curBase = strip(live.currentStation);
+    const curIdx = stops.findIndex((st) => {
+      const n = norm(st.name);
+      if (n === curNorm) return true;
+      if (curNorm.length >= 5 && (n.startsWith(curNorm) || curNorm.startsWith(n))) return true;
+      const b = strip(st.name);
+      return b.length >= 5 && curBase.length >= 5 && (b === curBase || b.startsWith(curBase) || curBase.startsWith(b));
+    });
     const askedIdx = stops.findIndex((st) => st === stop);
     if (curIdx >= 0 && askedIdx >= 0) {
       const nextBit = live.nextStation ? `, next ${live.nextStation}` : "";

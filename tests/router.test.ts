@@ -1251,3 +1251,31 @@ describe("29. Round-11: '12411 ludhiana se depart kar gyi?' — LIVE departure-q
     expect(res.body.reply).not.toMatch(/Kahan jaana hai/);
   });
 });
+
+describe("30. Round-11b: live/schedule naam-mismatch (Jalandhar Cant vs CITY)", () => {
+  it("30a. current 'Jalandhar Cant' vs schedule 'JALANDHAR CITY' → order-match, Haan reply", async () => {
+    r8Env();
+    setRailcoreFetch(async (url: unknown) => {
+      const u = String(url);
+      if (u.includes("/live"))
+        return jsonResponse(200, { success: true, data: { train_number: "12411", train_name: "Intercity Exp", status_text: "Running 8 minutes late", delay_minutes: 8, current_station_name: "Jalandhar Cant", next_station_name: "Jalandhar City" } });
+      if (u.includes("/schedule"))
+        return jsonResponse(200, { success: true, data: { train_number: "12411", train_name: "Intercity Exp", stops: [
+          { station_code: "LDH", station_name: "LUDHIANA JN", arrival_time: "08:56", departure_time: "09:02", day: 1 },
+          { station_code: "PGW", station_name: "PHAGWARA JN", arrival_time: "09:32", departure_time: "09:34", day: 1 },
+          { station_code: "JUC", station_name: "JALANDHAR CITY", arrival_time: "10:03", departure_time: "10:05", day: 1 },
+          { station_code: "ASR", station_name: "AMRITSAR JN", arrival_time: "11:20", departure_time: "00:00", day: 1 },
+        ] } });
+      return jsonResponse(500, { success: false });
+    });
+    const app = createApp();
+    const res = await request(app).post("/api/agent").send({
+      text: "12411 kya ludhiana departure kar gyi?",
+      now: "2026-09-07T05:35:00.000Z",
+    });
+    expect(res.body.reply).toContain("Haan");
+    expect(res.body.reply).toContain("LUDHIANA JN cross kar chuki");
+    expect(res.body.reply).toContain("current status Jalandhar Cant");
+    expect(res.body.reply).not.toMatch(/Kahan jaana hai/);
+  });
+});
