@@ -8,6 +8,7 @@ import {
   isClusterCityName,
   isGarbageStationQuery,
   matchStation,
+  matchStationFuzzy,
   stationGroundedInText,
 } from "./stations";
 import { isOutOfDomain } from "./domain";
@@ -272,7 +273,7 @@ function titlePlace(raw: string): string {
 function resolveBare(raw: string): { station?: Station; unresolved?: string } | null {
   if (!isBarePlace(raw)) return null;
   const cleaned = cleanPlace(raw);
-  const station = matchStation(cleaned);
+  const station = matchStation(cleaned) ?? matchStationFuzzy(cleaned);
   if (station) return { station };
   const hits = findStationsInText(cleaned);
   if (hits.length) return { station: hits[hits.length - 1] };
@@ -305,7 +306,19 @@ function extractPair(t: string): {
     /([\p{L}][\p{L} .]{0,28}?)\s+(?:से|se|from)\s+([\p{L}][\p{L} .]{0,28}?)(?:\s|$)/u,
   );
   if (se) {
-    const hit = asRoute(resolveBare(se[1]), resolveBare(se[2]));
+    let a = resolveBare(se[1]);
+    let b = resolveBare(se[2]);
+    /* Round-12: "ambala se new delhi kal" — lazy right side "new" par ruk
+     * jata tha; ek word extend karke STATION mile to wahi. */
+    if (b && !b.station && b.unresolved && typeof se.index === "number") {
+      const rest = t.slice(se.index + se[0].length).trim();
+      const nextWord = rest.split(/\s+/)[0] ?? "";
+      if (/^[\p{L}]{2,}$/u.test(nextWord)) {
+        const b2 = resolveBare(`${se[2]} ${nextWord}`);
+        if (b2?.station) b = b2;
+      }
+    }
+    const hit = asRoute(a, b);
     if (hit) return hit;
   }
   const originBit = t.match(/([\p{L}][\p{L} ]{0,24}?)\s+(?:से|se)(?=\s|$|,|\.)/u);

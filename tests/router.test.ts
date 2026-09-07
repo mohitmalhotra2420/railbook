@@ -1279,3 +1279,59 @@ describe("30. Round-11b: live/schedule naam-mismatch (Jalandhar Cant vs CITY)", 
     expect(res.body.reply).not.toMatch(/Kahan jaana hai/);
   });
 });
+
+describe("31. Round-12: spelling-tolerant station match (ChatGPT-jaisi samajh)", () => {
+  /* User: "ChatGPT galat spelling bhi samajh leta hai, mera AI kyun nahi?"
+   * Fuzzy: "ludiyana"→LDH, "chandigardh"→CDG. Cluster cities (delhi/agra)
+   * fuzzy NAHI — options list hi sahi jawab. */
+  it("31a. matchStationFuzzy: typos resolve, cluster/junk nahi", async () => {
+    const { matchStationFuzzy } = await import("../server/understand/legacy-stations");
+    expect(matchStationFuzzy("ludiyana")?.code).toBe("LDH");
+    expect(matchStationFuzzy("chandigardh")?.code).toBe("CDG");
+    expect(matchStationFuzzy("amratsar")?.code).toBe("ASR");
+    expect(matchStationFuzzy("jaipurr")?.code).toBe("JP");
+    expect(matchStationFuzzy("delhii")).toBeUndefined();
+    expect(matchStationFuzzy("kanpurr")).toBeUndefined();
+    expect(matchStationFuzzy("xyzabc")).toBeUndefined();
+    expect(matchStationFuzzy("kya")).toBeUndefined();
+  });
+
+  it("31b. NLU: 'ludiyana se delhi kal ki train' → from LDH", async () => {
+    const { understand } = await import("../server/understand/legacy-nlu");
+    const r = understand("ludiyana se delhi kal ki train", {});
+    expect(r.from?.code).toBe("LDH");
+    expect(r.unresolvedFrom).toBeUndefined();
+    expect(r.unresolvedTo).toBe("Delhi"); // cluster — options poochhega
+  });
+
+  it("31c. NLU: '12054 luddiyana se hw ki train' → poora route LDH→HW", async () => {
+    const { understand } = await import("../server/understand/legacy-nlu");
+    const r = understand("12054 luddiyana se hw ki train", {});
+    expect(r.from?.code).toBe("LDH");
+    expect(r.to?.code).toBe("HW");
+  });
+
+  it("31d. 'new delhi' ab lazy-split nahi hota (ambala cantt se new delhi kal → NDLS)", async () => {
+    const { understand } = await import("../server/understand/legacy-nlu");
+    const r = understand("ambala cantt se new delhi kal", {});
+    expect(r.from?.code).toBe("UMB");
+    expect(r.to?.code).toBe("NDLS");
+    expect(r.unresolvedTo).toBeUndefined();
+  });
+
+  it("31e. client mirror bhi typos pakadta hai", async () => {
+    const { matchStationFuzzy } = await import("../src/ai/stations");
+    expect(matchStationFuzzy("ludiyana")?.code).toBe("LDH");
+    expect(matchStationFuzzy("chandigardh")?.code).toBe("CDG");
+    expect(matchStationFuzzy("delhii")).toBeUndefined();
+  });
+
+  it("31f. junk words station nahi bante (26b regression ke saath)", async () => {
+    const { matchStationFuzzy } = await import("../server/understand/legacy-stations");
+    for (const w of ["kya baat", "accha hai", "train chahiye", "raat ko"]) {
+      expect(matchStationFuzzy(w)).toBeUndefined();
+    }
+    const { understand } = await import("../server/understand/legacy-nlu");
+    expect(understand("12054 umb se hw ki train kal", {}).from?.code).toBe("UMB");
+  });
+});

@@ -74,6 +74,9 @@ const ALIASES: Record<string, string> = {
   अम्रितसर: "ASR",
   ludhiana: "LDH",
   ldh: "LDH",
+  ludiyana: "LDH",
+  ludhiyana: "LDH",
+  luddiyana: "LDH",
   लुधियाना: "LDH",
   jalandhar: "JUC",
   jullundur: "JUC",
@@ -174,6 +177,67 @@ export const NEARBY: Record<string, string[]> = {
 
 export function stationByCode(code: string): Station | undefined {
   return CLIENT_STATIONS.find((s) => s.code === code.toUpperCase());
+}
+
+/* ── Round-12 (2026-09-07, user request: "ChatGPT galat spelling bhi samajh
+ * leta hai — mera AI kyun nahi?"): spelling-tolerant station match.
+ * "ludiyana"→LDH, "chandigardh"→CDG, "amratsar"→ASR — Levenshtein distance
+ * se. Guards (andaza NAHI, sirf pakka match):
+ *  - latin query >= 4 chars; max distance 1 (len 4-7) / 2 (len >= 8)
+ *  - CLUSTER city (delhi/agra/…) fuzzy NAHI — ambiguity ka jawab options
+ *    list hota hai, guess nahi
+ *  - best match UNIQUE ho (do stations barabar door → undefined) */
+function lev(a: string, b: string): number {
+  const m = a.length;
+  const n = b.length;
+  if (!m) return n;
+  if (!n) return m;
+  let prev = Array.from({ length: n + 1 }, (_, j) => j);
+  for (let i = 1; i <= m; i++) {
+    const cur = [i];
+    for (let j = 1; j <= n; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    prev = cur;
+  }
+  return prev[n];
+}
+
+type FuzzTarget = { key: string; st: Station };
+const FUZZ_TARGETS: FuzzTarget[] = [
+  ...CLIENT_STATIONS.flatMap((s) => [
+    { key: s.city.toLowerCase(), st: s },
+    { key: s.name.toLowerCase().replace(/ junction$| cantt$| city$| road$| terminal$| central$| jn$/g, ""), st: s },
+  ]),
+  ...Object.entries(ALIASES)
+    .filter(([k]) => /^[a-z][a-z ]{3,}$/.test(k))
+    .map(([k, v]) => ({ key: k, st: stationByCode(v) }))
+    .filter((x): x is FuzzTarget => Boolean(x.st)),
+];
+
+export function matchStationFuzzy(raw: string): Station | undefined {
+  const q = raw.trim().toLowerCase().replace(/\s+/g, " ");
+  if (q.length < 4 || !/^[a-z][a-z ]+$/.test(q)) return undefined;
+  if (CLUSTER_CITIES.has(q)) return undefined;
+  const max = q.length >= 8 ? 2 : 1;
+  let bestD = max + 1;
+  let bestSt: Station | undefined;
+  const hits = new Set<string>();
+  for (const { key, st } of FUZZ_TARGETS) {
+    if (key.length < 4 || CLUSTER_CITIES.has(key)) continue;
+    const d = lev(q, key);
+    if (d > max) continue;
+    if (d < bestD) {
+      bestD = d;
+      bestSt = st;
+      hits.clear();
+      hits.add(st.code);
+    } else if (d === bestD) {
+      hits.add(st.code);
+    }
+  }
+  if (!bestSt || hits.size !== 1) return undefined;
+  return bestSt;
 }
 
 const CLUSTER_CITIES = new Set([

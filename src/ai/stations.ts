@@ -100,6 +100,9 @@ const ALIASES: Record<string, string> = {
   अमृतसर: "ASR",
   अम्रितसर: "ASR",
   ludhiana: "LDH",
+  ludiyana: "LDH",
+  ludhiyana: "LDH",
+  luddiyana: "LDH",
   ldh: "LDH",
   लुधियाना: "LDH",
   "jalandhar city": "JUC",
@@ -363,6 +366,63 @@ export function isGarbageStationQuery(raw: string): boolean {
   if (/[A-Za-z]{3,}\d|\d[A-Za-z]{3,}/.test(compact)) return true;
   if (/[A-Za-z]{3,}\d|\d[A-Za-z]{3,}/.test(q) && q.split(/\s+/).length <= 3) return true;
   return false;
+}
+
+/* ── Round-12 (2026-09-07): spelling-tolerant match — server legacy-stations
+ * ke matchStationFuzzy ka mirror. "ludiyana"→LDH, "chandigardh"→CDG.
+ * Cluster city guess NAHI (options list hi sahi jawab), unique best only. */
+function lev(a: string, b: string): number {
+  const m = a.length;
+  const n = b.length;
+  if (!m) return n;
+  if (!n) return m;
+  let prev = Array.from({ length: n + 1 }, (_, j) => j);
+  for (let i = 1; i <= m; i++) {
+    const cur = [i];
+    for (let j = 1; j <= n; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    prev = cur;
+  }
+  return prev[n];
+}
+
+type FuzzTarget = { key: string; st: Station };
+const FUZZ_TARGETS: FuzzTarget[] = [
+  ...CLIENT_STATIONS.flatMap((s) => [
+    { key: s.city.toLowerCase(), st: s },
+    { key: s.name.toLowerCase().replace(/ junction$| cantt$| city$| road$| terminal$| central$| jn$/g, ""), st: s },
+  ]),
+  ...Object.entries(ALIASES)
+    .filter(([k]) => /^[a-z][a-z ]{3,}$/.test(k))
+    .map(([k, v]) => ({ key: k, st: stationByCode(v) }))
+    .filter((x): x is FuzzTarget => Boolean(x.st)),
+];
+
+export function matchStationFuzzy(raw: string): Station | undefined {
+  const q = raw.trim().toLowerCase().replace(/\s+/g, " ");
+  if (q.length < 4 || !/^[a-z][a-z ]+$/.test(q)) return undefined;
+  if (isClusterCityName(q)) return undefined;
+  if (isGarbageStationQuery(q)) return undefined;
+  const max = q.length >= 8 ? 2 : 1;
+  let bestD = max + 1;
+  let bestSt: Station | undefined;
+  const hits = new Set<string>();
+  for (const { key, st } of FUZZ_TARGETS) {
+    if (key.length < 4 || isClusterCityName(key)) continue;
+    const d = lev(q, key);
+    if (d > max) continue;
+    if (d < bestD) {
+      bestD = d;
+      bestSt = st;
+      hits.clear();
+      hits.add(st.code);
+    } else if (d === bestD) {
+      hits.add(st.code);
+    }
+  }
+  if (!bestSt || hits.size !== 1) return undefined;
+  return bestSt;
 }
 
 export function matchStation(raw: string): Station | undefined {

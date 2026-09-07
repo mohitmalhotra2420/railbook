@@ -1,6 +1,6 @@
 import type { ClassCode, Station } from "../providers/types.js";
 import { parseDatePhrase, type DateHit } from "./legacy-dates.js";
-import { findStationsInText, matchStation, stationByCode } from "./legacy-stations.js";
+import { findStationsInText, matchStation, matchStationFuzzy, stationByCode } from "./legacy-stations.js";
 import { isOutOfDomain } from "./domain.js";
 import { routeRailwayIntent } from "./toolRoute.js";
 
@@ -256,7 +256,9 @@ function titlePlace(raw: string): string {
 function resolveBare(raw: string): { station?: Station; unresolved?: string } | null {
   if (!isBarePlace(raw)) return null;
   const cleaned = cleanPlace(raw);
-  const station = matchStation(cleaned);
+  /* Round-12: spelling-tolerant — "ludiyana se delhi" ka LDH yahin se milta
+   * hai (ChatGPT-jaisi language-tolerance, par deterministic aur free). */
+  const station = matchStation(cleaned) ?? matchStationFuzzy(cleaned);
   if (station) return { station };
   return { unresolved: titlePlace(cleaned) };
 }
@@ -287,7 +289,20 @@ function extractPair(t: string): {
     /([\p{L}][\p{L} .]{0,28}?)\s+(?:से|se|from)\s+([\p{L}][\p{L} .]{0,28}?)(?:\s|$)/u,
   );
   if (se) {
-    const hit = asRoute(resolveBare(se[1]), resolveBare(se[2]));
+    let a = resolveBare(se[1]);
+    let b = resolveBare(se[2]);
+    /* Round-12: lazy right side "new" par ruk jaata tha — "ambala se new
+     * delhi kal" mein "New" unresolved ban jata tha. Ek word extend karke
+     * agar STATION ban jaaye to wahi lo (warna original). */
+    if (b && !b.station && b.unresolved && typeof se.index === "number") {
+      const rest = t.slice(se.index + se[0].length).trim();
+      const nextWord = rest.split(/\s+/)[0] ?? "";
+      if (/^[\p{L}]{2,}$/u.test(nextWord)) {
+        const b2 = resolveBare(`${se[2]} ${nextWord}`);
+        if (b2?.station) b = b2;
+      }
+    }
+    const hit = asRoute(a, b);
     if (hit) return hit;
   }
   const to = t.match(
