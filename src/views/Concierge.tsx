@@ -275,7 +275,7 @@ export function Concierge() {
           {
             id: newId(),
             role: "assistant",
-            text: `${live.trainNumber} ${live.trainName || ""}\nStatus: ${live.status}${live.delayMinutes != null ? ` · delay ${live.delayMinutes} min` : ""}${live.currentStation ? ` · last: ${live.currentStation}` : ""}${live.nextStation ? ` · next: ${live.nextStation}` : ""}\n(Live railway data — gadh ke nahi.)`,
+            text: `${live.trainNumber} ${live.trainName || ""}\nStatus: ${live.status}${live.delayMinutes != null ? ` · delay ${live.delayMinutes} min` : ""}${live.currentStation ? ` · current: ${live.currentStation}` : ""}${live.nextStation ? ` · next: ${live.nextStation}` : ""}\n(Live railway data — gadh ke nahi.)`,
           },
         ]);
       } catch {

@@ -1100,3 +1100,57 @@ describe("27. Round-9: Agra origin-cluster bug (multi-turn station choice)", () 
     expect(picked.origin).toMatchObject({ code: "AGC" });
   });
 });
+
+describe("28. Round-10: live status 'last X' → current position (screenshot fix)", () => {
+  /* Screenshot (2026-09-07): 12411 Ludhiana par khadi thi par app ne likha
+   * "last Ludhiana Jn" — user: "current status hai ludhiana last nahi".
+   * RailCore /live ka current_station = train ki ABHI ki position. */
+  it("28a. livePositionLabel: RailCore running-status → 'current status X'", async () => {
+    const { livePositionLabel } = await import("../server/agent/tools");
+    expect(livePositionLabel({ status: "Running 13 minutes late", currentStation: "Ludhiana Jn" })).toBe("current status Ludhiana Jn");
+  });
+
+  it("28b. NTES 'Departed from X' → 'X se nikal chuki'", async () => {
+    const { livePositionLabel } = await import("../server/agent/tools");
+    expect(livePositionLabel({ status: "Departed from LUDHIANA JN(LDH) at 09:11 07-Sep (Delay: 00:09)", currentStation: "Ludhiana Jn" })).toBe("Ludhiana Jn se nikal chuki");
+  });
+
+  it("28c. 'At X'/'Arrived at X' → 'abhi X par'; no station → null", async () => {
+    const { livePositionLabel } = await import("../server/agent/tools");
+    expect(livePositionLabel({ status: "At Ludhiana", currentStation: "Ludhiana" })).toBe("abhi Ludhiana par");
+    expect(livePositionLabel({ status: "Arrived at Beas (BEAS)", currentStation: "Beas" })).toBe("abhi Beas par");
+    expect(livePositionLabel({ status: "Running 5 minutes late", currentStation: null })).toBeNull();
+  });
+
+  it("28d. /api/agent '12411 kahan hai' → 'current status Ludhiana Jn', NOT 'last Ludhiana Jn'", async () => {
+    r8Env();
+    setRailcoreFetch(async (url: unknown) =>
+      String(url).includes("/live")
+        ? jsonResponse(200, {
+            success: true,
+            data: {
+              train_number: "12411",
+              train_name: "Intercity Exp",
+              status_text: "Running 13 minutes late",
+              delay_minutes: 13,
+              current_station_code: "LDH",
+              current_station_name: "Ludhiana Jn",
+              next_station_code: "PGW",
+              next_stop: { station_name: "Phagwara Jn", station_code: "PGW" },
+              last_reported_at: "2026-09-07T09:15:00+05:30",
+            },
+          })
+        : jsonResponse(500, { success: false }),
+    );
+    const app = createApp();
+    const res = await request(app).post("/api/agent").send({
+      text: "12411 kahan hai abhi",
+      now: "2026-09-07T04:20:00.000Z",
+    });
+    expect(res.body.reply).toContain("current status Ludhiana Jn");
+    expect(res.body.reply).toContain("next Phagwara Jn");
+    expect(res.body.reply).not.toMatch(/last Ludhiana/);
+    /* status text mein delay already hai — duplicate ', delay 13 min' nahi. */
+    expect(res.body.reply).not.toMatch(/delay 13 min/);
+  });
+});

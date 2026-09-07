@@ -24,6 +24,7 @@ import { todayYmdFrom } from "../understand/legacy-dates.js";
 import { stripFences } from "../understand/parse-json.js";
 import type { Station, TrainResult } from "../providers/types.js";
 import { isForbiddenMoneyTool } from "./context.js";
+import { livePositionLabel } from "./tools.js";
 import { runAutoTool, type AutoToolResult } from "./autoTools.js";
 import { AUTO_TOOLS, AUTO_TOOL_NAMES } from "./toolSpecs.js";
 
@@ -551,8 +552,11 @@ function evidenceSummary(results: AutoToolResult[]): string | null {
         break;
       }
       case "getLiveStatus": {
-        const delay = p.delayMinutes != null ? `, delay ${p.delayMinutes} min` : "";
-        lines.push(`${p.trainNumber} ${p.trainName ?? ""} — ${p.status ?? "status nahi"}${p.currentStation ? `, last: ${p.currentStation}` : ""}${delay}.`);
+        /* Round-10: "last X" → position-aware (current status / nikal chuki / abhi par) */
+        const position = livePositionLabel(p as { status?: string | null; currentStation?: string | null });
+        const delayInStatus = /\d+\s*min/i.test(String(p.status ?? ""));
+        const delay = !delayInStatus && p.delayMinutes != null ? `, delay ${p.delayMinutes} min` : "";
+        lines.push(`${p.trainNumber} ${p.trainName ?? ""} — ${p.status ?? "status nahi"}${position ? `, ${position}` : ""}${delay}.`);
         break;
       }
       case "getAvailability": {

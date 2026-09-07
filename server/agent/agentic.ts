@@ -33,7 +33,7 @@ import { webSourceLabel } from "../railway/webscrape.js";
 import { parseDatePhrase } from "../understand/legacy-dates.js";
 import { RailKitProvider } from "../railway/railkit.js";
 import type { ClassCode } from "../providers/types.js";
-import { executeTool } from "./tools.js";
+import { executeTool, livePositionLabel } from "./tools.js";
 import {
   GENERAL_FACT_RE, isQuestionPhraseNotTrainName, segmentOfStops } from "./context.js";
 import { searchRailcoreTrainsByName } from "../railway/railcore.js";
@@ -880,7 +880,7 @@ const RAILWAY_KB: Record<string, string> = {
   upgrade: "Free upgrade scheme: booking time 'consider for auto-upgrade' opt-in par confirmed passengers same class mein higher class mein upgrade ho sakte hain jab seat uplabdh ho. Upgrade par ek hi jagah baithte hain, fare difference nahi dena hota.",
   senior_citizen: "Purush 60+ / mahila 58+ ke liye senior citizen concession opt-in hota hai (lower berth + partial fare concession) — abhi limited classes mein available, booking form mein choose karna padta hai.",
   child_fare: "5 saal se kam umra ke bachche ka ticket FREE (alag seat/berth nahi). 5-11 saal ke bachche full fare ya child fare option ke saath seat mil sakti hai (child fare berth ke saath).",
-  live_tracking: "Live tracking provider (RailCore/RailKit) ke real feed se aata hai — position, delay aur last updated station. Data na ho to hum saaf mana kar dete hain, andaza nahi lagate.",
+  live_tracking: "Live tracking provider (RailCore/RailKit) ke real feed se aata hai — current position (train abhi kahan hai), delay aur next station. Data na ho to hum saaf mana kar dete hain, andaza nahi lagate.",
 };
 
 export async function executeApprovedTool(
@@ -1134,7 +1134,7 @@ export async function executeApprovedTool(
           delayMinutes?: number | null;
           lastUpdatedAt?: string | null;
         };
-        return okResult(res.provider, `${live.trainNumber ?? a.train_number} — ${live.status ?? "unknown"}${live.currentStation ? `, last ${live.currentStation}` : ""}${live.delayMinutes != null ? `, delay ${live.delayMinutes}m` : ""}.`, live);
+        return okResult(res.provider, `${live.trainNumber ?? a.train_number} — ${live.status ?? "unknown"}${livePositionLabel(live) ? `, ${livePositionLabel(live)}` : ""}${!/\d+\s*min/i.test(String(live.status ?? "")) && live.delayMinutes != null ? `, delay ${live.delayMinutes}m` : ""}.`, live);
       }
       case "CHECK_AVAILABILITY": {
         const ctx = await resolveTrainRouteDate(a as unknown as { train_number: string; date?: string; origin?: string; destination?: string });

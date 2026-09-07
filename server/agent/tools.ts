@@ -15,6 +15,22 @@ import { getWallet } from "../wallet.js";
 import type { ClassCode } from "../providers/types.js";
 import { isForbiddenMoneyTool, segmentOfStops } from "./context.js";
 
+/** Round-10 (screenshot fix 2026-09-07): provider ka current_station = train
+ * ki ABHI ki position — RailCore /live mein train station PAR khadi ho sakti
+ * hai (speed 0). Purana "last X" label galat imply karta tha ki train nikal
+ * chuki. Status text se position-aware label:
+ *  - "Departed from X ..." (NTES /running, railenquiry) → "X se nikal chuki"
+ *  - "Arrived at X" / "At X" (railyatri)                → "abhi X par"
+ *  - default (RailCore /live current position)          → "current status X" */
+export function livePositionLabel(live: { status?: string | null; currentStation?: string | null }): string | null {
+  const station = String(live.currentStation ?? "").trim();
+  if (!station) return null;
+  const s = String(live.status ?? "").trim();
+  if (/^departed\s+from/i.test(s)) return `${station} se nikal chuki`;
+  if (/^(?:arrived\s+at|at\s)/i.test(s)) return `abhi ${station} par`;
+  return `current status ${station}`;
+}
+
 export type ToolName =
   | "searchStations"
   | "searchTrains"
@@ -107,12 +123,17 @@ export async function executeTool(
         return { ok: false, tool, summary: "Live status unavailable.", data: null, provider: routed.provider };
       }
       const live = routed.live as { trainNumber?: string; trainName?: string; status?: string; currentStation?: string | null; nextStation?: string | null; delayMinutes?: number | null };
-      const delay = live.delayMinutes != null ? `, delay ${live.delayMinutes} min` : "";
+      /* Round-10 (screenshot fix 2026-09-07): "last X" galat tha — RailCore ka
+       * current_station train ki ABHI ki position hai (LDH par khadi, speed 0).
+       * Status text se position-aware label; delay duplicate bhi hatado. */
+      const position = livePositionLabel(live);
+      const delayInStatus = /\d+\s*min/i.test(String(live.status ?? ""));
+      const delay = !delayInStatus && live.delayMinutes != null ? `, delay ${live.delayMinutes} min` : "";
       const nextBit = live.nextStation ? `, next ${live.nextStation}` : "";
       return {
         ok: true,
         tool,
-        summary: `${live.trainNumber ?? args.trainNumber} ${live.trainName ?? ""} — ${live.status ?? "status nahi"}${live.currentStation ? `, last ${live.currentStation}` : ""}${nextBit}${delay}${webSourceLabel(routed.provider)}`.trim(),
+        summary: `${live.trainNumber ?? args.trainNumber} ${live.trainName ?? ""} — ${live.status ?? "status nahi"}${position ? `, ${position}` : ""}${nextBit}${delay}${webSourceLabel(routed.provider)}`.trim(),
         data: live,
         provider: routed.provider,
       };
