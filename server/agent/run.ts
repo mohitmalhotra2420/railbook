@@ -1364,6 +1364,7 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
           origin: ctx.origin?.code ?? null,
           destination: ctx.destination?.code ?? null,
           date: ctx.date ?? det.date ?? null,
+          dateProvided: Boolean(ctx.dateProvided || det.date),
           trainNumber: trainNo ?? null,
           classCode: ctx.classCode ?? det.classCodes?.[0] ?? null,
           passengers: ctx.passengers ?? det.passengerCount ?? null,
@@ -1582,7 +1583,8 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
    * honest agla sawaal. Kabhi khali nahi. */
   if (!tool && !reply && stationPick) {
     const other = stationPick.side === "to" ? ctx.origin : ctx.destination;
-    if (other && ctx.date) {
+    /* Round-16h: date user ne di ho tabhi search — warna neeche resume-line date poochegi. */
+    if (other && ctx.date && ctx.dateProvided) {
       try {
         const search = await searchTrainsRouted({ from: ctx.origin!.code, to: ctx.destination!.code, date: ctx.date });
         const top = search.trains

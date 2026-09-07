@@ -1438,7 +1438,7 @@ function systemPrompt(
     "3. Multi-step tool calling allowed + encouraged hai: pehle SEARCH_TRAINS, phir results dekh kar zaroorat ke hisaab se GET_TIMETABLE / GET_FARE / CHECK_AVAILABILITY / GET_TRAIN_INFO call karo. Ek tool call mein sab na mile to agla tool call karo.",
     "3b. User sirf train number + class poochhe (route/date na de) to bhi GET_FARE / CHECK_AVAILABILITY turant bulao — route/date optional hain, server timetable se route aur aaj ki date khud lagata hai. Missing slots ki bhikh mat maango.",
     "4. Sirf tool results ke facts bolo. Train number, naam, time, fare, seats, delay, STATION CODE — kuch bhi invent mat karo. Station codes/options sirf tool results se; apni knowledge se station code mat banao.",
-    "5. Required info (origin/destination/date/train number/PNR) genuinely missing ho to POOCHHO — journey/book intent ke liye DATE sabse pehle poochho (sabse zaroori slot); station ambiguity ho to usi ek line mein saath mein poochho (jaise: \"Kis date ko jaana hai? Aur Delhi mein kaunsa station — NDLS, DLI?\"). Aaj ki date silently assume mat karo. Station options sirf tool result (needs_choice) ya well-known stations se bolo — airport/foreign codes (BCT jaise) kabhi Delhi ke options mein mat likho.",
+    "5. Required info (origin/destination/date/train number/PNR) genuinely missing ho to POOCHHO — journey/book intent ke liye DATE sabse pehle poochho (sabse zaroori slot) — Known context mein date=- ho aur user ne is message mein bhi date na di ho to SEARCH_TRAINS/JOURNEY_ANALYZE call MAT karo (server reject karega), sirf date poochho; station ambiguity ho to usi ek line mein saath mein poochho (jaise: \"Kis date ko jaana hai? Aur Delhi mein kaunsa station — NDLS, DLI?\"). Aaj ki date silently assume mat karo. Station options sirf tool result (needs_choice) ya well-known stations se bolo — airport/foreign codes (BCT jaise) kabhi Delhi ke options mein mat likho.",
     "6. Data na mile to saaf bolo ki unavailable hai — kabhi fake number/seats/fare mat banao, aur train/station ka naam ya code khud se guess mat karo (sab kuch sirf tool result se).",
     "7. Final jawab mein koi API key/secret/URL nahi hoga.",
     "8. Jab user ko station options dikhane hon (needs_choice), options Gin ke poochho.",
@@ -1653,6 +1653,10 @@ export async function runAgenticTurn(input: {
     origin?: string | null;
     destination?: string | null;
     date?: string | null;
+    /** Round-16h (user 2026-09-08 "mai chahta hun date pooche"): user ne
+     * date KHUD di hai (context ya is turn) — false ho to journey search
+     * (SEARCH_TRAINS/JOURNEY_ANALYZE) HARD-blocked, pehle date poochho. */
+    dateProvided?: boolean;
     trainNumber?: string | null;
     classCode?: string | null;
     passengers?: number | null;
@@ -1954,6 +1958,21 @@ export async function runAgenticTurn(input: {
               "Ye general-fact sawaal (top speed / history / coaches / locomotive) hai — railway data tools (timetable/live/fare) iska jawab NAHI dete. WEB_SEARCH use karo: train ka naam + number + fact (jaise 'Jan Shatabdi Express 12054 top speed').",
             data: null,
             rejected: "general_fact_tool_block",
+          };
+        } else if (
+          (toolName === "SEARCH_TRAINS" || toolName === "JOURNEY_ANALYZE") &&
+          input.known?.dateProvided === false &&
+          dateHint?.kind !== "date"
+        ) {
+          /* Round-16h: user ne date nahi di — aaj assume karke search NAHI.
+           * Model ko bolo: sirf date poochho (station ambiguity ho to saath). */
+          result = {
+            ok: false,
+            source: null,
+            summary:
+              "DATE MISSING — user ne journey ki date nahi batayi. Aaj ki date assume karke search MAT karo. Reply mein SIRF poochho: \"Kis date ko jaana hai? (aaj/kal/parso ya tareekh)\" — agar destination/origin station bhi ambiguous hai to usi line mein saath poochho. Koi train list/andaza nahi.",
+            data: null,
+            rejected: "date_required",
           };
         } else {
           result = await executeApprovedTool(toolName, args, { userText: input.text });

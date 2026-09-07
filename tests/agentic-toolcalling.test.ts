@@ -806,4 +806,42 @@ describe("agent integration: agentic path + deterministic fallback", () => {
     expect(res.body.engine ?? "deterministic").toBe("deterministic");
     expect(res.body.reply).toBeTruthy();
   });
+
+  it("Round-16h: DATE REQUIRED — known.dateProvided=false & no date in text → SEARCH_TRAINS rejected, model asks date", async () => {
+    railcoreMock();
+    const toolResults: any[] = [];
+    setAgenticNvidiaFetch(async (_input, init) => {
+      const body = JSON.parse(String(init?.body));
+      const toolMsgs = body.messages.filter((m: any) => m.role === "tool");
+      toolResults.push(...toolMsgs.map((m: any) => JSON.parse(m.content)));
+      if (toolMsgs.length === 0) {
+        // model assumes today and searches — must be blocked
+        return chatResponse({ tool_calls: [toolCall("SEARCH_TRAINS", { origin: "ASR", destination: "NDLS", date: "2026-09-04" })] });
+      }
+      return chatResponse({ content: "ASR → NDLS ke liye kis date ko jaana hai? (aaj/kal/parso ya tareekh)" });
+    });
+    const turn = await runAgenticTurn({
+      text: "amritsar se delhi jaana hai",
+      now: NOW,
+      known: { origin: "ASR", destination: "NDLS", date: null, dateProvided: false },
+    });
+    const blocked = turn.steps.find((s) => s.tool === "SEARCH_TRAINS");
+    expect(blocked?.ok).toBe(false);
+    expect(blocked?.summary).toMatch(/DATE MISSING/);
+    expect(toolResults[0]?.summary).toMatch(/DATE MISSING/);
+    expect(turn.reply).toMatch(/kis date/i);
+    expect(turn.reply).not.toMatch(/12014/);
+  });
+
+  it("Round-16h: date in text (\"kal\") → resolver hint present → search allowed even with dateProvided=false", async () => {
+    railcoreMock();
+    setAgenticNvidiaFetch(async (_input, init) => {
+      const body = JSON.parse(String(init?.body));
+      const toolMsgs = body.messages.filter((m: any) => m.role === "tool").length;
+      if (toolMsgs === 0) return chatResponse({ tool_calls: [toolCall("SEARCH_TRAINS", { origin: "ASR", destination: "NDLS", date: "2026-09-05" })] });
+      return chatResponse({ content: "ASR → NDLS 2026-09-05: 2 trains — 12014 AMRITSAR SHATABDI sabse fast." });
+    });
+    const turn = await runAgenticTurn({ text: "amritsar se delhi kal jaana hai", now: NOW, known: { origin: "ASR", destination: "NDLS", date: null, dateProvided: false } });
+    expect(turn.steps.find((s) => s.tool === "SEARCH_TRAINS")?.ok).toBe(true);
+  });
 });
