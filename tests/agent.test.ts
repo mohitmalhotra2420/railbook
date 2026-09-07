@@ -428,3 +428,29 @@ describe("Round-16d: comparison is NOT a local UI query", () => {
     expect(classifyFollowUp("aur koi train hai?")).toBe("more_trains");
   });
 });
+
+describe("Round-16g: stale slot from previous chat must not produce from == to (user screenshot 2026-09-08)", () => {
+  const LDH = { code: "LDH", name: "Ludhiana Junction", city: "Ludhiana" };
+  it("prev.destination = LDH, user says 'ludhiana se delhi' → destination cleared, Delhi pending", () => {
+    const prev = { ...emptyAgentContext(), destination: LDH };
+    const text = "mujhe ludhiana se delhi jaana hai";
+    const ctx = mergeAgentContext(prev, understand(text, { now: NOW }), text);
+    expect(ctx.origin?.code).toBe("LDH");
+    expect(ctx.destination).toBeFalsy();
+    expect(ctx.pendingDestinationChoice).toMatch(/delhi/i);
+  });
+  it("prev.origin = LDH, user says 'delhi se ludhiana' → origin cleared", () => {
+    const prev = { ...emptyAgentContext(), origin: LDH };
+    const text = "delhi se ludhiana jaana hai";
+    const ctx = mergeAgentContext(prev, understand(text, { now: NOW }), text);
+    expect(ctx.destination?.code).toBe("LDH");
+    expect(ctx.origin).toBeFalsy();
+  });
+  it("prev.destination = LDH, user says 'ludhiana se amritsar' (both resolved) → LDH→ASR", () => {
+    const prev = { ...emptyAgentContext(), destination: LDH };
+    const text = "ludhiana se amritsar jaana hai";
+    const ctx = mergeAgentContext(prev, understand(text, { now: NOW }), text);
+    expect(ctx.origin?.code).toBe("LDH");
+    expect(ctx.destination?.code).toBe("ASR");
+  });
+});

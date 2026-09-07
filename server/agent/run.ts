@@ -1430,13 +1430,22 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
   }
 
   /* ── 2) DETERMINISTIC FALLBACK (existing architecture, preserved) ── */
+  const seeded2 = seedContext(req);
+  /* Round-16g: deterministic NLU ko bhi SEEDED slots do (sirf req.known nahi
+   * — context wale bhi). Warna "NDLS" (destination pick) ko NLU `from`
+   * samajh leta tha kyunki known.from khaali tha → origin LDH overwrite. */
   const understood = await runUnderstand({
     text: req.text,
-    lastAsked: req.lastAsked ?? null,
-    known: req.known ?? {},
+    lastAsked: req.lastAsked ?? (stationPick ? (stationPick.side as "to" | "from") : null),
+    known: {
+      ...(req.known ?? {}),
+      from: req.known?.from ?? seeded2.origin ?? null,
+      to: req.known?.to ?? seeded2.destination ?? null,
+      date: req.known?.date ?? (seeded2.dateProvided ? seeded2.date : null) ?? null,
+      passengerCount: req.known?.passengerCount ?? (seeded2.paxProvided ? seeded2.passengers : null) ?? null,
+    },
     now: req.now,
   });
-  const seeded2 = seedContext(req);
   /* Naam-se-resolve (upar hua) deterministic ctx par bhi apply ho — warna
    * fallback pichhli selected train (galat) ka jawab de deta tha. */
   if (nameResolvedTrain) {
@@ -1451,6 +1460,11 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
     } else if (stationPick.side === "from" && !seeded2.origin) {
       seeded2.origin = { code: stationPick.code, name: stationPick.name, city: stationPick.city };
     }
+    /* Round-16g: pick ek side ke liye tha — NLU ne agar wahi code doosri side
+     * par daal diya to wo galat hai; sirf picked side rakho. */
+    const picked = stationPick.code;
+    if (stationPick.side === "to" && understood.nlu.from?.code === picked) understood.nlu.from = undefined;
+    if (stationPick.side === "from" && understood.nlu.to?.code === picked) understood.nlu.to = undefined;
   }
   const ctx = mergeAgentContext(seeded2, understood.nlu, req.text);
   const follow = classifyFollowUp(req.text);

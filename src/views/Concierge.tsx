@@ -824,7 +824,8 @@ export function Concierge() {
             state.from?.code === c?.origin?.code &&
             state.to?.code === c?.destination?.code &&
             state.date === c?.date;
-          if (wantBooking && c?.origin && c?.destination && c?.date && !sameSearch) {
+          /* Round-16g: from == to par kabhi card mat kholo (server guard bhi hai). */
+          if (wantBooking && c?.origin && c?.destination && c.origin.code !== c.destination.code && c?.date && !sameSearch) {
             setBusy(true);
             try {
               await searchRoute(c.origin, c.destination, c.date);
@@ -982,6 +983,13 @@ export function Concierge() {
     const from = slot === "from" ? st : journeyRef.current.from ?? state.from;
     const to = slot === "to" ? st : journeyRef.current.to ?? state.to;
     const date = journeyRef.current.dateProvided || state.dateProvided ? (journeyRef.current.date || state.date) : "";
+    if (from && to && from.code === to.code) {
+      setMessages((m) => [
+        ...m,
+        { id: newId(), role: "assistant", text: `${st.name} (${st.code}) — from aur to same nahi ho sakte. ${slot === "to" ? "Kahan se" : "Kahan"} jaana hai?` },
+      ]);
+      return;
+    }
     if (from && to && date) {
       setLastAsked("train");
       setMessages((m) => [

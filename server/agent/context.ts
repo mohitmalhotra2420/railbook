@@ -339,10 +339,15 @@ export function mergeAgentContext(
   if (nlu.from) next.pendingOriginChoice = null;
   else if (nlu.unresolvedFrom && /^[A-Za-z\u0900-\u097F][A-Za-z\u0900-\u097F .]{1,28}$/.test(nlu.unresolvedFrom)) {
     next.pendingOriginChoice = nlu.unresolvedFrom;
+    /* Round-16g (user screenshot 2026-09-08: "ludhiana se delhi" → LDH→LDH card):
+     * user ne NAYA origin bola jo abhi resolve nahi hua — purana origin slot
+     * stale hai, use rakhne se galat route banta hai. Clear karo. */
+    next.origin = null;
   }
   if (nlu.to) next.pendingDestinationChoice = null;
   else if (nlu.unresolvedTo && /^[A-Za-z\u0900-\u097F][A-Za-z\u0900-\u097F .]{1,28}$/.test(nlu.unresolvedTo)) {
     next.pendingDestinationChoice = nlu.unresolvedTo;
+    next.destination = null; // Round-16g: purana destination (pichhli chat ka) hatao
   }
   /* Round-8 (topic-switch): poora NAYA route (from+to dono, dono pichle se
    * alag) + user ne koi train number/nahi bola → purani selected train
@@ -368,6 +373,13 @@ export function mergeAgentContext(
   }
   if (nlu.from) next.origin = nlu.from;
   if (nlu.to) next.destination = nlu.to;
+  /* Round-16g: from == to kabhi valid route nahi — jo slot is turn mein NAHI
+   * bola gaya wo stale hai, use hatao (jaise pichhli chat ka destination LDH
+   * aur ab user "ludhiana se ..." bola). */
+  if (next.origin && next.destination && next.origin.code === next.destination.code) {
+    if (nlu.from && !nlu.to) next.destination = null;
+    else if (nlu.to && !nlu.from) next.origin = null;
+  }
   /* Round-9: station-pick ya kisi bhi raaste se slot bhar gaya to pending clear. */
   if (next.origin) next.pendingOriginChoice = null;
   if (next.destination) next.pendingDestinationChoice = null;

@@ -250,10 +250,12 @@ export function mergeAgentContext(
   if (nlu.from) next.pendingOriginChoice = null;
   else if (nlu.unresolvedFrom && /^[A-Za-z\u0900-\u097F][A-Za-z\u0900-\u097F .]{1,28}$/.test(nlu.unresolvedFrom)) {
     next.pendingOriginChoice = nlu.unresolvedFrom;
+    next.origin = null; // Round-16g: naya (unresolved) origin bola → purana stale origin hatao
   }
   if (nlu.to) next.pendingDestinationChoice = null;
   else if (nlu.unresolvedTo && /^[A-Za-z\u0900-\u097F][A-Za-z\u0900-\u097F .]{1,28}$/.test(nlu.unresolvedTo)) {
     next.pendingDestinationChoice = nlu.unresolvedTo;
+    next.destination = null; // Round-16g (server parity): purana destination hatao
   }
   /* Round-8 (topic-switch): poora naya route + koi train reference nahi →
    * purani selected train clear. EXCEPTION: pichhla intent selected-train
@@ -276,6 +278,11 @@ export function mergeAgentContext(
   }
   if (nlu.from) next.origin = nlu.from;
   if (nlu.to) next.destination = nlu.to;
+  /* Round-16g: from == to kabhi valid nahi — jo slot is turn mein nahi bola wo stale hai. */
+  if (next.origin && next.destination && next.origin.code === next.destination.code) {
+    if (nlu.from && !nlu.to) next.destination = null;
+    else if (nlu.to && !nlu.from) next.origin = null;
+  }
   /* Round-9: slot kisi bhi raaste se bhara to pending clear. */
   if (next.origin) next.pendingOriginChoice = null;
   if (next.destination) next.pendingDestinationChoice = null;
