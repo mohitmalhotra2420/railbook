@@ -646,6 +646,45 @@ export function createApp() {
 
   /* Round-7 diagnostics: prod datacenter se kaunsi scrape-site reachable hai.
    * Fixed targets only (no params — SSRF nahi), read-only. */
+  /* Round-16: booking-critical web fallbacks ka prod-side reachability probe.
+   * Har source ko actual scraper function se hit karta hai (same headers,
+   * same parser) taaki "Render ke IP se chalta hai ya nahi" ka pakka jawab mile. */
+  app.get("/api/debug/web-fallback-health", async (req, res) => {
+    const ws = await import("./railway/webscrape.js");
+    const train = String(req.query.train ?? "12014");
+    const from = String(req.query.from ?? "ASR").toUpperCase();
+    const to = String(req.query.to ?? "NDLS").toUpperCase();
+    const cls = String(req.query.cls ?? "CC").toUpperCase();
+    const date = String(req.query.date ?? new Date(Date.now() + 86400e3).toISOString().slice(0, 10));
+    const timed = async <T,>(label: string, fn: () => Promise<T | null>, pick: (v: NonNullable<T>) => unknown) => {
+      const t = Date.now();
+      try {
+        const v = await fn();
+        return { label, ok: v != null && (!Array.isArray(v) || v.length > 0), latencyMs: Date.now() - t, sample: v == null ? null : pick(v as NonNullable<T>) };
+      } catch (err) {
+        return { label, ok: false, latencyMs: Date.now() - t, error: String(err).slice(0, 200) };
+      }
+    };
+    const [availability, fareRoute, stationCode, stationName, liveRailEnquiry, liveRailYatri, schedule] = await Promise.all([
+      timed("seat_availability (sa.railyatri.in)", () => ws.scrapeSeatAvailabilityWeb(train, date, from, to, cls), (v) => v),
+      timed("fare_route (erail.in)", () => ws.scrapeTrainFareWeb(train), (v) => ({ classes: v.classes })),
+      timed("station_code (railenquiry.in)", () => ws.scrapeStationLookupWeb("PGW"), (v) => v),
+      timed("station_name (erail stations.js)", () => ws.scrapeStationSearchWeb("phagwara"), (v) => v.slice(0, 3)),
+      timed("live_status (railenquiry.in)", () => ws.scrapeLiveStatusRailEnquiry(train), (v) => ({ status: v.status, currentStation: v.currentStation, lastUpdatedAt: v.lastUpdatedAt })),
+      timed("live_status (railyatri.in)", () => ws.scrapeLiveStatusWeb(train, "Amritsar Shatabdi"), (v) => ({ status: v.status, currentStation: v.currentStation })),
+      timed("schedule (ixigo/confirmtkt/trainspnrstatus)", () => ws.scrapeTrainScheduleWeb(train), (v) => ({ name: v.trainName, stops: v.stops?.length, provider: v.provider })),
+    ]);
+    const checks = [availability, fareRoute, stationCode, stationName, liveRailEnquiry, liveRailYatri, schedule];
+    res.json({
+      from: "render-prod",
+      at: new Date().toISOString(),
+      probe: { train, from, to, cls, date },
+      okCount: checks.filter((c) => c.ok).length,
+      total: checks.length,
+      checks,
+    });
+  });
+
   app.get("/api/debug/scrape-health", async (_req, res) => {
     /* (a) REAL production path — scrapeTrainFareWeb (fetchHtml full fingerprint) */
     const t1 = Date.now();
