@@ -1,3 +1,4 @@
+import type { Station } from "../providers/types.js";
 import { runUnderstand } from "../understand/index.js";
 import { generalRailwayAnswer } from "../understand/llm.js";
 import { understand as deterministicUnderstand, type DialogSlot, type KnownSlots, type NluResult } from "../understand/legacy-nlu.js";
@@ -192,6 +193,21 @@ async function atlasFallback(
     null;
   if (unresolved) {
     const res = await routedStationSearch(unresolved);
+    /* Round-16j (screenshot: "koaa" → "KOLKATA ke liye kaunsa station? 1. KOAA"):
+     * provider ne EXACTLY ek station diya aur choice nahi maangi → wahi hai,
+     * poochhne ka matlab nahi. Slot bhar ke aage badho. */
+    if (res.stations.length === 1 && !res.needChoice) {
+      const only = res.stations[0];
+      const st = { code: only.code, name: only.name, city: only.city ?? only.name };
+      if (nlu.unresolvedTo || (!nlu.unresolvedFrom && ctx.pendingDestinationChoice)) {
+        ctx.destination = st;
+        ctx.pendingDestinationChoice = null;
+      } else {
+        ctx.origin = st;
+        ctx.pendingOriginChoice = null;
+      }
+      return atlasFallback(pref, ctx, { ...nlu, unresolvedFrom: undefined, unresolvedTo: undefined });
+    }
     const list = res.stations.slice(0, 6).map((s, i) => `${i + 1}. ${s.code} – ${s.name}`).join(", ");
     const question = list
       ? `${res.city ?? unresolved} mein kaun sa station chahiye? Options: ${list}`
@@ -215,8 +231,8 @@ async function atlasFallback(
     ? "Kahan se jaana hai? Departure station bataiye."
     : !ctx.destination
       ? "Kahan jaana hai? Station bataiye."
-      : !ctx.date
-        ? "Kis date ko jaana hai?"
+      : !ctx.date || !ctx.dateProvided
+        ? `${ctx.origin.code} → ${ctx.destination.code} — kis date ko jaana hai? (aaj/kal/parso ya tareekh)`
         : null;
   if (missingAsk) {
     return { reply: missingAsk, ok: false, trace: trace(false, null, "slot missing — clarification"), grounded: true, trains: null };
@@ -1114,6 +1130,47 @@ export async function arrivalAtStationTurn(
   };
 }
 
+/* Round-16j: unresolved place (det.unresolvedFrom/To ya ctx.pending*Choice)
+ * ko provider se dekho — EXACTLY ek station, needChoice=false → slot fill
+ * + pending clear + det ka unresolved hata do (taaki model/atlas dobara na
+ * poochhe). Multi-station city → kuch nahi (options flow). Fail-safe. */
+async function autoResolveSingleStation(ctx: AgentContext, det: NluResult): Promise<void> {
+  const tryOne = async (q: string | null | undefined): Promise<Station | null> => {
+    const query = String(q ?? "").trim();
+    if (!query) return null;
+    try {
+      const res = await routedStationSearch(query);
+      if (res.stations.length === 1 && !res.needChoice) {
+        const only = res.stations[0];
+        return { code: only.code, name: only.name, city: only.city ?? only.name };
+      }
+    } catch {
+      /* provider fail — pehla flow chalega */
+    }
+    return null;
+  };
+  if (!ctx.destination) {
+    const st = await tryOne(det.unresolvedTo ?? ctx.pendingDestinationChoice);
+    if (st) {
+      ctx.destination = st;
+      ctx.pendingDestinationChoice = null;
+      det.unresolvedTo = undefined;
+    }
+  }
+  if (!ctx.origin) {
+    const st = await tryOne(det.unresolvedFrom ?? ctx.pendingOriginChoice);
+    if (st) {
+      ctx.origin = st;
+      ctx.pendingOriginChoice = null;
+      det.unresolvedFrom = undefined;
+    }
+  }
+  if (ctx.origin && ctx.destination && ctx.origin.code === ctx.destination.code) {
+    // same station dono side — jo abhi resolve hua use hatao
+    if (det.unresolvedTo === undefined && ctx.pendingDestinationChoice === null) ctx.destination = null;
+  }
+}
+
 export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
   const seeded = seedContext(req);
 
@@ -1295,6 +1352,12 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
       },
     });
     const ctx = mergeAgentContext(seeded, det, req.text);
+    /* Round-16j (screenshot: "koaa" → model ne "KOLKATA ke liye kaunsa
+     * station? 1. KOAA" poochha): unresolved city/code ko model tak jaane se
+     * PEHLE deterministic resolve karo — provider exactly EK station de (koi
+     * choice nahi) to slot yahin bhar do. Ambiguous (Delhi/Kolkata city) ho to
+     * pehle jaisa options-flow. */
+    await autoResolveSingleStation(ctx, det);
     const follow = classifyFollowUp(req.text);
     const trainNo = resolveTrainNumber(req.text, ctx) ?? det.trainNumber;
     if (trainNo) ctx.selectedTrainNumber = trainNo;
@@ -1468,6 +1531,7 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
     if (stationPick.side === "from" && understood.nlu.to?.code === picked) understood.nlu.to = undefined;
   }
   const ctx = mergeAgentContext(seeded2, understood.nlu, req.text);
+  await autoResolveSingleStation(ctx, understood.nlu); // Round-16j
   const follow = classifyFollowUp(req.text);
   const trainNo = resolveTrainNumber(req.text, ctx) ?? understood.nlu.trainNumber;
   if (trainNo) ctx.selectedTrainNumber = trainNo;

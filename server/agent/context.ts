@@ -383,6 +383,21 @@ export function mergeAgentContext(
   /* Round-9: station-pick ya kisi bhi raaste se slot bhar gaya to pending clear. */
   if (next.origin) next.pendingOriginChoice = null;
   if (next.destination) next.pendingDestinationChoice = null;
+  /* Round-16j (user screenshot 2026-09-08: "ludhiana se koaa" par date nahi
+   * poochhi): NAYI journey (koi bhi end pichhle se alag, ya naya unresolved
+   * city) bola aur is turn mein date nahi di → purani chat ki date STALE hai;
+   * dateProvided reset — date dobara poochhi jayegi. */
+  const routeChanged =
+    (nlu.from && prev.origin && nlu.from.code !== prev.origin.code) ||
+    (nlu.to && prev.destination && nlu.to.code !== prev.destination.code) ||
+    (nlu.from && !prev.origin) ||
+    (nlu.to && !prev.destination) ||
+    Boolean(nlu.unresolvedFrom) ||
+    Boolean(nlu.unresolvedTo);
+  if (routeChanged && !nlu.date && (nlu.from || nlu.to || nlu.unresolvedFrom || nlu.unresolvedTo)) {
+    next.date = null;
+    next.dateProvided = false;
+  }
   if (nlu.date) {
     next.date = nlu.date;
     next.dateProvided = true;

@@ -454,3 +454,32 @@ describe("Round-16g: stale slot from previous chat must not produce from == to (
     expect(ctx.destination?.code).toBe("ASR");
   });
 });
+
+describe("Round-16j: new route resets stale date; single-station code never re-asked (user screenshots 2026-09-08)", () => {
+  const LDH = { code: "LDH", name: "Ludhiana Junction", city: "Ludhiana" };
+  const NDLS = { code: "NDLS", name: "New Delhi", city: "New Delhi" };
+  it("prev LDH→NDLS with date, user says 'ludhiana se koaa' (no date) → dateProvided=false", () => {
+    const prev = { ...emptyAgentContext(), origin: LDH, destination: NDLS, date: "2026-09-09", dateProvided: true };
+    const text = "Mujhe ludhiana se koaa jaana hai";
+    const ctx = mergeAgentContext(prev, understand(text, { now: NOW }), text);
+    expect(ctx.origin?.code).toBe("LDH");
+    expect(ctx.destination).toBeFalsy();
+    expect(ctx.dateProvided).toBe(false);
+    expect(ctx.date).toBeNull();
+  });
+  it("same route repeated without date → date retained", () => {
+    const prev = { ...emptyAgentContext(), origin: LDH, destination: NDLS, date: "2026-09-09", dateProvided: true };
+    const text = "ludhiana se new delhi";
+    const ctx = mergeAgentContext(prev, understand(text, { now: NOW }), text);
+    expect(ctx.dateProvided).toBe(true);
+    expect(ctx.date).toBe("2026-09-09");
+  });
+  it("new route WITH date in same message → new date kept", () => {
+    const prev = { ...emptyAgentContext(), origin: LDH, destination: NDLS, date: "2026-09-09", dateProvided: true };
+    const text = "kal ludhiana se amritsar jaana hai";
+    const ctx = mergeAgentContext(prev, understand(text, { now: NOW }), text);
+    expect(ctx.destination?.code).toBe("ASR");
+    expect(ctx.dateProvided).toBe(true);
+    expect(ctx.date).toBe("2026-08-20");
+  });
+});
