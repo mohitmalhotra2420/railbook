@@ -483,3 +483,13 @@ describe("Round-16j: new route resets stale date; single-station code never re-a
     expect(ctx.date).toBe("2026-08-20");
   });
 });
+
+describe("Round-16k: station-first flow for ambiguous city (user 2026-09-08)", () => {
+  it("ambiguous 'kolkata' with no date → mergeAgentContext keeps pending city, no date", () => {
+    const text = "Mujhe ludhiana se kolkata jaana hai";
+    const ctx = mergeAgentContext(emptyAgentContext(), understand(text, { now: NOW }), text);
+    expect(ctx.origin?.code).toBe("LDH");
+    expect(ctx.destination).toBeFalsy();
+    expect(ctx.dateProvided).toBe(false);
+  });
+});

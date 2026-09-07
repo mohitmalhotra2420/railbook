@@ -649,11 +649,29 @@ describe("agent integration: agentic path + deterministic fallback", () => {
       // Model asks for the genuinely missing slot instead of calling tools with an assumed date.
       return chatResponse({ content: "Kis date ko jaana hai?" });
     });
-    const result = await runAgent({ text: "Mujhe Amritsar se Delhi jaana hai", now: NOW });
+    // Round-16k: unambiguous stations (ASR→LDH) — model turn; ambiguous city
+    // (Delhi) ab deterministic "station first" leta hai (neeche alag test).
+    const result = await runAgent({ text: "Mujhe Amritsar se Ludhiana jaana hai", now: NOW });
     expect(result.engine).toBe("agentic_tool_calling");
     expect(result.reply).toContain("Kis date ko");
     expect(result.toolTrace ?? []).toEqual([]);
     expect(result.confirmBook).toBe(false);
+  });
+
+  it("Round-16k: ambiguous city (Delhi) → deterministic station options FIRST, no model, no date in question", async () => {
+    railcoreMock();
+    let modelCalls = 0;
+    setAgenticNvidiaFetch(async () => {
+      modelCalls += 1;
+      return chatResponse({ content: "Kis date ko jaana hai?" });
+    });
+    const result = await runAgent({ text: "Mujhe Amritsar se Delhi jaana hai", now: NOW });
+    expect(result.engine).toBe("deterministic");
+    expect(modelCalls).toBe(0);
+    expect(result.reply).toMatch(/Delhi mein kaunsa station chahiye\? Options: 1\. /);
+    expect(result.reply).not.toMatch(/kis date/i);
+    expect(result.context.pendingDestinationChoice).toBeTruthy();
+    expect(result.context.dateProvided).toBeFalsy();
   });
 
   it("booking MUTATION (confirm/payment) never reaches the model — deterministic flow owns it", async () => {

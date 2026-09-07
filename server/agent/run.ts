@@ -1171,6 +1171,46 @@ async function autoResolveSingleStation(ctx: AgentContext, det: NluResult): Prom
   }
 }
 
+/* Round-16k: pending/unresolved city ke liye REAL station options — sirf
+ * station ka sawaal (date nahi), "station first" flow. Provider se 2+ station
+ * mile tabhi; 0/1 (ya fail) → null (aage normal flow). */
+async function askStationChoiceFirst(
+  ctx: AgentContext,
+  det: NluResult,
+): Promise<{ reply: string; side: "to" | "from" } | null> {
+  const side: "to" | "from" | null =
+    !ctx.destination && (det.unresolvedTo || ctx.pendingDestinationChoice)
+      ? "to"
+      : !ctx.origin && (det.unresolvedFrom || ctx.pendingOriginChoice)
+        ? "from"
+        : null;
+  if (!side) return null;
+  const place = String(
+    (side === "to" ? det.unresolvedTo ?? ctx.pendingDestinationChoice : det.unresolvedFrom ?? ctx.pendingOriginChoice) ?? "",
+  ).trim();
+  if (!place) return null;
+  try {
+    const res = await routedStationSearch(place);
+    if (res.stations.length < 2) return null;
+    if (side === "to") ctx.pendingDestinationChoice = place;
+    else ctx.pendingOriginChoice = place;
+    const city = res.city ?? place;
+    // Format resolveStationPick ke parsers se match: "1. HWH – Howrah Junction, 2. …"
+    const list = res.stations
+      .slice(0, 6)
+      .map((s, i) => `${i + 1}. ${s.code} – ${s.name}`)
+      .join(", ");
+    const known = side === "to" && ctx.origin ? `${ctx.origin.code} se ${city}: ` : side === "from" && ctx.destination ? `${city} se ${ctx.destination.code}: ` : "";
+    const dateNote = ctx.dateProvided && ctx.date ? "" : " Station batane ke baad date poochhunga.";
+    return {
+      side,
+      reply: `${known}${city} mein kaunsa station chahiye? Options: ${list}.${dateNote}`,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
   const seeded = seedContext(req);
 
@@ -1361,6 +1401,37 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
     const follow = classifyFollowUp(req.text);
     const trainNo = resolveTrainNumber(req.text, ctx) ?? det.trainNumber;
     if (trainNo) ctx.selectedTrainNumber = trainNo;
+
+    /* Round-16k (user: "pehle station, fir date"): ambiguous city (Kolkata/
+     * Delhi/Mumbai…) abhi bhi unresolved hai → model ko mat bhejo (wo kabhi
+     * date+station ek saath, kabhi alag poochhta tha). Deterministic: PEHLE
+     * station options; station lock hone ke baad date guard apne aap date
+     * poochhega. */
+    if (!trainNo && !stationPick) {
+      const ask = await askStationChoiceFirst(ctx, det);
+      if (ask) {
+        return {
+          nlu: det,
+          source: "nlu",
+          context: ctx,
+          tool: "searchStations",
+          toolOk: true,
+          reply: ask.reply,
+          interrupt: false,
+          resumeAsk: null,
+          resumeText: null,
+          trains: null,
+          confirmBook: false,
+          missingFields: [ask.side === "to" ? "destination" : "origin"],
+          modelUsed: null,
+          latencyMs: 0,
+          failureReason: null,
+          engine: "deterministic",
+          agenticFailureReason: null,
+          grounded: true,
+        };
+      }
+    }
 
     /* ── ROUND-13d: LIVE fast-path — "18310 kahan hai abhi" jaisi UNAMBIGUOUS
      * query par LLM round-trip (10s+) bekar hai. Train number + live-phrase,
