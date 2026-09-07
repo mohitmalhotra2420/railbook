@@ -148,9 +148,20 @@ describe("RailYatri live-status scrape (booking-critical, user-authorized 2026-0
     expect(parseRailYatriLive(ltsPage({ success: true, train_number: "9", train_name: "X" }), "9", "u")).toBeNull();
   });
 
-  it("scrapeLiveStatusWeb: naam ke bina null; naam ke saath URL mein slug", async () => {
-    expect(await scrapeLiveStatusWeb("12054", null)).toBeNull();
+  it("scrapeLiveStatusWeb: naam optional (Round-16b: number se route) — bina naam bhi /12054-train hit; invalid number null", async () => {
     expect(await scrapeLiveStatusWeb("abc", "Some Train")).toBeNull();
+    const urls: string[] = [];
+    setScrapeFetch(async (url: any) => {
+      urls.push(String(url));
+      if (String(url).includes("/live-train-status/12054-train")) {
+        return htmlResponse(ltsPage({ success: true, train_number: "12054", status: "T", delay: 5, current_station_name: "LDH~" }));
+      }
+      return ({ ok: false, status: 404, text: async () => "", json: async () => ({}) }) as unknown as Response;
+    });
+    const noName = await scrapeLiveStatusWeb("12054", null);
+    expect(noName!.trainNumber).toBe("12054");
+    expect(noName!.delayMinutes).toBe(5);
+    expect(urls.some((u) => u.endsWith("/live-train-status/12054-train"))).toBe(true);
     setScrapeFetch(async (url: any) => {
       if (String(url).includes("/live-train-status/12054-Jan-Shatabdi-Express")) {
         return htmlResponse(

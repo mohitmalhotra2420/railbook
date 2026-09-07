@@ -335,21 +335,14 @@ export async function routedLiveStatus(number: string, dateYmd?: string, trainNa
      * dono API fail par RailYatri SSR live-status. Naam URL mein chahiye —
      * pehle caller ka hint (context ki selected train), warna RailCore
      * trainInfo (alag endpoint, live down hone par bhi chal sakta hai). */
-    let trainName: string | null = String(trainNameHint ?? "").trim() || null;
-    if (!trainName) {
-      try {
-        const info = await railcoreTrainInfo(number);
-        trainName = info?.trainName ?? null;
-      } catch {
-        trainName = null;
-      }
-    }
-    if (trainName) {
-      const scraped = await scrapeLiveStatusWeb(number, trainName);
-      if (scraped) {
-        logServed("web_railyatri", "liveStatus", started, true, "api_both_failed");
-        return { live: scraped, provider: "web_railyatri" };
-      }
+    /* Round-16b: RailYatri ko naam zaroori nahi (number se route hota hai) —
+     * RailCore trainInfo par depend nahi karte (RailCore down/rate-limited
+     * hone par wo bhi fail hota tha → prod par fallback kabhi chalta hi nahi tha). */
+    const trainName: string | null = String(trainNameHint ?? "").trim() || null;
+    const scraped = await scrapeLiveStatusWeb(number, trainName);
+    if (scraped) {
+      logServed("web_railyatri", "liveStatus", started, true, "api_both_failed");
+      return { live: scraped, provider: "web_railyatri" };
     }
     /* railenquiry.in (round-6): number-only URL — trainName hint na mile
      * tab bhi chalta hai (RailYatri ko naam URL mein chahiye). */

@@ -671,7 +671,7 @@ export function createApp() {
       timed("station_code (railenquiry.in)", () => ws.scrapeStationLookupWeb("PGW"), (v) => v),
       timed("station_name (erail stations.js)", () => ws.scrapeStationSearchWeb("phagwara"), (v) => v.slice(0, 3)),
       timed("live_status (railenquiry.in)", () => ws.scrapeLiveStatusRailEnquiry(train), (v) => ({ status: v.status, currentStation: v.currentStation, lastUpdatedAt: v.lastUpdatedAt })),
-      timed("live_status (railyatri.in)", () => ws.scrapeLiveStatusWeb(train, "Amritsar Shatabdi"), (v) => ({ status: v.status, currentStation: v.currentStation })),
+      timed("live_status (railyatri.in)", () => ws.scrapeLiveStatusWeb(train, null), (v) => ({ status: v.status, currentStation: v.currentStation })),
       timed("schedule (ixigo/confirmtkt/trainspnrstatus)", () => ws.scrapeTrainScheduleWeb(train), (v) => ({ name: v.trainName, stops: v.stops?.length, provider: v.provider })),
     ]);
     const checks = [availability, fareRoute, stationCode, stationName, liveRailEnquiry, liveRailYatri, schedule];

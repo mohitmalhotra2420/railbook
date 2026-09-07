@@ -12,6 +12,7 @@ import {
   parseIrctcAvailabilityText,
   scrapeSeatAvailabilityWeb,
   scrapeStationSearchWeb,
+  scrapeStationLookupWeb,
   setScrapeFetch,
   _setErailStationsCacheForTests,
 } from "../server/railway/webscrape";
@@ -178,5 +179,20 @@ describe("ROUND-16: booking-critical web fallback (API fail → verified sites)"
     const routedMulti = await routedStationSearch("jalandhar");
     expect(routedMulti.needChoice).toBe(true);
     expect(routedMulti.stations.length).toBe(2);
+  });
+
+  it("Round-16b: station CODE lookup — railenquiry blocked (404) → erail station list se exact code", async () => {
+    setScrapeFetch(async () => ({ ok: false, status: 404, text: async () => "", json: async () => ({}) }) as unknown as Response);
+    _setErailStationsCacheForTests([
+      { code: "PGW", name: "Phagwara Jn" },
+      { code: "LDH", name: "Ludhiana Jn" },
+    ]);
+    const hit = await scrapeStationLookupWeb("pgw");
+    expect(hit).not.toBeNull();
+    expect(hit!.code).toBe("PGW");
+    expect(hit!.name).toBe("Phagwara Jn");
+    expect(hit!.city).toBe("Phagwara");
+    expect(hit!.provider).toBe("web_erail");
+    expect(await scrapeStationLookupWeb("ZZZZ")).toBeNull();
   });
 });

@@ -431,8 +431,9 @@ export function parseRailYatriLive(html: string, trainNumber: string, sourceUrl:
 export async function scrapeLiveStatusWeb(trainNumber: string, trainName?: string | null): Promise<ScrapedLiveStatus | null> {
   const num = String(trainNumber ?? "").trim();
   if (!/^\d{4,6}$/.test(num)) return null;
-  const name = String(trainName ?? "").trim().replace(/[^\p{L}\p{N}\s-]/gu, "").replace(/\s+/g, "-");
-  if (!name) return null;
+  /* Round-16b: RailYatri sirf number se route karta hai — slug koi bhi chale
+   * (verified 2026-09-07: /12904-x → same __NEXT_DATA__). Naam optional. */
+  const name = String(trainName ?? "").trim().replace(/[^\p{L}\p{N}\s-]/gu, "").replace(/\s+/g, "-") || "train";
   const sourceUrl = `https://www.railyatri.in/live-train-status/${num}-${name}`;
   const html = await fetchHtml(sourceUrl);
   if (!html) return null;
@@ -623,8 +624,22 @@ export async function scrapeStationLookupWeb(code: string): Promise<ScrapedStati
   if (!/^[A-Za-z]{2,5}$/.test(c)) return null;
   const sourceUrl = `https://railenquiry.in/station/${c.toUpperCase()}`;
   const html = await fetchHtml(sourceUrl);
-  if (!html) return null;
-  return parseRailEnquiryStation(html, c, sourceUrl);
+  if (html) {
+    const parsed = parseRailEnquiryStation(html, c, sourceUrl);
+    if (parsed) return parsed;
+  }
+  /* Round-16b: railenquiry.in Render (datacenter) IP se block hai — erail ki
+   * full station list se exact code match (same list jo name-search use karti hai). */
+  const list = await erailStationList();
+  const hit = list.find((s) => s.code === c.toUpperCase());
+  if (!hit) return null;
+  return {
+    code: hit.code,
+    name: hit.name,
+    city: hit.name.replace(/\s+(Jn|Junction|Cantt|City|Terminus|Central|Town|Road|Halt|H)$/i, "").trim() || hit.name,
+    provider: "web_erail",
+    sourceUrl: "https://erail.in/",
+  };
 }
 
 /* ── SEAT AVAILABILITY via RailYatri SA JSON (Round-16, user request
