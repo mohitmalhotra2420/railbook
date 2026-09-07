@@ -11,3 +11,5 @@ coverage
 
 PROD_TOOL_TRACE.json
 tmpscripts/
+LIGHTNING_BENCH_*.json
+bench-*.json

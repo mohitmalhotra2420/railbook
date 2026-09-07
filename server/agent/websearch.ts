@@ -136,15 +136,37 @@ export type WikipediaPage = {
   extract: string;
 };
 
-export async function findWikipediaPage(query: string, mustInclude?: string): Promise<WikipediaPage | null> {
+const WIKI_API = "https://en.wikipedia.org/w/api.php";
+
+/** Wikipedia full-text search — sirf titles (ranking order mein). */
+export async function searchWikipediaTitles(query: string, limit = 3): Promise<string[]> {
+  const q = query.trim().slice(0, 160);
+  if (!q) return [];
+  const search = (await fetchJson(
+    `${WIKI_API}?action=query&list=search&srsearch=${encodeURIComponent(q)}&format=json&srlimit=${limit}&origin=*`,
+  )) as { query?: { search?: { title: string }[] } } | null;
+  return (search?.query?.search ?? []).map((h) => h.title).filter(Boolean);
+}
+
+/**
+ * @param preferTitles Round-15: in titles ko hits mein AAGE rakho — "vande
+ * bharat top speed" search "Vande Bharat Sleeper" pehle laata hai, jabki
+ * subject-only "vande bharat" search "Vande Bharat Express" — dono lists
+ * mein jo page common ho wahi sawaal ka asli subject hai.
+ */
+export async function findWikipediaPage(query: string, mustInclude?: string, preferTitles?: string[]): Promise<WikipediaPage | null> {
   const q = query.trim().slice(0, 160);
   if (!q) return null;
-  const base = "https://en.wikipedia.org/w/api.php";
-  const search = (await fetchJson(
-    `${base}?action=query&list=search&srsearch=${encodeURIComponent(q)}&format=json&srlimit=3&origin=*`,
-  )) as { query?: { search?: { title: string }[] } } | null;
-  const hits = search?.query?.search ?? [];
+  const base = WIKI_API;
+  let hits = (await searchWikipediaTitles(q, 3)).map((title) => ({ title }));
   if (!hits.length) return null;
+  if (preferTitles?.length) {
+    /* Common pages ko SUBJECT-list ke rank se order karo (subject search
+     * "vande bharat" → "Vande Bharat Express" #1), baaki apni jagah. */
+    const rank = new Map(preferTitles.map((t, i) => [t.toLowerCase(), i]));
+    const common = hits.filter((h) => rank.has(h.title.toLowerCase())).sort((a, b) => rank.get(a.title.toLowerCase())! - rank.get(b.title.toLowerCase())!);
+    hits = [...common, ...hits.filter((h) => !rank.has(h.title.toLowerCase()))];
+  }
   for (const hit of hits) {
     const extracts = (await fetchJson(
       `${base}?action=query&prop=extracts&explaintext=1&exsectionformat=plain&titles=${encodeURIComponent(hit.title)}&format=json&origin=*`,

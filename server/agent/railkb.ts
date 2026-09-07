@@ -200,6 +200,11 @@ const ENTRIES: KbEntry[] = [
     answer: "Break-journey rules allow travel beech mein rokna (certain conditions — 500+ km par ek break etc.) — ticket booking ke rules ke hisaab se; detail IRCTC/press notes se confirm karein.",
   },
   {
+    keys: ["luggage limit", "luggage allowance", "saman kitna", "samaan kitna", "luggage kitna", "baggage limit", "baggage allowance", "free luggage", "luggage charge", "luggage rule", "kitna saman", "kitna samaan", "luggage weight"],
+    answer:
+      "Indian Railways free luggage allowance (per passenger, long-standing rules): 1A (AC First) 70 kg, 2A 50 kg, 3A/CC 40 kg, Sleeper 40 kg, 2S/Second class 35 kg. Isse zyada par excess-luggage charge lagta hai (max allowed: 1A 150 kg, 2A 100 kg, 3A/CC 40 kg, SL 80 kg, 2S 70 kg) — parcel/luggage office se book karna hota hai. Size limit: coach ke andar 100 cm × 60 cm × 25 cm tak. 5 se 12 saal ke bachche ka allowance half.",
+  },
+  {
     keys: ["1031 ka number", "rail madad", "139 helpline", "railway complaint"],
     answer: "Rail Madad (139) Indian Railways ki helpline hai — enquiry, complaint, medical assistance, security. App: Rail Madad. Emergency: 139 ya Railways security 182.",
   },

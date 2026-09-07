@@ -38,6 +38,8 @@ import {
   GENERAL_FACT_RE, isQuestionPhraseNotTrainName, segmentOfStops } from "./context.js";
 import { searchRailcoreTrainsByName } from "../railway/railcore.js";
 import { webSearch } from "./websearch.js";
+import { findTopicAnswer, HINGLISH_TOPIC_WORDS, significantWords } from "./topicpage.js";
+import { railKbAnswer } from "./railkb.js";
 import { stationBoard, trainHistory } from "../railway/railkit.js";
 
 export type AgenticToolName =
@@ -202,6 +204,7 @@ const ArgSchemas = {
       "senior_citizen",
       "child_fare",
       "live_tracking",
+      "luggage",
     ]),
   }),
   JOURNEY_ANALYZE: z.object({
@@ -883,12 +886,21 @@ const RAILWAY_KB: Record<string, string> = {
   upgrade: "Free upgrade scheme: booking time 'consider for auto-upgrade' opt-in par confirmed passengers same class mein higher class mein upgrade ho sakte hain jab seat uplabdh ho. Upgrade par ek hi jagah baithte hain, fare difference nahi dena hota.",
   senior_citizen: "Purush 60+ / mahila 58+ ke liye senior citizen concession opt-in hota hai (lower berth + partial fare concession) — abhi limited classes mein available, booking form mein choose karna padta hai.",
   child_fare: "5 saal se kam umra ke bachche ka ticket FREE (alag seat/berth nahi). 5-11 saal ke bachche full fare ya child fare option ke saath seat mil sakti hai (child fare berth ke saath).",
+  luggage:
+    "Indian Railways free luggage allowance (per passenger): 1A 70 kg, 2A 50 kg, 3A/CC 40 kg, Sleeper 40 kg, 2S 35 kg. Isse zyada par excess-luggage charge (max allowed 1A 150 kg, 2A 100 kg, 3A/CC 40 kg, SL 80 kg, 2S 70 kg; luggage/parcel office se book). Size limit coach ke andar 100 × 60 × 25 cm.",
   live_tracking: "Live tracking provider (RailCore/RailKit) ke real feed se aata hai — current position (train abhi kahan hai), delay aur next station. Data na ho to hum saaf mana kar dete hain, andaza nahi lagate.",
+};
+
+export type ToolExecContext = {
+  /** User ka original message — WEB_SEARCH isse Hinglish sawaal ka topic
+   * (speed/history/coach) samajh kar Wikipedia se focused jawab nikalta hai. */
+  userText?: string;
 };
 
 export async function executeApprovedTool(
   name: string,
   rawArgs: Record<string, unknown>,
+  ctx: ToolExecContext = {},
 ): Promise<ApprovedToolResult> {
   if (!APPROVED.includes(name as AgenticToolName)) {
     return {
@@ -929,18 +941,67 @@ export async function executeApprovedTool(
       case "WEB_SEARCH": {
         const q = String(a.query ?? "").trim();
         if (!q) return failResult("web", "Search query khaali hai.");
+        /* Round-15 ("Muse ko web search mein better banao"): 300-char snippets
+         * se 30B models jawab synthesize nahi kar paate the — 2-3 baar
+         * search repeat, phir raw "N results" summary. Ab tool KHUD
+         * Wikipedia ka POORA page utha kar sawaal-focused paragraph/table
+         * (topicpage engine — deterministic path wala hi) ANSWER-READY
+         * summary mein deta hai; model ko sirf Hinglish mein rephrase karna
+         * hai. Pehle model ki query (context-resolved), phir user ka
+         * original Hinglish sawaal. */
+        const userText = String(ctx.userText ?? "").trim();
+        /* Order: user ka ORIGINAL Hinglish sawaal pehle jab usme khud subject
+         * ho (topic engine Hinglish ke liye tuned hai; model ki mixed query
+         * "X kab shuru hui when was X started" ranking bigaad deti hai).
+         * Follow-up ("iski speed?") mein subject nahi hota → model ki
+         * context-resolved query pehle. */
+        const userHasSubject = Boolean(userText) && significantWords(userText).filter((w) => !HINGLISH_TOPIC_WORDS.has(w)).length > 0;
+        const tries = userHasSubject && userText.toLowerCase() !== q.toLowerCase() ? [userText, q] : [q];
+        if (!userHasSubject && userText && userText.toLowerCase() !== q.toLowerCase()) tries.push(userText);
+        for (const t of tries) {
+          const ans = await findTopicAnswer(t);
+          if (!ans) continue;
+          const summary =
+            ans.kind === "table"
+              ? `Web se mila (Wikipedia — ${ans.title}, top rows):\n${ans.text}\n(Source: ${ans.url})`
+              : `Web se mila (Wikipedia — ${ans.title}): ${ans.text}\n(Source: ${ans.url})`;
+          return okResult("web", summary, {
+            query: q,
+            answer_found: true,
+            title: ans.title,
+            source_url: ans.url,
+            answer: ans.text,
+            kind: ans.kind,
+            note:
+              "YAHI JAWAB HAI — dobara WEB_SEARCH MAT karo. Is 'answer' text ko 2-4 line Hinglish mein user ko do (numbers/names/dates jaise hain waise rakho), shuru mein 'Web se mila (Wikipedia — <title>):' aur end mein '(Source: <url>)' rakho. Ye railway API ka live data NAHI — time/fare/seats/booking ke liye use mat karo.",
+          });
+        }
+        /* Topic-page fail → local KB (stable rules: luggage/tatkal/RAC…) —
+         * snippet se zyada reliable, aur answer-ready. */
+        const kb = railKbAnswer(userText || q) ?? (userText ? railKbAnswer(q) : null);
+        if (kb) {
+          const kbText = kb.replace(/\n\(Ye general railway knowledge hai[^)]*\)\s*$/, "").trim();
+          return okResult("kb", kbText, {
+            query: q,
+            answer_found: true,
+            answer: kbText,
+            kind: "kb",
+            note: "YAHI JAWAB HAI (RailBook knowledge base — stable railway rules) — dobara WEB_SEARCH MAT karo. Is text ko 2-4 line Hinglish mein do, numbers waise hi; end mein '(General railway rules — official/IRCTC se verify karein.)' likho.",
+          });
+        }
         const results = await webSearch(q, 4);
         if (!results.length) {
           return failResult("web", `"${q}" par web se bhi kuch nahi mila — invent nahi karunga.`);
         }
+        const best = results[0];
         return okResult(
           "web",
-          `Web search "${q}": ${results.length} results (Wikipedia/DDG — UNVERIFIED, live railway data nahi).`,
+          `Web search "${q}": ${results.length} results (Wikipedia/DDG — UNVERIFIED, live railway data nahi). Best: ${best.title} — ${best.snippet} (Source: ${best.url})`,
           {
             query: q,
             count: results.length,
             results,
-            note: "Ye WEB-sourced hai (Wikipedia/DuckDuckGo) — railway API ka live data NAHI. Reply mein 'web se mila' bolo; time/fare/seats/booking ke liye use mat karo.",
+            note: "Ye WEB-sourced hai (Wikipedia/DuckDuckGo) — railway API ka live data NAHI. Sabse relevant snippet se 2-3 line jawab do, 'web se mila' + Source URL ke saath; dobara search mat karo. Time/fare/seats/booking ke liye use mat karo.",
           },
         );
       }
@@ -1365,7 +1426,7 @@ function systemPrompt(
     "20. Timetable/stops/route poora poochha jaye ('poora timetable do', 'kon kon se stops hain', 'har stop ka naam', 'route kya hai', 'kahan kahan rukti hai') to GET_TIMETABLE ke data se SABHI stops list karo — naam + arrival/departure (max ~25, numbered). Sirf '11 stops' jaisa COUNT mat bolna. Ye sawaal journey-slot (origin/date) ka nahi hai — 'kahan se jana hai?' MAT poochna. 'Kon kon se/kaun kaun se' jaise question-words TRAIN KE NAAM nahi hote — bina number ke follow-up par pichhli train (history/known context) use karo, TRAIN_NAME_SEARCH par ye phrase mat bhejo.",
     "21. Do trains compare karne ko kahe ('12014 and 12054 mein se kon si better', 'X vs Y') to DONO par GET_TIMETABLE call karo aur duration/stops/classes/timing compare karke 2-4 line mein data-based verdict do. Ek train ka data na mile to doosre ka jo mila wo do + saaf bolo kaunsa nahi mila — poora compare 'data nahi mila' se cancel MAT karo. Route alag ho (last stop different) to pehle batao.",
     "22. User ne clearly kaha ki travel NAHI karna, sirf information chahiye ('jaana nahi hai', 'sirf details chahiye', 'bas batao') to journey slots (origin/destination/date) kabhi mat poochho — seedha info tool se do. Travel-denial wale message ko station/journey input ki tarah parse MAT karna.",
-      "23. GENERAL-FACT sawaal (top speed/max speed/kitni tez/average speed/kab chalu hui/kab shuru/history/kitne coach) par WEB_SEARCH PEHLA tool hai — train ka naam/number dhoondh kar train-list 'kaunsi?' bilkul mat poochho. Web results 'web se mila' + source ke saath do — unhe verified railway data jaisa present na karo. Baaki cases mein WEB_SEARCH last-resort hai (railway tools/KB jawab na dein YA sawaal general railway background/history/news ka ho). Live time/fare/seats/availability/booking ke liye web data kabhi use na karo. Ek reply mein max 1 web search.",
+      "23. GENERAL-FACT sawaal (top speed/max speed/kitni tez/average speed/kab chalu hui/kab shuru/history/kitne coach) par WEB_SEARCH PEHLA tool hai — train ka naam/number dhoondh kar train-list 'kaunsi?' bilkul mat poochho. Query mein train/topic ka POORA naam do (jaise 'Vande Bharat Express top speed', 'Konkan Railway history'). WEB_SEARCH ka result summary mein AKSAR seedha jawab hota hai ('Web se mila (Wikipedia — …): …' + Source) — us text ko 2-4 line Hinglish mein user ko do, numbers/dates/names bilkul waise hi, 'Web se mila (Wikipedia — <title>)' label + '(Source: <url>)' ke saath. EK search kaafi hai — result aane ke baad dobara/alag query se search MAT karo, seedha reply likho. Web results ko verified railway data jaisa present na karo. Baaki cases mein WEB_SEARCH last-resort hai (railway tools/KB jawab na dein YA sawaal general railway background/history/news ka ho). Live time/fare/seats/availability/booking ke liye web data kabhi use na karo. Ek reply mein max 1 web search.",
     "25. Reply mein KABHI 'tool', 'tool result', 'tool se mila', 'API', 'function', 'evidence' jaise internal words mat likho — user ko sirf railway data chahiye, tumhara internal process nahi. Bas seedha jawab: 'LDH → ASR kal 27 trains hain…'. Source label sirf tab jab summary mein '(Source: …)' aaye — use waise hi rakho.",
       "24. UNIVERSAL WEB FALLBACK (user request 2026-09-06: 'ChatGPT jaisa — koi bhi railway sawaal, API se jawab na mile to khud web se dhoondh lo'): koi bhi railway ka sawaal (catering/pantry/rules/facilities/history/facts/general knowledge) jiska jawab railway data tools (timetable/live/fare/seats) se NAHI aata — WEB_SEARCH se dhoondo aur 'web se mila' + source label ke saath do. Railway-irrelevant web results (cars/automobiles jaise) skip karo, railway-relevant hi do. Na mile to honest 'nahi mil paya' bolo — guess kabhi nahi. Live status/fare/seats/availability/PNR ke liye web search kabhi use mat karna — wahan sirf railway tools.",
   ]
@@ -1449,7 +1510,8 @@ function groundingCheck(content: string, steps: ToolTraceStep[], evidenceParts: 
   const tokens = [...new Set(content.match(/\b[A-Z]{2,5}\b/g) ?? [])];
   // Word-boundary match: "NDL" ko "NDLS" ke ANDAR substring mil jaata tha —
   // invented code ko exact token ki tarah check karo.
-  const badTokens = tokens.filter((t) => !SAFE_UPPER_TOKENS.has(t) && !new RegExp(`\\b${t}\\b`).test(evidence));
+  // (Round-15: "CCTV" vs evidence "CCTVs" — plural-tolerant.)
+  const badTokens = tokens.filter((t) => !SAFE_UPPER_TOKENS.has(t) && !new RegExp(`\\b${t}s?\\b`).test(evidence));
   // Train-type proper names (Rajdhani/Shatabdi/Vande Bharat…): data fail hone par
   // model kabhi khud se naam guess karta hai (12014 ko "Rajdhani" bolna — Shatabdi
   // hai). User ne bola ho ya provider data mein ho to theek; warna ungrounded.
@@ -1464,9 +1526,22 @@ function groundingCheck(content: string, steps: ToolTraceStep[], evidenceParts: 
 function deterministicSummary(steps: ToolTraceStep[]): string {
   const okSteps = steps.filter((s) => s.ok);
   if (!okSteps.length) return "Ye jaankari abhi provider se nahi mil pa rahi. Main gadh ke nahi bataunga.";
-  return okSteps
-    .map((s) => `• ${s.summary}`)
-    .join("\n");
+  /* Round-15: WEB_SEARCH ka answer-ready result (topicpage) hi user ka
+   * jawab hai — bullet-list mein "• Web search: 3 results" jaisa raw dump
+   * nahi. Model fail/empty ho to seedha yahi do. */
+  const webAns = okSteps.find((s) => s.tool === "WEB_SEARCH" && (/^Web se mila \(Wikipedia/.test(s.summary) || s.source === "kb"));
+  if (webAns) {
+    const others = okSteps.filter((s) => s !== webAns && s.tool !== "WEB_SEARCH");
+    const head =
+      webAns.source === "kb"
+        ? `${webAns.summary}\n(General railway rules — live data nahi; official/IRCTC se verify karein.)`
+        : `${webAns.summary}\n(Ye railway API ka data nahi, web-scrape ka jawab hai.)`;
+    return others.length ? `${head}\n${others.map((s) => `• ${s.summary}`).join("\n")}` : head;
+  }
+  /* Ek hi step — bullet ki zaroorat nahi; duplicate summaries collapse. */
+  const uniq = [...new Set(okSteps.map((s) => s.summary))];
+  if (uniq.length === 1) return uniq[0];
+  return uniq.map((s) => `• ${s}`).join("\n");
 }
 
 export function agenticConfigured(): boolean {
@@ -1680,7 +1755,11 @@ export async function runAgenticTurn(input: {
             ...(model.startsWith("nvidia/nemotron") && (process.env.NEMOTRON_THINKING ?? "").trim().toLowerCase() === "off"
               ? { chat_template_kwargs: { enable_thinking: false } }
               : {}),
-            max_tokens: 900,
+            // Round-15: Muse (reasoning model) ke reasoning tokens bhi is
+            // budget mein ginte hain — 900 par lambe tool-results ke baad
+            // final content beech mein kat jaata tha ("…jo result aaya wo").
+            // gpt-oss (reasoning_effort low) 900 par theek hai.
+            max_tokens: model.startsWith("openai/gpt-oss") ? 900 : 2000,
             messages,
             tools: AGENTIC_TOOLS,
           }),
@@ -1811,7 +1890,18 @@ export async function runAgenticTurn(input: {
          * HARD cap: ek turn mein max 2 WEB_SEARCH, uske baad reject + jo mila
          * usi se jawab do. */
         const webSearchesSoFar = steps.filter((st) => st.tool === "WEB_SEARCH").length;
-        if (toolName === "WEB_SEARCH" && webSearchesSoFar >= 2) {
+        /* Round-15: pehli search se hi answer-ready result mil gaya ho to
+         * doosri search ka koi matlab nahi — wahi jawab wapas do. */
+        const webAnswered = steps.find((st) => st.tool === "WEB_SEARCH" && st.ok && (/^Web se mila \(Wikipedia/.test(st.summary) || st.source === "kb"));
+        if (toolName === "WEB_SEARCH" && webAnswered) {
+          result = {
+            ok: false,
+            source: null,
+            summary: `Dobara search ki zaroorat nahi — jawab pehle hi mil chuka hai. ISI se user ko reply do:\n${webAnswered.summary}`,
+            data: null,
+            rejected: "web_search_already_answered",
+          };
+        } else if (toolName === "WEB_SEARCH" && webSearchesSoFar >= 2) {
           result = {
             ok: false,
             source: null,
@@ -1836,7 +1926,7 @@ export async function runAgenticTurn(input: {
             rejected: "general_fact_tool_block",
           };
         } else {
-          result = await executeApprovedTool(toolName, args);
+          result = await executeApprovedTool(toolName, args, { userText: input.text });
         }
         // Structured table capture (user feedback 2026-09-05): SEARCH/JOURNEY
         // success par rows nikalo — client proper <table> render karega, aur
