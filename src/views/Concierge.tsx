@@ -60,14 +60,35 @@ function progressStep(flow: string): number {
  * hi restore — refresh ke baad bhi "hum 18310 ki baat kar rahe the"
  * yaad rehta hai. Blocks (train-tables) persist nahi hote — sirf text. */
 const MEMORY_KEY = "railbook.memory.v1";
-const MEMORY_MAX_AGE_MS = 7 * 24 * 3600 * 1000;
-const MEMORY_MAX_MESSAGES = 120;
+/* Round-16f (user 2026-09-08: "Render open karta hoon to old chat wala page
+ * khulta hai"): app open par HAMESHA fresh home screen. Purani chat sirf
+ * SHORT-TERM agent context ke liye (1 ghanta) — refresh/tab-switch par
+ * "18310 ki baat kar rahe the" yaad rahe, par screen par purani chat nahi.
+ * User apni marzi se "Nayi chat" 🗑️ se sab clear kar sakta hai. */
+const MEMORY_MAX_AGE_MS = 60 * 60 * 1000;
+const MEMORY_MAX_MESSAGES = 40;
+/* Screen par sirf is session ki chat — page-load par thread khaali. */
+const SESSION_KEY = "railbook.session.v1";
+function currentPageSession(): string {
+  try {
+    let id = sessionStorage.getItem(SESSION_KEY);
+    if (!id) {
+      id = String(Date.now());
+      sessionStorage.setItem(SESSION_KEY, id);
+    }
+    return id;
+  } catch {
+    return "nosession";
+  }
+}
 
 type PersistedMemory = {
   savedAt: number;
+  pageSession?: string;
   messages: ChatMessage[];
   agentCtx: import("../api").AgentContextClient | null;
 };
+
 
 function readPersistedMemory(): PersistedMemory | null {
   try {
@@ -84,13 +105,22 @@ function readPersistedMemory(): PersistedMemory | null {
           .filter((m) => m && (m.role === "user" || m.role === "assistant") && typeof m.text === "string")
           .map((m) => ({ id: String(m.id ?? Math.random()), role: m.role, text: m.text }))
       : [];
-    return { savedAt: parsed.savedAt, messages: msgs.slice(-MEMORY_MAX_MESSAGES), agentCtx: parsed.agentCtx ?? null };
+    return { savedAt: parsed.savedAt, pageSession: parsed.pageSession, messages: msgs.slice(-MEMORY_MAX_MESSAGES), agentCtx: parsed.agentCtx ?? null };
   } catch {
     return null;
   }
 }
 
 let memoryCache: PersistedMemory | null | undefined;
+export function clearPersistedMemory(): void {
+  try {
+    localStorage.removeItem(MEMORY_KEY);
+  } catch {
+    /* ignore */
+  }
+  memoryCache = null;
+}
+
 function persistedMemory(): PersistedMemory | null {
   if (memoryCache === undefined) memoryCache = readPersistedMemory();
   return memoryCache;
@@ -100,6 +130,7 @@ function writePersistedMemory(msgs: ChatMessage[], agentCtx: import("../api").Ag
   try {
     const slim: PersistedMemory = {
       savedAt: Date.now(),
+      pageSession: currentPageSession(),
       messages: msgs
         .filter((m) => !m.pending)
         .slice(-MEMORY_MAX_MESSAGES)
@@ -119,7 +150,13 @@ export function Concierge() {
   const [lastAsked, setLastAsked] = useState<DialogSlot>(null);
   /* Round-8: refresh ke baad bhi conversation + agent-context yaad —
    * localStorage se restore (7 din tak). */
-  const [messages, setMessages] = useState<ChatMessage[]>(() => persistedMemory()?.messages ?? []);
+  /* Round-16f: screen par purani chat sirf tab jab SAME tab mein reload hua
+   * ho (sessionStorage id match) — naya open/new tab = fresh home. */
+  const [messages, setMessages] = useState<ChatMessage[]>(() => {
+    const mem = persistedMemory();
+    if (!mem) return [];
+    return mem.pageSession && mem.pageSession === currentPageSession() ? mem.messages : [];
+  });
   const [seenSession, setSeenSession] = useState(state.sessionId);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
@@ -166,8 +203,22 @@ export function Concierge() {
 
   /* Round-8: har turn ke baad chat + context localStorage mein save. */
   useEffect(() => {
+    if (!messages.length) return; // fresh open — purani memory ko khaali se overwrite mat karo
     writePersistedMemory(messages, agentCtxRef.current);
   }, [messages]);
+
+  /* Round-16f: "Nayi chat" — screen + memory + agent context + journey sab fresh. */
+  function startNewChat() {
+    clearPersistedMemory();
+    agentCtxRef.current = null;
+    lastFactTrainRef.current = null;
+    stationPickRef.current = null;
+    journeyRef.current = { from: null, to: null, date: "", dateProvided: false };
+    resetJourney();
+    setLastAsked(null);
+    setPrefs({});
+    setMessages([]);
+  }
 
   async function applyTurn(turn: AssistantTurn, userText = "") {
     setPrefs(turn.prefs);
@@ -714,7 +765,7 @@ export function Concierge() {
             passengerCount: state.paxProvided ? state.passengerCount : null,
           },
           context: agentCtxRef.current ?? undefined,
-          history: messages
+          history: (messages.length ? messages : persistedMemory()?.messages ?? [])
             .slice(-8)
             .map((m) => ({ role: m.role, content: String(m.text ?? "").slice(0, 500) })),
           now: new Date().toISOString(),
@@ -1241,6 +1292,9 @@ export function Concierge() {
           >
             Demo
           </span>
+        )}
+        {!showHome && (
+          <button className="icon-btn" title="Nayi chat" aria-label="Nayi chat" onClick={startNewChat}>✚</button>
         )}
         <button className="icon-btn" title="RailKit tools" onClick={() => go("tools")}>▦</button>
         <button className="icon-btn" title="Wallet" onClick={() => go("wallet")}>₹</button>
