@@ -1164,24 +1164,53 @@ export async function executeApprovedTool(
         let seg: ReturnType<typeof segmentOfStops> = null;
         const segFrom = (a.origin as string | undefined) ?? null;
         const segTo = (a.destination as string | undefined) ?? null;
-        if (segFrom && segTo) {
-          const fromRes = await resolveStationRef(segFrom);
-          const toRes = await resolveStationRef(segTo);
-          if (!("error" in fromRes) && !("candidates" in fromRes) && !("error" in toRes) && !("candidates" in toRes)) {
-            seg = segmentOfStops(stops, fromRes.code, toRes.code);
-          }
+        /* Round-16e (user screenshot 2026-09-08): "12014 yan 12498 kon si better
+         * hai ludhiana ke liye" — summary sirf "14 stops" bolta tha, model ko raw
+         * stops array khud scan karna padta tha; ek baar usne first→last stop ka
+         * time Ludhiana ka bata diya (12498 LDH par rukti hi nahi). Ab origin/
+         * destination ka route-par-hai-ya-nahi DETERMINISTIC summary mein jaata
+         * hai — model ke paas galat padhne ki gunjaish nahi. */
+        const stationChecks: { ref: string; code: string | null; onRoute: boolean; arrival?: string | null; departure?: string | null; index?: number }[] = [];
+        const resolveCode = async (ref: string | null): Promise<string | null> => {
+          if (!ref) return null;
+          const r = await resolveStationRef(ref);
+          if ("error" in r || "candidates" in r) return null;
+          return r.code;
+        };
+        const fromCode = await resolveCode(segFrom);
+        const toCode = await resolveCode(segTo);
+        for (const [ref, code] of [[segFrom, fromCode], [segTo, toCode]] as const) {
+          if (!ref) continue;
+          const idx = code ? stops.findIndex((st) => st.code.toUpperCase() === code.toUpperCase()) : -1;
+          stationChecks.push(
+            idx >= 0
+              ? { ref, code, onRoute: true, arrival: stops[idx].arrival ?? null, departure: stops[idx].departure ?? null, index: idx + 1 }
+              : { ref, code, onRoute: false },
+          );
         }
+        if (fromCode && toCode) seg = segmentOfStops(stops, fromCode, toCode);
+        else if (!fromCode && toCode && stops.length) seg = segmentOfStops(stops, stops[0].code, toCode);
+        else if (fromCode && !toCode && stops.length) seg = segmentOfStops(stops, fromCode, stops[stops.length - 1].code);
+        const checkLine = stationChecks
+          .map((c) =>
+            c.onRoute
+              ? ` ${c.code} par RUKTI HAI (stop #${c.index}/${stops.length}${c.arrival ? `, arr ${c.arrival}` : ""}${c.departure ? `, dep ${c.departure}` : ""}).`
+              : ` ${c.code ?? c.ref} is train ke route par NAHI hai — ${c.ref} ke liye ye train use nahi hoti.`,
+          )
+          .join("");
         const segLine = seg ? `, ${seg.from}→${seg.to} ${seg.departure}→${seg.arrival} (${seg.durationLabel})` : "";
+        const routeEnds = stops.length ? ` Route: ${stops[0].code} ${stops[0].departure ?? ""} → ${stops[stops.length - 1].code} ${stops[stops.length - 1].arrival ?? ""} (poora route, segment nahi).` : "";
         // Web-scrape fallback (2026-09-06): verified-site data — label saaf.
         const webLine = webSourceLabel(res.provider);
         return okResult(
           res.provider,
-          `${a.train_number} ${name} — ${stops.length} stops${segLine}.${webLine}`,
+          `${a.train_number} ${name} — ${stops.length} stops${segLine}.${checkLine}${stationChecks.length ? routeEnds : ""}${webLine}`,
           {
             trainNumber: a.train_number,
             trainName: name,
             stops,
             segment: seg,
+            stationChecks,
             totalRouteDurationMinutes: totalDur,
           },
         );
