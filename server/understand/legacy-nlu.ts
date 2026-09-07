@@ -99,6 +99,12 @@ export interface NluResult {
   compareNumbers?: string[];
 }
 
+/* Round-11: departure-question cue — "depart kar gyi", "nikal chuki",
+ * "chali hai". Future tense ("niklegi", "rukegi") schedule-halt hai —
+ * isme NAHI aata. "departure time" bhi schedule-info hai. */
+const DEPART_LIVE_RE =
+  /\bdepart(?:ed|ure)?\b|(?:nikal|nikli|chhoot|chhuti|chali)\s+(?:chuki|chuka|gayi|gyi)|(?:nikli|chali)\s+hai/i;
+
 const NUM_WORDS: Record<string, number> = {
   ek: 1, ik: 1, one: 1, "1": 1, एक: 1, इक: 1, "१": 1,
   do: 2, two: 2, "2": 2, दो: 2, "२": 2,
@@ -558,6 +564,16 @@ export function understand(text: string, ctx: NluContext = {}): NluResult {
       trainNumber: trainNo,
       from: topic === "LIVE_AT_STATION" ? stationHit : undefined,
     };
+  }
+
+  /* Round-11 (screenshot 2026-09-07): "12411 kya ludhiana departure kar gyi?"
+   * / "12411 ludhiana se depart kar gyi kya?" — LIVE departure-question.
+   * Pehle SEARCH_TRAIN banta tha ("Kahan jaana hai?" ghalat jawab) aur
+   * "Depart"/"Nikli" verbs unresolved-station ban jate the. Train number +
+   * depart/nikal (perfect-tense) → LIVE_TRAIN_STATUS, station from-slot. */
+  if (trainNo && DEPART_LIVE_RE.test(t)) {
+    const st = uniqueStations(t)[0] ?? matchStation(cleanPlace(t));
+    return { intent: "LIVE_TRAIN_STATUS", trainNumber: trainNo, from: st };
   }
 
   const corrText = t.replace(/\s+(?:ki jagah|ke bajaye|ke badle)\s+/g, " nahi ");

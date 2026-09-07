@@ -1154,3 +1154,100 @@ describe("28. Round-10: live status 'last X' → current position (screenshot fi
     expect(res.body.reply).not.toMatch(/delay 13 min/);
   });
 });
+
+describe("29. Round-11: '12411 ludhiana se depart kar gyi?' — LIVE departure-question", () => {
+  /* Screenshot (2026-09-07 09:47): app SEARCH_TRAIN bana raha tha —
+   * "Kahan jaana hai? Station bataiye." aur '"Depart" ke liye exact station
+   * chahiye'. Fix: train + station + depart/nikal cue → LIVE + deterministic
+   * Haan/Abhi-nahi jawab (live position + route-order + schedule dep-time). */
+  it("29a. NLU: 4 departure phrasings → LIVE_TRAIN_STATUS (pseudo-station nahi)", async () => {
+    const { understand } = await import("../server/understand/legacy-nlu");
+    for (const t of ["12411 kya ludhiana departure kar gyi?", "12411 ludhiana se depart kar gyi kya ?", "12411 ludhiana se nikal chuki kya", "kya 12411 ludhiana se nikli hai"]) {
+      const r = understand(t, {});
+      expect(r.intent).toBe("LIVE_TRAIN_STATUS");
+      expect(r.trainNumber).toBe("12411");
+      expect(r.unresolvedTo).toBeUndefined();
+    }
+  });
+
+  it("29b. NLU regressions: search/schedule/arrival phir se galat nahi hue", async () => {
+    const { understand } = await import("../server/understand/legacy-nlu");
+    expect(understand("12054 umb se hw ki train kal", {}).intent).toBe("SEARCH_TRAIN");
+    expect(understand("12411 ka schedule", {}).intent).toBe("TRAIN_SCHEDULE");
+    expect(understand("12054 umb se hw ki train kal", {}).from?.code).toBe("UMB");
+  });
+
+  it("29c. '12411 kya ludhiana departure kar gyi?' → Haan + cross ho chuki, 'Kahan jaana hai?' NAHI", async () => {
+    r8Env();
+    setRailcoreFetch(async (url: unknown) => {
+      const u = String(url);
+      if (u.includes("/live"))
+        return jsonResponse(200, { success: true, data: { train_number: "12411", train_name: "Intercity Exp", status_text: "Running 18 minutes late", delay_minutes: 18, current_station_name: "Ladhowal", next_station_name: "Phagwara Jn" } });
+      if (u.includes("/schedule"))
+        return jsonResponse(200, { success: true, data: { train_number: "12411", train_name: "Intercity Exp", stops: [
+          { station_code: "LDH", station_name: "Ludhiana Jn", arrival_time: "09:05", departure_time: "09:11", day: 1 },
+          { station_code: "LDW", station_name: "Ladhowal", arrival_time: "09:25", departure_time: "09:27", day: 1 },
+          { station_code: "PGW", station_name: "Phagwara Jn", arrival_time: "09:40", departure_time: "09:42", day: 1 },
+        ] } });
+      return jsonResponse(500, { success: false });
+    });
+    const app = createApp();
+    const res = await request(app).post("/api/agent").send({
+      text: "12411 kya ludhiana departure kar gyi?",
+      now: "2026-09-07T04:20:00.000Z",
+    });
+    expect(res.body.reply).toContain("Haan");
+    expect(res.body.reply).toContain("Ludhiana Jn cross kar chuki");
+    expect(res.body.reply).toContain("current status Ladhowal");
+    expect(res.body.reply).not.toMatch(/Kahan jaana hai|exact station chahiye/);
+    expect(res.body.context.selectedTrainNumber).toBe("12411");
+  });
+
+  it("29d. train abhi asked station PAR hai → 'Abhi nahi'", async () => {
+    r8Env();
+    setRailcoreFetch(async (url: unknown) => {
+      const u = String(url);
+      if (u.includes("/live"))
+        return jsonResponse(200, { success: true, data: { train_number: "12411", train_name: "Intercity Exp", status_text: "Running 5 minutes late", delay_minutes: 5, current_station_name: "Ludhiana Jn", next_station_name: "Ladhowal" } });
+      if (u.includes("/schedule"))
+        return jsonResponse(200, { success: true, data: { train_number: "12411", train_name: "Intercity Exp", stops: [
+          { station_code: "LDH", station_name: "Ludhiana Jn", arrival_time: "09:05", departure_time: "09:11", day: 1 },
+          { station_code: "LDW", station_name: "Ladhowal", arrival_time: "09:25", departure_time: "09:27", day: 1 },
+        ] } });
+      return jsonResponse(500, { success: false });
+    });
+    const app = createApp();
+    const res = await request(app).post("/api/agent").send({
+      text: "12411 ludhiana se depart kar gyi kya ?",
+      now: "2026-09-07T04:20:00.000Z",
+    });
+    expect(res.body.reply).toContain("Abhi nahi");
+    expect(res.body.reply).toContain("is waqt Ludhiana Jn par hai");
+    expect(res.body.reply).not.toMatch(/Kahan jaana hai/);
+  });
+
+  it("29e. NTES 'Departed from X at 09:11' status → seedha evidence wala jawab", async () => {
+    r8Env();
+    setRailcoreFetch(async (url: unknown) => {
+      const u = String(url);
+      /* railenquiry/railyatri-style live: status text mein hi "Departed from"
+       * evidence hota hai. */
+      if (u.includes("/live"))
+        return jsonResponse(200, { success: true, data: { train_number: "12411", train_name: "Intercity Exp", status_text: "Departed from LUDHIANA JN(LDH) at 09:11 07-Sep (Delay: 00:09)", delay_minutes: 9, current_station_name: "Ladhowal", next_station_name: "Phagwara Jn" } });
+      if (u.includes("/schedule"))
+        return jsonResponse(200, { success: true, data: { train_number: "12411", train_name: "Intercity Exp", stops: [
+          { station_code: "LDH", station_name: "Ludhiana Jn", arrival_time: "09:05", departure_time: "09:11", day: 1 },
+          { station_code: "LDW", station_name: "Ladhowal", arrival_time: "09:25", departure_time: "09:27", day: 1 },
+        ] } });
+      return jsonResponse(500, { success: false });
+    });
+    const app = createApp();
+    const res = await request(app).post("/api/agent").send({
+      text: "kya 12411 ludhiana se nikli hai",
+      now: "2026-09-07T04:20:00.000Z",
+    });
+    expect(res.body.reply).toContain("Haan");
+    expect(res.body.reply).toContain("09:11 par nikal chuki");
+    expect(res.body.reply).not.toMatch(/Kahan jaana hai/);
+  });
+});

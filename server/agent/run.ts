@@ -20,7 +20,7 @@ import {
   type AgentContext,
   type AgentToolName,
 } from "./context.js";
-import { executeTool, type ToolName } from "./tools.js";
+import { executeTool, livePositionLabel, type ToolName } from "./tools.js";
 import {
   agenticConfigured,
   runAgenticTurn,
@@ -30,7 +30,7 @@ import {
   type SearchCapture,
   type ToolTraceStep,
 } from "./agentic.js";
-import { routedClassBoard, routedSchedule, routedStationSearch, routedTrainInfo, searchTrainsRouted } from "../railway/router.js";
+import { routedClassBoard, routedLiveStatus, routedSchedule, routedStationSearch, routedTrainInfo, searchTrainsRouted } from "../railway/router.js";
 import { webSourceLabel } from "../railway/webscrape.js";
 import {findWikipediaPage, webSearch, generalWebSearch, scrapeWebPage } from "./websearch.js";
 import { railKbAnswer } from "./railkb.js";
@@ -1146,6 +1146,118 @@ export type ArrivalAtStation = {
   trainName: string | null;
 };
 
+/* ── Round-11 (screenshot 2026-09-07): "12411 kya ludhiana departure kar
+ * gyi?" — app pehle SEARCH_TRAIN bana raha tha ("Kahan jaana hai?" /
+ * '"Depart" ke liye exact station chahiye'). Deterministic direct jawab:
+ * live position + route-order se Haan/Abhi-nahi, schedule se dep-time. */
+const DEPART_QUESTION_RE =
+  /\bdepart(?:ed|ure)?\b|(?:nikal|nikli|chhoot|chhuti|chali)\s+(?:chuki|chuka|gayi|gyi)|(?:nikli|chali)\s+hai|(?:niklegi|niklega|niklengi|niklenge)/i;
+
+const DEPART_VERB_WORDS = new Set([
+  "depart", "departed", "departure", "nikal", "nikli", "nikalna", "nikalke", "chali", "chhoot", "chhuti", "chuki", "chuka", "gayi", "gyi", "niklegi", "niklega", "niklengi", "niklenge", "kya", "abhi", "ho", "hui", "tha", "thi", "waqt", "se",
+]);
+
+export type DepartureFromStation = {
+  reply: string;
+  trainNumber: string;
+  trainName: string | null;
+};
+
+export async function departureFromStationTurn(
+  text: string,
+  ctx: AgentContext,
+): Promise<DepartureFromStation | null> {
+  const raw = String(text ?? "");
+  if (!DEPART_QUESTION_RE.test(raw)) return null;
+  const trainNo = resolveTrainNumber(raw, ctx);
+  if (!trainNo) return null;
+  const tokens = arrivalStationTokens(raw).filter((w) => !DEPART_VERB_WORDS.has(w));
+  if (tokens.length === 0) return null;
+
+  /* Route (schedule) — asked stop dhundhne + dep-time ke liye. */
+  const sched = await routedSchedule(trainNo);
+  const stops = sched.schedule && "stops" in sched.schedule ? sched.schedule.stops ?? [] : [];
+  const clean = (s: string) => s.toLowerCase().replace(/[^a-z\u0900-\u097F]/g, "");
+  const matchStop = (tok: string) =>
+    stops.find(
+      (st) =>
+        st.code.toLowerCase() === tok ||
+        (tok.length >= 4 && (clean(st.name).includes(clean(tok)) || clean(st.name).startsWith(clean(tok)))),
+    );
+  let stop: (typeof stops)[number] | null = null;
+  for (const tok of tokens) {
+    const m = matchStop(tok);
+    if (m) stop = m;
+  }
+  if (!stop) return null; // route mein asked station nahi — normal flow honest jawab dega
+  const name = "trainName" in (sched.schedule ?? {}) ? String((sched.schedule as { trainName?: string }).trainName ?? "") : "";
+  const depTime = stop.departure && !(stop === stops[stops.length - 1] && stop.departure === "00:00") ? stop.departure : null;
+
+  const routed = await routedLiveStatus(trainNo);
+  const live = routed.live as
+    | { trainName?: string; status?: string; currentStation?: string | null; nextStation?: string | null; delayMinutes?: number | null }
+    | null;
+  const norm = (s: string) => s.toLowerCase().replace(/junction|jn\b|[^a-z]/g, "");
+  const title = live?.trainName?.trim() || name || "";
+
+  /* 1) NTES-style status: "Departed from LUDHIANA JN(LDH) at 09:11" — seedha
+   *    evidence: HAAN + nikalne ka waqt. */
+  const dep = /departed\s+from\s+([^(]+?)\s*\((\w+)\)\s*at\s*([\d:]+)/i.exec(String(live?.status ?? ""));
+  if (dep && (norm(dep[1]) === norm(stop.name) || dep[2].toLowerCase() === stop.code.toLowerCase())) {
+    const extra = live && live.currentStation && norm(live.currentStation) !== norm(stop.name) ? ` Abhi: current status ${live.currentStation}${live.nextStation ? `, next ${live.nextStation}` : ""}.` : "";
+    return {
+      reply: `Haan — ${trainNo}${title ? ` ${title}` : ""} ${stop.name} se ${dep[3]} par nikal chuki hai.${live?.delayMinutes != null ? ` (delay ~${live.delayMinutes} min)` : ""}${extra}`,
+      trainNumber: trainNo,
+      trainName: title || null,
+    };
+  }
+
+  /* 2) Live current position vs asked stop — route-order se Haan/Abhi-nahi. */
+  if (live?.currentStation) {
+    const cur = norm(live.currentStation);
+    const curIdx = stops.findIndex((st) => norm(st.name) === cur || norm(st.name).startsWith(cur) || cur.startsWith(norm(st.name)));
+    const askedIdx = stops.findIndex((st) => st === stop);
+    if (curIdx >= 0 && askedIdx >= 0) {
+      const nextBit = live.nextStation ? `, next ${live.nextStation}` : "";
+      const delayBit = live.delayMinutes != null ? `, delay ${live.delayMinutes} min` : "";
+      if (askedIdx === curIdx) {
+        return {
+          reply: `Abhi nahi — ${trainNo}${title ? ` ${title}` : ""} is waqt ${stop.name} par hai (current status${delayBit})${nextBit}.${depTime ? ` ${stop.name} se ${depTime} ka departure hai.` : ""}`,
+          trainNumber: trainNo,
+          trainName: title || null,
+        };
+      }
+      if (askedIdx < curIdx) {
+        return {
+          reply: `Haan — ${trainNo}${title ? ` ${title}` : ""} ${stop.name} cross kar chuki hai. Abhi: current status ${live.currentStation}${nextBit}${delayBit}.${depTime ? ` (${stop.name} se scheduled ${depTime})` : ""}`,
+          trainNumber: trainNo,
+          trainName: title || null,
+        };
+      }
+      return {
+        reply: `Abhi nahi — ${trainNo}${title ? ` ${title}` : ""} abhi ${live.currentStation} par hai${nextBit}${delayBit}.${stop.name} abhi baaki hai${depTime ? ` — wahan se ${depTime} ka departure hai` : ""}.`,
+        trainNumber: trainNo,
+        trainName: title || null,
+      };
+    }
+    /* 3) Current position route mein nahi mili — live position bata do. */
+    const position = livePositionLabel(live);
+    return {
+      reply: `${trainNo}${title ? ` ${title}` : ""} — ${live.status ?? ""}${position ? `, ${position}` : ""}${live.nextStation ? `, next ${live.nextStation}` : ""}.${depTime ? ` ${stop.name} se scheduled departure ${depTime}.` : ""}`,
+      trainNumber: trainNo,
+      trainName: title || null,
+    };
+  }
+
+  /* 4) Live nahi mila — schedule se honest jawab. */
+  return {
+    reply: `${trainNo}${title ? ` ${title}` : ""} — live position abhi provider se nahi mili${depTime ? `, par schedule ke hisaab se ${stop.name} se ${depTime} ka departure hai` : ` (${stop.name} route mein hai)`}.${webSourceLabel(sched.provider)}`,
+    trainNumber: trainNo,
+    trainName: title || null,
+  };
+}
+
+
 /** Deterministic arrival-at-station jawab — screenshot ke saare cases:
  * "18310 cdg kitne baje pahunchegi?", "18310 ka cdg arrival btao",
  * "Sirf cdg ka btao kitne baje arrival hai" (context-train), "At what time
@@ -1308,6 +1420,51 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
           tool: "getTimetable",
           toolOk: true,
           reply: arrival.reply,
+          interrupt: false,
+          resumeAsk: null,
+          resumeText: null,
+          trains: null,
+          confirmBook: false,
+          missingFields: [],
+          modelUsed: null,
+          latencyMs: 0,
+          failureReason: null,
+          engine: "deterministic",
+          agenticFailureReason: null,
+          grounded: true,
+        };
+      }
+    } catch {
+      /* precheck optional hai — normal flow continue */
+    }
+  }
+
+  /* ── ROUND-11 (screenshot fix): "12411 kya ludhiana departure kar gyi?" —
+   * deterministic departure-from-station jawab (live + route-order), taaki
+   * SEARCH_TRAIN ka "Kahan jaana hai?" na aaye. */
+  if (!nameClarify && !isBookingMutation(req)) {
+    try {
+      const dep = await departureFromStationTurn(req.text, seeded);
+      if (dep) {
+        const det = await deterministicUnderstand(req.text, {
+          now: req.now ? new Date(req.now) : undefined,
+          lastAsked: req.lastAsked ?? null,
+          known: { from: seeded.origin, to: seeded.destination, date: seeded.date, passengerCount: seeded.passengers },
+        });
+        const ctxDep = mergeAgentContext(seeded, det, req.text, {
+          selectedTrainNumber: dep.trainNumber,
+          selectedTrainName: dep.trainName,
+        });
+        if (!ctxDep.intent || ctxDep.intent === "NONE") ctxDep.intent = "LIVE_TRAIN_STATUS";
+        ctxDep.pendingAsk = null;
+        void neverAutoBook(det.intent, req.bookingFlow);
+        return {
+          nlu: det,
+          source: "nlu",
+          context: ctxDep,
+          tool: "getLiveStatus",
+          toolOk: true,
+          reply: dep.reply,
           interrupt: false,
           resumeAsk: null,
           resumeText: null,

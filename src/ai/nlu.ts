@@ -109,6 +109,10 @@ export interface NluResult {
   unresolvedTo?: string;
 }
 
+/* Round-11: departure-question cue (server legacy-nlu ke DEPART_LIVE_RE jaisa). */
+const DEPART_LIVE_RE =
+  /\bdepart(?:ed|ure)?\b|(?:nikal|nikli|chhoot|chhuti|chali)\s+(?:chuki|chuka|gayi|gyi)|(?:nikli|chali)\s+hai|(?:niklegi|niklega|niklengi|niklenge)/i;
+
 const NUM_WORDS: Record<string, number> = {
   ek: 1, ik: 1, one: 1, "1": 1, एक: 1, इक: 1, "१": 1,
   do: 2, two: 2, "2": 2, दो: 2, "२": 2,
@@ -733,6 +737,15 @@ export function understand(text: string, ctx: NluContext = {}): NluResult {
       from: topic === "LIVE_AT_STATION" ? stationHit : undefined,
       ...extractClasses(t, lastAsked),
     };
+  }
+
+  /* Round-11 (screenshot 2026-09-07): train + station + depart/nikal
+   * (perfect-tense ya future) = LIVE departure-question — SEARCH_TRAIN nahi
+   * ("Kahan jaana hai?" ghalat jawab tha, "Depart"/"Nikli" pseudo-station
+   * ban rahe the). */
+  if (trainNo && DEPART_LIVE_RE.test(t)) {
+    const st = uniqueStations(t)[0] ?? matchStation(cleanPlace(t));
+    return { intent: "LIVE_TRAIN_STATUS", trainNumber: trainNo, from: st };
   }
 
   const corrText = t.replace(/\s+(?:ki jagah|ke bajaye|ke badle)\s+/g, " nahi ");
