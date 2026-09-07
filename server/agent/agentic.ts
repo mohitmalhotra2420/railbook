@@ -1621,11 +1621,20 @@ export async function runAgenticTurn(input: {
     const started = Date.now();
     // Agentic loop ke paas multi-step reasoning + bada context hota hai — NLU se zyada time do,
     // par ek single call poora budget kha nahi sakti.
-    const agenticTimeoutMs = Math.max(3000, Math.min(Number(process.env.AI_AGENTIC_TIMEOUT_MS ?? 25000), timeLeft() - 1500));
+    const agenticBaseMs = Math.max(3000, Number(process.env.AI_AGENTIC_TIMEOUT_MS ?? 25000));
     let json: NvidiaChatJson | null = null;
     let msg: { content?: string | null; reasoning_content?: string | null; tool_calls?: ChatMsg["tool_calls"] } | undefined;
     let lastFailure: string | null = null;
     for (const model of modelChain) {
+      /* Round-13 (prod incident 2026-09-07): primary model deepseek-v4-flash
+       * NIM par hang ho raha tha — 40s timeout poora budget kha jata tha aur
+       * fallback ko ~5s hi milte the (dono timeout). Ab har agle model ke
+       * liye 8s RESERVE — primary mara to fallback ko asli mauka mile. */
+      const modelsAfterThis = Math.max(0, modelChain.length - modelChain.indexOf(model) - 1);
+      const agenticTimeoutMs = Math.max(
+        3000,
+        Math.min(agenticBaseMs, Math.max(4000, timeLeft() - modelsAfterThis * 8000 - 1500)),
+      );
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), agenticTimeoutMs);
       try {
