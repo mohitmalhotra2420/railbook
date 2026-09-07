@@ -394,17 +394,22 @@ const FUZZ_TARGETS: FuzzTarget[] = [
     { key: s.name.toLowerCase().replace(/ junction$| cantt$| city$| road$| terminal$| central$| jn$/g, ""), st: s },
   ]),
   ...Object.entries(ALIASES)
-    .filter(([k]) => /^[a-z][a-z ]{3,}$/.test(k))
+    .filter(([k]) => /^[a-z][a-z ]{3,}$/.test(k) || /^[\u0900-\u097F][\u0900-\u097F ]{3,}$/.test(k))
     .map(([k, v]) => ({ key: k, st: stationByCode(v) }))
     .filter((x): x is FuzzTarget => Boolean(x.st)),
 ];
 
 export function matchStationFuzzy(raw: string): Station | undefined {
   const q = raw.trim().toLowerCase().replace(/\s+/g, " ");
-  if (q.length < 4 || !/^[a-z][a-z ]+$/.test(q)) return undefined;
+  const deva = /^[\u0900-\u097F][\u0900-\u097F ]+$/.test(q);
+  if (deva) {
+    if (q.length < 6) return undefined;
+  } else if (q.length < 4 || !/^[a-z][a-z ]+$/.test(q)) {
+    return undefined;
+  }
   if (isClusterCityName(q)) return undefined;
   if (isGarbageStationQuery(q)) return undefined;
-  const max = q.length >= 8 ? 2 : 1;
+  const max = deva ? 2 : q.length >= 8 ? 2 : 1;
   let bestD = max + 1;
   let bestSt: Station | undefined;
   const hits = new Set<string>();

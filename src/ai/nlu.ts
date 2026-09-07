@@ -303,7 +303,7 @@ function extractPair(t: string): {
   unresolvedTo?: string;
 } {
   const se = t.match(
-    /([\p{L}][\p{L} .]{0,28}?)\s+(?:से|se|from)\s+([\p{L}][\p{L} .]{0,28}?)(?:\s|$)/u,
+    /([\p{L}][\p{L}\p{M} .]{0,28}?)\s+(?:से|se|from)\s+([\p{L}][\p{L}\p{M} .]{0,28}?)(?:\s|$)/u,
   );
   if (se) {
     let a = resolveBare(se[1]);
@@ -321,8 +321,8 @@ function extractPair(t: string): {
     const hit = asRoute(a, b);
     if (hit) return hit;
   }
-  const originBit = t.match(/([\p{L}][\p{L} ]{0,24}?)\s+(?:से|se)(?=\s|$|,|\.)/u);
-  const destBit = t.match(/([\p{L}][\p{L} ]{0,24}?)\s+(?:jana hai|jaana hai|जाना है)/u);
+  const originBit = t.match(/([\p{L}][\p{L}\p{M} ]{0,24}?)\s+(?:से|se)(?=\s|$|,|\.)/u);
+  const destBit = t.match(/([\p{L}][\p{L}\p{M} ]{0,24}?)\s+(?:jana hai|jaana hai|जाना है)/u);
   if (originBit && destBit) {
     const oClean = cleanPlace(originBit[1]);
     const dClean = cleanPlace(destBit[1]);
@@ -785,7 +785,9 @@ export function understand(text: string, ctx: NluContext = {}): NluResult {
       else if (lastAsked === "to") unresolvedTo = cluster.city;
     }
   }
-  if (!from && !to && names.length === 1) {
+  /* Round-12b: pair se cluster-city unresolved aayi hai (जलंधर से दिल्ली)
+   * to single-station ko galat from mat banao — options flow chalne do. */
+  if (!from && !to && names.length === 1 && !unresolvedFrom && !unresolvedTo) {
     const s = names[0];
     if (destCue(t) && !originCue(t)) to = s;
     else if (originCue(t)) from = s;

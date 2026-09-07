@@ -1335,3 +1335,57 @@ describe("31. Round-12: spelling-tolerant station match (ChatGPT-jaisi samajh)",
     expect(understand("12054 umb se hw ki train kal", {}).from?.code).toBe("UMB");
   });
 });
+
+describe("32. Round-12b: Hindi/Devanagari typos (ChatGPT-jaisi Hindi samajh)", () => {
+  it("32a. matchStationFuzzy Devanagari: लुधिआना→LDH, चंडीगढ→CDG, अम्रीतसर→ASR", async () => {
+    const { matchStationFuzzy } = await import("../server/understand/legacy-stations");
+    expect(matchStationFuzzy("लुधिआना")?.code).toBe("LDH");
+    expect(matchStationFuzzy("चंडीगढ")?.code).toBe("CDG");
+    expect(matchStationFuzzy("चण्डीगड़")?.code).toBe("CDG");
+    expect(matchStationFuzzy("अम्रीतसर")?.code).toBe("ASR");
+    /* cluster cities fuzzy NAHI — options flow */
+    expect(matchStationFuzzy("जलंधर")).toBeUndefined();
+    expect(matchStationFuzzy("दिल्ली")).toBeUndefined();
+    expect(matchStationFuzzy("मुम्बई")).toBeUndefined();
+    /* short Hindi words junk nahi */
+    expect(matchStationFuzzy("क्या")).toBeUndefined();
+    expect(matchStationFuzzy("कितने")).toBeUndefined();
+  });
+
+  it("32b. 'लुधिआना से दिल्ली कल की ट्रेटन' → from LDH (pehle galat NDLS)", async () => {
+    const { understand } = await import("../server/understand/legacy-nlu");
+    const r = understand("लुधिआना से दिल्ली कल की ट्रेन", {});
+    expect(r.from?.code).toBe("LDH");
+    expect(r.unresolvedFrom).toBeUndefined();
+    expect(r.unresolvedTo).toBe("दिल्ली");
+  });
+
+  it("32c. 'चंडीगढ से अमृतसर कल' → CDG→ASR (pehle ULTA from=ASR tha!)", async () => {
+    const { understand } = await import("../server/understand/legacy-nlu");
+    const r = understand("चंडीगढ से अमृतसर कल", {});
+    expect(r.from?.code).toBe("CDG");
+    expect(r.to?.code).toBe("ASR");
+  });
+
+  it("32d. cluster-city Hindi variants options-flow (galat from nahi)", async () => {
+    const { understand } = await import("../server/understand/legacy-nlu");
+    const r = understand("जलंधर से दिल्ली कल", {});
+    expect(r.from).toBeUndefined();
+    expect(r.unresolvedFrom).toBe("जलंधर");
+    expect(r.unresolvedTo).toBe("दिल्ली");
+  });
+
+  it("32e. जालंधर-variants local cluster se JUC/JRC options", async () => {
+    const { MULTI_STATION_CITIES } = await import("../server/railway/station-resolve");
+    for (const k of ["जालन्दर", "जलंधर", "जलांधर"]) {
+      expect(MULTI_STATION_CITIES[k]).toContain("JUC");
+    }
+  });
+
+  it("32f. client mirror: Devanagari fuzzy", async () => {
+    const { matchStationFuzzy } = await import("../src/ai/stations");
+    expect(matchStationFuzzy("लुधिआना")?.code).toBe("LDH");
+    expect(matchStationFuzzy("चंडीगढ")?.code).toBe("CDG");
+    expect(matchStationFuzzy("जलंधर")).toBeUndefined();
+  });
+});

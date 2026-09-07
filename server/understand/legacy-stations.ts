@@ -72,6 +72,7 @@ const ALIASES: Record<string, string> = {
   ambarsar: "ASR",
   अमृतसर: "ASR",
   अम्रितसर: "ASR",
+  अम्रीतसर: "ASR",
   ludhiana: "LDH",
   ldh: "LDH",
   ludiyana: "LDH",
@@ -210,16 +211,26 @@ const FUZZ_TARGETS: FuzzTarget[] = [
     { key: s.name.toLowerCase().replace(/ junction$| cantt$| city$| road$| terminal$| central$| jn$/g, ""), st: s },
   ]),
   ...Object.entries(ALIASES)
-    .filter(([k]) => /^[a-z][a-z ]{3,}$/.test(k))
+    .filter(([k]) => /^[a-z][a-z ]{3,}$/.test(k) || /^[\u0900-\u097F][\u0900-\u097F ]{3,}$/.test(k))
     .map(([k, v]) => ({ key: k, st: stationByCode(v) }))
     .filter((x): x is FuzzTarget => Boolean(x.st)),
 ];
 
 export function matchStationFuzzy(raw: string): Station | undefined {
   const q = raw.trim().toLowerCase().replace(/\s+/g, " ");
-  if (q.length < 4 || !/^[a-z][a-z ]+$/.test(q)) return undefined;
+  /* Devanagari (Round-12b): matra-typos ("लुधिआना", "चंडीगढ") bhi —
+   * Devanagari words codepoints mein lambe hote hain, min 6 ka guard
+   * short Hindi words ("क्या") ke false-positive rokta hai. */
+  const deva = /^[\u0900-\u097F][\u0900-\u097F ]+$/.test(q);
+  if (deva) {
+    if (q.length < 6) return undefined;
+  } else if (q.length < 4 || !/^[a-z][a-z ]+$/.test(q)) {
+    return undefined;
+  }
   if (CLUSTER_CITIES.has(q)) return undefined;
-  const max = q.length >= 8 ? 2 : 1;
+  /* Devanagari: nukta/matra variance (आ vs ा) common — hamesha 2 ki
+   * chhut (latin ke 1-2 ke bajaye). */
+  const max = deva ? 2 : q.length >= 8 ? 2 : 1;
   let bestD = max + 1;
   let bestSt: Station | undefined;
   const hits = new Set<string>();
@@ -243,10 +254,10 @@ export function matchStationFuzzy(raw: string): Station | undefined {
 const CLUSTER_CITIES = new Set([
   "ambala", "अंबाला", "अम्बाला",
   "delhi", "dilli", "दिल्ली", "दिल्ही",
-  "mumbai", "bombay", "मुंबई", "बंबई",
+  "mumbai", "bombay", "मुंबई", "मुम्बई", "बंबई",
   "kolkata", "calcutta", "कोलकाता",
   "hyderabad", "हैदराबाद",
-  "jalandhar", "jullundur", "जालंधर", "जालन्धर",
+  "jalandhar", "jullundur", "जालंधर", "जालन्धर", "जालन्दर", "जलंधर", "जलांधर", "जलंदर",
   "lucknow", "लखनऊ",
   "kanpur", "कानपुर",
   "agra", "आगरा",
