@@ -569,6 +569,13 @@ export async function resolveStationPick(
  * se poocha, vande bharat hi bata diya"). (1) pichhli search list mein se naam
  * match, (2) nahi to RailCore /trains/search API se. Ek solid match → number;
  * multiple/zero → honest clarify (galat train ka data KABHI nahi). */
+/* Round-13 (prod incident 2026-09-07): explicit ROUTE pattern — "munbai se
+ * dilli kal ki train" jaisi journey query par fuzzy train-name search
+ * "munbai"→"MUMBAI MAIL" hijack kar raha tha (engine ko milta hi nahi).
+ * Word-word "se"/से (ya "from X to Y") = route query — bina train-type/naam
+ * keyword ke train-NAME resolve skip, engine (NLU/agentic) route samjhe. */
+const ROUTE_QUERY_RE = /(?:^|\s)\S+\s+se\s+\S+|(?:^|\s)\S+\s+से\s+\S+|\bfrom\s+\S+\s+to\s+\S+/i;
+
 /** Phrase user ke apne origin/destination station se match karti hai? ("amritsar ka
  * time" = station context, train-name search NAHI chalana). */
 function phraseMatchesStation(phrase: string, ctx: AgentContext): boolean {
@@ -617,6 +624,10 @@ async function resolveTrainByName(
    * ke liye). Keyword (shatabdi/rajdhani/…) ho to follow-up ki zaroorat nahi. */
   const hasNameKeyword = TRAIN_TYPE_KEYWORD_RE.test(text) || TRAIN_NAME_SUFFIX_RE.test(text);
   const phrase = trainNamePhrase(text) ?? "";
+  /* Round-13: route query ("munbai se dilli ...") — lastTrains list-hit ke
+   * BAAAD check karo (list wale "us wali" resolve बचे रहें), par generic
+   * fuzzy name-search se journey ko hijack mat karo. */
+  if (!hasNameKeyword && ROUTE_QUERY_RE.test(text)) return null;
   /* 2026-09-06: "kon kon se stops hai" jaise follow-up question-phrases train
    * naam nahi — fuzzy search se hijack MAT ("kon kon" → KONKAN KANYA thi). */
   if (!hasNameKeyword && !/\d{4,6}/.test(text) && isQuestionPhraseNotTrainName(text)) return null;
