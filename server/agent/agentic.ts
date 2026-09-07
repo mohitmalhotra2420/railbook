@@ -140,13 +140,16 @@ function fetchImpl(): typeof fetch {
 
 const StationRef = z.string().trim().min(2).max(40);
 const Ymd = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+/* Round-14: kuch models (meta/muse-glimmer) train_number ko JSON NUMBER bhejte hain
+ * (12014 not "12014") — coerce to string, regex gate wahi ka wahi (4-6 digits). */
+const TrainNo = z.coerce.string().trim().regex(/^\d{4,6}$/);
 
 const ArgSchemas = {
   WEB_SEARCH: z.object({ query: z.string().trim().min(2).max(120) }),
   TRAIN_NAME_SEARCH: z.object({ query: z.string().trim().min(2).max(60) }),
   SEARCH_STATIONS: z.object({ query: z.string().trim().min(2).max(40) }),
   GET_COACH_POSITION: z.object({
-    train_number: z.string().regex(/^\d{4,6}$/),
+    train_number: TrainNo,
     station: z.string().trim().min(2).max(20).nullish(),
   }),
   GET_STATION_BOARD: z.object({
@@ -154,7 +157,7 @@ const ArgSchemas = {
     hours: z.number().int().min(2).max(8).nullish(),
   }),
   GET_TRAIN_HISTORY: z.object({
-    train_number: z.string().regex(/^\d{4,6}$/),
+    train_number: TrainNo,
     date: Ymd,
   }),
   SEARCH_TRAINS: z.object({
@@ -162,15 +165,15 @@ const ArgSchemas = {
     destination: StationRef,
     date: Ymd,
   }),
-  GET_TRAIN_INFO: z.object({ train_number: z.string().regex(/^\d{4,6}$/) }),
+  GET_TRAIN_INFO: z.object({ train_number: TrainNo }),
   GET_TIMETABLE: z.object({
-    train_number: z.string().regex(/^\d{4,6}$/),
+    train_number: TrainNo,
     origin: z.string().trim().min(2).max(20).nullish(),
     destination: z.string().trim().min(2).max(20).nullish(),
   }),
-  TRACK_TRAIN: z.object({ train_number: z.string().regex(/^\d{4,6}$/), date: Ymd.nullish() }),
+  TRACK_TRAIN: z.object({ train_number: TrainNo, date: Ymd.nullish() }),
   CHECK_AVAILABILITY: z.object({
-    train_number: z.string().regex(/^\d{4,6}$/),
+    train_number: TrainNo,
     date: Ymd.nullish(),
     origin: StationRef.nullish(),
     destination: StationRef.nullish(),
@@ -178,14 +181,14 @@ const ArgSchemas = {
     quota: z.string().regex(/^[A-Z]{2}$/).nullish(),
   }),
   GET_FARE: z.object({
-    train_number: z.string().regex(/^\d{4,6}$/),
+    train_number: TrainNo,
     date: Ymd.nullish(),
     origin: StationRef.nullish(),
     destination: StationRef.nullish(),
     class_code: z.string().regex(/^[A-Z0-9]{1,3}$/),
     passengers: z.number().int().min(1).max(6).nullish(),
   }),
-  CHECK_PNR: z.object({ pnr: z.string().regex(/^\d{10}$/) }),
+  CHECK_PNR: z.object({ pnr: z.coerce.string().trim().regex(/^\d{10}$/) }),
   GET_CANCELLED_TRAINS: z.object({}),
   GENERAL_RAILWAY_ANSWER: z.object({
     topic: z.enum([
@@ -1363,6 +1366,7 @@ function systemPrompt(
     "21. Do trains compare karne ko kahe ('12014 and 12054 mein se kon si better', 'X vs Y') to DONO par GET_TIMETABLE call karo aur duration/stops/classes/timing compare karke 2-4 line mein data-based verdict do. Ek train ka data na mile to doosre ka jo mila wo do + saaf bolo kaunsa nahi mila — poora compare 'data nahi mila' se cancel MAT karo. Route alag ho (last stop different) to pehle batao.",
     "22. User ne clearly kaha ki travel NAHI karna, sirf information chahiye ('jaana nahi hai', 'sirf details chahiye', 'bas batao') to journey slots (origin/destination/date) kabhi mat poochho — seedha info tool se do. Travel-denial wale message ko station/journey input ki tarah parse MAT karna.",
       "23. GENERAL-FACT sawaal (top speed/max speed/kitni tez/average speed/kab chalu hui/kab shuru/history/kitne coach) par WEB_SEARCH PEHLA tool hai — train ka naam/number dhoondh kar train-list 'kaunsi?' bilkul mat poochho. Web results 'web se mila' + source ke saath do — unhe verified railway data jaisa present na karo. Baaki cases mein WEB_SEARCH last-resort hai (railway tools/KB jawab na dein YA sawaal general railway background/history/news ka ho). Live time/fare/seats/availability/booking ke liye web data kabhi use na karo. Ek reply mein max 1 web search.",
+    "25. Reply mein KABHI 'tool', 'tool result', 'tool se mila', 'API', 'function', 'evidence' jaise internal words mat likho — user ko sirf railway data chahiye, tumhara internal process nahi. Bas seedha jawab: 'LDH → ASR kal 27 trains hain…'. Source label sirf tab jab summary mein '(Source: …)' aaye — use waise hi rakho.",
       "24. UNIVERSAL WEB FALLBACK (user request 2026-09-06: 'ChatGPT jaisa — koi bhi railway sawaal, API se jawab na mile to khud web se dhoondh lo'): koi bhi railway ka sawaal (catering/pantry/rules/facilities/history/facts/general knowledge) jiska jawab railway data tools (timetable/live/fare/seats) se NAHI aata — WEB_SEARCH se dhoondo aur 'web se mila' + source label ke saath do. Railway-irrelevant web results (cars/automobiles jaise) skip karo, railway-relevant hi do. Na mile to honest 'nahi mil paya' bolo — guess kabhi nahi. Live status/fare/seats/availability/PNR ke liye web search kabhi use mat karna — wahan sirf railway tools.",
   ]
     .filter(Boolean)
@@ -1664,13 +1668,18 @@ export async function runAgenticTurn(input: {
             temperature: 0,
             // reasoning_effort GPT-OSS-specific hai (openai/gpt-oss* family only);
             // HF/GLM ya Nemotron jaise models ko bhejne par API reject/ignore karti hai.
-            ...(transport.reasoningEffort && model === transport.primaryModel && model.startsWith("openai/gpt-oss")
-              ? { reasoning_effort: "low" }
-              : {}),
+            // Round-14: GPT-OSS ab fallback slot mein bhi ho sakta hai (Muse primary) — jahan bhi ho, low effort.
+            ...(transport.reasoningEffort && model.startsWith("openai/gpt-oss") ? { reasoning_effort: "low" } : {}),
             // DeepSeek V4 hybrid-thinking: production mein thinking OFF — latency
             // experiment mein measured: 63s/call (thinking ON) → 18-31s/call (OFF),
             // quality identical (6/6 tool-selection/JSON). Params: chat_template_kwargs.
             ...(model.startsWith("deepseek") ? { chat_template_kwargs: { thinking: false } } : {}),
+            // Nemotron 3.5 (Lightning) hybrid-thinking: NEMOTRON_THINKING=off par
+            // reasoning band (benchmark-measured: 2-9s → 1-2s/call). Default = model
+            // default (on). Sirf nvidia/nemotron* models par bheja jata hai.
+            ...(model.startsWith("nvidia/nemotron") && (process.env.NEMOTRON_THINKING ?? "").trim().toLowerCase() === "off"
+              ? { chat_template_kwargs: { enable_thinking: false } }
+              : {}),
             max_tokens: 900,
             messages,
             tools: AGENTIC_TOOLS,
@@ -1797,7 +1806,21 @@ export async function runAgenticTurn(input: {
          * HARD guard: general-fact sawaal par railway data tools reject (sirf
          * WEB_SEARCH + train ka naam dhoondhne wale tools allowed). */
         let result: ApprovedToolResult;
-        if (
+        /* Round-14 (Muse bench T8): model WEB_SEARCH ko same query se 6x repeat
+         * karke step budget kha gaya. Rule 23 ("max 1 web search") soft tha —
+         * HARD cap: ek turn mein max 2 WEB_SEARCH, uske baad reject + jo mila
+         * usi se jawab do. */
+        const webSearchesSoFar = steps.filter((st) => st.tool === "WEB_SEARCH").length;
+        if (toolName === "WEB_SEARCH" && webSearchesSoFar >= 2) {
+          result = {
+            ok: false,
+            source: null,
+            summary:
+              "WEB_SEARCH limit (2/turn) khatam — dobara search mat karo. Pichhle web results se hi jawab do ('web se mila' + source), ya honest bolo ki nahi mil paya.",
+            data: null,
+            rejected: "web_search_cap",
+          };
+        } else if (
           GENERAL_FACT_RE.test(input.text) &&
           toolName !== "WEB_SEARCH" &&
           toolName !== "GET_TRAIN_INFO" &&

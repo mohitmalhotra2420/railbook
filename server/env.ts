@@ -11,13 +11,14 @@ try {
 }
 
 const NVIDIA_DEFAULT_BASE = "https://integrate.api.nvidia.com/v1";
-const NVIDIA_DEFAULT_MODEL = "openai/gpt-oss-20b";
 /**
- * Nemotron fallback HATA DIYA GAYA (2026-09-04) — single-model chain:
- * GPT-OSS-20B fail → deterministic NLU/tool routing. Khali string = koi
- * secondary model push nahi hota (agentic.ts khali fallback skip karta hai).
+ * Round-14 (2026-09-07): PRIMARY = meta/muse-glimmer-30b (bench 11/12 manual,
+ * 1.9s p50 — best Hinglish samajh + multi-tool). FALLBACK = openai/gpt-oss-20b
+ * (3-hafte prod-proven, 10/12). Per-model timeout stagger (Round-13) se dead
+ * primary fallback ko nahi maarta. Env NVIDIA_MODEL / NVIDIA_FALLBACK_MODEL override.
  */
-const NVIDIA_DEFAULT_FALLBACK_MODEL = "";
+const NVIDIA_DEFAULT_MODEL = "meta/muse-glimmer-30b";
+const NVIDIA_DEFAULT_FALLBACK_MODEL = "openai/gpt-oss-20b";
 
 /** Production default. Explicit `mock` / `railkit` / `authorized` still override. */
 export const DEFAULT_RAILWAY_PROVIDER = "railcore";

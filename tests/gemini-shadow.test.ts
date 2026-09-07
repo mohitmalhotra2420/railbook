@@ -19,10 +19,11 @@ describe("Gemini is shadow-only and cannot take money", () => {
     delete process.env.GEMINI_SHADOW;
   });
 
-  it("Production AI models intentional hain: primary planner DeepSeek, NLU/fallback GPT-OSS", () => {
-    // 2026-09-05 intentional switch: DeepSeek V4 Flash primary planner (thinking off),
-    // GPT-OSS-20B NLU/fallback layer par. Gemini/RapidAPI shadow-only guard intact.
-    expect(env.nvidiaModel).toBe("deepseek-ai/deepseek-v4-flash-0731");
+  it("Production AI models intentional hain: primary planner Muse-Glimmer, fallback + NLU GPT-OSS", () => {
+    // 2026-09-07 Round-14 intentional switch: Muse-Glimmer-30B primary planner (bench 11/12, 1.9s p50),
+    // GPT-OSS-20B fallback + NLU layer par. Gemini/RapidAPI shadow-only guard intact.
+    expect(env.nvidiaModel).toBe("meta/muse-glimmer-30b");
+    expect(env.nvidiaFallbackModel).toBe("openai/gpt-oss-20b");
     expect(env.nluModel).toBe("openai/gpt-oss-20b");
     expect(env.geminiShadow).toBe(false);
   });

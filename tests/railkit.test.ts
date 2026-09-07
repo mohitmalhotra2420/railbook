@@ -733,13 +733,17 @@ describe("provider / NVIDIA safety", () => {
     }
   });
 
-  it("NVIDIA defaults stay gpt-oss-20b on integrate.api.nvidia.com", () => {
+  it("NVIDIA defaults: Muse-Glimmer primary, GPT-OSS fallback on integrate.api.nvidia.com (Round-14)", () => {
     const prevModel = process.env.NVIDIA_MODEL;
     const prevBase = process.env.NVIDIA_BASE_URL;
+    const prevFb = process.env.NVIDIA_FALLBACK_MODEL;
     delete process.env.NVIDIA_MODEL;
     delete process.env.NVIDIA_BASE_URL;
-    expect(env.nvidiaModel).toBe("openai/gpt-oss-20b");
+    delete process.env.NVIDIA_FALLBACK_MODEL;
+    expect(env.nvidiaModel).toBe("meta/muse-glimmer-30b");
+    expect(env.nvidiaFallbackModel).toBe("openai/gpt-oss-20b");
     expect(env.nvidiaBaseUrl).toBe("https://integrate.api.nvidia.com/v1");
+    if (prevFb != null) process.env.NVIDIA_FALLBACK_MODEL = prevFb;
     if (prevModel != null) process.env.NVIDIA_MODEL = prevModel;
     if (prevBase != null) process.env.NVIDIA_BASE_URL = prevBase;
   });
