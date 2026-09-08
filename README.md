@@ -114,6 +114,15 @@ Changing the date, train, or class clears downstream selections so stale cards c
 
 `npm test` covers search, empty routes, date-change resets, passenger validation, wallet shortfall, mock success/failure, and PNR retrieval.
 
+## Live status of yesterday / earlier runs (Round-16p)
+
+Live status is per **start-date run**. "kal / parson / yesterday / 7 Sep wali
+kahan hai" resolves to the *past* run (`parseStatusDate`, opposite of the booking
+parser where "kal" = tomorrow). Without a date, if today's run is still idle at
+its origin (multi-day trains), the router auto-probes the previous 3 days and
+returns the run that is actually moving. Completed runs return their final
+status/delay. Replies label the run: `[kal (08 Sep) se chali wali run]`.
+
 ## Extra fallback APIs (Round-16o, optional)
 
 Data chain per method: **RailCore → RailKit → RailRadar → Indian Rail API → verified-site web-scrape → none**. The two new providers are *additional* and fully optional — with no key set they are skipped and nothing else changes.

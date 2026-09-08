@@ -30,10 +30,10 @@ import {
   searchTrainsRouted,
 } from "../railway/router.js";
 import { webSourceLabel } from "../railway/webscrape.js";
-import { parseDatePhrase } from "../understand/legacy-dates.js";
+import { parseDatePhrase, parseStatusDate } from "../understand/legacy-dates.js";
 import { RailKitProvider } from "../railway/railkit.js";
 import type { ClassCode } from "../providers/types.js";
-import { executeTool, livePositionLabel } from "./tools.js";
+import { executeTool, livePositionLabel, liveRunDateLabel } from "./tools.js";
 import {
   GENERAL_FACT_RE, isQuestionPhraseNotTrainName, segmentOfStops } from "./context.js";
 import { routedTrainNameSearch } from "../railway/router.js";
@@ -296,7 +296,7 @@ export const AGENTIC_TOOLS = [
     type: "function",
     function: {
       name: "GET_TRAIN_HISTORY",
-      description: "Train ka PIChhla/completed run (diya gaya date) — actual arrival/departure aur delay per station. 'Kal ki train late thi?' jaise sawaalon ke liye.",
+      description: "Train ke PIChhle run (diya gaya START date) ka station-wise actual arrival/departure + delay. Fail ho (koi provider history na de) to TRACK_TRAIN usi date ke saath call karo — wo completed run ka final status/delay deta hai.",
       parameters: {
         type: "object",
         properties: {
@@ -351,10 +351,14 @@ export const AGENTIC_TOOLS = [
     type: "function",
     function: {
       name: "TRACK_TRAIN",
-      description: "Live running status (position, delay). Date optional (default aaj).",
+      description:
+        "Live running status (position, delay) — kisi bhi START-DATE ke run ka: aaj, kal (yesterday), parson, ya 40 din tak pichhla (completed run bhi — 'kitni late pahunchi'). date = train ki ORIGIN se START date YYYY-MM-DD. 'kal wali/parson wali/7 Sep wali kahan hai', 'kal kitni late thi' → date do. date chhodo to server aaj ka run leta hai, aur agar aaj wala abhi chala nahi to khud pichhle 3 din ka chalta hua run dhoondh leta hai (multi-day trains).",
       parameters: {
         type: "object",
-        properties: { train_number: { type: "string" }, date: { type: "string" } },
+        properties: {
+          train_number: { type: "string" },
+          date: { type: "string", description: "Run START date YYYY-MM-DD (kal/yesterday = aaj-1, parson = aaj-2; system prompt ke 'Status-date resolver' se lo)" },
+        },
         required: ["train_number"],
       },
     },
@@ -1079,7 +1083,22 @@ export async function executeApprovedTool(
       }
       case "GET_TRAIN_HISTORY": {
         const history = await trainHistory(a.train_number as string, a.date as string);
-        if (!history) return failResult(null, "Is date ka completed run nahi mila — main yesterday ka live invent nahi karunga.");
+        if (!history) {
+          /* Round-16p: RailKit history na ho to usi START-date ka run live-chain
+           * (RailCore/RailRadar/web) se — completed run ka final status/delay
+           * bhi "kal kitni late thi" ka sachcha jawab hai. */
+          const res = await routedLiveStatus(a.train_number as string, a.date as string);
+          if (res.live) {
+            const live = res.live as { trainNumber?: string; trainName?: string; status?: string; currentStation?: string | null; delayMinutes?: number | null; journeyDate?: string | null; runState?: string | null };
+            const runLabel = liveRunDateLabel(live.journeyDate ?? (a.date as string));
+            return okResult(
+              res.provider,
+              `${live.trainNumber ?? a.train_number} ${live.trainName ?? ""}${runLabel ? ` [${runLabel}]` : ""} — ${live.status ?? "unknown"}${livePositionLabel(live) ? `, ${livePositionLabel(live)}` : ""}${!/\d+\s*min/i.test(String(live.status ?? "")) && live.delayMinutes != null ? `, delay ${live.delayMinutes}m` : ""}. (Station-wise history provider se nahi mili; ye us run ka overall status hai.)${webSourceLabel(res.provider)}`,
+              live,
+            );
+          }
+          return failResult(res.provider, "Is date ka run kisi provider se nahi mila — main pichhle din ka status invent nahi karunga.");
+        }
         const stops = Array.isArray(history.stops) ? history.stops.slice(0, 20) : [];
         return okResult(
           "railkit",
@@ -1256,7 +1275,14 @@ export async function executeApprovedTool(
           delayMinutes?: number | null;
           lastUpdatedAt?: string | null;
         };
-        return okResult(res.provider, `${live.trainNumber ?? a.train_number} — ${live.status ?? "unknown"}${livePositionLabel(live) ? `, ${livePositionLabel(live)}` : ""}${!/\d+\s*min/i.test(String(live.status ?? "")) && live.delayMinutes != null ? `, delay ${live.delayMinutes}m` : ""}.`, live);
+        const runLabel = liveRunDateLabel((live as { journeyDate?: string | null }).journeyDate);
+        const runState = (live as { runState?: string | null }).runState;
+        const nextBit = live.nextStation && runState !== "completed" ? `, next ${live.nextStation}` : "";
+        return okResult(
+          res.provider,
+          `${live.trainNumber ?? a.train_number}${runLabel ? ` [${runLabel}]` : ""} — ${live.status ?? "unknown"}${livePositionLabel(live) ? `, ${livePositionLabel(live)}` : ""}${nextBit}${!/\d+\s*min/i.test(String(live.status ?? "")) && live.delayMinutes != null ? `, delay ${live.delayMinutes}m` : ""}.${runLabel ? ` (Ye ${runLabel} ka status hai — user ko run-date saaf batao.)` : ""}${webSourceLabel(res.provider)}`,
+          live,
+        );
       }
       case "CHECK_AVAILABILITY": {
         const ctx = await resolveTrainRouteDate(a as unknown as { train_number: string; date?: string; origin?: string; destination?: string });
@@ -1434,6 +1460,7 @@ function systemPrompt(
   },
   dateHint: { kind: "date"; date: string } | { kind: "ambiguous"; options: { date: string; label: string }[] } | null,
   history: AgenticHistoryTurn[] = [],
+  statusDate: string | undefined = undefined,
 ): string {
   const hintLine =
     dateHint?.kind === "date"
@@ -1443,6 +1470,11 @@ function systemPrompt(
             .map((o) => `${o.label} (${o.date})`)
             .join(" / ")} — dono user ko poochho, assume mat karo.`
         : "Deterministic date resolver (IST): user text mein koi date resolve nahi hui — neeche wali date map use karo, warna user se poochho.";
+  /* Round-16p: LIVE/HISTORY ke liye "kal" = BEETA hua kal (yesterday), booking
+   * ke ulta. Deterministic status-date resolver ka result model ko seedha do. */
+  const statusDateLine = statusDate
+    ? `Status-date resolver (IST, sirf TRACK_TRAIN/GET_TRAIN_HISTORY ke liye): user PICHHLE run ki baat kar raha hai — run START date=${statusDate}. TRACK_TRAIN/GET_TRAIN_HISTORY mein date=${statusDate} do (booking wali 'kal=tomorrow' yahan LAGU NAHI). Jawab mein saaf bolo ki ye ${statusDate} se chali wali run hai.`
+    : "Status-date resolver: live/history sawaal mein 'kal/parson/yesterday/<date> wali' = PICHHLA run (aaj se peeche), aane wali train nahi. Multi-day train ke liye TRACK_TRAIN bina date ke bhi call kar sakte ho — server khud chalta hua run dhoondhta hai.";
   const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"] as const;
   const baseMs = (now && Date.parse(now) ? Date.parse(now) : Date.now()) + 5.5 * 3600 * 1000;
   const today = new Date(baseMs);
@@ -1454,6 +1486,7 @@ function systemPrompt(
     `Aaj ki date (IST): ${todayLabel}.`,
     `Date map (agle 7 din, IST): ${weekdayDateMap(now)}.`,
     hintLine,
+    statusDateLine,
     known.origin || known.destination || known.date || known.trainNumber || known.classCode || known.passengers
       ? `Known context (inhi par continue karo, dobara mat poochho): origin=${known.origin ?? "-"}, destination=${known.destination ?? "-"}, date=${known.date ?? "-"}, train=${known.trainNumber ?? "-"}, class=${known.classCode ?? "-"}, passengers=${known.passengers ?? "-"}.${
           known.stationPicked
@@ -1782,6 +1815,9 @@ export async function runAgenticTurn(input: {
   // Deterministic date resolver (IST) — arbitrary dates bhi; model sirf follow karta hai.
   const nowDate = input.now && Date.parse(input.now) ? new Date(input.now) : new Date();
   const dateHint = deterministicDateHint(String(input.text ?? ""), nowDate);
+  /* Round-16p: live/history sawaal → "kal/parson/<date> wali" = PICHHLA run. */
+  const LIVE_OR_HISTORY_RE = /\b(kahan|kaha|kahaan|live|running|status|late|delay|pahunch|pohonch|pahuch|reach|arriv|chali|chal rahi|position|track)\b|कहाँ|कहां|लेट|स्टेटस|पहुँच|पहुंच/i;
+  const statusDate = LIVE_OR_HISTORY_RE.test(String(input.text ?? "")) ? parseStatusDate(String(input.text ?? ""), nowDate) : undefined;
   const historyTurns = (Array.isArray(input.history) ? input.history : [])
     .filter((h) => h && (h.role === "user" || h.role === "assistant") && typeof h.content === "string" && h.content.trim())
     .slice(-8)
@@ -1804,6 +1840,7 @@ export async function runAgenticTurn(input: {
         },
         dateHint,
         historyTurns,
+        statusDate,
       ),
     },
     ...historyTurns,
@@ -2015,6 +2052,14 @@ export async function runAgenticTurn(input: {
           args.date !== dateHint.date
         ) {
           args = { ...args, date: dateHint.date };
+        }
+        /* Round-16p: model ne "kal" ko tomorrow samajh kar future date bhej di
+         * (ya date hi nahi bheji) jabki user pichhle run ki baat kar raha hai →
+         * status-date resolver FINAL. */
+        if ((toolName === "TRACK_TRAIN" || toolName === "GET_TRAIN_HISTORY") && statusDate) {
+          const given = typeof args?.date === "string" ? args.date : "";
+          const todayIst = todayYmd();
+          if (!given || given > todayIst || given !== statusDate) args = { ...args, date: statusDate };
         }
         // GET_TIMETABLE segment (2026-09-05): model ne origin/destination na
         // bheje ho to known context se inject — "kitne time leti hai" ka jawab

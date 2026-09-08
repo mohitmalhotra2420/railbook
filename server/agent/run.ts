@@ -22,6 +22,7 @@ import {
   type AgentToolName,
 } from "./context.js";
 import { executeTool, livePositionLabel, type ToolName } from "./tools.js";
+import { parseStatusDate } from "../understand/legacy-dates.js";
 import {
   agenticConfigured,
   runAgenticTurn,
@@ -1446,6 +1447,8 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
         "right", "now", "ab", "tell", "me", "batao", "bata", "bataiye", "btado", "dijiye",
         "position", "currently", "train", "no", "number", "ki", "ka", "ke", "the", "is",
         "meri", "mera", "se", "par", "pe", "rahi", "gayi", "gai", "kar", "karo", "kahan", "hai",
+        /* Round-16p: pichhle-din cues — deterministic parseStatusDate handle karta hai */
+        "kal", "parson", "parso", "yesterday", "wali", "wala", "jo", "chali", "thi", "tha", "din", "pehle", "ago", "aaj", "today",
       ]);
       const leftovers = String(req.text)
         .toLowerCase()
@@ -1457,6 +1460,8 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
           const liveResult = await executeTool("getLiveStatus", {
             trainNumber: trainNo,
             trainName: ctx.selectedTrainName ?? undefined,
+            /* Round-16p: "kal wali kahan hai" → pichhle din ka run. */
+            date: parseStatusDate(req.text, req.now ? new Date(req.now) : new Date()),
           });
           if (liveResult.ok && liveResult.summary) {
             ctx.intent = "LIVE_TRAIN_STATUS";
@@ -1814,11 +1819,14 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
         /* timetable nahi mili — seedha ctx ke stations se try */
       }
     }
+    /* Round-16p: live status ke liye booking-date (ctx.date = future journey)
+     * NAHI — status-date (kal/parson/7 Sep = PICHHLA run) chahiye. */
+    const liveDate = tool === "getLiveStatus" ? parseStatusDate(req.text, req.now ? new Date(req.now) : new Date()) : undefined;
     const result = await executeTool(tool as ToolName, {
       query: req.text,
       origin: fareOrigin ?? undefined,
       destination: fareDestination ?? undefined,
-      date: ctx.date ?? undefined,
+      date: tool === "getLiveStatus" ? liveDate : ctx.date ?? undefined,
       trainNumber: trainNo,
       trainName: ctx.selectedTrainName ?? undefined,
       classCode: ctx.classCode ?? undefined,

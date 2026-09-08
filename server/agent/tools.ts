@@ -22,13 +22,36 @@ import { isForbiddenMoneyTool, segmentOfStops } from "./context.js";
  *  - "Departed from X ..." (NTES /running, railenquiry) → "X se nikal chuki"
  *  - "Arrived at X" / "At X" (railyatri)                → "abhi X par"
  *  - default (RailCore /live current position)          → "current status X" */
-export function livePositionLabel(live: { status?: string | null; currentStation?: string | null }): string | null {
+export function livePositionLabel(live: { status?: string | null; currentStation?: string | null; runState?: string | null }): string | null {
   const station = String(live.currentStation ?? "").trim();
   if (!station) return null;
   const s = String(live.status ?? "").trim();
+  /* Round-16p: run-state aware — completed run "abhi X par" nahi, "X pahunch
+   * chuki" hai; not-started "abhi origin par khadi, chali nahi". */
+  if (live.runState === "completed") return `${station} pahunch chuki (journey complete)`;
+  if (live.runState === "not_started") return `abhi ${station} se chali nahi (origin par)`;
   if (/^departed\s+from/i.test(s)) return `${station} se nikal chuki`;
   if (/^(?:arrived\s+at|at\s)/i.test(s)) return `abhi ${station} par`;
   return `current status ${station}`;
+}
+
+/** Round-16p: run-date label — "kal (08 Sep) wali" — jab user ne pichhla din
+ * poocha ho ya router ne khud pichhla active run uthaya ho. */
+export function liveRunDateLabel(journeyDate: string | null | undefined, now = new Date()): string {
+  const jd = String(journeyDate ?? "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(jd)) return "";
+  const today = todayYmd();
+  if (jd === today) return "";
+  const [y, m, d] = jd.split("-").map(Number);
+  const [ty, tm, td] = today.split("-").map(Number);
+  const diff = Math.round((Date.UTC(ty, tm - 1, td) - Date.UTC(y, m - 1, d)) / 86400000);
+  const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const pretty = `${String(d).padStart(2, "0")} ${MON[m - 1]}`;
+  void now;
+  if (diff === 1) return `kal (${pretty}) se chali wali run`;
+  if (diff === 2) return `parson (${pretty}) se chali wali run`;
+  if (diff > 2) return `${pretty} se chali wali run (${diff} din pehle)`;
+  return `${pretty} wali run`;
 }
 
 export type ToolName =
@@ -122,18 +145,21 @@ export async function executeTool(
       if (!routed.live) {
         return { ok: false, tool, summary: "Live status unavailable.", data: null, provider: routed.provider };
       }
-      const live = routed.live as { trainNumber?: string; trainName?: string; status?: string; currentStation?: string | null; nextStation?: string | null; delayMinutes?: number | null };
+      const live = routed.live as { trainNumber?: string; trainName?: string; status?: string; currentStation?: string | null; nextStation?: string | null; delayMinutes?: number | null; journeyDate?: string | null; runState?: string | null };
       /* Round-10 (screenshot fix 2026-09-07): "last X" galat tha — RailCore ka
        * current_station train ki ABHI ki position hai (LDH par khadi, speed 0).
        * Status text se position-aware label; delay duplicate bhi hatado. */
       const position = livePositionLabel(live);
       const delayInStatus = /\d+\s*min/i.test(String(live.status ?? ""));
       const delay = !delayInStatus && live.delayMinutes != null ? `, delay ${live.delayMinutes} min` : "";
-      const nextBit = live.nextStation ? `, next ${live.nextStation}` : "";
+      const nextBit = live.nextStation && live.runState !== "completed" ? `, next ${live.nextStation}` : "";
+      /* Round-16p: kaunsa run — kal/parson wala — saaf bolo. */
+      const runLabel = liveRunDateLabel(live.journeyDate);
+      const runBit = runLabel ? ` [${runLabel}]` : "";
       return {
         ok: true,
         tool,
-        summary: `${live.trainNumber ?? args.trainNumber} ${live.trainName ?? ""} — ${live.status ?? "status nahi"}${position ? `, ${position}` : ""}${nextBit}${delay}${webSourceLabel(routed.provider)}`.trim(),
+        summary: `${live.trainNumber ?? args.trainNumber} ${live.trainName ?? ""}${runBit} — ${live.status ?? "status nahi"}${position ? `, ${position}` : ""}${nextBit}${delay}${webSourceLabel(routed.provider)}`.trim(),
         data: live,
         provider: routed.provider,
       };

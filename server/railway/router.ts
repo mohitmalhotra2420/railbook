@@ -507,8 +507,67 @@ export type RoutedLive = {
   provider: ServedProvider;
 };
 
+/* Round-16p: live-status ka "run" samjho. Har provider ek START-DATE ka run
+ * deta hai; multi-day train (Rajdhani 3 din) ke liye AAJ wala run abhi origin
+ * par khada hota hai jabki KAL/PARSON wala run asli mein raste mein hai. */
+export function liveRunState(live: RailcoreLiveStatus | LiveTrainStatus | null): "not_started" | "running" | "completed" | "unknown" {
+  if (!live) return "unknown";
+  const explicit = (live as RailcoreLiveStatus).runState;
+  if (explicit) return explicit;
+  const s = String(live.status ?? "").toLowerCase();
+  if (/not[\s-]*started|yet to start|scheduled to depart|abhi chali nahi|has not started/.test(s)) return "not_started";
+  if (/completed|reached destination|journey (?:over|ended)|terminated|arrived at destination/.test(s)) return "completed";
+  if (/running|departed|arrived|late|on time|delay|at station|between/.test(s)) return "running";
+  return "unknown";
+}
+
+function ymdShift(ymd: string, days: number): string {
+  const [y, m, d] = ymd.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d + days));
+  return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}-${String(dt.getUTCDate()).padStart(2, "0")}`;
+}
+
+function istToday(): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+}
+
+/** Origin par khadi (progress 0) aaj wali entry vs. sach mein chal rahi
+ * pichhle din wali — dono "running" bol sakte hain; isliye origin-idle bhi
+ * not_started jaisa treat hota hai jab currentStation route ka pehla stop ho. */
+function looksIdleAtOrigin(live: RailcoreLiveStatus | LiveTrainStatus | null): boolean {
+  return liveRunState(live) === "not_started";
+}
+
+/**
+ * Round-16p (user: "kal/parson/usse pehle ki train ka live status nahi milta"):
+ * (a) date DI gayi ho (kal/parson/7 Sep) → wahi run, chahe completed ho —
+ *     completed run bhi "kahan thi, kitni late pahunchi" ka sach hai.
+ * (b) date NA di ho aur aaj ka run origin par idle/not-started ho → pichhle
+ *     3 din ke runs probe karo (multi-day trains) aur jo RUNNING mile wahi
+ *     "abhi kahan hai" ka jawab hai. Kuch na mile → aaj wala hi.
+ */
 export async function routedLiveStatus(number: string, dateYmd?: string, trainNameHint?: string | null): Promise<RoutedLive> {
+  const first = await routedLiveStatusForDate(number, dateYmd, trainNameHint);
+  if (dateYmd || !first.live) return first;
+  if (!looksIdleAtOrigin(first.live)) return first;
+  const today = istToday();
+  for (let back = 1; back <= 3; back++) {
+    const probeDate = ymdShift(today, -back);
+    const probe = await routedLiveStatusForDate(number, probeDate, trainNameHint, /*quiet*/ true);
+    if (!probe.live) continue;
+    const st = liveRunState(probe.live);
+    if (st === "running" && !looksIdleAtOrigin(probe.live)) {
+      logServed(probe.provider, "liveStatus", Date.now(), true, `active_run_${probeDate}`);
+      return { ...probe, live: { ...probe.live, journeyDate: (probe.live as RailcoreLiveStatus).journeyDate ?? probeDate } as RailcoreLiveStatus };
+    }
+    if (st === "completed") break; // isse purane sab complete honge
+  }
+  return first;
+}
+
+async function routedLiveStatusForDate(number: string, dateYmd?: string, trainNameHint?: string | null, quiet = false): Promise<RoutedLive> {
   const started = Date.now();
+  void quiet;
   if (railcoreIsPrimary()) {
     const primary = await railcoreLive(number, dateYmd);
     if (isUsableLive(primary)) {

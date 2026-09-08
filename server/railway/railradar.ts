@@ -286,6 +286,7 @@ export async function railradarLive(number: string, dateYmd?: string): Promise<R
     currentStation: curName ? `${String(curName)} (${curCode})` : curCode || null,
     nextStation: next.stationName ? `${String(next.stationName)} (${String(next.stationCode ?? "")})` : null,
     journeyDate: d.startDate != null ? String(d.startDate) : (dateYmd ?? null),
+    runState: /^not-?started$/i.test(String(d.status ?? "")) ? "not_started" : /^completed$/i.test(String(d.status ?? "")) ? "completed" : /^(running|running-late|delayed|on-time)$/i.test(String(d.status ?? "")) ? "running" : undefined,
   };
 }
 

@@ -26,6 +26,10 @@ export type RailcoreLiveStatus = {
   currentStation: string | null;
   nextStation: string | null;
   journeyDate: string | null;
+  /** Round-16p: provider ka explicit run-state (RailCore status enum /
+   * RailRadar status) — "aaj ka run abhi chala nahi" vs "kal wala chal raha
+   * hai" alag karne ke liye. Web-scrape par undefined. */
+  runState?: "not_started" | "running" | "completed";
 };
 
 export type RailcoreSchedule = {
@@ -347,7 +351,23 @@ function mapLivePayload(d: Record<string, unknown>, number: string, dateYmd?: st
       null,
     nextStation: String(next.station_name ?? d.next_station_code ?? next.station_code ?? "") || null,
     journeyDate: typeof d.journey_date === "string" ? d.journey_date : dateYmd ?? null,
+    runState: railcoreRunState(d),
   };
+}
+
+/* Round-16p: RailCore `status` enum → run-state. AT_STATION + progress 0 +
+ * koi previous station nahi = origin par khadi, abhi chali nahi (aaj ka run
+ * jo raat ko chalega) — ye "running" NAHI hai. */
+function railcoreRunState(d: Record<string, unknown>): "not_started" | "running" | "completed" | undefined {
+  const st = String(d.status ?? "").toUpperCase();
+  if (st === "COMPLETED" || st === "TERMINATED" || st === "ARRIVED") return "completed";
+  if (st === "NOT_STARTED" || st === "SCHEDULED" || st === "YET_TO_START") return "not_started";
+  const progress = Number(d.progress_percent);
+  if (st === "AT_STATION" && (progress === 0 || !Number.isFinite(progress)) && !d.previous_station_code && !(Number(d.distance_covered_km) > 0)) {
+    return "not_started";
+  }
+  if (st === "RUNNING" || st === "AT_STATION" || st === "DEPARTED") return "running";
+  return undefined;
 }
 
 /** /running ka NTES-style format (pd.trainCurrentPosition) — RailCore ne

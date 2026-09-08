@@ -93,12 +93,12 @@ export const AUTO_TOOLS = [
     function: {
       name: "getLiveStatus",
       description:
-        "Live running status of a train today (or a given start date): current station, delay minutes, last update. Use for 'kahan hai', 'kitni late', 'live status', 'running status'.",
+        "Live running status of a train for a given START date run: current station, delay minutes, last update. Use for 'kahan hai', 'kitni late', 'live status', 'running status'. 'kal wali/yesterday/parson/7 Sep wali' = PAST run → pass that start date (yesterday = today-1). Completed runs also return final status/delay. Omit date for today's run (server auto-finds the still-running previous-day run for multi-day trains).",
       parameters: {
         type: "object",
         properties: {
           trainNumber: { type: "string" },
-          date: { type: "string", description: "Optional journey start date YYYY-MM-DD; omit for today" },
+          date: { type: "string", description: "Run START date YYYY-MM-DD (past dates allowed, up to 40 days); omit for today" },
         },
         required: ["trainNumber"],
       },

@@ -240,6 +240,55 @@ export function parseDatePhrase(
   return {};
 }
 
+/**
+ * Round-16p: LIVE-STATUS / HISTORY ke liye date — booking parser ka ulta.
+ * Booking mein "kal" = TOMORROW aur "7 September" (beet chuka) = agle saal;
+ * lekin "kal wali 12424 kahan hai" / "parson ki train kitni late thi" mein
+ * user PICHHLA run pooch raha hai. Yahan sab kuch PAST (max 40 din) resolve
+ * hota hai: yesterday/kal/parson/N din pehle/dd Month/dd-mm/YYYY-MM-DD.
+ * Future-only cue ("tomorrow", "aane wali") ho to undefined — caller aaj le.
+ */
+export function parseStatusDate(text: string, now = new Date()): string | undefined {
+  const raw = String(text ?? "").toLowerCase();
+  const today = todayYmdFrom(now);
+  const floor = addDays(today, -40);
+  const inRange = (d: string): string | undefined => (d <= today && d >= floor ? d : undefined);
+  if (/\b(aaj|today|aj)\b/.test(raw) || /(?<!\p{L})आज(?!\p{L})/u.test(raw)) return today;
+  if (/\b(tomorrow|aane\s*wali|aane\s*wala|agle\s*din)\b/.test(raw)) return undefined;
+  if (/\b(day\s*before\s*yesterday|parson|parso|ek\s*din\s*pehle\s*wali)\b/.test(raw) || /(?<!\p{L})परसों|(?<!\p{L})परसो/u.test(raw)) {
+    /* "parson" live context mein = do din pehle (beeta hua). */
+    return addDays(today, -2);
+  }
+  if (
+    /\b(yesterday|yasterday|ysterday|yester\s*day|prev(?:ious)?\s*day|pichle\s*din|pichhle\s*din|pichhla\s*din|last\s*day|beeta\s*kal|beete\s*kal)\b/.test(raw) ||
+    /यस्टरडे|येस्टरडे|बीता कल|बीते कल|पिछले दिन/u.test(raw)
+  ) {
+    return addDays(today, -1);
+  }
+  if (/\bkal\b/.test(raw) || /(?<!\p{L})कल(?!\p{L})/u.test(raw)) return addDays(today, -1);
+  const ago = raw.match(/\b(\d{1,2})\s*(?:din|days?)\s*(?:pehle|pahle|ago|purani|purana)\b/);
+  if (ago) return inRange(addDays(today, -Number(ago[1])));
+  const iso = raw.match(/\b(20\d{2}-\d{2}-\d{2})\b/);
+  if (iso) return inRange(iso[1]);
+  const named = raw.match(new RegExp(`(\\d{1,2})(?:st|nd|rd|th)?\\s*(${MONTH_ALT})`, "u"));
+  const monthFirst = named ? null : raw.match(new RegExp(`(${MONTH_ALT})\\s+(\\d{1,2})(?:st|nd|rd|th)?`, "u"));
+  const dm = named ? { d: Number(named[1]), mo: MONTHS[named[2]] } : monthFirst ? { d: Number(monthFirst[2]), mo: MONTHS[monthFirst[1]] } : null;
+  if (dm && dm.mo && dm.d >= 1 && dm.d <= 31) {
+    const y = Number(today.slice(0, 4));
+    const thisYear = ymdFromParts(y, dm.mo, dm.d);
+    return inRange(thisYear) ?? inRange(ymdFromParts(y - 1, dm.mo, dm.d));
+  }
+  const slash = raw.match(/\b(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?\b/);
+  if (slash) {
+    const d = Number(slash[1]);
+    const mo = Number(slash[2]);
+    let y = slash[3] ? Number(slash[3]) : Number(today.slice(0, 4));
+    if (y < 100) y += 2000;
+    if (d >= 1 && d <= 31 && mo >= 1 && mo <= 12) return inRange(ymdFromParts(y, mo, d));
+  }
+  return undefined;
+}
+
 const IST_YMD = new Intl.DateTimeFormat("en-CA", {
   timeZone: "Asia/Kolkata",
   year: "numeric",
