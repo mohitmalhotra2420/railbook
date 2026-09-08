@@ -113,3 +113,14 @@ Changing the date, train, or class clears downstream selections so stale cards c
 ## Tests
 
 `npm test` covers search, empty routes, date-change resets, passenger validation, wallet shortfall, mock success/failure, and PNR retrieval.
+
+## Extra fallback APIs (Round-16o, optional)
+
+Data chain per method: **RailCore → RailKit → RailRadar → Indian Rail API → verified-site web-scrape → none**. The two new providers are *additional* and fully optional — with no key set they are skipped and nothing else changes.
+
+| Provider | Env var | Signup | Covers |
+| --- | --- | --- | --- |
+| RailRadar (`api.railradar.in/v1`) | `RAILRADAR_API_KEY` (`rr_live_…`) | https://railradar.in/developers — free sandbox, 1,000 req/month, no card | trains-between, seat availability, fare, live status, schedule, coach position, station + train-name autocomplete |
+| Indian Rail API (`indianrailapi.com/api/v2`) | `INDIANRAILAPI_KEY` | https://indianrailapi.com (register → API key; seat availability needs Advanced/Enterprise plan) | schedule, live status, fare, coach position, station + train autocomplete, (seat availability on paid plan) |
+
+Train-name search additionally falls back to the erail.in train list (`web_erail`) when every API is limited. General/knowledge questions that no provider can answer are auto-answered from the web (Wikipedia/KB/DDG) — never "provider se nahi mil pa rahi" for a non-booking question.

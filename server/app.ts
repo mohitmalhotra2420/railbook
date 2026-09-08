@@ -114,6 +114,8 @@ export function createApp() {
         ? { blocked: true, reason: block.reason, until: new Date(block.until).toISOString() }
         : { blocked: false },
       agent: { auto: (process.env.AGENT_AUTO ?? "1").trim() !== "0", model: env.agentModel },
+      /* Round-16o: optional extra fallback APIs — sirf configured flag (key kabhi nahi). */
+      extraProviders: { railradar: Boolean(env.railradarApiKey), indianrailapi: Boolean(env.indianRailApiKey) },
     });
   });
 

@@ -25,6 +25,7 @@ import { executeTool, livePositionLabel, type ToolName } from "./tools.js";
 import {
   agenticConfigured,
   runAgenticTurn,
+  webRescueEligible,
   type AgentTrainRow,
   type AgentTrainTable,
   type AgenticHistoryTurn,
@@ -1522,7 +1523,17 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
         turn.steps.every((st) => !st.ok) &&
         /provider se nahi mil|gadh ke nahi bataunga|unavailable/i.test(String(turn.reply ?? ""));
       if (unhelpfulNoData) agenticFailureReason = "unhelpful_summary_with_pending_choice";
-      if (turn.reply && !pickReasked && !unhelpfulNoData) {
+      /* Round-16o: agentic ne bina kisi successful tool ke "provider se nahi
+       * mil pa rahi" de diya, par sawaal general/knowledge type hai → reply
+       * discard; neeche UNIVERSAL WEB FALLBACK (KB/Wikipedia/scrape) jawab
+       * dega. User rule: general sawaal kabhi "provider se nahi mil" par na ruke. */
+      const unhelpfulGeneral =
+        !unhelpfulNoData &&
+        turn.steps.every((st) => !st.ok) &&
+        /provider se nahi mil|gadh ke nahi bataunga/i.test(String(turn.reply ?? "")) &&
+        webRescueEligible(String(req.text ?? ""), turn.steps);
+      if (unhelpfulGeneral) agenticFailureReason = "unhelpful_summary_general_question";
+      if (turn.reply && !pickReasked && !unhelpfulNoData && !unhelpfulGeneral) {
         // Memory (2026-09-05): search hui to trains ctx mein yaad rakho.
         rememberSearch(ctx, capture.table);
         // User instruction (2026-09-05): "waise hum continue kar sakte hain"

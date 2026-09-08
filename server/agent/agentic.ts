@@ -36,7 +36,7 @@ import type { ClassCode } from "../providers/types.js";
 import { executeTool, livePositionLabel } from "./tools.js";
 import {
   GENERAL_FACT_RE, isQuestionPhraseNotTrainName, segmentOfStops } from "./context.js";
-import { searchRailcoreTrainsByName } from "../railway/railcore.js";
+import { routedTrainNameSearch } from "../railway/router.js";
 import { webSearch } from "./websearch.js";
 import { findTopicAnswer, HINGLISH_TOPIC_WORDS, significantWords } from "./topicpage.js";
 import { railKbAnswer } from "./railkb.js";
@@ -1014,14 +1014,24 @@ export async function executeApprovedTool(
         if (!/\d{4,6}/.test(q0) && isQuestionPhraseNotTrainName(q0)) {
           return failResult("railcore", `"${q0}" train ka naam nahi lagta — ye follow-up/question phrase hai. Pichhli baat ki train ka data use karo (history/context mein hai).`);
         }
-        const results = await searchRailcoreTrainsByName(a.query as string);
+        /* Round-16o: chain RailCore → RailRadar → IndianRailAPI → erail.in
+         * train-list. Pehle sirf RailCore tha — daily limit par "naam se koi
+         * train nahi mili" aata tha aur model apne dimaag se jawab likh deta
+         * tha (ungrounded → "provider se nahi mil pa rahi"). Ab fail par model
+         * ko saaf hint: general sawaal hai to WEB_SEARCH karo. */
+        const named = await routedTrainNameSearch(a.query as string);
+        const results = named.trains;
         if (!results.length) {
-          return failResult("railcore", `"${a.query}" naam se koi train nahi mili — train number (5-digit) maango.`);
+          return failResult(
+            named.provider,
+            `"${a.query}" naam se koi train nahi mili (train-name API limited/empty). Agar user ka sawaal GENERAL/knowledge type hai (route, sabse lambi/tez train, history, kahan se kahan) to ABHI WEB_SEARCH tool call karo — apni memory se jawab MAT likho. Booking/time/fare ke liye train number (5-digit) maango.`,
+          );
         }
+        const routeless = results.every((t) => !t.from && !t.to);
         return okResult(
-          "railcore",
-          `"${a.query}": ${results.length} trains mili.`,
-          { query: a.query, count: results.length, trains: results.slice(0, 10) },
+          named.provider,
+          `"${a.query}": ${results.length} trains mili${routeless ? " (sirf number+naam; route/timing ke liye GET_TIMETABLE ya WEB_SEARCH)" : ""}.${webSourceLabel(named.provider)}`,
+          { query: a.query, count: results.length, trains: results.slice(0, 10), ...(routeless ? { note: "Route/source-destination is list mein NAHI hai — invent mat karo; chahiye to GET_TIMETABLE(train_number) ya WEB_SEARCH." } : {}) },
         );
       }
       case "SEARCH_STATIONS": {
@@ -1253,9 +1263,10 @@ export async function executeApprovedTool(
           );
           if (!board.classes.length) return failResult(board.provider, `Availability unavailable (${ctx.origin}→${ctx.destination}, ${ctx.date}).`);
           const boardWeb = board.classes.find((c) => c.source === "web_railyatri" && c.status !== "UNKNOWN");
+          const boardExtra = board.classes.find((c) => (c.source === "railradar" || c.source === "indianrailapi") && c.status !== "UNKNOWN");
           return okResult(
             board.provider,
-            `${a.train_number} ${ctx.origin}→${ctx.destination} (${ctx.date}${ctx.autoDate ? ", aaj ke liye" : ""}): ${board.classes.map((c) => `${c.code} ${c.status}${c.seats != null ? ` ${c.seats}` : ""}${c.waitlist != null ? ` WL${c.waitlist}` : ""}${c.rac != null ? ` RAC${c.rac}` : ""}`).join(", ")}.${boardWeb ? ` (Source: railyatri.in — IRCTC data, railway API down tha${boardWeb.webNote && /as of/i.test(boardWeb.webNote) ? `, ${boardWeb.webNote.match(/as of[^)]*/i)?.[0]}` : ""}.)` : ""}`,
+            `${a.train_number} ${ctx.origin}→${ctx.destination} (${ctx.date}${ctx.autoDate ? ", aaj ke liye" : ""}): ${board.classes.map((c) => `${c.code} ${c.status}${c.seats != null ? ` ${c.seats}` : ""}${c.waitlist != null ? ` WL${c.waitlist}` : ""}${c.rac != null ? ` RAC${c.rac}` : ""}`).join(", ")}.${boardWeb ? ` (Source: railyatri.in — IRCTC data, railway API down tha${boardWeb.webNote && /as of/i.test(boardWeb.webNote) ? `, ${boardWeb.webNote.match(/as of[^)]*/i)?.[0]}` : ""}.)` : boardExtra ? webSourceLabel(String(boardExtra.source)) : ""}`,
             { train_number: a.train_number, date: ctx.date, resolvedRoute: { origin: ctx.origin, destination: ctx.destination, autoDate: ctx.autoDate }, classes: board.classes },
           );
         }
@@ -1269,8 +1280,8 @@ export async function executeApprovedTool(
         );
         if (row.status === "UNKNOWN") return failResult(providerOf(), `Availability unavailable (${ctx.origin}→${ctx.destination}, ${ctx.date}) — invent nahi karunga.`, row);
         return okResult(
-          row.source === "web_railyatri" ? "web_railyatri" : providerOf(),
-          `${a.train_number} ${code} ${ctx.origin}→${ctx.destination} (${ctx.date}${ctx.autoDate ? ", aaj ke liye" : ""}): ${row.status}${row.seats != null ? `, ${row.seats} seats` : ""}${row.waitlist != null ? `, WL ${row.waitlist}` : ""}${row.rac != null ? `, RAC ${row.rac}` : ""}${row.fare > 0 ? `, ₹${row.fare}` : ""}.${row.source === "web_railyatri" ? ` (Source: railyatri.in — IRCTC data, railway API down tha${row.webNote && /as of/i.test(row.webNote) ? `, ${row.webNote.match(/as of[^)]*/i)?.[0]}` : ""}; booking se pehle IRCTC par confirm karein.)` : ""}`,
+          row.source === "web_railyatri" ? "web_railyatri" : row.source === "railradar" || row.source === "indianrailapi" ? row.source : providerOf(),
+          `${a.train_number} ${code} ${ctx.origin}→${ctx.destination} (${ctx.date}${ctx.autoDate ? ", aaj ke liye" : ""}): ${row.status}${row.seats != null ? `, ${row.seats} seats` : ""}${row.waitlist != null ? `, WL ${row.waitlist}` : ""}${row.rac != null ? `, RAC ${row.rac}` : ""}${row.fare > 0 ? `, ₹${row.fare}` : ""}.${row.source === "web_railyatri" ? ` (Source: railyatri.in — IRCTC data, railway API down tha${row.webNote && /as of/i.test(row.webNote) ? `, ${row.webNote.match(/as of[^)]*/i)?.[0]}` : ""}; booking se pehle IRCTC par confirm karein.)` : row.source === "railradar" || row.source === "indianrailapi" ? webSourceLabel(row.source) : ""}`,
           { ...row, resolvedRoute: { origin: ctx.origin, destination: ctx.destination, date: ctx.date, autoDate: ctx.autoDate } },
         );
       }
@@ -1295,7 +1306,7 @@ export async function executeApprovedTool(
           );
         return okResult(
           providerOf(),
-          `${a.train_number} ${(a.class_code as string).toUpperCase()} ${ctx.origin}→${ctx.destination} (${ctx.date}${ctx.autoRoute ? ", poora route" : ""}${ctx.autoDate ? ", aaj ke liye" : ""}): ticket ₹${fare.baseFare}, service ₹${fare.serviceFee}, total ₹${fare.total}${(a.passengers as number | undefined) ? ` (${a.passengers} pax)` : ""}.${fare.source === "web_railyatri" ? " (Source: railyatri.in — IRCTC fare, railway API down tha; exact booking fare thoda alag ho sakta hai.)" : fare.source === "web_erail" ? " (Source: erail.in — poore route ka fare, railway API down tha; exact booking fare alag ho sakta hai.)" : ""}`,
+          `${a.train_number} ${(a.class_code as string).toUpperCase()} ${ctx.origin}→${ctx.destination} (${ctx.date}${ctx.autoRoute ? ", poora route" : ""}${ctx.autoDate ? ", aaj ke liye" : ""}): ticket ₹${fare.baseFare}, service ₹${fare.serviceFee}, total ₹${fare.total}${(a.passengers as number | undefined) ? ` (${a.passengers} pax)` : ""}.${fare.source === "web_railyatri" ? " (Source: railyatri.in — IRCTC fare, railway API down tha; exact booking fare thoda alag ho sakta hai.)" : fare.source === "web_erail" ? " (Source: erail.in — poore route ka fare, railway API down tha; exact booking fare alag ho sakta hai.)" : fare.source === "railradar" || fare.source === "indianrailapi" ? webSourceLabel(fare.source) : ""}`,
           { ...fare, resolvedRoute: { origin: ctx.origin, destination: ctx.destination, date: ctx.date, autoRoute: ctx.autoRoute, autoDate: ctx.autoDate } },
         );
       }
@@ -1565,6 +1576,62 @@ function groundingCheck(content: string, steps: ToolTraceStep[], evidenceParts: 
   const normEvidence = normName(evidence);
   const badNames = nameHits.filter((n) => !normEvidence.includes(n));
   return { grounded: bad.length === 0 && badTokens.length === 0 && badNames.length === 0, evidence: [...bad, ...badTokens, ...badNames].join(",") };
+}
+
+
+/* Round-16o (prod screenshot: "India ki sabse longest route ki train?" /
+ * "Vivek express kahan se kahan chalti hai?" → "provider se nahi mil pa
+ * rahi"): RailCore daily-limit par TRAIN_NAME_SEARCH fail hua, model ne
+ * WEB_SEARCH call kiye bina apni memory se jawab likha → groundingCheck ne
+ * ungrounded pakda → deterministicSummary mein 0 ok steps → "provider se
+ * nahi mil". User rule: general sawaal ka jawab HAMESHA web se aana chahiye.
+ * Ye rescue wahi WEB_SEARCH pipeline (topicpage → KB → DDG) khud chala kar
+ * grounded, labeled reply deta hai — sirf tab jab koi tool succeed nahi hua
+ * aur text booking-critical (live/seat/fare/PNR) nahi hai. */
+const WEB_RESCUE_BLOCK_RE = /\b(live|running status|abhi kahan|kaha hai|kahan hai|seat|seats|availability|avail|fare|kiraya|ticket|book|booking|pnr|tatkal|waiting|wl\b|rac\b|coach position|platform)\b/i;
+/* Journey/route search ("Amritsar se Delhi Saturday ko trains batao") — ye
+ * provider ka kaam hai, web-rescue ka nahi (search fail par honest "none"). */
+const WEB_RESCUE_JOURNEY_RE = /\b(trains?\s+(batao|dikhao|dikha|list|chahiye)|jaana|jana|jaunga|jaungi|\S+\s+se\s+\S+(?:\s+\S+)?\s+(ko|tak|ke liye)\s+trains?|aaj|kal|parso|tomorrow|today|monday|tuesday|wednesday|thursday|friday|saturday|sunday|somvar|mangalvar|budhvar|guruvar|shukravar|shanivar|ravivar)\b/i;
+const WEB_RESCUE_Q_RE =
+  /\b(kya|kaise|kaisa|kab|kahan|kahaan|kaha|kitna|kitni|kitne|kaun|kaunsi|kon|konsi|kyun|kyu|why|how|what|when|where|which|batao|bata|btao|history|sabse|pehli|pehla|longest|shortest|fastest|slowest|oldest|largest|biggest|route|chalti|chalta|jaati|jaata|se .* tak|explain|samjhao|matlab|meaning)\b/i;
+
+export function webRescueEligible(userText: string, steps: ToolTraceStep[]): boolean {
+  const t = String(userText ?? "").trim();
+  if (t.length < 6) return false;
+  if (steps.some((s) => s.ok)) return false;
+  if (steps.some((s) => s.tool === "WEB_SEARCH")) return false; // web already tried and failed
+  if (WEB_RESCUE_BLOCK_RE.test(t)) return false;
+  if (WEB_RESCUE_JOURNEY_RE.test(t)) return false;
+  return WEB_RESCUE_Q_RE.test(t);
+}
+
+async function webRescueAnswer(userText: string, steps: ToolTraceStep[], stepNo: number): Promise<string | null> {
+  const started = Date.now();
+  let result: ApprovedToolResult;
+  try {
+    result = await executeApprovedTool("WEB_SEARCH", { query: userText }, { userText });
+  } catch {
+    return null;
+  }
+  steps.push({
+    step: stepNo,
+    tool: "WEB_SEARCH",
+    args: { query: userText, auto: "web_rescue" },
+    ok: result.ok,
+    source: result.source,
+    summary: result.summary,
+    latencyMs: Date.now() - started,
+  });
+  if (!result.ok) return null;
+  const d = (result.data ?? {}) as { answer_found?: boolean; kind?: string; results?: { title: string; snippet: string; url: string }[] };
+  if (d.answer_found) {
+    return d.kind === "kb"
+      ? `${result.summary}\n(General railway rules — live data nahi; official/IRCTC se verify karein.)`
+      : `${result.summary}\n(Ye railway API ka data nahi, web se laaya gaya jawab hai.)`;
+  }
+  const best = d.results?.[0];
+  if (best) return `Web se mila: ${best.title} — ${best.snippet}\n(Source: ${best.url}; web search — live railway data nahi.)`;
+  return null;
 }
 
 function deterministicSummary(steps: ToolTraceStep[]): string {
@@ -1844,6 +1911,12 @@ export async function runAgenticTurn(input: {
       // Model chain poori tarah fail — par agar tools chal chuke hain to unka
       // provider-backed summary hi sahi jawab hai (weak deterministic NLU par mat ja).
       const reason = lastFailure ?? "empty_content";
+      if (steps.length && webRescueEligible(input.text, steps)) {
+        const rescued = await webRescueAnswer(input.text, steps, steps.length + 1);
+        if (rescued) {
+          return { ok: true, reply: rescued, grounded: true, steps, modelUsed, latencyMs: Date.now() - startedAll, failureReason: `${reason}_rescued_by_web` };
+        }
+      }
       return {
         ok: false,
         reply: steps.length ? deterministicSummary(steps) : null,
@@ -2257,6 +2330,22 @@ export async function runAgenticTurn(input: {
           /* station API fail — generic summary (neeche) */
         }
       }
+      /* Round-16o: koi tool succeed nahi hua aur general sawaal hai → web se
+       * asli jawab (model ki memory nahi) — "provider se nahi mil" ke bajaye. */
+      if (webRescueEligible(input.text, steps)) {
+        const rescued = await webRescueAnswer(input.text, steps, steps.length + 1);
+        if (rescued) {
+          return {
+            ok: true,
+            reply: rescued,
+            grounded: true,
+            steps,
+            modelUsed,
+            latencyMs: Date.now() - startedAll,
+            failureReason: `ungrounded_rescued_by_web:${check.evidence}`,
+          };
+        }
+      }
       return {
         ok: steps.some((s) => s.ok),
         reply: `${deterministicSummary(steps)}\n(AI ka jawab providers ke data se match nahi hua — sirf verified data dikha raha hoon.)`,
@@ -2271,6 +2360,12 @@ export async function runAgenticTurn(input: {
   }
 
   // Step budget kharch — honest deterministic summary.
+  if (webRescueEligible(input.text, steps)) {
+    const rescued = await webRescueAnswer(input.text, steps, steps.length + 1);
+    if (rescued) {
+      return { ok: true, reply: rescued, grounded: true, steps, modelUsed, latencyMs: Date.now() - startedAll, failureReason: "step_budget_rescued_by_web" };
+    }
+  }
   return {
     ok: steps.some((s) => s.ok),
     reply: deterministicSummary(steps),

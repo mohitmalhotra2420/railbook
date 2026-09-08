@@ -41,6 +41,13 @@ export const env = {
   get railcoreApiKey() {
     return (process.env.RAILCORE_API_KEY ?? "").trim();
   },
+  /** Round-16o: ADDITIONAL fallback providers (optional). Unset = skipped. */
+  get railradarApiKey() {
+    return (process.env.RAILRADAR_API_KEY ?? "").trim();
+  },
+  get indianRailApiKey() {
+    return (process.env.INDIANRAILAPI_KEY ?? "").trim();
+  },
   walletInitial: Number(process.env.WALLET_INITIAL_BALANCE ?? 5000),
   serviceFee: Number(process.env.SERVICE_FEE_INR ?? 25),
   mockForceFail: process.env.MOCK_FORCE_FAIL === "true",

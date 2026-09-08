@@ -8,8 +8,31 @@ import {
   scrapeSeatAvailabilityWeb,
   scrapeStationSearchWeb,
   scrapeTrainsBetweenWeb,
+  scrapeTrainNameSearchWeb,
   type ScrapedTrainRow,
 } from "./webscrape.js";
+/* Round-16o: ADDITIONAL API fallbacks (optional keys) — RailCore → RailKit →
+ * RailRadar → IndianRailAPI → verified-site web-scrape. Existing web-scrape
+ * fallbacks untouched; ye sirf unse PEHLE ek aur API try hai. */
+import {
+  railradarAvailability,
+  railradarCoachPosition,
+  railradarFare,
+  railradarLive,
+  railradarSchedule,
+  railradarSearchTrains,
+  railradarStationSearch,
+  railradarTrainNameSearch,
+} from "./railradar.js";
+import {
+  indianRailApiAvailability,
+  indianRailApiCoachPosition,
+  indianRailApiFare,
+  indianRailApiLive,
+  indianRailApiSchedule,
+  indianRailApiStationSearch,
+  indianRailApiTrainNameSearch,
+} from "./indianrailapi.js";
 import { env } from "../env.js";
 import { searchStations as searchLocalStations } from "../data/stations.js";
 import {
@@ -29,7 +52,9 @@ import {
   coachPosition as railcoreCoachPosition,
   liveTrainStatus as railcoreLive,
   searchRailcoreStationsResult,
+  searchRailcoreTrainsByName,
   trainInfo as railcoreTrainInfo,
+  type RailcoreTrainNameResult,
   trainSchedule as railcoreSchedule,
   type RailcoreCoachPosition,
   type RailcoreLiveStatus,
@@ -122,6 +147,8 @@ export type ServedProvider =
   | "railcore"
   | "railkit_fallback"
   | "railkit"
+  | "railradar"
+  | "indianrailapi"
   | "local"
   | "none"
   | "web_ixigo"
@@ -308,6 +335,105 @@ async function railyatriFareBreakdown(
   }
 }
 
+/* ── Round-16o: extra-API helpers (RailRadar → IndianRailAPI). Har ek key na
+ * hone par null deta hai (koi network call nahi). ────────────────────── */
+async function extraApiStationSearch(q: string): Promise<{ stations: Station[]; provider: ServedProvider } | null> {
+  const rr = await railradarStationSearch(q);
+  if (rr && rr.length) return { stations: preferLocalNames(rr), provider: "railradar" };
+  const ira = await indianRailApiStationSearch(q);
+  if (ira && ira.length) return { stations: preferLocalNames(ira), provider: "indianrailapi" };
+  return null;
+}
+
+async function extraApiSchedule(number: string): Promise<{ schedule: RailcoreSchedule; provider: ServedProvider } | null> {
+  const rr = await railradarSchedule(number);
+  if (rr && (rr.stops.length || rr.trainName)) return { schedule: rr, provider: "railradar" };
+  const ira = await indianRailApiSchedule(number);
+  if (ira && (ira.stops.length || ira.trainName)) return { schedule: ira, provider: "indianrailapi" };
+  return null;
+}
+
+async function extraApiCoachPosition(number: string, stationCode?: string): Promise<{ coachPosition: RailcoreCoachPosition; provider: ServedProvider } | null> {
+  const rr = await railradarCoachPosition(number, stationCode);
+  if (rr) return { coachPosition: rr, provider: "railradar" };
+  const ira = await indianRailApiCoachPosition(number);
+  if (ira) return { coachPosition: { ...ira, stationCode: stationCode ?? null }, provider: "indianrailapi" };
+  return null;
+}
+
+async function extraApiAvailability(
+  trainNumber: string,
+  date: string,
+  from: string,
+  to: string,
+  classCode: ClassCode,
+  quotaCode: string,
+): Promise<ClassAvailability | null> {
+  const rr = await railradarAvailability(trainNumber, date, from, to, classCode, quotaCode);
+  if (rr && rr.status !== "UNKNOWN") return rr;
+  const ira = await indianRailApiAvailability(trainNumber, date, from, to, classCode, quotaCode);
+  if (ira && ira.status !== "UNKNOWN") return ira;
+  return null;
+}
+
+async function extraApiFare(
+  trainNumber: string,
+  date: string,
+  from: string,
+  to: string,
+  classCode: ClassCode,
+  passengerCount: number,
+): Promise<FareBreakdown | null> {
+  const rr = await railradarFare(trainNumber, date, from, to, classCode, passengerCount);
+  if (rr?.railwayAvailable) return rr;
+  const ira = await indianRailApiFare(trainNumber, date, from, to, classCode, passengerCount);
+  if (ira?.railwayAvailable) return ira;
+  return null;
+}
+
+/** Round-16o: train NAME search chain — RailCore → RailRadar → IndianRailAPI →
+ * erail.in train-list (web). Pehle sirf RailCore tha: daily limit par
+ * "naam se koi train nahi mili" (Vivek Express / Shatabdi jaise sawaal fail). */
+export async function routedTrainNameSearch(q: string): Promise<{ trains: RailcoreTrainNameResult[]; provider: ServedProvider }> {
+  const started = Date.now();
+  const query = q.trim();
+  if (!query) return { trains: [], provider: "none" };
+  let primary: RailcoreTrainNameResult[] = [];
+  try {
+    primary = await searchRailcoreTrainsByName(query);
+  } catch {
+    primary = [];
+  }
+  if (primary.length) {
+    logServed("railcore", "trainNameSearch", started, true);
+    return { trains: primary, provider: "railcore" };
+  }
+  const blocked = railcoreBlockState().blocked || !env.railcoreApiKey;
+  const rr = await railradarTrainNameSearch(query);
+  if (rr && rr.length) {
+    logServed("railradar", "trainNameSearch", started, true, blocked ? "railcore_blocked" : "railcore_empty");
+    return { trains: rr, provider: "railradar" };
+  }
+  const ira = await indianRailApiTrainNameSearch(query);
+  if (ira && ira.length) {
+    logServed("indianrailapi", "trainNameSearch", started, true, blocked ? "railcore_blocked" : "railcore_empty");
+    return { trains: ira, provider: "indianrailapi" };
+  }
+  /* Web (erail train list) — sirf number+naam; route blank (honest). */
+  let web: { number: string; name: string }[] = [];
+  try {
+    web = await scrapeTrainNameSearchWeb(query, 10);
+  } catch {
+    web = [];
+  }
+  if (web.length) {
+    logServed("web_erail", "trainNameSearch", started, true, blocked ? "railcore_blocked" : "railcore_empty");
+    return { trains: web.map((t) => ({ number: t.number, name: t.name, from: "", to: "", type: "" })), provider: "web_erail" };
+  }
+  logServed("none", "trainNameSearch", started, false, blocked ? "railcore_blocked+all_failed" : "no_match");
+  return { trains: [], provider: "none" };
+}
+
 export async function routedStationSearch(q: string): Promise<StationSearchResult> {
   const started = Date.now();
   const query = q.trim();
@@ -338,6 +464,18 @@ export async function routedStationSearch(q: string): Promise<StationSearchResul
     }
     if (pick.kind === "single") {
       return { stations: pick.stations, needChoice: false, provider: "railkit_fallback" };
+    }
+    /* Round-16o: local bhi empty — pehle extra APIs (RailRadar / IndianRailAPI,
+     * key ho to), phir web lookup. */
+    if (local.length === 0) {
+      const extra = await extraApiStationSearch(query);
+      if (extra) {
+        const pickX = pickStations(query, enrichClusterHits(query, extra.stations));
+        logServed(extra.provider, "stationSearch", started, pickX.kind !== "none", "api_and_local_empty");
+        if (pickX.kind === "ambiguous") return { stations: pickX.stations, needChoice: true, city: pickX.city, provider: extra.provider };
+        if (pickX.kind === "single") return { stations: pickX.stations, needChoice: false, provider: extra.provider };
+        if (extra.stations.length) return { stations: extra.stations, needChoice: extra.stations.length > 1, city: extra.stations.length > 1 ? query : undefined, provider: extra.provider };
+      }
     }
     /* Round-7/16: local bhi empty — web lookup (railenquiry code → erail name-list). */
     if (local.length === 0) {
@@ -381,6 +519,17 @@ export async function routedLiveStatus(number: string, dateYmd?: string, trainNa
     if (fb) {
       logServed("railkit_fallback", "liveStatus", started, true, "railcore_unusable");
       return { live: fb, provider: "railkit_fallback" };
+    }
+    /* Round-16o: extra APIs (RailRadar → IndianRailAPI) web-scrape se pehle. */
+    const rr = await railradarLive(number, dateYmd);
+    if (isUsableLive(rr)) {
+      logServed("railradar", "liveStatus", started, true, "railcore+railkit_failed");
+      return { live: rr, provider: "railradar" };
+    }
+    const ira = await indianRailApiLive(number, dateYmd);
+    if (isUsableLive(ira)) {
+      logServed("indianrailapi", "liveStatus", started, true, "railcore+railkit+railradar_failed");
+      return { live: ira, provider: "indianrailapi" };
     }
     /* Web-scrape fallback (user-authorized 2026-09-06, booking-critical bhi):
      * dono API fail par RailYatri SSR live-status. Naam URL mein chahiye —
@@ -449,6 +598,12 @@ export async function routedSchedule(number: string): Promise<RoutedSchedule> {
       logServed("railkit_fallback", "timetable", started, true, "railcore_unusable");
       return { schedule: fb, provider: "railkit_fallback" };
     }
+    /* Round-16o: extra APIs web-scrape se pehle. */
+    const extra = await extraApiSchedule(number);
+    if (extra) {
+      logServed(extra.provider, "timetable", started, true, "railcore+railkit_failed");
+      return { schedule: extra.schedule, provider: extra.provider };
+    }
     /* VERIFIED-SITE WEB SCRAPING (user request 2026-09-06): API dono fail →
      * public verified sites (ixigo/ConfirmTkt/trainspnrstatus) se scrape.
      * Provider label "web_<site>" — reply mein source saaf dikhta hai. */
@@ -496,6 +651,12 @@ export async function routedTrainInfo(number: string): Promise<{
         provider: "railkit_fallback",
       };
     }
+    /* Round-16o: extra APIs (RailRadar/IndianRailAPI) web-scrape se pehle. */
+    const extra = await extraApiSchedule(number);
+    if (extra?.schedule.trainName) {
+      logServed(extra.provider, "trainInfo", started, true, "railcore+railkit_failed");
+      return { info: { trainNumber: extra.schedule.trainNumber, trainName: extra.schedule.trainName, runningDays: extra.schedule.runningDays ?? [] }, provider: extra.provider };
+    }
     /* VERIFIED-SITE WEB SCRAPING (2026-09-06): API dono fail → schedule-page
      * scrape se train ka naam. runningDays scrape se nahi aata — [] honest. */
     const sc = await scrapeTrainScheduleWeb(number);
@@ -539,6 +700,12 @@ export async function routedCoachPosition(number: string, stationCode?: string):
       logServed("railcore", "coachPosition", started, true);
       return { coachPosition: primary, provider: "railcore" };
     }
+    /* Round-16o: extra APIs web-scrape se pehle. */
+    const extra = await extraApiCoachPosition(number, stationCode);
+    if (extra) {
+      logServed(extra.provider, "coachPosition", started, true, "railcore_failed");
+      return { coachPosition: extra.coachPosition, provider: extra.provider };
+    }
     /* VERIFIED-SITE WEB SCRAPING (2026-09-06): RailCore coach-position fail
      * (ya train missing) → trainspnrstatus SSR boxes se layout. Labeled. */
     const sc = await scrapeCoachPositionWeb(number);
@@ -552,7 +719,12 @@ export async function routedCoachPosition(number: string, stationCode?: string):
     logServed("none", "coachPosition", started, false, "railcore+web_failed");
     return { coachPosition: null, provider: "none" };
   }
-  /* RailCore configured nahi — phir bhi web se dekh lo (API-first policy). */
+  /* RailCore configured nahi — extra APIs, phir web (API-first policy). */
+  const extra2 = await extraApiCoachPosition(number, stationCode);
+  if (extra2) {
+    logServed(extra2.provider, "coachPosition", started, true, "no_railcore");
+    return { coachPosition: extra2.coachPosition, provider: extra2.provider };
+  }
   const sc2 = await scrapeCoachPositionWeb(number);
   if (sc2) {
     logServed(sc2.provider, "coachPosition", started, true, "no_railcore → web-scrape");
@@ -609,9 +781,13 @@ export async function routedClassBoard(
         codes.map((code) => provider.getAvailability(trainNumber, date, from, to, code, quota)),
       );
       const ok = classes.some((c) => c.status !== "UNKNOWN");
-      const viaWeb = ok && classes.filter((c) => c.status !== "UNKNOWN").every((c) => c.source === "web_railyatri");
-      logServed(viaWeb ? "web_railyatri" : ok ? "railcore" : "none", "classBoard", started, ok);
-      return { classes, provider: viaWeb ? "web_railyatri" : ok ? "railcore" : "none" };
+      const known = classes.filter((c) => c.status !== "UNKNOWN");
+      const viaWeb = ok && known.every((c) => c.source === "web_railyatri");
+      /* Round-16o: extra-API rows (railradar/indianrailapi) ka label bhi sahi. */
+      const viaExtra = ok && !viaWeb && known.every((c) => c.source === "railradar" || c.source === "indianrailapi") ? (known[0].source as ServedProvider) : null;
+      const label: ServedProvider = viaWeb ? "web_railyatri" : viaExtra ? viaExtra : ok ? "railcore" : "none";
+      logServed(label, "classBoard", started, ok);
+      return { classes, provider: label };
     }
     const fb = await railkitClassBoard(trainNumber, date, from, to, quota);
     logServed("railkit_fallback", "classBoard", started, fb.length > 0, "railcore_no_classes");
@@ -674,6 +850,11 @@ async function loadStops(trainNumber: string): Promise<StopsLookup> {
       arrival: s.arrival && s.arrival !== "--" ? s.arrival : null,
       departure: s.departure && s.departure !== "--" ? s.departure : null,
     }));
+  }
+  if (!stops.length) {
+    /* Round-16o: extra APIs (key ho to) — halt-verify ke liye timetable. */
+    const extra = await extraApiSchedule(trainNumber);
+    stops = (extra?.schedule.stops ?? []).map((s) => ({ code: s.code, name: s.name, arrival: s.arrival, departure: s.departure, day: s.day }));
   }
   if (!stops.length) return { stops: null, reason: "unavailable" };
   scheduleCache.set(trainNumber, { stops, at: Date.now() });
@@ -831,6 +1012,17 @@ export class FallbackRailwayProvider implements RailwayProvider {
         return filterTrainsServingStops(fb.trains, query.from, query.to);
       }
     }
+    /* Round-16o: RailRadar trains-between (key ho to) — web se pehle. Exact
+     * from/to codes hum khud bhejte hain; running-day filter yahin. */
+    const rr = await railradarSearchTrains(query);
+    if (rr && rr.length) {
+      const wdR = weekday(query.date);
+      const rows = rr.filter((t) => !t.runsOn.length || t.runsOn.includes(wdR));
+      if (rows.length) {
+        logServed("railradar", "trainSearch", started, true, `${reason}+railkit_failed`);
+        return rows;
+      }
+    }
     /* Round-16n (user: "daily limit hit → fallback par bhi trains nahi, web
      * scraping lagayi thi na?"): train SEARCH ka web fallback ab hai — erail.in
      * trains-between list (IRCTC timetable data). Date ke hisaab se running-day
@@ -872,6 +1064,12 @@ export class FallbackRailwayProvider implements RailwayProvider {
       }
     }
     if (!env.railkitApiKey) {
+      /* Round-16o: extra APIs (RailRadar → IndianRailAPI) web se pehle. */
+      const extraNoKit = await extraApiAvailability(trainNumber, date, from, to, classCode, quotaCode);
+      if (extraNoKit) {
+        logServed(extraNoKit.source as ServedProvider, "availability", started, true, "railcore_failed");
+        return extraNoKit;
+      }
       /* Round-16: railkit key nahi — RailYatri SA se seats+status+fare. */
       const ry = await railyatriAvailability(trainNumber, date, from, to, classCode, quotaCode);
       if (ry) {
@@ -891,6 +1089,12 @@ export class FallbackRailwayProvider implements RailwayProvider {
     if (fb.status !== "UNKNOWN") {
       logServed("railkit_fallback", "availability", started, true, "railcore_unusable");
       return fb;
+    }
+    /* Round-16o: extra APIs (RailRadar → IndianRailAPI) web se pehle. */
+    const extra = await extraApiAvailability(trainNumber, date, from, to, classCode, quotaCode);
+    if (extra) {
+      logServed(extra.source as ServedProvider, "availability", started, true, "railcore+railkit_failed");
+      return extra;
     }
     /* Round-16: dono API fail — RailYatri SA JSON (IRCTC-sourced) se
      * seats+status+fare. */
@@ -926,6 +1130,12 @@ export class FallbackRailwayProvider implements RailwayProvider {
       }
     }
     if (!env.railkitApiKey) {
+      /* Round-16o: extra APIs web se pehle. */
+      const extraNoKit = await extraApiFare(trainNumber, date, from, to, classCode, passengerCount);
+      if (extraNoKit) {
+        logServed(extraNoKit.source as ServedProvider, "fare", started, true, "railcore_failed");
+        return extraNoKit;
+      }
       /* Round-16: railyatri (segment fare) → Round-7: erail.in (route fare). */
       const web =
         (await railyatriFareBreakdown(trainNumber, date, from, to, classCode, passengerCount)) ??
@@ -942,6 +1152,12 @@ export class FallbackRailwayProvider implements RailwayProvider {
     if (fb.railwayAvailable) {
       logServed("railkit_fallback", "fare", started, true, "railcore_unusable");
       return fb;
+    }
+    /* Round-16o: extra APIs web se pehle. */
+    const extra = await extraApiFare(trainNumber, date, from, to, classCode, passengerCount);
+    if (extra) {
+      logServed(extra.source as ServedProvider, "fare", started, true, "railcore+railkit_failed");
+      return extra;
     }
     /* Round-16/7: railkit bhi fail — railyatri (segment) → erail.in fare-scrape. */
     const web =

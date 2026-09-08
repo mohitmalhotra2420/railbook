@@ -718,19 +718,16 @@ describe("Advance-plan payload mapping", () => {
 });
 
 describe("provider / NVIDIA safety", () => {
-  it("RailRadar runtime files and imports are gone", () => {
+  /* Round-16o: RailRadar ab OPTIONAL extra fallback hai (user request) —
+   * sirf server/railway/railradar.ts + env getter. Legacy provider file /
+   * primary-provider wiring wapas NAHI aayi. */
+  it("RailRadar is only an optional fallback (no legacy primary-provider wiring)", () => {
     expect(existsSync("server/providers/railradar.ts")).toBe(false);
     expect(existsSync("tests/railradar.test.ts")).toBe(false);
-    const files = [
-      "server/providers/index.ts",
-      "server/app.ts",
-      "server/env.ts",
-      "server/railway/railkit.ts",
-      ".env.example",
-    ];
-    for (const file of files) {
+    for (const file of ["server/providers/index.ts", "server/app.ts", "server/railway/railkit.ts"]) {
       expect(readFileSync(file, "utf8")).not.toMatch(/railradar\.in|RAILRADAR_/i);
     }
+    expect(readFileSync("server/env.ts", "utf8")).toMatch(/RAILRADAR_API_KEY/);
   });
 
   it("NVIDIA defaults: Muse-Glimmer primary, GPT-OSS fallback on integrate.api.nvidia.com (Round-14)", () => {

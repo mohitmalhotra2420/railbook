@@ -37,7 +37,7 @@ export interface ClassAvailability {
   /** Round-7: fare API-fail par erail.in scrape se aaya (status UNKNOWN,
    * fare-only). Round-16: "web_railyatri" = seats+status RailYatri SA
    * (IRCTC-sourced, cached) se — `webNote` mein last-updated. */
-  source?: "web_erail" | "web_railyatri";
+  source?: "web_erail" | "web_railyatri" | "railradar" | "indianrailapi";
   webNote?: string;
 }
 
@@ -80,7 +80,7 @@ export interface FareBreakdown {
   /** Fare kyun nahi mila (endpoint band / quota khatam) — honest user message. */
   unavailableReason?: string;
   /** Round-7: erail.in web-scrape se aaya (API-fail fallback). */
-  source?: "web_erail" | "web_railyatri";
+  source?: "web_erail" | "web_railyatri" | "railradar" | "indianrailapi";
 }
 
 export interface PassengerInput {

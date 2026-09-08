@@ -323,6 +323,9 @@ export function webSourceLabel(provider: string): string {
               : provider === "web_erail"
                 ? "erail.in"
                 : null;
+  /* Round-16o: extra API providers — web-scrape nahi, doosri railway API. */
+  if (provider === "railradar") return " (Source: RailRadar API — primary railway API down tha.)";
+  if (provider === "indianrailapi") return " (Source: Indian Rail API — primary railway API down tha.)";
   return site ? ` (Source: ${site} — railway API se nahi, verified web site se.)` : "";
 }
 
@@ -927,4 +930,85 @@ export async function scrapeTrainsBetweenWeb(from: string, to: string): Promise<
   const trains = parseErailTrainList(body);
   if (!trains.length) return null;
   return { trains, provider: "web_erail", sourceUrl: url };
+}
+
+/* ── TRAIN NAME SEARCH via erail.in train list (Round-16o). RailCore daily
+ * limit par TRAIN_NAME_SEARCH "naam se koi train nahi mili" bolta tha —
+ * erail.in apni site ke liye poori "NNNNN - NAME" list (/js5/IRTrains.js)
+ * serve karta hai. Ek baar fetch, 6 ghante memory cache. Sirf number+naam
+ * (route nahi) — schedule alag se aata hai. */
+let erailTrainsCache: { at: number; list: { number: string; name: string }[] } | null = null;
+const ERAIL_TRAINS_TTL_MS = 6 * 60 * 60 * 1000;
+
+export function parseErailTrainNameList(raw: string): { number: string; name: string }[] {
+  let arr: unknown = null;
+  try {
+    arr = JSON.parse(raw);
+  } catch {
+    const m = raw.match(/\[[\s\S]*\]/);
+    if (m) {
+      try {
+        arr = JSON.parse(m[0]);
+      } catch {
+        arr = null;
+      }
+    }
+  }
+  if (!Array.isArray(arr)) return [];
+  const out: { number: string; name: string }[] = [];
+  for (const item of arr) {
+    const m = String(item).match(/^\s*(\d{4,6})\s*-\s*(.+?)\s*$/);
+    if (m) out.push({ number: m[1], name: m[2].replace(/\s+/g, " ") });
+  }
+  return out;
+}
+
+export async function erailTrainList(): Promise<{ number: string; name: string }[]> {
+  if (erailTrainsCache && Date.now() - erailTrainsCache.at < ERAIL_TRAINS_TTL_MS) return erailTrainsCache.list;
+  const body = await fetchHtml("https://erail.in/js5/IRTrains.js");
+  if (!body) return erailTrainsCache?.list ?? [];
+  const list = parseErailTrainNameList(body);
+  if (list.length > 1000) erailTrainsCache = { at: Date.now(), list };
+  return list;
+}
+
+export function _setErailTrainsCacheForTests(list: { number: string; name: string }[] | null): void {
+  erailTrainsCache = list ? { at: Date.now(), list } : null;
+}
+
+export type ScrapedTrainName = { number: string; name: string; provider: "web_erail" };
+
+/** Naam/number se trains — number exact, phir naam ke saare words match
+ * (word-prefix), phir koi bhi word. Max `limit`. */
+export async function scrapeTrainNameSearchWeb(query: string, limit = 10): Promise<ScrapedTrainName[]> {
+  const q = query.trim().toLowerCase().replace(/\s+/g, " ");
+  if (q.length < 3) return [];
+  const list = await erailTrainList();
+  if (!list.length) return [];
+  if (/^\d{4,6}$/.test(q)) {
+    return list.filter((t) => t.number === q).slice(0, limit).map((t) => ({ ...t, provider: "web_erail" as const }));
+  }
+  const norm = (s: string) => s.toLowerCase().replace(/\bexp\b/g, "express").replace(/\bsf\b/g, "superfast").replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
+  const words = norm(q).split(" ").filter((w) => w.length >= 2 && !/^(train|trains|ki|ka|ke|wali|wala)$/.test(w));
+  if (!words.length) return [];
+  const scored: { t: { number: string; name: string }; hits: number; exact: boolean }[] = [];
+  for (const t of list) {
+    const n = norm(t.name);
+    const nWords = n.split(" ");
+    let hits = 0;
+    for (const w of words) {
+      if (nWords.some((nw) => nw === w || (w.length >= 4 && nw.startsWith(w)))) hits++;
+    }
+    if (!hits) continue;
+    scored.push({ t, hits, exact: n === words.join(" ") });
+  }
+  if (!scored.length) return [];
+  /* Sirf best tier — saare words match hue to wahi; warna max-hits waale.
+   * ("express" jaisa common word akela 3000 trains hit karega.) */
+  const maxHits = Math.max(...scored.map((x) => x.hits));
+  return scored
+    .filter((x) => x.hits === maxHits)
+    .sort((a, b) => Number(b.exact) - Number(a.exact) || a.t.number.localeCompare(b.t.number))
+    .slice(0, limit)
+    .map(({ t }) => ({ ...t, provider: "web_erail" as const }));
 }
