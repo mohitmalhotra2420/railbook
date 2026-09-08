@@ -423,6 +423,10 @@ describe("TEST 6: GPT-OSS (single-model chain) -> deterministic NLU", () => {
 
   it("both AI models failing hands over to the deterministic engine", async () => {
     railcoreMock();
+    /* Offline: afterEach ka setScrapeFetch(null) REAL network kholta hai —
+     * yahan deterministic path live-status web-scrape try karta hai (2× ~0.5s
+     * railyatri) jo full-suite load par 5s timeout paar kar deta tha. */
+    setScrapeFetch(async () => new Response("", { status: 500 }));
     setAgenticNvidiaFetch(async () => {
       throw new Error("both AI providers down");
     });

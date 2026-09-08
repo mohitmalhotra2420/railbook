@@ -92,15 +92,17 @@ function railradarMock(calls: string[] = []) {
           trainNumber: "12414",
           classCode: "3A",
           quotaCode: "GN",
-          avlDayList: [
-            { availablityDate: "2026-09-12", availablityStatus: "GNWL24/WL11" },
-            { availablityDate: "2026-09-13", availablityStatus: "AVAILABLE-0042" },
+          /* Live shape (verified 2026-09-08 with real key): calendar[] */
+          calendar: [
+            { date: "2026-09-12", rawDate: "2026-09-12", status: "GNWL24/WL11", statusCode: "WAITLIST", isAvailable: false, availableSeats: 0 },
+            { date: "2026-09-13", rawDate: "2026-09-13", status: "AVAILABLE-0042", statusCode: "AVAILABLE", isAvailable: true, availableSeats: 42 },
           ],
         },
       });
     }
     if (u.pathname.endsWith("/trains/12414/fare")) {
-      return jsonResponse(200, { success: true, data: { trainNumber: "12414", classCode: "3A", totalFare: 745, breakdown: { baseFare: 640 } } });
+      /* Live shape: totalFare breakdown ke ANDAR hai */
+      return jsonResponse(200, { success: true, data: { trainNumber: "12414", distance: 311, breakdown: { baseFare: 640, reservationCharge: 40, superfastCharge: 45, goodsServiceTax: 20, totalFare: 745 } } });
     }
     if (u.pathname.endsWith("/trains/12414/live")) {
       return jsonResponse(200, {
@@ -112,7 +114,7 @@ function railradarMock(calls: string[] = []) {
           lastUpdatedAt: "2026-09-08T23:40:00+05:30",
           status: "running",
           delayMinutes: 12,
-          currentLocation: { stationCode: "UMB", status: "departed" },
+          currentLocation: { stationCode: "UMB", stationName: "Ambala Cantt", status: "departed" },
           nextHalt: { stationCode: "DLI", stationName: "Old Delhi Junction" },
           route: [{ stationCode: "UMB", stationName: "Ambala Cantt" }, { stationCode: "DLI", stationName: "Old Delhi Junction" }],
         },
@@ -121,7 +123,8 @@ function railradarMock(calls: string[] = []) {
     if (u.pathname.endsWith("/trains/12414/coaches")) {
       return jsonResponse(200, {
         success: true,
-        data: { trainNumber: "12414", coaches: [{ position: 1, code: "ENG", classType: "ENG" }, { position: 2, code: "B1", classType: "3A" }, { position: 3, code: "S1", classType: "SL" }] },
+        /* Live shape: rake[] (docs: coaches[]) */
+        data: { trainNumber: "12414", rake: [{ position: 1, code: "ENG", classType: "LOCO" }, { position: 2, code: "B1", classType: "3A" }, { position: 3, code: "S1", classType: "SL" }] },
       });
     }
     if (u.pathname.endsWith("/trains/12414")) {
@@ -141,7 +144,8 @@ function railradarMock(calls: string[] = []) {
       return jsonResponse(200, { success: true, data: [{ code: "KGM", name: "Kathgodam", city: "Haldwani" }] });
     }
     if (u.pathname.endsWith("/lookup/search/trains")) {
-      return jsonResponse(200, { success: true, data: [{ number: "15906", name: "Vivek Express", source: "CAPE", destination: "DBRG" }, { number: "15905", name: "Vivek Express", source: "DBRG", destination: "CAPE" }] });
+      /* Live shape: source/dest + sourceName/destName */
+      return jsonResponse(200, { success: true, data: [{ number: "15906", name: "Vivek Express", source: "CAPE", dest: "DBRG", type: "MAIL EXPRESS" }, { number: "15905", name: "Vivek Express", source: "DBRG", dest: "CAPE" }] });
     }
     return jsonResponse(404, { success: false, error: { code: "NOT_FOUND", message: "Resource not found" } });
   });

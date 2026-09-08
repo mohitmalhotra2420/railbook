@@ -189,23 +189,28 @@ export async function railradarAvailability(
   logCall("availability", started, res.ok, res.error);
   if (!res.ok) return null;
   const d = asObj(res.data);
-  const list = Array.isArray(d.avlDayList) ? d.avlDayList : [];
-  const row = list.map(asObj).find((x) => String(x.availablityDate ?? x.availabilityDate ?? "") === date) ?? (list.length ? asObj(list[0]) : null);
+  /* Live API (verified 2026-09-08): `calendar[]` {date, rawDate, status,
+   * statusCode, availableSeats}; docs: `avlDayList[]` {availablityDate,
+   * availablityStatus}. Dono handle. */
+  const list = Array.isArray(d.calendar) ? d.calendar : Array.isArray(d.avlDayList) ? d.avlDayList : [];
+  const rowDate = (x: Record<string, unknown>) => String(x.date ?? x.rawDate ?? x.availablityDate ?? x.availabilityDate ?? "");
+  const row = list.map(asObj).find((x) => rowDate(x) === date) ?? (list.length ? asObj(list[0]) : null);
   if (!row) return null;
-  const rawStatus = String(row.availablityStatus ?? row.availabilityStatus ?? "").trim();
+  const rawStatus = String(row.status ?? row.availablityStatus ?? row.availabilityStatus ?? "").trim();
   if (!rawStatus) return null;
   const parsed = parseIrctcAvailabilityText(rawStatus);
   if (parsed.status === "UNKNOWN") return null;
+  const seatsN = Number(row.availableSeats);
   return {
     code: classCode,
     label: CLASS_LABELS[classCode],
     status: parsed.status,
-    seats: parsed.seats ?? undefined,
+    seats: parsed.seats ?? (Number.isFinite(seatsN) && seatsN > 0 ? seatsN : undefined),
     rac: parsed.rac ?? undefined,
     waitlist: parsed.waitlist ?? undefined,
     fare: 0,
     quota: String(d.quotaCode ?? quotaCode ?? "GN"),
-    date: String(row.availablityDate ?? row.availabilityDate ?? date),
+    date: rowDate(row) || date,
     source: "railradar",
     webNote: `RailRadar API — status "${rawStatus}"`,
   };
@@ -232,7 +237,8 @@ export async function railradarFare(
   logCall("fare", started, res.ok, res.error);
   if (!res.ok) return null;
   const d = asObj(res.data);
-  const per = Number(d.totalFare ?? asObj(d.breakdown).baseFare ?? 0);
+  const bd = asObj(d.breakdown);
+  const per = Number(d.totalFare ?? bd.totalFare ?? bd.baseFare ?? 0);
   if (!Number.isFinite(per) || per <= 0) return null;
   const pax = Math.max(1, passengerCount || 1);
   return {
@@ -261,9 +267,9 @@ export async function railradarLive(number: string, dateYmd?: string): Promise<R
   const next = asObj(d.nextHalt);
   const route = Array.isArray(d.route) ? d.route.map(asObj) : [];
   const curCode = String(cur.stationCode ?? "").trim();
-  const curName = route.find((s) => String(s.stationCode ?? "") === curCode)?.stationName;
+  const curName = cur.stationName ?? route.find((s) => String(s.stationCode ?? "") === curCode)?.stationName;
   const delay = Number(d.delayMinutes);
-  const statusRaw = String(d.status ?? "").trim();
+  const statusRaw = String(d.status ?? "").trim().replace(/^not-started$/, "not started yet");
   const status = statusRaw
     ? `${statusRaw}${Number.isFinite(delay) ? (delay > 0 ? `, ${delay} min late` : ", on time") : ""}`
     : Number.isFinite(delay)
@@ -332,7 +338,7 @@ export async function railradarCoachPosition(number: string, stationCode?: strin
   logCall("coachPosition", started, res.ok, res.error);
   if (!res.ok) return null;
   const d = asObj(res.data);
-  const rows = Array.isArray(d.coaches) ? d.coaches : [];
+  const rows = Array.isArray(d.coaches) ? d.coaches : Array.isArray(d.rake) ? d.rake : [];
   const coaches = rows
     .map((row) => {
       const c = asObj(row);
@@ -341,7 +347,7 @@ export async function railradarCoachPosition(number: string, stationCode?: strin
       const pos = Number(c.position);
       return {
         name,
-        classCode: String(c.classType ?? c.category ?? "").trim().toUpperCase() || "—",
+        classCode: String(c.classType ?? c.category ?? "").trim().toUpperCase().replace(/^LOCO$/, "ENG") || "—",
         positionFromEngine: Number.isFinite(pos) ? pos : null,
         sequence: Number.isFinite(pos) ? pos : null,
       };
@@ -349,7 +355,8 @@ export async function railradarCoachPosition(number: string, stationCode?: strin
     .filter((c): c is NonNullable<typeof c> => Boolean(c))
     .sort((a, b) => (a.positionFromEngine ?? 1e9) - (b.positionFromEngine ?? 1e9));
   if (!coaches.length) return null;
-  return { trainNumber: String(d.trainNumber ?? number), stationCode: d.stationCode != null ? String(d.stationCode) : (stationCode ?? null), coaches };
+  const stCode = d.stationCode ?? asObj(d.station).code;
+  return { trainNumber: String(d.trainNumber ?? number), stationCode: stCode != null ? String(stCode) : (stationCode ?? null), coaches };
 }
 
 /* ── Station autocomplete ─────────────────────────────────────────────── */
@@ -388,7 +395,7 @@ export async function railradarTrainNameSearch(q: string): Promise<RailcoreTrain
       number,
       name: String(o.name ?? `Train ${number}`),
       from: String(asObj(o.source).code ?? o.source ?? "").toUpperCase(),
-      to: String(asObj(o.destination).code ?? o.destination ?? "").toUpperCase(),
+      to: String(asObj(o.destination).code ?? o.destination ?? o.dest ?? "").toUpperCase(),
       type: String(o.type ?? ""),
     });
   }
