@@ -464,3 +464,55 @@ describe("Round-16o (A): general question + RailCore limited → web rescue inst
     expect(String(turn.reply)).not.toMatch(/42 seats/);
   });
 });
+
+/* ── topicpage: canonical Indian Railways list pages for superlative Qs ── */
+import { cleanQueryEn, findTopicAnswer } from "../server/agent/topicpage";
+
+describe("Round-16o: topic engine — 'sabse longest route ki train kon si hai' → canonical list page (table)", () => {
+  afterEach(() => setWebFetch(null));
+
+  it("cleanQueryEn drops kon/si/chlti/? noise", () => {
+    expect(cleanQueryEn("India ki sabse longest route ki train kon si hai?")).toBe("india longest route train");
+    expect(cleanQueryEn("Vivek express kahan se kahan chlti hai?")).toBe("vivek express");
+  });
+
+  it("findTopicAnswer: canonical 'Longest train services of Indian Railways' tried first, table rows returned", async () => {
+    const searched: string[] = [];
+    setWebFetch(async (input: any) => {
+      const url = String(input);
+      if (url.includes("duckduckgo.com")) return jsonResponse(200, {});
+      const u = new URL(url);
+      if (u.searchParams.get("list") === "search") {
+        const q = u.searchParams.get("srsearch") ?? "";
+        searched.push(q);
+        if (/longest train services of indian railways/i.test(q)) return jsonResponse(200, { query: { search: [{ title: "Longest train services of Indian Railways" }] } });
+        return jsonResponse(200, { query: { search: [{ title: "Longest trains" }] } });
+      }
+      if (u.searchParams.get("prop") === "extracts") {
+        const title = u.searchParams.get("titles") ?? "";
+        const ex =
+          title === "Longest train services of Indian Railways"
+            ? "This is a list of the longest train services of Indian Railways by distance. The Dibrugarh–Kanyakumari Vivek Express is the longest train route in India, covering 4,154 km. Indian Railways operates several long-distance trains across India."
+            : "The length of a train may be measured in number of wagons or in metres for general freight. Australian iron ore trains are the longest in the world.";
+        return jsonResponse(200, { query: { pages: { "1": { title, extract: ex } } } });
+      }
+      if (u.searchParams.get("action") === "parse") {
+        const wikitext = [
+          '{| class="wikitable"',
+          "! No.", "! Train", "! Distance", "! Stops", "! Frequency",
+          "|-", "| 1", "| 22503/22504 Dibrugarh–Kanyakumari Vivek Superfast Express", "| 4,154.1 km", "| 58", "| Daily",
+          "|-", "| 2", "| 15607/15608 Thiruvananthapuram–Silchar Aronai Express", "| 3,915.5 km", "| 57", "| Weekly",
+          "|}",
+        ].join("\n");
+        return jsonResponse(200, { parse: { title: u.searchParams.get("page"), wikitext: { "*": wikitext } } });
+      }
+      return jsonResponse(404, {});
+    });
+    const a = await findTopicAnswer("India ki sabse longest route ki train kon si hai?");
+    expect(searched[0]).toBe("Longest train services of Indian Railways");
+    expect(a?.title).toBe("Longest train services of Indian Railways");
+    expect(a?.kind).toBe("table");
+    expect(a?.text).toMatch(/Dibrugarh–Kanyakumari Vivek Superfast Express/);
+    expect(a?.text).toMatch(/4,154\.1 km/);
+  });
+});

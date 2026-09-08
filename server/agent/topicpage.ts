@@ -7,7 +7,7 @@
 import { findWikipediaPage, searchWikipediaTitles, wikiTableForPage } from "./websearch.js";
 
 const FILLER_QUERY_RE =
-  /\b(ka|ki|ke|ko|kya|kya|hai|hain|hun|tha|thi|the|se|mein|me|mai|main|par|pe|to|hi|bhi|batao|batana|btana|btaye|bataiye|bata|bataen|dikhao|dikha|chahiye|karo|karna|karke|kar|mujhe|mera|meri|mere|aap|tum|tumhara|kripya|please|kr|kro|nahi|na|haan|yan|ya|jaise|waise|bta|btao|lga|lagta|kabhi|hota|hoti|hote|milta|milti|milte|karta|karti|karte|matlab|meaning|wali|wala|wale|hua|hui|hue|jaata|jaati|jati|jata|ho|kab|kab|kahan|kahaan|kaha|kyun|kyo|kyon|kaise|kaisa|kaisi|kitna|kitni|kitne|kaun|kaunsi|kaunsa|konsi|konsa|cover|karta|karti|hu|bani|bana|bane|chalu|shuru|chali|chalati|chalata|chalti|chalta|bare|baare|baat|gaya|gayi|gaye)\b/gi;
+  /\b(ka|ki|ke|ko|kya|kya|hai|hain|hun|tha|thi|the|se|mein|me|mai|main|par|pe|to|hi|bhi|batao|batana|btana|btaye|bataiye|bata|bataen|dikhao|dikha|chahiye|karo|karna|karke|kar|mujhe|mera|meri|mere|aap|tum|tumhara|kripya|please|kr|kro|nahi|na|haan|yan|ya|jaise|waise|bta|btao|lga|lagta|kabhi|hota|hoti|hote|milta|milti|milte|karta|karti|karte|matlab|meaning|wali|wala|wale|hua|hui|hue|jaata|jaati|jati|jata|ho|kab|kab|kahan|kahaan|kaha|kyun|kyo|kyon|kaise|kaisa|kaisi|kitna|kitni|kitne|kaun|kaunsi|kaunsa|konsi|konsa|cover|karta|karti|hu|bani|bana|bane|chalu|shuru|chali|chalati|chalata|chalti|chalta|bare|baare|baat|gaya|gayi|gaye|kon|konsi|konsa|si|sa|chlti|chlta|chlte|chalte|kha|khan|kidhar|batado|batado|btado)\b/gi;
 
 const HINGLISH_TO_EN: [RegExp, string][] = [
   [/\bsabse\s+(tez|tezi|jaldi)\b/gi, "fastest"],
@@ -37,13 +37,15 @@ const HINGLISH_TO_EN: [RegExp, string][] = [
   /* "vande bharat"/"amrit bharat"/"namo bharat" train-brand hain — inka
    * "bharat" translate NAHI hota (warna "vande india" wiki par galat page). */
   [/\b(?<!vande\s)(?<!amrit\s)(?<!namo\s)bharat\b/gi, "india"],
+  /* Round-16o: akela "sabse" (English superlative ke saath: "sabse longest") — noise. */
+  [/\bsabse\b/gi, ""],
 ];
 
 export function cleanQueryEn(text: string): string {
   let q = ` ${text.toLowerCase()} `;
   q = q.replace(FILLER_QUERY_RE, " ");
   for (const [re, en] of HINGLISH_TO_EN) q = q.replace(re, ` ${en} `);
-  return q.replace(/\s+/g, " ").trim().slice(0, 100);
+  return q.replace(/[?!।]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 100);
 }
 
 /** Wikipedia pages mein har railway page par aane wale generic words —
@@ -89,6 +91,19 @@ const PRIORITY_SYNONYMS: Record<string, string[]> = {
   cheapest: ["cheapest", "lowest fare"],
   famous: ["famous", "popular", "well-known"],
 };
+
+/** Round-16o: superlative/general sawaal → canonical Indian Railways pages
+ * (Wikipedia search ranking se independent). */
+const CANONICAL_PAGES: [RegExp, string][] = [
+  [/\b(longest|lambi|lamba|lambe)\b[\s\S]*\b(route|train|trains|safar|journey|distance|doori)\b|\b(route|train|trains)\b[\s\S]*\b(longest|lambi|lamba|lambe)\b/i, "Longest train services of Indian Railways"],
+  [/\b(fastest|tez|tezi|jaldi|speed)\b/i, "Express trains in India"],
+  [/\b(busiest|vyast|crowded|bheed)\b[\s\S]*\bstation/i, "List of busiest railway stations in India"],
+  [/\bplatform\b[\s\S]*\b(longest|lambi|lamba|largest)\b|\b(longest|lambi|lamba|largest)\b[\s\S]*\bplatform\b/i, "Hubballi Junction railway station"],
+  [/\b(luxury|shahi|royal)\b[\s\S]*\btrains?\b/i, "List of luxury trains in India"],
+  [/\b(oldest|purani|purana|first|pehli|pehla)\b[\s\S]*\b(train|railway|rail)\b/i, "Rail transport in India"],
+];
+/* Superlative sawaal mein ye words subject NAHI hain (canonical page tab bhi chale). */
+const CANON_HINT_WORDS = new Set(["longest", "fastest", "busiest", "oldest", "luxury", "platform", "railway", "railways", "route", "routes", "train", "trains", "india", "indian", "journey", "safar", "distance", "doori", "speed", "station", "stations", "lambi", "lamba", "lambe", "sabse", "kaunsi", "konsi", "kaun", "kon", "chalti", "chalta", "chlti"]);
 
 /** User ne foreign jagah/system explicitly poochha ho to India-guard off. */
 const FOREIGN_PLACE_RE =
@@ -213,6 +228,16 @@ export async function findTopicAnswer(questionText: string): Promise<TopicAnswer
     const historyFlavored = /history|shuruaat|shuruat|pehli|pehla|first|oldest|purani|kab\s+(hui|hua|bani|shuru|chalu)/i.test(questionText);
     const candidates: string[] = [];
     if (historyFlavored && !contentWords.length) candidates.push("rail transport in india");
+    /* Round-16o (prod: "India ki sabse longest route ki train kon si hai?"
+     * → null): Wikipedia ranking "longest route train india" par generic
+     * world pages ("Longest trains") deta hai jo India-guard par reject ho
+     * jaate hain. Common superlative sawaalon ke CANONICAL Indian Railways
+     * list-pages pehle try karo (sirf jab koi distinct subject naam na ho). */
+    if (!contentWords.filter((w) => !CANON_HINT_WORDS.has(w)).length) {
+      for (const [re, title] of CANONICAL_PAGES) {
+        if (re.test(`${questionText} ${q}`)) candidates.push(title);
+      }
+    }
     candidates.push(q);
     const nameWords = cleanQueryEn(questionText)
       .split(" ")

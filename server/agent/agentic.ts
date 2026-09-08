@@ -1028,10 +1028,21 @@ export async function executeApprovedTool(
           );
         }
         const routeless = results.every((t) => !t.from && !t.to);
+        const knowledgeQ = knowledgeQuestion(String(ctx.userText ?? ""));
+        const hint = routeless
+          ? knowledgeQ
+            ? " (sirf number+naam — user ka sawaal route/history/knowledge ka hai: AB WEB_SEARCH call karo, GET_TIMETABLE har train par MAT chalao)"
+            : " (sirf number+naam; kisi EK train ki timing ke liye GET_TIMETABLE, route/history ke liye WEB_SEARCH)"
+          : "";
         return okResult(
           named.provider,
-          `"${a.query}": ${results.length} trains mili${routeless ? " (sirf number+naam; route/timing ke liye GET_TIMETABLE ya WEB_SEARCH)" : ""}.${webSourceLabel(named.provider)}`,
-          { query: a.query, count: results.length, trains: results.slice(0, 10), ...(routeless ? { note: "Route/source-destination is list mein NAHI hai — invent mat karo; chahiye to GET_TIMETABLE(train_number) ya WEB_SEARCH." } : {}) },
+          `"${a.query}": ${results.length} trains mili${hint}.${webSourceLabel(named.provider)}`,
+          {
+            query: a.query,
+            count: results.length,
+            trains: results.slice(0, 10),
+            ...(routeless ? { note: `Route/source-destination is list mein NAHI hai — invent mat karo.${knowledgeQ ? " User ka sawaal knowledge-type hai → agla step WEB_SEARCH (user ke original sawaal se)." : " Chahiye to GET_TIMETABLE(train_number) ya WEB_SEARCH."}` } : {}),
+          },
         );
       }
       case "SEARCH_STATIONS": {
@@ -1595,14 +1606,23 @@ const WEB_RESCUE_JOURNEY_RE = /\b(trains?\s+(batao|dikhao|dikha|list|chahiye)|ja
 const WEB_RESCUE_Q_RE =
   /\b(kya|kaise|kaisa|kab|kahan|kahaan|kaha|kitna|kitni|kitne|kaun|kaunsi|kon|konsi|kyun|kyu|why|how|what|when|where|which|batao|bata|btao|history|sabse|pehli|pehla|longest|shortest|fastest|slowest|oldest|largest|biggest|route|chalti|chalta|jaati|jaata|se .* tak|explain|samjhao|matlab|meaning)\b/i;
 
-export function webRescueEligible(userText: string, steps: ToolTraceStep[]): boolean {
+export function webRescueEligible(userText: string, steps: ToolTraceStep[], opts: { allowOkSteps?: boolean } = {}): boolean {
   const t = String(userText ?? "").trim();
   if (t.length < 6) return false;
-  if (steps.some((s) => s.ok)) return false;
+  if (!opts.allowOkSteps && steps.some((s) => s.ok)) return false;
   if (steps.some((s) => s.tool === "WEB_SEARCH")) return false; // web already tried and failed
   if (WEB_RESCUE_BLOCK_RE.test(t)) return false;
   if (WEB_RESCUE_JOURNEY_RE.test(t)) return false;
   return WEB_RESCUE_Q_RE.test(t);
+}
+
+/* "kahan se kahan chalti hai / route kya hai / kab shuru hui" — KNOWLEDGE
+ * sawaal jinka jawab TRAIN_NAME_SEARCH ki list ya timetable-dump nahi,
+ * Wikipedia-para hota hai. Model-fail par (429/step-budget) tool-summaries ka
+ * bullet dump dene se pehle web answer try karo. */
+const KNOWLEDGE_Q_RE = /\b(kahan se kahan|kaha se kaha|kahan se|route kya|kya route|kab shuru|kab chalu|history|kyun (?:famous|mashhoor)|kis liye|kitni lambi|kitna lamba|sabse|longest|fastest|oldest|kaunsi hai|kon si hai|kaun si hai)\b/i;
+export function knowledgeQuestion(userText: string): boolean {
+  return KNOWLEDGE_Q_RE.test(String(userText ?? ""));
 }
 
 async function webRescueAnswer(userText: string, steps: ToolTraceStep[], stepNo: number): Promise<string | null> {
@@ -1815,6 +1835,12 @@ export async function runAgenticTurn(input: {
 
   for (let step = 1; step <= MAX_STEPS; step++) {
     if (timeLeft() < 2500) {
+      if (steps.length && timeLeft() > -20000 && webRescueEligible(input.text, steps, { allowOkSteps: knowledgeQuestion(input.text) })) {
+        const rescued = await webRescueAnswer(input.text, steps, steps.length + 1);
+        if (rescued) {
+          return { ok: true, reply: rescued, grounded: true, steps, modelUsed, latencyMs: Date.now() - startedAll, failureReason: "turn_time_budget_rescued_by_web" };
+        }
+      }
       return {
         ok: steps.length > 0,
         reply: steps.length ? deterministicSummary(steps) : null,
@@ -1911,7 +1937,7 @@ export async function runAgenticTurn(input: {
       // Model chain poori tarah fail — par agar tools chal chuke hain to unka
       // provider-backed summary hi sahi jawab hai (weak deterministic NLU par mat ja).
       const reason = lastFailure ?? "empty_content";
-      if (steps.length && webRescueEligible(input.text, steps)) {
+      if (steps.length && webRescueEligible(input.text, steps, { allowOkSteps: knowledgeQuestion(input.text) })) {
         const rescued = await webRescueAnswer(input.text, steps, steps.length + 1);
         if (rescued) {
           return { ok: true, reply: rescued, grounded: true, steps, modelUsed, latencyMs: Date.now() - startedAll, failureReason: `${reason}_rescued_by_web` };
@@ -2360,7 +2386,7 @@ export async function runAgenticTurn(input: {
   }
 
   // Step budget kharch — honest deterministic summary.
-  if (webRescueEligible(input.text, steps)) {
+  if (webRescueEligible(input.text, steps, { allowOkSteps: knowledgeQuestion(input.text) })) {
     const rescued = await webRescueAnswer(input.text, steps, steps.length + 1);
     if (rescued) {
       return { ok: true, reply: rescued, grounded: true, steps, modelUsed, latencyMs: Date.now() - startedAll, failureReason: "step_budget_rescued_by_web" };
