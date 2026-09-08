@@ -65,6 +65,7 @@ export interface TrainResult {
   durationLabel: string;
   runsOn: number[];
   classes: ClassAvailability[];
+  haltVerified?: boolean;
 }
 
 export interface Recommendation {

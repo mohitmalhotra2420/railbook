@@ -48,7 +48,22 @@ import { durationLabel } from "../util.js";
 import { MULTI_STATION_CITIES, isClusterStation, pickStations } from "./station-resolve.js";
 import { STATIONS as LOCAL_STATIONS } from "../data/stations.js";
 
+/* Round-16m (user: chat mein HWH ka naam "KOLKATA - ALL STATIONS" aata tha,
+ * Howrah nahi): RailCore kuch codes ko marketing/cluster naam deta hai. Jahan
+ * hamare curated dataset mein proper naam hai (Howrah Junction, New Delhi…),
+ * wahi dikhao — code same rehta hai, sirf label sahi hota hai. */
+function preferLocalNames(hits: Station[]): Station[] {
+  return hits.map((s) => {
+    const local = LOCAL_STATIONS.find((l) => l.code.toUpperCase() === s.code.toUpperCase());
+    if (!local) return s;
+    const remoteName = String(s.name ?? "").trim();
+    const generic = !remoteName || /all stations|^[A-Z .-]+$/.test(remoteName) || remoteName.toUpperCase() === s.code.toUpperCase();
+    return generic ? { ...s, name: local.name, city: s.city && s.city !== remoteName ? s.city : local.city } : s;
+  });
+}
+
 function enrichClusterHits(query: string, hits: Station[]): Station[] {
+  hits = preferLocalNames(hits);
   const key = query.trim().toLowerCase();
   const group = MULTI_STATION_CITIES[key];
   if (!group) return hits;
@@ -577,15 +592,27 @@ function stopIndex(stops: { code: string }[], code: string): number {
 
 type StopRow = { code: string; name: string; arrival?: string | null; departure?: string | null; day?: number };
 
-const scheduleCache = new Map<string, StopRow[] | null>();
+/* Round-16m: timetable cache ab TTL ke saath (12h) — timetable roz nahi
+ * badalti, aur har search par 27 trains × /schedule call RailCore ka 20/min
+ * burst limit uda deta tha ("Too many requests" → sirf 4 trains bachi).
+ * `null` (fail) ko cache NAHI karte, taaki agli baar retry ho. */
+const SCHEDULE_TTL_MS = 12 * 60 * 60_000;
+const scheduleCache = new Map<string, { stops: StopRow[]; at: number }>();
+/* Round-16m: schedule lookups bhi rate-limit ke andar — ek waqt mein 4. */
+const SCHEDULE_CONCURRENCY = 4;
 
 export function clearScheduleCache(): void {
   scheduleCache.clear();
 }
 
-async function loadStops(trainNumber: string): Promise<StopRow[] | null> {
+/** Round-16m: loadStops ka result — `unknown` = provider se timetable nahi
+ * aayi (rate-limit/down), `stops` = verified list. Dono alag hain: unknown par
+ * train ko DROP karna "trains hi nahi hain" ka jhooth ban jaata hai. */
+type StopsLookup = { stops: StopRow[] } | { stops: null; reason: "unavailable" };
+
+async function loadStops(trainNumber: string): Promise<StopsLookup> {
   const cached = scheduleCache.get(trainNumber);
-  if (cached !== undefined) return cached;
+  if (cached && Date.now() - cached.at < SCHEDULE_TTL_MS) return { stops: cached.stops };
   let stops: StopRow[] = ((await railcoreSchedule(trainNumber))?.stops ?? []).map((s) => ({
     code: s.code,
     name: s.name,
@@ -602,9 +629,53 @@ async function loadStops(trainNumber: string): Promise<StopRow[] | null> {
       departure: s.departure && s.departure !== "--" ? s.departure : null,
     }));
   }
-  const value = stops.length ? stops : null;
-  scheduleCache.set(trainNumber, value);
-  return value;
+  if (!stops.length) {
+    /* Round-16m: RailCore 20/min burst + RailKit down → verified sites se
+     * timetable (ixigo/confirmtkt/trainspnrstatus). Sirf halt-verify ke liye. */
+    try {
+      const web = await scrapeTrainScheduleWeb(trainNumber);
+      stops = (web?.stops ?? []).map((s) => ({ code: s.code, name: s.name, arrival: s.arrival, departure: s.departure }));
+    } catch {
+      stops = [];
+    }
+  }
+  if (!stops.length) return { stops: null, reason: "unavailable" };
+  scheduleCache.set(trainNumber, { stops, at: Date.now() });
+  return { stops };
+}
+
+/* Round-16m: jo trains is search mein verify nahi ho paayin (rate-limit), unki
+ * timetable background mein dheere-dheere (4s gap ≈ 15/min) warm karo — agli
+ * search ("1 day later", dobara route) poori verified ho. Fire-and-forget. */
+const warming = new Set<string>();
+function warmSchedulesInBackground(numbers: string[]): void {
+  const todo = numbers.filter((n) => !warming.has(n) && !scheduleCache.has(n)).slice(0, 40);
+  if (!todo.length) return;
+  for (const n of todo) warming.add(n);
+  void (async () => {
+    for (const n of todo) {
+      await new Promise((r) => setTimeout(r, 4000));
+      try {
+        await loadStops(n);
+      } catch {
+        /* ignore */
+      }
+      warming.delete(n);
+    }
+  })();
+}
+
+async function mapLimited<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      const i = next++;
+      out[i] = await fn(items[i]);
+    }
+  });
+  await Promise.all(workers);
+  return out;
 }
 
 function hhmmMinutes(raw: string | null | undefined): number | null {
@@ -621,12 +692,17 @@ export async function filterTrainsServingStops(
 ): Promise<TrainResult[]> {
   if (!trains.length) return trains;
   const kept: TrainResult[] = [];
-  await Promise.all(
-    trains.map(async (train) => {
-      const stops = await loadStops(train.number);
+  await mapLimited(trains, SCHEDULE_CONCURRENCY, async (train) => {
+      const lookup = await loadStops(train.number);
+      const stops = lookup.stops;
       if (!stops?.length) {
-        // Cannot confirm — do not invent a halt, but do not wipe a valid search if timetable is down.
-        if (!isClusterStation(from) && !isClusterStation(to)) kept.push(train);
+        /* Round-16m (user: "LDH→DLI 12 Sep par 'No trains' jabki IRCTC par
+         * hain"): timetable nahi mili (RailCore 20/min burst limit) to train
+         * ko DROP nahi karte — provider ne is route par di hai, wahi rakho.
+         * Cluster station (DLI/NDLS/HWH) par bhi: provider ka `to` code hi
+         * user ka chuna hua station hai; galat-station ka risk < "koi train
+         * nahi" ka jhooth. Verification skip ka nishaan: haltVerified=false. */
+        kept.push({ ...train, haltVerified: false });
         return;
       }
       const fromIdx = stopIndex(stops, from);
@@ -673,10 +749,12 @@ export async function filterTrainsServingStops(
         arrivalDayOffset,
         durationMinutes,
         durationLabel: durationLabel(durationMinutes || 0),
+        haltVerified: true,
       });
-    }),
-  );
+  });
   kept.sort((a, b) => a.departure.localeCompare(b.departure));
+  const unverified = kept.filter((t) => t.haltVerified === false).map((t) => t.number);
+  if (unverified.length && process.env.NODE_ENV !== "test" && !process.env.VITEST) warmSchedulesInBackground(unverified);
   return kept;
 }
 

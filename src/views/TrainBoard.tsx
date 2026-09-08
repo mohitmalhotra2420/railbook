@@ -422,7 +422,12 @@ export function TrainBoard() {
             <div className="tb-route">
               {fromName} → {toName}
             </div>
-            <div className="tb-sub">{nowLabel.replace(",", " ·")}</div>
+            {/* Round-16m: header par JOURNEY date (jo search hui), "abhi ka
+             * time" nahi — user ko "08 Sept" dikh raha tha jabki 12 Sept
+             * search thi. */}
+            <div className="tb-sub">
+              {state.date ? `Journey: ${formatShortDate(state.date)}` : nowLabel.replace(",", " ·")}
+            </div>
           </div>
           <button className="tb-round" aria-label="Menu" onClick={() => go("bookings")}>
             ☰
@@ -594,14 +599,27 @@ export function TrainBoard() {
                   <div>{train.durationLabel}</div>
                   <div className="tb-line" />
                   <div className="tb-days">{weekdayLetters(train.runsOn)}</div>
+                  {train.haltVerified === false && (
+                    <div className="tb-unverified" title="Timetable se halt confirm nahi ho paaya (railway API busy). Book karne se pehle schedule check karein.">
+                      halt unverified
+                    </div>
+                  )}
                 </div>
                 <div className="tb-arr">
-                  <div className="tb-hh">{train.arrival}</div>
+                  <div className="tb-hh">
+                    {train.arrival}
+                    {train.arrivalDayOffset > 0 && (
+                      <span className="tb-plusday" title={`Arrives ${train.arrivalDayOffset} day(s) after departure`}>
+                        {" "}+{train.arrivalDayOffset}d
+                      </span>
+                    )}
+                  </div>
                   <div className="tb-st">{train.to.name || train.to.city}</div>
                   <div className="tb-day">
                     {formatShortDate(
                       train.arrivalDayOffset ? addDays(train.date, train.arrivalDayOffset) : train.date,
                     )}
+                    {train.arrivalDayOffset > 0 && ` (Day ${train.arrivalDayOffset + 1})`}
                   </div>
                 </div>
               </div>

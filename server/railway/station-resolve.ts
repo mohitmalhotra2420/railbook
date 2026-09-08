@@ -154,7 +154,11 @@ export function pickStations(query: string, hits: Station[]): StationPick {
       const extra = hits
         .filter((s) => !unique.has(s.code.toUpperCase()) && scoreStation(q, s) > 0)
         .sort((a, b) => scoreStation(q, b) - scoreStation(q, a) || a.code.localeCompare(b.code));
-      return { kind: "ambiguous", stations: [...unique.values(), ...extra], city: q };
+      /* Round-16m: group ka order hi priority hai (HWH → SDAH → KOAA → SHM;
+       * NDLS → DLI → NZM…) — API ke random order se "KOAA pehle, Howrah
+       * doosra" jaisa list na bane. */
+      const ordered = group.map((c) => unique.get(c)).filter((s): s is Station => Boolean(s));
+      return { kind: "ambiguous", stations: [...ordered, ...extra], city: q };
     }
     if (unique.size === 1) {
       const only = [...unique.values()][0];

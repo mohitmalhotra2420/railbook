@@ -136,18 +136,19 @@ export function BookingProvider({ children }: { children: ReactNode }) {
 
   const setDate = useCallback(
     (d: string) => {
-      const shouldRefresh =
-        Boolean(state.from && state.to) &&
-        d !== state.date &&
-        (state.trains.length > 0 ||
-          Boolean(state.selectedTrain) ||
-          state.screen === "results");
+      /* Round-16m (user: "1 day later par next day ki trains nahi aati,
+       * calendar se aati hain"): results/empty screen par date badli →
+       * HAMESHA fresh search; "empty" state par bhi (trains.length 0 tha to
+       * pehle refetch skip ho sakta tha jab screen state stale ho). */
+      const onResults =
+        state.screen === "results" || state.trains.length > 0 || Boolean(state.selectedTrain) || Boolean(state.emptyMessage);
+      const shouldRefresh = Boolean(state.from && state.to) && d !== state.date && onResults;
       dispatch({ type: "SET_DATE", date: d });
       if (shouldRefresh && state.from && state.to) {
         void runSearch(state.from, state.to, d);
       }
     },
-    [state.from, state.to, state.date, state.trains.length, state.selectedTrain, state.screen, runSearch],
+    [state.from, state.to, state.date, state.trains.length, state.selectedTrain, state.screen, state.emptyMessage, runSearch],
   );
 
   const selectClass = useCallback(

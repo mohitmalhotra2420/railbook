@@ -975,6 +975,8 @@ h2 { font-size: 17px; }
   align-items: start;
 }
 .tb-hh { font-size: 26px; font-weight: 800; letter-spacing: -0.03em; }
+.tb-unverified { font-size: 10px; color: #b3541e; background: #fdf1e7; border-radius: 6px; padding: 1px 6px; margin-top: 4px; display: inline-block; }
+.tb-plusday { font-size: 13px; font-weight: 800; color: #b3541e; letter-spacing: 0; vertical-align: super; }
 .tb-st { font-size: 13px; color: var(--muted); margin-top: 2px; }
 .tb-day { font-size: 12px; color: var(--faint); }
 .tb-arr { text-align: right; }

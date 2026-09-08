@@ -55,6 +55,9 @@ export interface TrainResult {
   durationLabel: string;
   runsOn: number[];
   classes: ClassAvailability[];
+  /** Round-16m: false = timetable se halt verify nahi ho paaya (provider
+   * rate-limit), train provider ke route-result se hai. undefined/true = ok. */
+  haltVerified?: boolean;
 }
 
 export interface SearchQuery {

@@ -645,6 +645,7 @@ async function journeyAnalyze(args: {
     departure: t.departure,
     arrival: t.arrival,
     arrivalDayOffset: t.arrivalDayOffset,
+    arrivalDay: arrivalDayLabel(t.arrivalDayOffset),
     durationMinutes: t.durationMinutes,
     classes: t.classes.map((c) => c.code),
   }));
@@ -1124,10 +1125,14 @@ export async function executeApprovedTool(
         const fastestLine = fastest
           ? ` Sabse fast: ${fastest.number} ${fastest.name} (${fastest.durationLabel ?? durLabel(fastest.durationMinutes ?? 0)}).`
           : "";
+        const unverifiedCount = trains.filter((t) => t.haltVerified === false).length;
+        const unverifiedNote = unverifiedCount
+          ? ` (${unverifiedCount} trains ka halt timetable se verify nahi hua — railway API busy thi; list provider ke route data se hai.)`
+          : "";
         return okResult(
           search.provider,
           trains.length
-            ? `${fromRes.code}→${toRes.code} (${a.date}): ${trains.length} trains.${fastestLine}`
+            ? `${fromRes.code}→${toRes.code} (${a.date}): ${trains.length} trains.${fastestLine}${unverifiedNote}`
             : `${fromRes.code}→${toRes.code} (${a.date}): koi train nahi mili.`,
           {
             from: fromRes.code,
@@ -1140,6 +1145,9 @@ export async function executeApprovedTool(
               departure: t.departure,
               arrival: t.arrival,
               arrivalDayOffset: t.arrivalDayOffset,
+              /* Round-16m: model ke liye explicit — "Day 2"/"Day 3" — taaki
+               * reply mein clearly likhe (user: +1/+2/+3 din saaf dikhe). */
+              arrivalDay: arrivalDayLabel(t.arrivalDayOffset),
               durationMinutes: t.durationMinutes,
               durationLabel: t.durationLabel,
               classes: t.classes.map((c) => c.code),
@@ -1363,6 +1371,12 @@ function weekdayDateMap(nowIso?: string): string {
  * handle karta hai; 8-day map sirf hint hai, resolver ka result final.
  * Train numbers/PNR (5-10 digit) pehle strip — "12014 ko" ko date na samjha jaye.
  */
+/** Round-16m: "Day 1" = same day, "Day 2" = agle din, "Day 3"… */
+export function arrivalDayLabel(offset: number | null | undefined): string {
+  const n = Number(offset ?? 0) || 0;
+  return n <= 0 ? "Day 1 (same day)" : n === 1 ? "Day 2 (agle din)" : `Day ${n + 1} (${n} din baad)`;
+}
+
 export function deterministicDateHint(
   text: string,
   now: Date,
@@ -1449,7 +1463,7 @@ function systemPrompt(
     "17. SIRF wahi data do jo user ne poocha. 'kitne time leti hai' = sirf duration; 'fare kitna' = sirf fare; 'platform/coach' = sirf coach position; 'kahan hai abhi' = sirf live position. Poora dump mat karo — user ne jo manga bas wahi, ek-do line mein.",
     "14. Train ka NAAM user ne bola (jaise 'swarn shatabdi', 'vande bharat') to USI train ka jawab do — known context mein trainNumber aaya hai ya list mein se naam match hua hai. Pichhli selected train se mix mat karo. Naam se train identify na ho to honestly poochho, galat train ka data mat do.",
     "15. 'Kitne time leti hai / kitna samay lagta hai' = user ke origin→destination SEGMENT ka duration (GET_TIMETABLE summary mein 'FROM→TO dep→arr (Xh YYm)' segment line hai). Poora-route duration sirf tab batao jab user 'poora route' maange.",
-    "12. Jab bhi train LIST dikha rahe ho (SEARCH_TRAINS/JOURNEY_ANALYZE results): reply TEXT mein sirf 2-3 line ka summary do — count + 'Sabse fast: <number> <name> (<duration>)' top par highlight. POORI train-by-train list reply text mein MAT likho — app khud organized TABLE mein saari trains dikhata hai. User ko dobara poochna na pade. Cheapest/earliest bhi isi tarah jab relevant ho.",
+    "12. Jab bhi train LIST dikha rahe ho (SEARCH_TRAINS/JOURNEY_ANALYZE results): reply TEXT mein sirf 2-3 line ka summary do — count + 'Sabse fast: <number> <name> (<duration>)' top par highlight. POORI train-by-train list reply text mein MAT likho — app khud organized TABLE mein saari trains dikhata hai. User ko dobara poochna na pade. Cheapest/earliest bhi isi tarah jab relevant ho. Jab train agle din ya usse baad pahunchti ho (arrivalDay 'Day 2'/'Day 3'), arrival ke saath wahi label likho — jaise '11:35 (Day 2)' — kabhi skip mat karo.",
     "13. Reply ke end mein PROACTIVE offer/continuation KABHI mat likho (jaise 'waise hum continue kar sakte hain', 'aap chahe to…', 'kya aapko aur kuch chahiye?', 'shall I continue?'). Sirf user ke sawaal ka jawab do — aage ka step tabhi batao jab user poochhe. (Zaroori slot-filling questions — date/station/passengers/booking-confirm — exempt hain, woh poochte raho.)",
     "18. CONTEXT-SWITCH (sabse zaroori): user ka CURRENT message hi priority hai. Agar aapne pichhle reply mein kuch poochha tha (station options/date/confirm) par user ne uska jawab NAHI diya aur koi alag cheez/train poochh li — to PEHLE naye sawaal ka jawab do (tool call karke). Apna pending sawaal naye reply mein dobara repeat ya attach mat karo; jab user khud wapas usi journey ki baat kare tab options yaad dilao. Same chat mein topic/train badalna normal hai — 'chhodo/arré chhad' jaise words ko ignore-marker ki tarah samjho.",
     "19. Purani search ki trains se current sawaal ka jawab MAT banao (jaise user ne fastest train poocha aur aap pichhli list ki kisi train par 'nahi, ye wahin stop nahi karti' bolo). Current sawaal ka data na mile to: pehle relevant TOOL call karo; phir bhi na mile to 1-2 line mein saaf bolo kya unavailable hai — flat 'is question ka jawab evidence mein nahi hai' jaisa kabhi nahi.",
