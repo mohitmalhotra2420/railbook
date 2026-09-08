@@ -19,6 +19,7 @@ import {
   railradarCoachPosition,
   railradarFare,
   railradarLive,
+  railradarRequest,
   railradarSchedule,
   railradarSearchTrains,
   railradarStationSearch,
@@ -51,6 +52,7 @@ import {
   isUsableLive,
   coachPosition as railcoreCoachPosition,
   liveTrainStatus as railcoreLive,
+  railcoreRequest,
   searchRailcoreStationsResult,
   searchRailcoreTrainsByName,
   trainInfo as railcoreTrainInfo,
@@ -64,6 +66,7 @@ import {
   RailKitProvider,
   cancelledTrains as railkitCancelled,
   liveTrainStatus as railkitLive,
+  trainHistory as railkitHistory,
   loadClassBoard as railkitClassBoard,
   pnrStatus as railkitPnr,
   searchRailkitStations,
@@ -563,6 +566,128 @@ export async function routedLiveStatus(number: string, dateYmd?: string, trainNa
     if (st === "completed") break; // isse purane sab complete honge
   }
   return first;
+}
+
+/* ── Round-16p-2: station-wise history of a PAST run ───────────────────
+ * RailKit getTrainHistory → RailCore /live?date= `stations[]` (actual_arrival/
+ * actual_departure/delay) → RailRadar /live?date= `route[]` (halts). Har
+ * provider us START-date ke run ka per-station actual deta hai — running run
+ * ke liye bhi (jitna ho chuka wahi actual, baaki scheduled/upcoming). */
+export type RoutedHistoryStop = {
+  code: string;
+  name: string;
+  arrival: string | null;
+  departure: string | null;
+  delay: number | null;
+  done: boolean;
+};
+export type RoutedHistory = {
+  trainNumber: string;
+  trainName: string;
+  date: string;
+  status: string | null;
+  runState: "not_started" | "running" | "completed" | "unknown";
+  stops: RoutedHistoryStop[];
+  provider: ServedProvider;
+};
+
+function hhmm(iso: unknown): string | null {
+  const s = String(iso ?? "").trim();
+  if (!s) return null;
+  const m = s.match(/T(\d{2}:\d{2})/);
+  if (m) {
+    const d = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    return d ? `${m[1]} (${d[3]}/${d[2]})` : m[1];
+  }
+  return s.length <= 8 ? s.slice(0, 5) : s;
+}
+
+export async function routedTrainHistory(number: string, dateYmd: string): Promise<RoutedHistory | null> {
+  const started = Date.now();
+  const kit = await railkitHistory(number, dateYmd).catch(() => null);
+  if (kit && kit.stops.length) {
+    logServed("railkit", "trainHistory", started, true);
+    return {
+      trainNumber: kit.trainNumber,
+      trainName: kit.trainName,
+      date: kit.date,
+      status: null,
+      runState: "unknown",
+      stops: kit.stops.map((s) => ({ ...s, done: Boolean(s.arrival || s.departure) })),
+      provider: "railkit",
+    };
+  }
+  /* RailCore full /live payload — stations[] with actuals. */
+  if (railcoreIsPrimary()) {
+    const res = await railcoreRequest(`/trains/${encodeURIComponent(number)}/live`, { date: dateYmd });
+    const d = asObjR(res.ok ? unwrapR(res.json) : null);
+    const rows = Array.isArray(d.stations) ? d.stations.map(asObjR) : [];
+    if (rows.length) {
+      const stops: RoutedHistoryStop[] = rows
+        .filter((r) => r.is_stopping !== false)
+        .map((r) => ({
+          code: String(r.station_code ?? ""),
+          name: String(r.station_name ?? r.station_code ?? ""),
+          arrival: hhmm(r.actual_arrival ?? (r.has_arrived ? r.eta : null)),
+          departure: hhmm(r.actual_departure ?? (r.has_departed ? r.etd : null)),
+          delay: typeof r.delay_arrival_minutes === "number" ? r.delay_arrival_minutes : typeof r.delay_departure_minutes === "number" ? r.delay_departure_minutes : null,
+          done: Boolean(r.has_arrived || r.has_departed),
+        }))
+        .filter((s) => s.code);
+      const st = String(d.status ?? "").toUpperCase();
+      logServed("railcore", "trainHistory", started, true, "railkit_failed");
+      return {
+        trainNumber: String(d.train_number ?? number),
+        trainName: String(d.train_name ?? ""),
+        date: String(d.journey_date ?? dateYmd),
+        status: String(d.status_text ?? d.status ?? "") || null,
+        runState: st === "COMPLETED" ? "completed" : st === "RUNNING" ? "running" : st === "AT_STATION" && !(Number(d.distance_covered_km) > 0) ? "not_started" : "unknown",
+        stops,
+        provider: "railcore",
+      };
+    }
+  }
+  /* RailRadar route[] (halts only). */
+  const rr = await railradarRequest(`/trains/${encodeURIComponent(number)}/live`, { date: dateYmd, haltsOnly: "true" });
+  const rd = asObjR(rr.ok ? rr.data : null);
+  const route = Array.isArray(rd.route) ? rd.route.map(asObjR) : [];
+  if (route.length) {
+    const stops: RoutedHistoryStop[] = route
+      .filter((r) => r.isHalt !== false)
+      .map((r) => {
+        const done = /departed|arrived|at-station/i.test(String(r.status ?? ""));
+        return {
+          code: String(r.stationCode ?? ""),
+          name: String(r.stationName ?? r.stationCode ?? ""),
+          arrival: done ? hhmm(r.actualArrival ?? r.scheduledArrival) : null,
+          departure: done ? hhmm(r.actualDeparture ?? r.scheduledDeparture) : null,
+          delay: typeof r.delayArrival === "number" ? r.delayArrival : typeof r.delayDeparture === "number" ? r.delayDeparture : null,
+          done,
+        };
+      })
+      .filter((s) => s.code);
+    const st = String(rd.status ?? "").toLowerCase();
+    logServed("railradar", "trainHistory", started, true, "railkit+railcore_failed");
+    return {
+      trainNumber: String(rd.trainNumber ?? number),
+      trainName: String(rd.trainName ?? asObjR(rd.train).name ?? ""),
+      date: String(rd.startDate ?? dateYmd),
+      status: st || null,
+      runState: st === "completed" ? "completed" : /not-?started/.test(st) ? "not_started" : st ? "running" : "unknown",
+      stops,
+      provider: "railradar",
+    };
+  }
+  logServed("none", "trainHistory", started, false, "all_failed");
+  return null;
+}
+
+function asObjR(v: unknown): Record<string, unknown> {
+  return v && typeof v === "object" ? (v as Record<string, unknown>) : {};
+}
+function unwrapR(json: unknown): unknown {
+  const o = asObjR(json);
+  return "data" in o ? o.data : json;
 }
 
 async function routedLiveStatusForDate(number: string, dateYmd?: string, trainNameHint?: string | null, quiet = false): Promise<RoutedLive> {

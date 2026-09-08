@@ -223,3 +223,83 @@ describe("Round-16p: /api/agent deterministic path (no LLM key)", () => {
     expect(res.body.reply).not.toMatch(/next /);
   });
 });
+
+/* ── Round-16p-2: station-wise history of a past run (RailKit → RailCore → RailRadar) ── */
+import { routedTrainHistory } from "../server/railway/router";
+import { setRailradarFetch } from "../server/railway/railradar";
+
+describe("Round-16p-2: routedTrainHistory + /api/history — RailKit fail par RailCore stations[] / RailRadar route[]", () => {
+  it("RailCore /live?date= stations[] → station-wise actual arr/dep + delay, runState completed", async () => {
+    setRailcoreFetch(async (input) => {
+      const url = new URL(String(input));
+      if (!url.pathname.includes("/live")) return jsonResponse(500, { success: false });
+      return jsonResponse(200, {
+        success: true,
+        data: {
+          train_number: "12424", train_name: "Dbrt Rajdhani", journey_date: url.searchParams.get("date"), status: "COMPLETED", status_text: "Journey completed", distance_covered_km: 2434,
+          stations: [
+            { station_code: "NDLS", station_name: "New Delhi", scheduled_departure: "2026-09-06T16:20:00+05:30", actual_departure: "2026-09-06T16:24:00+05:30", delay_departure_minutes: 4, has_arrived: true, has_departed: true, is_stopping: true },
+            { station_code: "CNB", station_name: "Kanpur Central", scheduled_arrival: "2026-09-06T21:00:00+05:30", actual_arrival: "2026-09-06T21:05:00+05:30", delay_arrival_minutes: 5, actual_departure: "2026-09-06T21:12:00+05:30", has_arrived: true, has_departed: true, is_stopping: true },
+            { station_code: "XYZ", station_name: "Pass-thru", is_stopping: false, has_arrived: true, has_departed: true },
+            { station_code: "DBRG", station_name: "Dibrugarh", scheduled_arrival: "2026-09-08T06:20:00+05:30", actual_arrival: "2026-09-08T09:00:00+05:30", delay_arrival_minutes: 160, has_arrived: true, has_departed: false, is_stopping: true },
+          ],
+        },
+      });
+    });
+    const h = await routedTrainHistory("12424", "2026-09-06");
+    expect(h?.provider).toBe("railcore");
+    expect(h?.runState).toBe("completed");
+    expect(h?.stops.map((s) => s.code)).toEqual(["NDLS", "CNB", "DBRG"]);
+    expect(h?.stops[2].arrival).toBe("09:00 (08/09)");
+    expect(h?.stops[2].delay).toBe(160);
+  });
+
+  it("RailCore bhi down → RailRadar route[] (halts, departed = done; upcoming = pending)", async () => {
+    setRailcoreFetch(async () => jsonResponse(500, { success: false }));
+    process.env.RAILRADAR_API_KEY = "rg_test";
+    setRailradarFetch(async () =>
+      jsonResponse(200, {
+        success: true,
+        data: {
+          trainNumber: "12424", trainName: "Rajdhani", startDate: "2026-09-07", status: "running",
+          route: [
+            { stationCode: "NDLS", stationName: "New Delhi", isHalt: true, status: "departed", scheduledDeparture: "2026-09-07T16:20:00+05:30", actualDeparture: "2026-09-07T16:23:00+05:30", delayDeparture: 3 },
+            { stationCode: "CNB", stationName: "Kanpur", isHalt: true, status: "departed", scheduledArrival: "2026-09-07T21:00:00+05:30", actualArrival: "2026-09-07T20:52:00+05:30", delayArrival: 0 },
+            { stationCode: "DBRG", stationName: "Dibrugarh", isHalt: true, status: "upcoming", scheduledArrival: "2026-09-09T06:20:00+05:30", actualArrival: "2026-09-09T06:42:00+05:30", delayArrival: 22 },
+          ],
+        },
+      }),
+    );
+    try {
+      const h = await routedTrainHistory("12424", "2026-09-07");
+      expect(h?.provider).toBe("railradar");
+      expect(h?.runState).toBe("running");
+      expect(h?.stops.filter((s) => s.done).map((s) => s.code)).toEqual(["NDLS", "CNB"]);
+      expect(h?.stops[2].done).toBe(false);
+      expect(h?.stops[2].arrival).toBeNull(); // upcoming — projected time ko actual mat dikhao
+    } finally {
+      setRailradarFetch(null);
+      process.env.RAILRADAR_API_KEY = "";
+    }
+  });
+
+  it("/api/history endpoint ab sirf RailKit par depend nahi — RailCore se 200", async () => {
+    setRailcoreFetch(async (input) => {
+      const url = new URL(String(input));
+      if (!url.pathname.includes("/live")) return jsonResponse(500, { success: false });
+      return jsonResponse(200, { success: true, data: { train_number: "12014", train_name: "Shatabdi", journey_date: "2026-09-08", status: "COMPLETED", status_text: "Journey completed", stations: [{ station_code: "ASR", station_name: "Amritsar", actual_departure: "2026-09-08T05:00:00+05:30", has_departed: true, is_stopping: true }, { station_code: "NDLS", station_name: "New Delhi", actual_arrival: "2026-09-08T11:10:00+05:30", delay_arrival_minutes: -4, has_arrived: true, is_stopping: true }] } });
+    });
+    const app = createApp();
+    const res = await request(app).get("/api/history?number=12014&date=2026-09-08");
+    expect(res.status).toBe(200);
+    expect(res.body.history.stops).toHaveLength(2);
+    expect(res.body.history.runState).toBe("completed");
+  });
+
+  it("sab provider down → 404 (invent nahi)", async () => {
+    setRailcoreFetch(async () => jsonResponse(500, { success: false }));
+    const app = createApp();
+    const res = await request(app).get("/api/history?number=12014&date=2026-09-08");
+    expect(res.status).toBe(404);
+  });
+});

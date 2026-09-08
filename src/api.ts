@@ -194,7 +194,7 @@ export const api = {
       body: JSON.stringify(body),
     }),
   liveTrain: (number: string, date?: string) =>
-    request<{ live: { trainNumber: string; trainName: string; status: string; delayMinutes: number | null; lastUpdatedAt?: string | null; currentStation: string | null; nextStation: string | null } }>(
+    request<{ live: { trainNumber: string; trainName: string; status: string; delayMinutes: number | null; lastUpdatedAt?: string | null; currentStation: string | null; nextStation: string | null; journeyDate?: string | null; runState?: "not_started" | "running" | "completed" | null } }>(
       `/api/live?number=${encodeURIComponent(number)}${date ? `&date=${encodeURIComponent(date)}` : ""}`,
     ),
   trainSchedule: (number: string) =>
@@ -229,7 +229,9 @@ export const api = {
         trainNumber: string;
         trainName: string;
         date: string;
-        stops: { code: string; name: string; arrival: string | null; departure: string | null; delay: number | null }[];
+        status?: string | null;
+        runState?: "not_started" | "running" | "completed" | "unknown";
+        stops: { code: string; name: string; arrival: string | null; departure: string | null; delay: number | null; done?: boolean }[];
       };
     }>(`/api/history?number=${encodeURIComponent(number)}&date=${encodeURIComponent(date)}`),
   stationBoard: (code: string, hours = 2) =>

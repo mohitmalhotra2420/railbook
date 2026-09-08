@@ -33,7 +33,7 @@ export function RailTools() {
     <Shell title="RailKit tools" back>
       <main className="page">
         <p className="lede">
-          Live status, station board, PNR, cancelled trains, history — RailKit se. Seats IRCTC snapshot nahi ho sakte.
+          Live status (aaj ya pichhle dinon ke runs), station board, PNR, cancelled trains, station-wise history — railway APIs se. Seats IRCTC snapshot nahi ho sakte.
         </p>
         <div className="inline-chips" style={{ margin: "12px 0" }}>
           {(
@@ -60,9 +60,9 @@ export function RailTools() {
               </div>
             </div>
             <div className="field">
-              <label>Date</label>
+              <label>Run start date (aaj / kal / parson / pehle ka bhi)</label>
               <div className="control">
-                <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+                <input type="date" value={date} max={todayYmd()} onChange={(e) => setDate(e.target.value)} />
               </div>
             </div>
             <button
@@ -70,9 +70,12 @@ export function RailTools() {
               disabled={busy || trainNo.length !== 5}
               onClick={() =>
                 void run(async () => {
-                  const res = await api.liveTrain(trainNo);
-                  const l = res.live;
-                  return `${l.trainNumber} ${l.trainName}\n${l.status}\nCurrent: ${l.currentStation ?? "—"}\nNext: ${l.nextStation ?? "—"}\nDelay: ${l.delayMinutes ?? "—"}${l.lastUpdatedAt ? `\nUpdated: ${l.lastUpdatedAt}` : ""}`;
+                  /* Round-16p-2: date (start date of the run) ab bheji jaati hai —
+                   * kal/parson/pehle ke runs ka live/completed status. */
+                  const res = await api.liveTrain(trainNo, date && date !== todayYmd() ? date : undefined);
+                  const l = res.live as typeof res.live & { journeyDate?: string | null; runState?: string | null };
+                  const runLine = l.journeyDate ? `Run start date: ${l.journeyDate}${l.runState === "completed" ? " (journey complete)" : l.runState === "not_started" ? " (abhi chali nahi)" : ""}\n` : "";
+                  return `${l.trainNumber} ${l.trainName}\n${runLine}${l.status}\nCurrent: ${l.currentStation ?? "—"}\nNext: ${l.runState === "completed" ? "—" : l.nextStation ?? "—"}\nDelay: ${l.delayMinutes ?? "—"}${l.lastUpdatedAt ? `\nUpdated: ${l.lastUpdatedAt}` : ""}`;
                 })
               }
             >
@@ -185,11 +188,12 @@ export function RailTools() {
               onClick={() =>
                 void run(async () => {
                   const res = await api.trainHistory(trainNo, date);
-                  const h = res.history;
-                  const stops = h.stops
-                    .slice(0, 25)
-                    .map((s) => `${s.code} ${s.name}  arr ${s.arrival ?? "—"}  dep ${s.departure ?? "—"}`);
-                  return `${h.trainNumber} ${h.trainName} · ${h.date}\n\n${stops.join("\n") || "No history record."}`;
+                  const h = res.history as typeof res.history & { runState?: string; status?: string | null; stops: { done?: boolean }[] };
+                  const stops = res.history.stops
+                    .slice(0, 30)
+                    .map((s, i) => `${s.code} ${s.name}  arr ${s.arrival ?? "—"}  dep ${s.departure ?? "—"}${s.delay != null ? `  delay ${s.delay}m` : ""}${h.stops[i]?.done === false ? "  (pending)" : ""}`);
+                  const head = h.runState === "completed" ? "journey complete" : h.runState === "running" ? "abhi bhi chal rahi" : h.status ?? "";
+                  return `${h.trainNumber} ${h.trainName} · run ${h.date}${head ? ` · ${head}` : ""}\n\n${stops.join("\n") || "No history record."}`;
                 })
               }
             >
@@ -198,7 +202,7 @@ export function RailTools() {
           </section>
         )}
 
-        {busy && <p className="lede">RailKit se laa raha hoon…</p>}
+        {busy && <p className="lede">Railway data laa raha hoon…</p>}
         {error && <div className="banner err">{error}</div>}
         {body && (
           <pre className="lede" style={{ whiteSpace: "pre-wrap", marginTop: 12 }}>

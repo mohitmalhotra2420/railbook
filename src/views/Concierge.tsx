@@ -7,7 +7,7 @@ import { api } from "../api";
 import { useBooking } from "../booking/context";
 import { validatePassengers } from "../booking/state";
 import { loadTravellers } from "../data/travellers";
-import { availabilityLabel, formatShortDate, inr, newId } from "../format";
+import { availabilityLabel, formatShortDate, inr, newId, todayYmd } from "../format";
 import { BERTH_BY_CLASS, CLASS_LABELS, isBookable, type ClassAvailability, type ClassCode, type Passenger, type Station, type TrainResult } from "../types";
 import type { AgentTrainTable } from "../ai/agent";
 
@@ -300,18 +300,33 @@ export function Concierge() {
           {
             id: newId(),
             role: "assistant",
-            text: `${res.history.trainNumber} ${res.history.trainName}\nDate: ${res.history.date} (completed run — aaj ki live nahi)\n${stops || "No history record."}\n(Provider history — gadh ke nahi.)`,
+            text: `${res.history.trainNumber} ${res.history.trainName}\nRun start date: ${res.history.date}${res.history.runState === "completed" ? " (journey complete)" : res.history.runState === "running" ? " (abhi bhi chal rahi)" : ""}\n${stops || "No history record."}\n(Provider data — gadh ke nahi.)`,
           },
         ]);
       } catch {
-        setMessages((m) => [
-          ...m,
-          {
-            id: newId(),
-            role: "assistant",
-            text: `Train ${turn.trainHistory} ka ${turn.historyDate ?? "kal"} ka completed run nahi mila. Main yesterday ka live invent nahi karunga.`,
-          },
-        ]);
+        /* Round-16p-2: station-wise history na mile to us run ka overall
+         * live/completed status (RailCore/RailRadar date= run). */
+        try {
+          const res = await api.liveTrain(turn.trainHistory, turn.historyDate);
+          const live = res.live;
+          setMessages((m) => [
+            ...m,
+            {
+              id: newId(),
+              role: "assistant",
+              text: `${live.trainNumber} ${live.trainName || ""}\nRun start date: ${live.journeyDate ?? turn.historyDate ?? "—"}${live.runState === "completed" ? " (journey complete)" : ""}\nStatus: ${live.status}${live.delayMinutes != null ? ` · delay ${live.delayMinutes} min` : ""}${live.currentStation ? ` · ${live.runState === "completed" ? "reached" : "current"}: ${live.currentStation}` : ""}${live.nextStation && live.runState !== "completed" ? ` · next: ${live.nextStation}` : ""}\n(Live railway data — gadh ke nahi.)`,
+            },
+          ]);
+        } catch {
+          setMessages((m) => [
+            ...m,
+            {
+              id: newId(),
+              role: "assistant",
+              text: `Train ${turn.trainHistory} ka ${turn.historyDate ?? "kal"} wala run kisi provider se nahi mila. Main pichhle din ka status invent nahi karunga.`,
+            },
+          ]);
+        }
       }
       setBusy(false);
     }
@@ -326,7 +341,7 @@ export function Concierge() {
           {
             id: newId(),
             role: "assistant",
-            text: `${live.trainNumber} ${live.trainName || ""}\nStatus: ${live.status}${live.delayMinutes != null ? ` · delay ${live.delayMinutes} min` : ""}${live.currentStation ? ` · current: ${live.currentStation}` : ""}${live.nextStation ? ` · next: ${live.nextStation}` : ""}\n(Live railway data — gadh ke nahi.)`,
+            text: `${live.trainNumber} ${live.trainName || ""}${live.journeyDate && live.journeyDate !== todayYmd() ? `\nRun start date: ${live.journeyDate}` : ""}\nStatus: ${live.status}${live.delayMinutes != null ? ` · delay ${live.delayMinutes} min` : ""}${live.currentStation ? ` · current: ${live.currentStation}` : ""}${live.nextStation && live.runState !== "completed" ? ` · next: ${live.nextStation}` : ""}\n(Live railway data — gadh ke nahi.)`,
           },
         ]);
       } catch {

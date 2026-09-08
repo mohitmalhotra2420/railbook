@@ -36,7 +36,7 @@ import type { ClassCode } from "../providers/types.js";
 import { executeTool, livePositionLabel, liveRunDateLabel } from "./tools.js";
 import {
   GENERAL_FACT_RE, isQuestionPhraseNotTrainName, segmentOfStops } from "./context.js";
-import { routedTrainNameSearch } from "../railway/router.js";
+import { routedTrainNameSearch, routedTrainHistory } from "../railway/router.js";
 import { webSearch } from "./websearch.js";
 import { findTopicAnswer, HINGLISH_TOPIC_WORDS, significantWords } from "./topicpage.js";
 import { railKbAnswer } from "./railkb.js";
@@ -1082,6 +1082,20 @@ export async function executeApprovedTool(
         );
       }
       case "GET_TRAIN_HISTORY": {
+        /* Round-16p-2: station-wise actuals — RailKit → RailCore → RailRadar. */
+        const routedHist = await routedTrainHistory(a.train_number as string, a.date as string);
+        if (routedHist && routedHist.stops.length) {
+          const done = routedHist.stops.filter((s) => s.done);
+          const last = done[done.length - 1];
+          const worst = done.reduce<{ code: string; delay: number } | null>((acc, s) => (s.delay != null && (!acc || s.delay > acc.delay) ? { code: s.code, delay: s.delay } : acc), null);
+          const runLabel = liveRunDateLabel(routedHist.date);
+          const lines = routedHist.stops.slice(0, 30).map((s) => `${s.code} ${s.name}: arr ${s.arrival ?? "—"}, dep ${s.departure ?? "—"}${s.delay != null ? `, delay ${s.delay}m` : ""}${s.done ? "" : " (pending)"}`);
+          return okResult(
+            routedHist.provider,
+            `${routedHist.trainNumber} ${routedHist.trainName}${runLabel ? ` [${runLabel}]` : ""} — ${routedHist.runState === "completed" ? "journey complete" : routedHist.runState === "running" ? "abhi bhi chal rahi" : routedHist.status ?? "run"}; ${done.length}/${routedHist.stops.length} halts ho chuke${last ? `, last ${last.code} ${last.arrival ?? last.departure ?? ""}${last.delay != null ? ` (delay ${last.delay}m)` : ""}` : ""}${worst ? `, max delay ${worst.delay}m @${worst.code}` : ""}. Station-wise: ${lines.join(" | ")}${webSourceLabel(routedHist.provider)}`,
+            { trainNumber: routedHist.trainNumber, trainName: routedHist.trainName, date: routedHist.date, runState: routedHist.runState, status: routedHist.status, stops: routedHist.stops.slice(0, 40) },
+          );
+        }
         const history = await trainHistory(a.train_number as string, a.date as string);
         if (!history) {
           /* Round-16p: RailKit history na ho to usi START-date ka run live-chain

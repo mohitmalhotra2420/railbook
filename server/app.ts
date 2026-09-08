@@ -21,6 +21,7 @@ import {
   routedPnr,
   routedSchedule,
   routedStationSearch,
+  routedTrainHistory,
 } from "./railway/router.js";
 import { BERTH_OPTIONS, isBookable, type ClassCode } from "./providers/types.js";
 import { recommend } from "./recommend.js";
@@ -397,7 +398,8 @@ export function createApp() {
         res.status(400).json({ error: "number and date (YYYY-MM-DD) are required." });
         return;
       }
-      const history = await trainHistory(number, date);
+      /* Round-16p-2: RailKit → RailCore stations[] → RailRadar route[] */
+      const history = await routedTrainHistory(number, date);
       if (!history) {
         res.status(404).json({ error: "Train history not available." });
         return;
@@ -540,7 +542,7 @@ export function createApp() {
         res.status(400).json({ error: "date (YYYY-MM-DD) is required." });
         return;
       }
-      const history = await trainHistory(String(req.params.number), date);
+      const history = await routedTrainHistory(String(req.params.number), date);
       if (!history) {
         res.status(404).json({ error: "Train history not available." });
         return;
