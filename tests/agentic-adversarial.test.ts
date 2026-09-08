@@ -662,7 +662,9 @@ describe("TEST 11: scoring is deterministic and reproducible", () => {
     expect(((earliestDep.data as any).direct.best as { departure: string }).departure).toBe("18:25");
 
     const earliestArr = await executeApprovedTool("JOURNEY_ANALYZE", { origin: "ASR", destination: "NDLS", date: "2026-09-05", preference: "earliest_arrival" });
-    expect(((earliestArr.data as any).direct.best as { number: string }).number).toBe("12460"); // 04:15 arrival per provider data
+    // Round-16l: 12460 ki 04:15 arrival AGLE din hai (+1d, dep 21:15 + 7h);
+    // 12014 usi din 23:00 pahunchti hai → absolute earliest arrival = 12014.
+    expect(((earliestArr.data as any).direct.best as { number: string }).number).toBe("12014");
 
     const bestValue = await executeApprovedTool("JOURNEY_ANALYZE", { origin: "ASR", destination: "NDLS", date: "2026-09-05", preference: "best_value" });
     const bvData = bestValue.data as { direct: { best: { cheapest: { fare: number } | null } } };

@@ -575,7 +575,7 @@ function stopIndex(stops: { code: string }[], code: string): number {
   return stops.findIndex((s) => s.code.toUpperCase() === want);
 }
 
-type StopRow = { code: string; name: string; arrival?: string | null; departure?: string | null };
+type StopRow = { code: string; name: string; arrival?: string | null; departure?: string | null; day?: number };
 
 const scheduleCache = new Map<string, StopRow[] | null>();
 
@@ -591,6 +591,7 @@ async function loadStops(trainNumber: string): Promise<StopRow[] | null> {
     name: s.name,
     arrival: s.arrival,
     departure: s.departure,
+    day: s.day,
   }));
   if (!stops.length) {
     const kit = await railkitSchedule(trainNumber);
@@ -638,15 +639,38 @@ export async function filterTrainsServingStops(
       const start = hhmmMinutes(dep);
       const end = hhmmMinutes(arr);
       let durationMinutes = train.durationMinutes;
-      if (start != null && end != null) {
-        durationMinutes = end >= start ? end - start : end + 1440 - start;
+      const segmentUnchanged =
+        fromStop.code.toUpperCase() === train.from.code.toUpperCase() &&
+        toStop.code.toUpperCase() === train.to.code.toUpperCase() &&
+        train.durationMinutes > 0;
+      if (start != null && end != null && !segmentUnchanged) {
+        /* Round-16l (LDH→KOAA "3h 23m" bug): clock-diff mod 24h se multi-day
+         * trains 24h ke multiples kho deti thin. Pehle stop ke `day` fields,
+         * warna provider ki total duration ke sabse paas waala 24h multiple. */
+        const base = end >= start ? end - start : end + 1440 - start;
+        if (typeof fromStop.day === "number" && typeof toStop.day === "number" && toStop.day >= fromStop.day) {
+          const byDay = (toStop.day - fromStop.day) * 1440 + (end - start);
+          durationMinutes = byDay > 0 ? byDay : base;
+        } else if (train.durationMinutes > 0) {
+          let best = base;
+          for (let k = 1; k <= 4; k++) {
+            const cand = base + k * 1440;
+            if (Math.abs(cand - train.durationMinutes) < Math.abs(best - train.durationMinutes)) best = cand;
+          }
+          durationMinutes = best;
+        } else {
+          durationMinutes = base;
+        }
       }
+      const arrivalDayOffset =
+        start != null && durationMinutes > 0 ? Math.floor((start + durationMinutes) / 1440) : train.arrivalDayOffset;
       kept.push({
         ...train,
         from: { code: fromStop.code, name: fromStop.name, city: fromStop.name },
         to: { code: toStop.code, name: toStop.name, city: toStop.name },
         departure: dep,
         arrival: arr,
+        arrivalDayOffset,
         durationMinutes,
         durationLabel: durationLabel(durationMinutes || 0),
       });

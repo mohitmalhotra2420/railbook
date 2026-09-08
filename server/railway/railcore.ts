@@ -61,6 +61,11 @@ export function railcoreBlockState(): { blocked: boolean; until: number; reason:
   return { blocked, until: blocked ? blockedUntil : 0, reason: blocked ? blockedReason : "" };
 }
 
+function hhmmToMinutes(raw: string): number | null {
+  const m = raw.match(/(\d{1,2}):(\d{2})/);
+  return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+}
+
 function noteRateLimit(res: Response): void {
   const now = Date.now();
   if (res.status === 402) {
@@ -485,6 +490,10 @@ export class RailCoreProvider implements RailwayProvider {
       const number = String(o.train_number ?? "").trim();
       if (!number) continue;
       const dur = typeof o.duration_minutes === "number" ? o.duration_minutes : 0;
+      /* Round-16l: multi-day trains (LDH→KOAA 27h) — arrival day offset
+       * duration se nikalo, 0 hardcode nahi (UI "+1d" aur sorting ke liye). */
+      const depMin = hhmmToMinutes(String(o.departure_time ?? ""));
+      const dayOffset = depMin != null && dur > 0 ? Math.floor((depMin + dur) / 1440) : 0;
       const classCodes = Array.isArray(o.classes)
         ? o.classes.map((c) => String(c).toUpperCase()).filter((c): c is ClassCode => (KNOWN_CLASS as string[]).includes(c))
         : [];
@@ -497,7 +506,7 @@ export class RailCoreProvider implements RailwayProvider {
         date: query.date,
         departure: String(o.departure_time ?? "--:--"),
         arrival: String(o.arrival_time ?? "--:--"),
-        arrivalDayOffset: 0,
+        arrivalDayOffset: dayOffset,
         durationMinutes: dur,
         durationLabel: durationLabel(dur),
         runsOn: runDays(o.running_days),
