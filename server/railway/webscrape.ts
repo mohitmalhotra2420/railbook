@@ -831,3 +831,100 @@ export async function scrapeStationSearchWeb(query: string, limit = 6): Promise<
     sourceUrl: "https://erail.in/",
   }));
 }
+
+/* ───────────────────────── Round-16n: trains-between-stations (web) ─────────────────────────
+ * User (2026-09-08): "RailCore daily limit hit → fallback par bhi trains nahi
+ * dikh rahi, web scraping lagayi thi na?" — train SEARCH ka web fallback tha
+ * hi nahi (sirf schedule/fare/availability/live ka tha). erail.in ka public
+ * getTrains endpoint '~'-delimited rows deta hai: number, name, src/dst,
+ * boarding FROM/TO code (exact — DLI vs NDLS alag), dep, arr, duration
+ * (HH.MM, 24h+ bhi), 7-char running-days bitmask (Mon..Sun), aur class list. */
+export type ScrapedTrainRow = {
+  number: string;
+  name: string;
+  fromCode: string;
+  fromName: string;
+  toCode: string;
+  toName: string;
+  departure: string; // HH:MM
+  arrival: string; // HH:MM
+  durationMinutes: number;
+  runsOn: number[]; // JS getDay(): 0=Sun..6=Sat
+  classes: string[];
+  type: string;
+};
+
+export type ScrapedTrainSearch = {
+  trains: ScrapedTrainRow[];
+  provider: "web_erail";
+  sourceUrl: string;
+};
+
+function erailTime(raw: string): string | null {
+  const m = String(raw ?? "").match(/^(\d{1,2})\.(\d{2})$/);
+  if (!m) return null;
+  return `${m[1].padStart(2, "0")}:${m[2]}`;
+}
+
+function erailDuration(raw: string): number | null {
+  const m = String(raw ?? "").match(/^(\d{1,3})\.(\d{2})$/);
+  if (!m) return null;
+  return Number(m[1]) * 60 + Number(m[2]);
+}
+
+/** erail bitmask: 7 chars Mon..Sun → JS days (0=Sun). */
+function erailDays(mask: string): number[] {
+  const m = String(mask ?? "").trim();
+  if (!/^[01]{7}$/.test(m)) return [0, 1, 2, 3, 4, 5, 6];
+  const out: number[] = [];
+  for (let i = 0; i < 7; i++) if (m[i] === "1") out.push((i + 1) % 7);
+  return out.length ? out : [0, 1, 2, 3, 4, 5, 6];
+}
+
+export function parseErailTrainList(text: string): ScrapedTrainRow[] {
+  const rows = String(text ?? "")
+    .split("^")
+    .map((r) => r.trim())
+    .filter(Boolean);
+  const out: ScrapedTrainRow[] = [];
+  for (const row of rows) {
+    const f = row.split("~");
+    if (f.length < 14) continue;
+    const number = f[0].trim();
+    if (!/^\d{5}$/.test(number)) continue;
+    const dep = erailTime(f[10]);
+    const arr = erailTime(f[11]);
+    const dur = erailDuration(f[12]);
+    if (!dep || !arr || dur == null) continue;
+    const classField = f.find((x) => /^(?:[A-Z0-9]{2}:[^|]*\|)+$/.test(x)) ?? "";
+    const classes = [...classField.matchAll(/(?:^|\|)([A-Z0-9]{2}):/g)].map((m) => m[1]);
+    const type = f.find((x) => /^(SUPERFAST|MAIL_EXPRESS|SHATABDI|RAJDHANI|COMPOSITE|RAIL_MOTOR|DURONTO|GARIB_RATH|VANDE_BHARAT|PASSENGER|MEMU|DEMU)$/.test(x)) ?? "Express";
+    out.push({
+      number,
+      name: f[1].trim(),
+      fromCode: f[7].trim().toUpperCase(),
+      fromName: f[6].trim(),
+      toCode: f[9].trim().toUpperCase(),
+      toName: f[8].trim(),
+      departure: dep,
+      arrival: arr,
+      durationMinutes: dur,
+      runsOn: erailDays(f[13]),
+      classes,
+      type,
+    });
+  }
+  return out;
+}
+
+export async function scrapeTrainsBetweenWeb(from: string, to: string): Promise<ScrapedTrainSearch | null> {
+  const f = String(from ?? "").trim().toUpperCase();
+  const t = String(to ?? "").trim().toUpperCase();
+  if (!/^[A-Z]{2,5}$/.test(f) || !/^[A-Z]{2,5}$/.test(t)) return null;
+  const url = `https://erail.in/rail/getTrains.aspx?Station_From=${f}&Station_To=${t}&DataSource=0&Language=0&Cache=true`;
+  const body = await fetchHtml(url);
+  if (!body) return null;
+  const trains = parseErailTrainList(body);
+  if (!trains.length) return null;
+  return { trains, provider: "web_erail", sourceUrl: url };
+}

@@ -7,6 +7,8 @@ import {
   scrapeStationLookupWeb,
   scrapeSeatAvailabilityWeb,
   scrapeStationSearchWeb,
+  scrapeTrainsBetweenWeb,
+  type ScrapedTrainRow,
 } from "./webscrape.js";
 import { env } from "../env.js";
 import { searchStations as searchLocalStations } from "../data/stations.js";
@@ -45,7 +47,7 @@ import {
   type PnrLookup,
   type TrainSchedule,
 } from "./railkit.js";
-import { durationLabel } from "../util.js";
+import { durationLabel, weekday } from "../util.js";
 import { MULTI_STATION_CITIES, isClusterStation, pickStations } from "./station-resolve.js";
 import { STATIONS as LOCAL_STATIONS } from "../data/stations.js";
 
@@ -82,6 +84,39 @@ function enrichClusterHits(query: string, hits: Station[]): Station[] {
   const extra = LOCAL_STATIONS.filter((s) => group.includes(s.code.toUpperCase()) && !have.has(s.code.toUpperCase()));
   return extra.length ? [...hits, ...extra] : hits;
 }
+
+/* Round-16n: erail rows → TrainResult (provider-neutral shape). */
+function webTrainsToResults(rows: ScrapedTrainRow[], query: SearchQuery): TrainResult[] {
+  const want = { from: query.from.toUpperCase(), to: query.to.toUpperCase() };
+  const out: TrainResult[] = [];
+  for (const r of rows) {
+    /* erail cluster-search mein DLI maangne par NDLS/NZM/DEE waali rows bhi
+     * aati hain — user ne EXACT station chuna hai, wahi rakho. */
+    if (r.fromCode !== want.from || r.toCode !== want.to) continue;
+    const depMin = hhmmMinutes(r.departure) ?? 0;
+    const dayOffset = Math.floor((depMin + r.durationMinutes) / 1440);
+    const classes = r.classes.filter((c): c is ClassCode => (KNOWN_CLASSES as string[]).includes(c));
+    out.push({
+      number: r.number,
+      name: r.name,
+      type: r.type,
+      from: { code: r.fromCode, name: r.fromName, city: r.fromName },
+      to: { code: r.toCode, name: r.toName, city: r.toName },
+      date: query.date,
+      departure: r.departure,
+      arrival: r.arrival,
+      arrivalDayOffset: dayOffset,
+      durationMinutes: r.durationMinutes,
+      durationLabel: durationLabel(r.durationMinutes),
+      runsOn: r.runsOn,
+      classes: classes.map((code) => ({ code, label: CLASS_LABELS[code], status: "UNKNOWN" as const, fare: 0 })),
+      haltVerified: true,
+    });
+  }
+  out.sort((a, b) => a.departure.localeCompare(b.departure));
+  return out;
+}
+const KNOWN_CLASSES: ClassCode[] = ["1A", "2A", "3A", "3E", "SL", "CC", "EC", "2S", "EA"];
 
 export type ServedProvider =
   | "railcore"
@@ -788,19 +823,30 @@ export class FallbackRailwayProvider implements RailwayProvider {
       logServed("railcore", "trainSearch", started, true);
       return filterTrainsServingStops(primary.trains, query.from, query.to);
     }
-    if (!env.railkitApiKey) {
-      logServed("none", "trainSearch", started, false, primary.failureReason ?? "railcore_failed");
-      return [];
+    const reason = primary.failureReason ?? "railcore_failed";
+    if (env.railkitApiKey) {
+      const fb = await this.kit.searchTrainsDetailed(query);
+      if (fb.ok) {
+        logServed("railkit_fallback", "trainSearch", started, true, reason);
+        return filterTrainsServingStops(fb.trains, query.from, query.to);
+      }
     }
-    const fb = await this.kit.searchTrainsDetailed(query);
-    if (!fb.ok) {
-      // Dono providers fail — "0 trains" bolna jhooth hai. "none" label hi
-      // upstream (SEARCH_TRAINS/JOURNEY_ANALYZE) ko honest unavailable deta hai.
-      logServed("none", "trainSearch", started, false, `${primary.failureReason ?? "railcore_failed"}+railkit_failed`);
-      return [];
+    /* Round-16n (user: "daily limit hit → fallback par bhi trains nahi, web
+     * scraping lagayi thi na?"): train SEARCH ka web fallback ab hai — erail.in
+     * trains-between list (IRCTC timetable data). Date ke hisaab se running-day
+     * filter yahin; exact boarding codes (DLI≠NDLS) source se aate hain to
+     * timetable-verify ki zaroorat nahi (quota bhi nahi jalta). */
+    const web = await scrapeTrainsBetweenWeb(query.from, query.to);
+    if (web && web.trains.length) {
+      const wd = weekday(query.date);
+      const rows = webTrainsToResults(web.trains, query).filter((t) => t.runsOn.includes(wd));
+      logServed("web_erail", "trainSearch", started, true, `${reason}+railkit_failed`);
+      return rows;
     }
-    logServed("railkit_fallback", "trainSearch", started, true, primary.failureReason ?? "railcore_failed");
-    return filterTrainsServingStops(fb.trains, query.from, query.to);
+    // Sab fail — "0 trains" bolna jhooth hai. "none" label hi upstream
+    // (SEARCH_TRAINS/JOURNEY_ANALYZE) ko honest unavailable deta hai.
+    logServed("none", "trainSearch", started, false, `${reason}+railkit_failed+web_failed`);
+    return [];
   }
 
   async getAvailability(

@@ -1132,7 +1132,7 @@ export async function executeApprovedTool(
         return okResult(
           search.provider,
           trains.length
-            ? `${fromRes.code}→${toRes.code} (${a.date}): ${trains.length} trains.${fastestLine}${unverifiedNote}`
+            ? `${fromRes.code}→${toRes.code} (${a.date}): ${trains.length} trains.${fastestLine}${unverifiedNote}${webSourceLabel(search.provider)}`
             : `${fromRes.code}→${toRes.code} (${a.date}): koi train nahi mili.`,
           {
             from: fromRes.code,

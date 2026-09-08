@@ -384,6 +384,9 @@ describe("TEST 5: both providers fail -> tool says unavailable, never invents", 
 
   it("model relays unavailability instead of inventing trains", async () => {
     railcoreDown();
+    // Round-16n: train search ka web fallback (erail) bhi down — warna real
+    // network se trains aa jaati hain aur "unavailable" contract test nahi hota.
+    setScrapeFetch(async () => new Response("", { status: 500 }));
     setAgenticNvidiaFetch(async (_input, init) => {
       const body = JSON.parse(String(init?.body));
       const toolMsgs = body.messages.filter((m: { role: string }) => m.role === "tool").length;
