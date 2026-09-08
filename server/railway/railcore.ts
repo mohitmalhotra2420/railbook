@@ -87,9 +87,14 @@ function noteRateLimit(res: Response): void {
   blockedReason = "railcore_rate_limited";
 }
 
+let budgetEnabled = true;
+const recentCalls: number[] = [];
 export function setRailcoreFetch(next: typeof fetch | null): void {
   fetchImpl = next ?? globalThis.fetch.bind(globalThis);
   resetRailcoreBlock();
+  // Tests mock fetch inject karte hain — minute budget real API ke liye hai.
+  budgetEnabled = next == null;
+  recentCalls.length = 0;
 }
 
 export function resetRailcoreBookings(): void {
@@ -117,7 +122,26 @@ function unwrap(json: unknown): unknown {
   return "data" in o ? o.data : json;
 }
 
-export async function railcoreRequest(path: string, query: Record<string, string | number | undefined> = {}): Promise<{
+/* Round-16m: client-side minute budget. RailCore = 20 req/min burst. Pehle
+ * har search 27 trains × /schedule daagti thi → server 429 → 23s ka block →
+ * agli search ("1 day later") turant fail → UI "No trains". Ab low-priority
+ * calls (timetable verify) budget ke ~70% par ruk jaati hain, taaki route
+ * search/availability ke liye jagah bache aur server-side block kabhi na lage. */
+const MINUTE_BUDGET = 20;
+const LOW_PRIORITY_CEILING = 13;
+function pruneRecent(now: number): void {
+  while (recentCalls.length && now - recentCalls[0] > 60_000) recentCalls.shift();
+}
+export function railcoreMinuteLoad(): number {
+  pruneRecent(Date.now());
+  return recentCalls.length;
+}
+
+export async function railcoreRequest(
+  path: string,
+  query: Record<string, string | number | undefined> = {},
+  opts: { lowPriority?: boolean } = {},
+): Promise<{
   ok: boolean;
   status: number;
   json: unknown;
@@ -130,6 +154,16 @@ export async function railcoreRequest(path: string, query: Record<string, string
   }
   if (Date.now() < blockedUntil) {
     return { ok: false, status: 429, json: { error: { message: blockedReason || "railcore_blocked" } }, latencyMs: 0 };
+  }
+  pruneRecent(started);
+  if (budgetEnabled) {
+    if (opts.lowPriority && recentCalls.length >= LOW_PRIORITY_CEILING) {
+      return { ok: false, status: 0, json: { error: { message: "railcore_budget_reserved" } }, latencyMs: 0 };
+    }
+    if (recentCalls.length >= MINUTE_BUDGET) {
+      return { ok: false, status: 429, json: { error: { message: "railcore_rate_limited" } }, latencyMs: 0 };
+    }
+    recentCalls.push(started);
   }
   const url = new URL(path.startsWith("http") ? path : `${RAILCORE_BASE_URL}${path}`);
   for (const [k, v] of Object.entries(query)) {
@@ -378,7 +412,7 @@ export async function trainInfo(number: string): Promise<{ trainNumber: string; 
 
 export async function trainSchedule(number: string): Promise<RailcoreSchedule | null> {
   const started = Date.now();
-  const res = await railcoreRequest(`/trains/${encodeURIComponent(number)}/schedule`);
+  const res = await railcoreRequest(`/trains/${encodeURIComponent(number)}/schedule`, {}, { lowPriority: true });
   logCall("timetable", started, res.ok, res.ok ? null : failReason(res.json));
   if (!res.ok) return null;
   const d = asObj(unwrap(res.json));

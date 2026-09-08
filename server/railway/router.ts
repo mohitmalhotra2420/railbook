@@ -22,6 +22,7 @@ import {
 } from "../providers/types.js";
 import {
   RailCoreProvider,
+  railcoreBlockState,
   isUsableLive,
   coachPosition as railcoreCoachPosition,
   liveTrainStatus as railcoreLive,
@@ -621,6 +622,16 @@ async function loadStops(trainNumber: string): Promise<StopsLookup> {
     day: s.day,
   }));
   if (!stops.length) {
+    /* Round-16m: RailCore budget/limit → verified sites se timetable
+     * (ixigo/confirmtkt/trainspnrstatus) — quota-free. Sirf halt-verify ke liye. */
+    try {
+      const web = await scrapeTrainScheduleWeb(trainNumber);
+      stops = (web?.stops ?? []).map((s) => ({ code: s.code, name: s.name, arrival: s.arrival, departure: s.departure }));
+    } catch {
+      stops = [];
+    }
+  }
+  if (!stops.length && env.railkitApiKey) {
     const kit = await railkitSchedule(trainNumber);
     stops = (kit?.stops ?? []).map((s) => ({
       code: s.code,
@@ -628,16 +639,6 @@ async function loadStops(trainNumber: string): Promise<StopsLookup> {
       arrival: s.arrival && s.arrival !== "--" ? s.arrival : null,
       departure: s.departure && s.departure !== "--" ? s.departure : null,
     }));
-  }
-  if (!stops.length) {
-    /* Round-16m: RailCore 20/min burst + RailKit down → verified sites se
-     * timetable (ixigo/confirmtkt/trainspnrstatus). Sirf halt-verify ke liye. */
-    try {
-      const web = await scrapeTrainScheduleWeb(trainNumber);
-      stops = (web?.stops ?? []).map((s) => ({ code: s.code, name: s.name, arrival: s.arrival, departure: s.departure }));
-    } catch {
-      stops = [];
-    }
   }
   if (!stops.length) return { stops: null, reason: "unavailable" };
   scheduleCache.set(trainNumber, { stops, at: Date.now() });
@@ -772,7 +773,17 @@ export class FallbackRailwayProvider implements RailwayProvider {
 
   async searchTrains(query: SearchQuery): Promise<TrainResult[]> {
     const started = Date.now();
-    const primary = await this.core.trySearchTrains(query);
+    let primary = await this.core.trySearchTrains(query);
+    /* Round-16m: short burst block (≤25s) par route search FAIL karke "No
+     * trains" dikhane se behtar — block khatam hone tak ruk ke ek retry. */
+    if (!primary.ok) {
+      const blk = railcoreBlockState();
+      const waitMs = blk.blocked ? blk.until - Date.now() : 0;
+      if (blk.blocked && blk.reason === "railcore_rate_limited" && waitMs > 0 && waitMs <= 25_000) {
+        await new Promise((r) => setTimeout(r, waitMs + 250));
+        primary = await this.core.trySearchTrains(query);
+      }
+    }
     if (primary.ok) {
       logServed("railcore", "trainSearch", started, true);
       return filterTrainsServingStops(primary.trains, query.from, query.to);
