@@ -493,3 +493,15 @@ describe("Round-16k: station-first flow for ambiguous city (user 2026-09-08)", (
     expect(ctx.dateProvided).toBe(false);
   });
 });
+
+describe("Round-16n: 'old delhi' / 'purani dilli' = DLI (Delhi Junction), not NDLS", () => {
+  it.each([
+    ["ludhiana se old delhi jaana hai", "DLI"],
+    ["ludhiana se purani dilli", "DLI"],
+    ["ludhiana se new delhi", "NDLS"],
+  ])("%s → %s", (text, code) => {
+    const nlu = understand(text, { now: NOW });
+    expect(nlu.from?.code).toBe("LDH");
+    expect(nlu.to?.code).toBe(code);
+  });
+});
