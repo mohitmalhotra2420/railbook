@@ -188,6 +188,10 @@ only provider-verified alternatives.
 ### Round-18j — 0 direct trains → same-city stations probed automatically (§8)
 - Browser E2E "Ludhiana se Mumbai sleeper mein seat hai kya 20 September ko": "Mumbai" resolved to BCT → 0 direct → the agent asked the user to try another station. `SEARCH_TRAINS` now probes cluster siblings (`findAlternateStationOptions`) and returns "YOU MAY ALSO CONSIDER: LDH→BDTS (12926, 12904); LDH→CSMT (11058)" with an explicit instruction to confirm with the user (origin/destination are never switched silently). `AlternateStationOption.allTrainNumbers` added; ranking failures no longer drop a real option.
 
+### Round-18k — build tag + no-cache index.html (stale-UI diagnosis)
+- The user kept reporting behaviour that no longer exists on the deployed build. Now the header shows a small build tag (short commit, e.g. `9dd6e9c`) and `GET /api/version` returns `{commit, startedAt, primaryModel, fallbackModel}`. If the header tag ≠ `/api/version.commit`, the browser is serving a cached bundle → hard refresh.
+- `index.html` is served with `Cache-Control: no-store`; hashed `/assets/*` are `immutable` (1y). Previously everything was `max-age=0`, which some mobile browsers/CDNs still revalidated lazily.
+
 ## Extra fallback APIs (Round-16o, optional)
 
 Data chain per method: **RailCore → RailKit → RailRadar → Indian Rail API → verified-site web-scrape → none**. The two new providers are *additional* and fully optional — with no key set they are skipped and nothing else changes.

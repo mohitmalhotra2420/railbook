@@ -1358,9 +1358,10 @@ export function Concierge() {
   return (
     <div className="concierge">
       <header className="topbar">
-        <div className="brand">
+        <div className="brand" title={`Build ${__BUILD_TAG__}`}>
           <img src="/logo.png" alt="" />
           RailBook
+          <span className="build-tag" aria-label="build">{__BUILD_TAG__.split(" ")[0]}</span>
         </div>
         <div className="spacer" />
         {booking.meta?.provider.mock && (

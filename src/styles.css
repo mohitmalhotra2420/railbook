@@ -1674,3 +1674,17 @@ table.traintable {
 .jo-cta-wide { margin: 8px 12px 12px; width: calc(100% - 24px); }
 .tb-alt-sheet { max-height: 86vh; overflow-y: auto; }
 .tb-alt-sheet .alt-wrap { margin: 8px 0 0; }
+
+/* Round-18k: tiny build tag next to the brand — tells stale cache from latest deploy. */
+.topbar .brand .build-tag {
+  margin-left: 8px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: rgba(255, 255, 255, 0.55);
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  padding: 2px 7px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  vertical-align: middle;
+}

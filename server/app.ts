@@ -51,6 +51,8 @@ const passengerSchema = z.object({
   berthPreference: z.string().min(1, "Select a berth preference"),
 });
 
+const SERVER_STARTED_AT = new Date().toISOString();
+
 export function createApp() {
   const app = express();
   app.disable("x-powered-by");
@@ -104,6 +106,19 @@ export function createApp() {
     } finally {
       clearTimeout(timer);
     }
+  });
+
+  /* Round-18k: which build is live (compare with the header tag in the UI). */
+  app.get("/api/version", (_req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    res.json({
+      commit: (process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT || "").slice(0, 7) || null,
+      service: process.env.RENDER_SERVICE_NAME ?? null,
+      startedAt: SERVER_STARTED_AT,
+      primaryModel: process.env.NVIDIA_MODEL ?? null,
+      fallbackModel: process.env.NVIDIA_FALLBACK_MODEL ?? null,
+      node: process.version,
+    });
   });
 
   app.get("/api/health", (_req, res) => {
@@ -960,8 +975,19 @@ export function createApp() {
   if (env.nodeEnv === "production" && !process.env.VERCEL) {
     const here = path.dirname(fileURLToPath(import.meta.url));
     const dist = path.resolve(here, "../dist");
-    app.use(express.static(dist));
+    /* Round-18k: hashed assets are immutable; index.html must NEVER be served
+     * from a stale cache (user kept seeing an old UI after deploys). */
+    app.use(
+      express.static(dist, {
+        index: false,
+        setHeaders: (res, filePath) => {
+          if (/[\\/]assets[\\/]/.test(filePath)) res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+          else res.setHeader("Cache-Control", "no-cache");
+        },
+      }),
+    );
     app.get("*", (_req, res) => {
+      res.setHeader("Cache-Control", "no-store");
       res.sendFile(path.join(dist, "index.html"));
     });
   }
