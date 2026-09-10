@@ -89,3 +89,29 @@ describe("Round-18m-5 connecting options only when BOTH legs have seats", () => 
     expect(out.map((c) => c.arrivalTrain)).toEqual(["D", "B"]);
   });
 });
+
+describe("Round-18m-6 best plan = seat-proven first; board-from-earlier beats WL", () => {
+  it("rankRouteOptions: connecting option with both legs AVL outranks a WL direct and an unknown direct", async () => {
+    const { rankRouteOptions } = await import("../server/journey/engine.js");
+    const st = (code: string) => ({ code, name: code, city: code });
+    const train = (n: string, dur: number) => ({ number: n, name: n, type: "EXP", from: st("LDH"), to: st("LKO"), departure: "10:00", arrival: "20:00", arrivalDayOffset: 0, durationMinutes: dur, runsOn: [], classes: [] }) as never;
+    const avl = (code: string, seats: number) => ({ classCode: code, status: "AVAILABLE", seats, rac: null, waitlist: null, fare: 1000, source: "railradar" });
+    const wl = { classCode: "SL", status: "WAITLIST", seats: null, rac: null, waitlist: 27, fare: 400, source: "railradar" };
+    const availability = new Map<string, unknown>([["13152", null], ["13308", wl]]);
+    const conn = { station: "NDLS", stationName: "New Delhi", arrivalTrain: "12426", departureTrain: "20504", arrivalAt: "05:55", departsAt: "11:25", arrivalDayOffset: 0, layoverMinutes: 330, valid: true, reason: null, totalDurationMinutes: 1015, source: "railradar",
+      legs: [{ trainNumber: "12426", trainName: "JAMMU RAJDHANI", from: "LDH", to: "NDLS", departure: "01:45", arrival: "05:55", arrivalDayOffset: 0, durationMinutes: 250, availability: avl("3A", 5) }, { trainNumber: "20504", trainName: "DBRG RAJDHANI", from: "NDLS", to: "LKO", departure: "11:25", arrival: "18:40", arrivalDayOffset: 0, durationMinutes: 435, availability: avl("3A", 19) }] };
+    const ranked = rankRouteOptions({ origin: "LDH", destination: "LKO", trains: [train("13152", 905), train("13308", 880)], availability: availability as never, connections: [conn as never], source: "railradar", travelClass: null });
+    expect(ranked[0].trainNumbers).toEqual(["12426", "20504"]);
+    expect(ranked[0].availability?.status).toBe("AVAILABLE");
+    expect(ranked[0].availability?.seats).toBe(5); // weakest leg
+    // unknown direct must NOT outrank a WL direct
+    expect(ranked.map((o) => o.trainNumbers[0]).slice(1)).toEqual(["13308", "13152"]);
+  });
+  it("journeySummary leads with book-from-earlier when best is WL", async () => {
+    const { journeySummary } = await import("../server/journey/engine.js");
+    const best = { rank: 1, category: "best_overall", trainNumbers: ["13308"], trainNames: ["GANGASATLUJ EXP"], durationLabel: "14h 40m", legs: [], departure: "19:55", arrival: "10:35", arrivalDayOffset: 1, durationMinutes: 880, changes: 0, availability: { classCode: "SL", status: "WAITLIST", seats: null, rac: null, waitlist: 27, fare: 415, source: "railradar" }, score: 1, reasons: [], badges: [], reliability: null } as never;
+    const bfe = { trainNumber: "13308", trainName: "GANGASATLUJ EXP", bookFrom: "PHR", bookFromName: "Phillaur Jn", bookFromDeparture: "19:00", boardAt: "LDH", boardAtName: "Ludhiana Jn", boardAtDeparture: "19:55", destination: "LKO", destinationName: "Lucknow", arrival: "10:35", arrivalDayOffset: 1, availability: { classCode: "SL", status: "RAC", seats: null, rac: 31, waitlist: null, fare: 415, source: "railradar" }, directStatus: "WAITLIST", stopsBefore: 1, source: "railradar" };
+    const s = journeySummary({ query: { from: "LDH", to: "LKO", date: "2026-09-15", travelClass: null, preference: "fastest" }, best, routeOptions: [best], connections: [], alternativeDates: [], directUnavailable: true, recovery: { reason: "WL", differentTrain: [], partialRoute: null, connecting: [], alternativeDates: [], alternateStations: [], boardFromEarlier: [bfe] }, provenance: { retrievedAt: new Date().toISOString(), freshness: "fresh", sources: [] }, sources: [], notes: [], conflicts: [] } as never);
+    expect(s).toContain("Best plan: 13308 GANGASATLUJ EXP — ticket Phillaur Jn (PHR 19:00) se book karo, board Ludhiana Jn (LDH 19:55) par hi — SL RAC 31, ₹415. (LDH→LKO par SL WL 27.)");
+  });
+});

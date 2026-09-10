@@ -26,7 +26,7 @@ describe("Round-18l journeySummary", () => {
       legs: [{ trainNumber: "12030", trainName: "SWARNA SHATABDI", from: "ASR", to: "NZM", departure: "05:00", arrival: "13:00", arrivalDayOffset: 0, durationMinutes: 480 } as never, { trainNumber: "12780", trainName: "GOA EXP", from: "NZM", to: "MAO", departure: "15:05", arrival: "07:00", arrivalDayOffset: 2, durationMinutes: 1800 } as never], source: "railradar" };
     const s = journeySummary(base({ best, routeOptions: [best], directUnavailable: true,
       recovery: { reason: "WL", differentTrain: [], partialRoute: null, connecting: [conn], alternativeDates: [{ date: "2026-09-12", count: 0, fastest: null }, { date: "2026-09-15", count: 1, fastest: { number: "06904", durationMinutes: 6870 } }], alternateStations: [] } }));
-    expect(s).toContain("Best plan: 12484 AMRITSAR KCVL EXP 08:20→11:30, 27h 10m (SL WL 18).");
+    expect(s).toContain("Best plan: 12484 AMRITSAR KCVL EXP 08:20→11:30, 27h 10m (SL WL 18) — kisi option mein confirmed seat nahi");
     expect(s).toContain("If it slips, route via Hazrat Nizamuddin (12030→12780, layover 125 min).");
     /* Round-18m: seat proof nahi → "seat hai" nahi bolte, sirf trains run + unverified. */
     expect(s).toContain("Or shift to Tue 15 Sep — 1 train run, seat status unverified.");

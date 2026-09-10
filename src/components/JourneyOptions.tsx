@@ -151,6 +151,7 @@ export function JourneyOptions({
   plan,
   onPickTrain,
   onPickLeg,
+  onPickBoardEarlier,
   onPickDate,
   onPickStations,
   onOpenBoard,
@@ -159,6 +160,8 @@ export function JourneyOptions({
   onPickTrain?: (trainNumber: string) => void;
   /** Round-18m-3: connecting leg tap → us leg ke segment+date ki seat query. */
   onPickLeg?: (leg: { trainNumber: string; from: string; to: string; date: string }) => void;
+  /** Round-18m-6: book-from-earlier tap → seat check for bookFrom→destination. */
+  onPickBoardEarlier?: (o: { trainNumber: string; bookFrom: string; boardAt: string; destination: string; classCode: string }) => void;
   onPickDate?: (ymd: string) => void;
   /** Round-18 §8: user explicitly confirms a different boarding/destination station. */
   onPickStations?: (from: string, to: string) => void;
@@ -285,6 +288,35 @@ export function JourneyOptions({
 
       {plan.directUnavailable && rec && (
         <div className="jo-recovery">
+          {(rec.boardFromEarlier ?? []).length > 0 && (
+            <div className="jo-sec">
+              <div className="jo-sec-title">🎫 Same train — pichhle station se ticket, board yahin se</div>
+              {(rec.boardFromEarlier ?? []).slice(0, 2).map((b) => {
+                const av = availTextOf(b.availability);
+                return (
+                  <button
+                    type="button"
+                    key={`${b.trainNumber}-${b.bookFrom}`}
+                    className="jo-bfe"
+                    onClick={onPickBoardEarlier ? () => onPickBoardEarlier({ trainNumber: b.trainNumber, bookFrom: b.bookFrom, boardAt: b.boardAt, destination: b.destination, classCode: b.availability.classCode }) : undefined}
+                  >
+                    <div className="jo-bfe-head">
+                      <span className="jo-no">{b.trainNumber}</span> <span className="jo-name">{b.trainName}</span>
+                      <span className={`jo-avl jo-avl-${av.tone}`}>{av.text}</span>
+                    </div>
+                    <div className="jo-bfe-grid">
+                      <div><div className="jo-bfe-k">Book from</div><div className="jo-bfe-v">{b.bookFromName ?? b.bookFrom}</div><div className="jo-bfe-s">{b.bookFrom}{b.bookFromDeparture ? `, ${b.bookFromDeparture}` : ""}</div></div>
+                      <div><div className="jo-bfe-k">Boarding</div><div className="jo-bfe-v">{b.boardAtName ?? b.boardAt}</div><div className="jo-bfe-s">{b.boardAt}{b.boardAtDeparture ? `, ${b.boardAtDeparture}` : ""}</div></div>
+                      <div><div className="jo-bfe-k">Deboarding</div><div className="jo-bfe-v">{b.destinationName ?? b.destination}</div><div className="jo-bfe-s">{b.destination}{b.arrival ? `, ${b.arrival}` : ""}{b.arrivalDayOffset ? ` · ${formatShortDate(addDays(baseDate, b.arrivalDayOffset))}` : ""}</div></div>
+                    </div>
+                    <div className="jo-split-note">
+                      {b.boardAt}→{b.destination} par {b.directStatus === "WAITLIST" ? "WL" : b.directStatus ?? "seat nahi"} tha; {b.bookFrom} se book karne par {av.text}{b.availability.fare != null ? ` · ${inr(b.availability.fare)}` : ""}. Boarding point {b.boardAt} rakhein (IRCTC mein boarding station change option). Provider: {b.source}.
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
           {rec.differentTrain.length > 0 && (
             <div className="jo-sec">
               <div className="jo-sec-title">🚆 Doosri train (seat available)</div>

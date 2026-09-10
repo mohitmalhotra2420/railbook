@@ -218,6 +218,11 @@ only provider-verified alternatives.
 - More candidates: fixed hubs (up to 10 connections) + **route-derived hubs** (`routeDerivedHubs()` — junction/major stops from the direct trains' timetable, e.g. JAT→BDTS tries PTKC/LDH/NDLS/SWM/RTM/BH), all legs probed, then filtered.
 - When nothing passes: card + `plan.notes` say "Connecting routes mile lekin kisi mein dono trains par seat available nahi thi — isliye connecting option nahi dikhaya." Summary's "route via X" line lists per-leg seats.
 
+### Round-18m-6 — honest "best plan" + ConfirmTkt-style "book from earlier station"
+- **Ranking fix:** a seat-proven (fresh AVL/RAC) option always outranks WL/N-A/unknown — even a connecting route; "no seat data" no longer ties with AVAILABLE (13152 bug). Connecting option's combined availability = weakest leg.
+- **Summary says why:** "… (SL WL 27) — kisi option mein confirmed seat nahi; ye sabse kam WL/fastest direct hai" or "— direct trains mein seat nahi, is route par dono legs available".
+- **Book from earlier station** (`findBoardFromEarlier`, `recovery.boardFromEarlier`): for each WL direct train, timetable → up to 3 stops before origin → probe bookFrom→destination → keep AVL/RAC. Card shows Book from / Boarding / Deboarding (e.g. 13308: book Phillaur Jn PHR 19:00, board Ludhiana Jn LDH 19:55 — 2A AVL 19 ₹1545). Summary leads with it when best is WL. Provider-proven only, never invented.
+
 ## Extra fallback APIs (Round-16o, optional)
 
 Data chain per method: **RailCore → RailKit → RailRadar → Indian Rail API → verified-site web-scrape → none**. The two new providers are *additional* and fully optional — with no key set they are skipped and nothing else changes.

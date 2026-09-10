@@ -117,6 +117,29 @@ export type VacantSeatsResult = {
   source: string;
 };
 
+export type BoardFromEarlierOption = {
+  trainNumber: string;
+  trainName: string;
+  /** Ticket is booked from here … */
+  bookFrom: string;
+  bookFromName: string | null;
+  bookFromDeparture: string | null;
+  /** … but the passenger boards here (user's origin). */
+  boardAt: string;
+  boardAtName: string | null;
+  boardAtDeparture: string | null;
+  destination: string;
+  destinationName: string | null;
+  arrival: string | null;
+  arrivalDayOffset: number;
+  /** Provider-proven row for bookFrom→destination. */
+  availability: RouteAvailability;
+  /** What the user's own segment showed (WL n / N-A) — for the "why" line. */
+  directStatus: string | null;
+  stopsBefore: number;
+  source: string;
+};
+
 export type PartialSegment = {
   from: string;
   fromName: string | null;
@@ -208,6 +231,10 @@ export type JourneyPlan = {
     alternativeDates: JourneyPlan["alternativeDates"];
     /** Round-18 §8: same-city alternate boarding/destination station — presented as a DIFFERENT journey assumption (never silently applied). */
     alternateStations: AlternateStationOption[];
+    /** Round-18m-6 (ConfirmTkt-style "Book from earlier station"): same train,
+     *  ticket booked from a stop BEFORE origin (user still boards at origin) →
+     *  provider-proven AVL/RAC for that longer segment. Fare = that segment. */
+    boardFromEarlier?: BoardFromEarlierOption[];
   } | null;
   sources: string[];
   notes: string[];

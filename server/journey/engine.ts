@@ -24,6 +24,7 @@ import { routedClassBoard, routedSchedule, searchTrainsRouted, type ServedProvid
 import { todayYmd } from "../util.js";
 import { MULTI_STATION_CITIES } from "../railway/station-resolve.js";
 import { CONFLICT_MESSAGE, availabilityEquals, freshnessOf, resolveConflict, sourceTypeOf } from "../providers/provenance.js";
+import type { BoardFromEarlierOption } from "./types.js";
 import {
   CLASS_CODES,
   durationLabelOf,
@@ -56,12 +57,16 @@ export const JOURNEY_CONFIG = {
     .filter(Boolean),
   /** Partial-route: max intermediate halts probed (each = 1 availability call). */
   partialSplitLimit: Number(process.env.PARTIAL_SPLIT_LIMIT ?? 3) || 3,
+  /** Round-18m-6: how many stops BEFORE origin to try for "book from earlier station". */
+  boardEarlierStops: Number(process.env.BOARD_EARLIER_STOPS ?? 3) || 3,
 };
 
 const AVAIL_RANK: Record<string, number> = { AVAILABLE: 0, RAC: 1, WAITLIST: 2, UNKNOWN: 3, NOT_AVAILABLE: 4 };
 
 function availScore(a: RouteAvailability | null): number {
-  if (!a) return 9;
+  /* Round-18m-6: unknown (null) ranks like UNKNOWN (3) — pehle 9 → floor(9/1e4)=0
+   * → "seat data nahi" wali train AVAILABLE ke barabar rank ho jaati thi (13152 bug). */
+  if (!a) return AVAIL_RANK.UNKNOWN * 10000 + 9;
   const base = AVAIL_RANK[a.status] ?? 5;
   return base * 10000 - (a.status === "AVAILABLE" ? Math.min(a.seats ?? 0, 9999) : 0);
 }
@@ -160,7 +165,10 @@ export function rankRouteOptions(input: RankInput): RouteOption[] {
       legs: c.legs,
       layoverMinutes: c.layoverMinutes,
       classes: [],
-      availability: null,
+      /* Round-18m-6: combined = weakest leg (AVL < RAC < WL …); null if any leg unknown. */
+      availability: c.legs.every((l) => l.availability)
+        ? [...c.legs.map((l) => l.availability!)].sort((x, y) => (AVAIL_RANK[y.status] ?? 5) - (AVAIL_RANK[x.status] ?? 5) || (x.seats ?? 0) - (y.seats ?? 0))[0]
+        : null,
       reliability: null,
       source: c.source,
       why: "",
@@ -181,8 +189,13 @@ export function rankRouteOptions(input: RankInput): RouteOption[] {
 
   /* best_overall: deterministic weighted order — direct first, then availability
    * class (AVAILABLE < RAC < WL < unknown), then duration, then train number. */
+  /* Round-18m-6 (user: "13308 mein seat nahi, fastest bhi nahi — best plan kaise?"):
+   * seat-proven (fresh AVL/RAC) option ALWAYS ranks above WL/N-A/unknown, even a
+   * connecting one; then fewer changes, then availability class, then duration. */
+  const bookable = (o: RouteOption) => (o.availability && !o.availability.stale && (o.availability.status === "AVAILABLE" || o.availability.status === "RAC") ? 0 : 1);
   const overall = [...base].sort(
     (a, b) =>
+      bookable(a) - bookable(b) ||
       a.changes - b.changes ||
       Math.floor(availScore(a.availability) / 10000) - Math.floor(availScore(b.availability) / 10000) ||
       dur(a) - dur(b) ||
@@ -564,6 +577,74 @@ export async function findPartialRouteSeats(args: {
   return base;
 }
 
+/* ── Round-18m-6: "Book from earlier station" (ConfirmTkt-style) ──────────
+ * User (LDH→LKO, 13308 SL WL 32): ConfirmTkt showed "book from Phillaur (PHR)
+ * 19:00, board at Ludhiana 19:55 — SL RAC 31". Same train, ticket from a stop
+ * BEFORE origin; quota pool differs so seats often exist. Deterministic and
+ * provider-proven: timetable → up to `stopsBack` earlier stops → probe
+ * bookFrom→destination → keep AVL/RAC only. Never invented. */
+export async function findBoardFromEarlier(args: {
+  trains: { number: string; name: string; directStatus?: string | null }[];
+  origin: string;
+  destination: string;
+  date: string;
+  travelClass?: string | null;
+  stopsBack?: number;
+  limitTrains?: number;
+}): Promise<{ options: BoardFromEarlierOption[]; sources: Set<string> }> {
+  const from = args.origin.toUpperCase();
+  const to = args.destination.toUpperCase();
+  const stopsBack = args.stopsBack ?? JOURNEY_CONFIG.boardEarlierStops;
+  const sources = new Set<string>();
+  const options: BoardFromEarlierOption[] = [];
+  await Promise.all(
+    args.trains.slice(0, args.limitTrains ?? 3).map(async (t) => {
+      try {
+        const sched = await routedSchedule(t.number);
+        const stops = (sched.schedule && "stops" in sched.schedule ? (sched.schedule.stops as Stop[]) : []) ?? [];
+        const codes = stops.map((s) => String(s.code).toUpperCase());
+        const iFrom = codes.indexOf(from);
+        const iTo = codes.indexOf(to);
+        if (iFrom <= 0 || iTo < 0 || iTo <= iFrom) return;
+        const earlier = stops.slice(Math.max(0, iFrom - stopsBack), iFrom).reverse(); // nearest first
+        for (let k = 0; k < earlier.length; k++) {
+          const s = earlier[k];
+          const board = await routedClassBoard(t.number, args.date, s.code, to, "GN", args.travelClass ? [args.travelClass] : []);
+          const row = bestClassRow(board.classes, args.travelClass ?? null);
+          if (row && !row.stale && (row.status === "AVAILABLE" || row.status === "RAC")) {
+            sources.add(row.source);
+            const dest = stops[iTo];
+            const dayOf = (st: Stop) => (typeof st.day === "number" ? st.day : 1);
+            options.push({
+              trainNumber: t.number,
+              trainName: t.name,
+              bookFrom: s.code,
+              bookFromName: s.name ?? null,
+              bookFromDeparture: s.departure ?? s.arrival ?? null,
+              boardAt: from,
+              boardAtName: stops[iFrom].name ?? null,
+              boardAtDeparture: stops[iFrom].departure ?? stops[iFrom].arrival ?? null,
+              destination: to,
+              destinationName: dest.name ?? null,
+              arrival: dest.arrival ?? dest.departure ?? null,
+              arrivalDayOffset: Math.max(0, dayOf(dest) - dayOf(stops[iFrom])),
+              availability: row,
+              directStatus: t.directStatus ?? null,
+              stopsBefore: k + 1,
+              source: row.source,
+            });
+            return; // nearest earlier stop with a seat is enough for this train
+          }
+        }
+      } catch {
+        /* provider fail → skip this train, never invent */
+      }
+    }),
+  );
+  options.sort((a, b) => (AVAIL_RANK[a.availability.status] ?? 5) - (AVAIL_RANK[b.availability.status] ?? 5) || a.stopsBefore - b.stopsBefore || a.trainNumber.localeCompare(b.trainNumber));
+  return { options, sources };
+}
+
 /** Round-18: same class from two different sources with different values → conflict (never blended). */
 export function detectBoardConflict(classes: ClassAvailability[]): string[] | null {
   const byCode = new Map<string, ClassAvailability[]>();
@@ -886,6 +967,23 @@ export async function planJourney(args: {
         }
       }
     }
+    /* Round-18m-6: same train, book from an earlier stop (user still boards at origin). */
+    let boardFromEarlier: BoardFromEarlierOption[] = [];
+    try {
+      /* Saari direct trains jinme user ke segment par seat nahi (ya probe nahi hui) —
+       * fastest pehle; bounded to 6 trains × 3 earlier stops. */
+      const wlDirect = [...trains]
+        .sort((a, b) => (a.durationMinutes || 9e9) - (b.durationMinutes || 9e9) || a.number.localeCompare(b.number))
+        .filter((t) => { const a = availability.get(t.number); return !a || (a.status !== "AVAILABLE" && a.status !== "RAC") || a.stale; })
+        .map((t) => ({ number: t.number, name: t.name, directStatus: availability.get(t.number)?.status ?? null }));
+      if (wlDirect.length) {
+        const r = await findBoardFromEarlier({ trains: wlDirect, origin: from, destination: to, date: args.date, travelClass: args.travelClass ?? null, limitTrains: 6 });
+        boardFromEarlier = r.options;
+        r.sources.forEach((s) => sources.add(s));
+      }
+    } catch {
+      boardFromEarlier = [];
+    }
     if (!connections.length) {
       const c = await findConnections(from, to, args.date, { maxHubs: 3 });
       connections = c.connections;
@@ -928,6 +1026,7 @@ export async function planJourney(args: {
       connecting: connections,
       alternativeDates,
       alternateStations,
+      boardFromEarlier,
     };
   }
   if (!trains.length && provider === "none") notes.push("Railway data source unavailable — RailCore/RailKit/RailRadar/web sab se jawab nahi mila.");
@@ -975,19 +1074,29 @@ export function journeySummary(plan: JourneyPlan): string | null {
   const parts: string[] = [];
   const best = plan.best;
   const rec = plan.recovery;
-  if (best) {
+  const isBookable = (a: RouteAvailability | null | undefined) => !!a && !a.stale && (a.status === "AVAILABLE" || a.status === "RAC");
+  /* Round-18m-6: "Book from earlier station" (same train) beats a WL best. */
+  const bfe = rec?.boardFromEarlier?.[0] ?? null;
+  if (best && !isBookable(best.availability) && bfe) {
+    const a = bfe.availability;
+    const seat = a.status === "AVAILABLE" ? `${a.classCode} AVL${a.seats != null ? ` ${a.seats}` : ""}` : `${a.classCode} RAC${a.rac != null ? ` ${a.rac}` : ""}`;
+    parts.push(`Best plan: ${bfe.trainNumber} ${bfe.trainName} — ticket ${bfe.bookFromName ?? bfe.bookFrom} (${bfe.bookFrom}${bfe.bookFromDeparture ? ` ${bfe.bookFromDeparture}` : ""}) se book karo, board ${bfe.boardAtName ?? bfe.boardAt} (${bfe.boardAt}${bfe.boardAtDeparture ? ` ${bfe.boardAtDeparture}` : ""}) par hi — ${seat}${a.fare != null ? `, ₹${a.fare}` : ""}. (${bfe.boardAt}→${bfe.destination} par ${best.trainNumbers[0] === bfe.trainNumber && best.availability ? availPhrase(best.availability) : bfe.directStatus ?? "seat nahi"}.)`);
+  } else if (best) {
     const name = best.trainNames[0] ? ` ${best.trainNames[0]}` : "";
     const av = availPhrase(best.availability);
     const dur = best.durationLabel ? `, ${best.durationLabel}` : "";
     const changes = best.changes ? `, ${best.changes} change` : "";
-    parts.push(`Best plan: ${best.trainNumbers.join("+")}${name} ${best.departure}→${best.arrival}${dur}${changes}${av ? ` (${av})` : ""}.`);
+    const why = isBookable(best.availability)
+      ? (best.changes ? " — direct trains mein seat nahi, is route par dono legs available" : "")
+      : " — kisi option mein confirmed seat nahi; ye sabse kam WL/fastest direct hai";
+    parts.push(`Best plan: ${best.trainNumbers.join("+")}${name} ${best.departure}→${best.arrival}${dur}${changes}${av ? ` (${av})` : ""}${why}.`);
   } else if (rec) {
     parts.push(`${plan.query.from}→${plan.query.to} ${dayLabel(plan.query.date)}: ${rec.reason}`);
   } else {
     return null;
   }
   /* Fallback route: a verified connecting option (only when best isn't already a clean AVAILABLE seat). */
-  const bestOk = best?.availability?.status === "AVAILABLE";
+  const bestOk = best?.availability?.status === "AVAILABLE" || !!bfe;
   const conn = (plan.connections.length ? plan.connections : rec?.connecting ?? []).find((c) => c.valid) ?? null;
   const diff = rec?.differentTrain.find((o) => o.availability && (o.availability.status === "AVAILABLE" || o.availability.status === "RAC")) ?? null;
   if (!bestOk && diff && diff.trainNumbers[0] !== best?.trainNumbers[0]) {

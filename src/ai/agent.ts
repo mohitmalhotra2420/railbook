@@ -62,6 +62,24 @@ export interface AgentRouteOption {
   source: string;
   why: string;
 }
+export interface AgentBoardFromEarlier {
+  trainNumber: string;
+  trainName: string;
+  bookFrom: string;
+  bookFromName: string | null;
+  bookFromDeparture: string | null;
+  boardAt: string;
+  boardAtName: string | null;
+  boardAtDeparture: string | null;
+  destination: string;
+  destinationName: string | null;
+  arrival: string | null;
+  arrivalDayOffset: number;
+  availability: NonNullable<AgentRouteOption["availability"]>;
+  directStatus: string | null;
+  stopsBefore: number;
+  source: string;
+}
 export interface AgentConnection {
   station: string;
   stationName?: string | null;
@@ -115,6 +133,8 @@ export interface AgentJourneyPlan {
     alternativeDates: AgentJourneyPlan["alternativeDates"];
     /** Round-18 §8: same-city alternate boarding/destination — different assumption, needs user confirm. */
     alternateStations?: { from: string; to: string; changed: "origin" | "destination" | "both"; count: number; best: AgentRouteOption | null; source: string; note: string }[];
+    /** Round-18m-6: same train, ticket from an earlier stop, board at origin. */
+    boardFromEarlier?: AgentBoardFromEarlier[];
   } | null;
   sources: string[];
   notes: string[];
