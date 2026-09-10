@@ -39,7 +39,7 @@ import {
 import { routedTrainNameSearch, routedTrainHistory } from "../railway/router.js";
 import { JOURNEY_CONFIG, findConnections, findPartialRouteSeats, findVacantSeats, planJourney } from "../journey/engine.js";
 import { durationLabelOf, type JourneyPlan, type AlternativeTrainsResult } from "../journey/types.js";
-import { findAlternativeTrains } from "../journey/engine.js";
+import { findAlternativeTrains, findAlternateStationOptions } from "../journey/engine.js";
 import { pickTrains, type TrainPickerResult } from "../journey/trainpicker.js";
 import { capabilityAvailable, UNAVAILABLE_MESSAGES } from "../providers/capabilities.js";
 import { makeProvenance } from "../providers/provenance.js";
@@ -1358,9 +1358,30 @@ export async function executeApprovedTool(
           // 0 trains par provider healthy: resolved station NAMES surface karo
           // taaki model apna code-mixup khud pakde (DEL = DENDULURU, Delhi nahi).
           const [fromName, toName] = await Promise.all([stationNameOf(fromRes.code), stationNameOf(toRes.code)]);
+          /* Round-18j (browser E2E "Ludhiana se Mumbai sleeper" → "Mumbai"
+           * resolved to BCT, 0 direct, agent asked user to try other station):
+           * §8 — SAME-CITY sibling stations (CSMT/BDTS/LTT…) khud probe karo
+           * aur REAL options batao. Origin/destination badle NAHI jaate —
+           * sirf suggest, user confirm kare. */
+          let altLine = "";
+          const altStations: Array<{ from: string; to: string; changed: string; count: number; trainNumbers: string[]; note: string }> = [];
+          try {
+            const alt = await findAlternateStationOptions({ from: fromRes.code, to: toRes.code, date: a.date as string, travelClass: null, maxProbes: 2 });
+            for (const o of alt.options) {
+              if (o.count <= 0) continue;
+              altStations.push({ from: o.from, to: o.to, changed: o.changed, count: o.count, trainNumbers: (o.allTrainNumbers?.length ? o.allTrainNumbers : o.best?.trainNumbers ?? []).slice(0, 4), note: o.note });
+            }
+            if (altStations.length) {
+              altLine = ` YOU MAY ALSO CONSIDER (same city, ALAG station — user se confirm karo, khud mat badlo): ${altStations
+                .map((o) => `${o.from}→${o.to} (${o.count} trains${o.trainNumbers.length ? `: ${o.trainNumbers.join(", ")}` : ""})`)
+                .join("; ")}. User haan bole to usi station se SEARCH_TRAINS dobara chalao.`;
+            }
+          } catch {
+            /* alternates optional */
+          }
           return okResult(
             search.provider,
-            `${fromRes.code}→${toRes.code} (${a.date}): koi direct train nahi mili. Resolved stations: ${fromRes.code} = ${fromName ?? "unknown"}, ${toRes.code} = ${toName ?? "unknown"}. Code galat lag raha hai to CITY NAAM se dobara search karo (jaise "Delhi") — railway codes misleading ho sakte hain (jaise DEL DENDULURU hai, Delhi nahi).`,
+            `${fromRes.code}→${toRes.code} (${a.date}): koi direct train nahi mili. Resolved stations: ${fromRes.code} = ${fromName ?? "unknown"}, ${toRes.code} = ${toName ?? "unknown"}.${altLine}${altLine ? "" : " Code galat lag raha hai to CITY NAAM se dobara search karo (jaise \"Delhi\") — railway codes misleading ho sakte hain (jaise DEL DENDULURU hai, Delhi nahi)."}`,
             {
               from: fromRes.code,
               to: toRes.code,
@@ -1369,6 +1390,7 @@ export async function executeApprovedTool(
               date: a.date,
               count: 0,
               trains: [],
+              alternate_stations: altStations,
             },
           );
         }

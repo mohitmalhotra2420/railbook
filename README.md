@@ -185,6 +185,9 @@ only provider-verified alternatives.
 - Browser E2E: "IRCTC tatkal booking kab shuru hoti hai" got a generic IRCTC Wikipedia paragraph (no timing). `WEB_SEARCH` now checks `RULES_TOPIC_RE` (tatkal/RAC/WL/chart/PNR/refund/luggage/ID/quota/concession…) and answers from the stable KB first (10:00 AM AC / 11:00 AM non-AC). Fact questions (longest/fastest/zones/history/largest) still go to Wikipedia topic-page first.
 - `railKbAnswer` normalises "X ka matlab/meaning kya hai" → "X kya" so "RAC ka matlab kya hai" hits the KB.
 
+### Round-18j — 0 direct trains → same-city stations probed automatically (§8)
+- Browser E2E "Ludhiana se Mumbai sleeper mein seat hai kya 20 September ko": "Mumbai" resolved to BCT → 0 direct → the agent asked the user to try another station. `SEARCH_TRAINS` now probes cluster siblings (`findAlternateStationOptions`) and returns "YOU MAY ALSO CONSIDER: LDH→BDTS (12926, 12904); LDH→CSMT (11058)" with an explicit instruction to confirm with the user (origin/destination are never switched silently). `AlternateStationOption.allTrainNumbers` added; ranking failures no longer drop a real option.
+
 ## Extra fallback APIs (Round-16o, optional)
 
 Data chain per method: **RailCore → RailKit → RailRadar → Indian Rail API → verified-site web-scrape → none**. The two new providers are *additional* and fully optional — with no key set they are skipped and nothing else changes.

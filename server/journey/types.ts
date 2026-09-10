@@ -176,6 +176,8 @@ export type AlternateStationOption = {
   changed: "origin" | "destination" | "both";
   count: number;
   best: RouteOption | null;
+  /** Round-18j: all direct train numbers on the sibling pair (≤6), for the agent's summary. */
+  allTrainNumbers?: string[];
   source: string;
   note: string;
 };

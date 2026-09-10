@@ -648,14 +648,21 @@ export async function findAlternateStationOptions(args: { from: string; to: stri
       } catch {
         availability.set(fastest.number, null);
       }
-      const ranked = rankRouteOptions({ origin: p.from, destination: p.to, trains: s.trains, availability, source: s.provider, travelClass: args.travelClass ?? null });
-      const best = ranked.find((o) => o.trainNumbers[0] === fastest.number) ?? ranked[0] ?? null;
+      /* Round-18j: ranking failure (odd provider row) must not drop a REAL option. */
+      let best: RouteOption | null = null;
+      try {
+        const ranked = rankRouteOptions({ origin: p.from, destination: p.to, trains: s.trains, availability, source: s.provider, travelClass: args.travelClass ?? null });
+        best = ranked.find((o) => o.trainNumbers[0] === fastest.number) ?? ranked[0] ?? null;
+      } catch {
+        best = null;
+      }
       options.push({
         from: p.from,
         to: p.to,
         changed: p.changed,
         count: s.trains.length,
         best,
+        allTrainNumbers: s.trains.map((t) => t.number).slice(0, 6),
         source: s.provider,
         note: `${p.changed === "origin" ? `Boarding ${p.from}` : `Destination ${p.to}`} (same city) — ${s.trains.length} trains${best?.availability ? `, ${best.trainNumbers[0]} ${best.availability.classCode} ${best.availability.status}${best.availability.seats != null ? ` ${best.availability.seats}` : ""}` : ""}. Ye aapki original ${p.changed === "origin" ? "boarding" : "destination"} station se ALAG hai — confirm karein.`,
       });
