@@ -266,11 +266,16 @@ export function classifyFollowUp(text: string): FollowUp {
     return "availability";
   }
   if (/\b(aur koi train|aur trains?|more trains?|koi aur train|aur options)\b/.test(t)) return "more_trains";
+  /* Round-18h (browser E2E): "Bharat ki pehli train kab chali thi" / "India's
+   * first train" GENERAL KNOWLEDGE hai — list-pick nahi. Knowledge phrasing
+   * (kab/kahan/history/kis saal/bharat/india/duniya) ho to agent ko jaane do. */
+  const knowledgePhrasing = /\b(kab|kahan|kaha|kis saal|kis year|history|itihas|bharat|india|hindustan|duniya|world|chali thi|chali|shuru|start(?:ed)?|launch)\b/.test(t);
   if (
-    /\b(\d{5})\s*wali\b/.test(t) ||
-    /^(yeh? wali|isi ko|pehli wali|first wali|doosri wali|dusri wali|teesri wali|this (one|train))$/i.test(t) ||
-    /\b(\d+)(?:st|nd|rd|th)\s+train\b/.test(t) ||
-    /\b(pehli|doosri|dusri|teesri|chauthi|first|second|third|fourth)\s+(wali|train)\b/.test(t)
+    !knowledgePhrasing &&
+    (/\b(\d{5})\s*wali\b/.test(t) ||
+      /^(yeh? wali|isi ko|pehli wali|first wali|doosri wali|dusri wali|teesri wali|this (one|train))$/i.test(t) ||
+      /\b(\d+)(?:st|nd|rd|th)\s+train\b/.test(t) ||
+      /\b(pehli|doosri|dusri|teesri|chauthi|first|second|third|fourth)\s+(wali|train)\b/.test(t))
   ) {
     return "train_pick";
   }

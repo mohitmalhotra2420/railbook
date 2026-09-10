@@ -177,6 +177,10 @@ only provider-verified alternatives.
 - New telemetry: every `/api/agent` response carries `modelFallbacks[{model,reason,ms,round}]` (+ structured log line). Prod showed Muse **timing out** in rounds 2+ (it got only 4–8 s after the first round, while Muse needs 20–35 s per round on NIM), so GPT-OSS/GLM answered.
 - Fix: primary model always gets ≥ `AI_PRIMARY_MIN_MS` (25 s on Render) while budget remains; turn budget 120 s, per-call 40 s (Render env updated). Fallback reserve 8 s → 6 s. Muse stays primary; GPT-OSS/GLM only when Muse genuinely fails.
 
+### Round-18h — browser E2E of general questions / Muse / seat+fare web-scrape
+- Client bug: "Bharat ki pehli train kab chali thi" never reached the server — `classifyFollowUp` treated "pehli train" as a list pick ("Pehle trains search karni hongi"). Knowledge phrasing (kab/kahan/history/bharat/india/…) now bypasses `train_pick`.
+- Verified live in Chromium: longest journey (Muse + Wikipedia), first train 1853 (Muse + Wikipedia), Rajdhani vs Shatabdi (KB+web), 12014 CC seats **with fare** (RailRadar seats + fare fill), and with all API keys removed seats+fare still come from railyatri.in (web) — CC AVL ₹1,125.
+
 ## Extra fallback APIs (Round-16o, optional)
 
 Data chain per method: **RailCore → RailKit → RailRadar → Indian Rail API → verified-site web-scrape → none**. The two new providers are *additional* and fully optional — with no key set they are skipped and nothing else changes.

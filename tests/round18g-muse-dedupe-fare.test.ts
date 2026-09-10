@@ -33,3 +33,13 @@ describe("Round-18g concept questions never open the train-name picker", () => {
     expect(CONCEPT_QUESTION_RE.test("Amritsar Shatabdi ka time kya hai?")).toBe(false);
   });
 });
+
+describe("Round-18h client: knowledge questions never classified as list-pick", () => {
+  it("'Bharat ki pehli train kab chali thi' is not train_pick; '12014 wali' still is", async () => {
+    const { classifyFollowUp } = await import("../src/ai/agent");
+    expect(classifyFollowUp("Bharat ki pehli train kab chali thi")).not.toBe("train_pick");
+    expect(classifyFollowUp("India ki first train kab shuru hui")).not.toBe("train_pick");
+    expect(classifyFollowUp("12014 wali")).toBe("train_pick");
+    expect(classifyFollowUp("pehli wali")).toBe("train_pick");
+  });
+});
