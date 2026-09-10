@@ -1536,6 +1536,7 @@ function BlockView({
         plan={block.plan}
         onPickTrain={(n) => onChip(`${n} ki seat availability ${block.plan.query.travelClass ? block.plan.query.travelClass + " " : ""}${block.plan.query.date} ko ${block.plan.query.from} se ${block.plan.query.to}`)}
         onPickDate={(d) => onChip(`${block.plan.query.from} se ${block.plan.query.to} ${d} ki trains dikhao`)}
+        onPickStations={(f, t) => onChip(`${f} se ${t} ${block.plan.query.date} ki trains dikhao`)}
       />
     );
   }

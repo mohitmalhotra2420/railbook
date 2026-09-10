@@ -1662,3 +1662,6 @@ table.traintable {
 .tp-route.muted { font-style: italic; }
 .tp-time { color: var(--ink); }
 .tp-cta { grid-area: cta; color: var(--saffron); font-weight: 700; white-space: nowrap; }
+
+/* Round-18c: alternate-station provenance tag */
+.jo-src { font-size: 10px; opacity: 0.55; text-transform: lowercase; letter-spacing: 0.02em; }

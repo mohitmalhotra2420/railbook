@@ -90,10 +90,13 @@ export function JourneyOptions({
   plan,
   onPickTrain,
   onPickDate,
+  onPickStations,
 }: {
   plan: AgentJourneyPlan;
   onPickTrain?: (trainNumber: string) => void;
   onPickDate?: (ymd: string) => void;
+  /** Round-18 §8: user explicitly confirms a different boarding/destination station. */
+  onPickStations?: (from: string, to: string) => void;
 }) {
   const [tab, setTab] = useState<Tab | null>(null);
   const best = plan.best;
@@ -126,6 +129,7 @@ export function JourneyOptions({
 
   const pick = onPickTrain ? (o: AgentRouteOption) => onPickTrain(o.trainNumbers[0]) : undefined;
   const rec = plan.recovery;
+  const altStations = (rec?.alternateStations ?? []).filter((o) => o.count > 0);
   const partial = rec?.partialRoute;
   const partialPlans = partial?.plans.filter((p) => p.fullyAvailable) ?? [];
 
@@ -220,6 +224,41 @@ export function JourneyOptions({
             <div className="jo-sec">
               <div className="jo-sec-title">🔁 Connecting journey</div>
               {connections.slice(0, 2).map((c, i) => <ConnectionRow key={i} c={c} />)}
+            </div>
+          )}
+          {altStations.length > 0 && (
+            <div className="jo-sec">
+              <div className="jo-sec-title">📍 Doosra station, same city (aapka route badla nahi — confirm karein)</div>
+              {altStations.slice(0, 3).map((o) => {
+                const av = o.best ? availText(o.best) : null;
+                return (
+                  <button
+                    key={`${o.from}-${o.to}`}
+                    type="button"
+                    className="jo-row"
+                    onClick={onPickStations ? () => onPickStations(o.from, o.to) : undefined}
+                  >
+                    <div className="jo-row-main">
+                      <div className="jo-row-title">
+                        <span className="jo-no">{o.from} → {o.to}</span>
+                        <span className="jo-name">{o.changed === "origin" ? "alternate boarding" : "alternate destination"} · {o.count} trains</span>
+                      </div>
+                      {o.best && (
+                        <div className="jo-row-times">
+                          <span className="jo-no">{o.best.trainNumbers[0]}</span> <strong>{o.best.departure}</strong> → <strong>{o.best.arrival}</strong>
+                          <span className="jo-day">{dayTag(o.best.arrivalDayOffset)}</span>
+                          <span className="jo-dot">·</span>
+                          <span>{o.best.durationLabel ?? "—"}</span>
+                        </div>
+                      )}
+                    </div>
+                    <div className="jo-row-side">
+                      {av && <span className={`jo-avl jo-avl-${av.tone}`}>{av.text}</span>}
+                      <span className="jo-src">{o.source}</span>
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           )}
           {altDates.length > 0 && (

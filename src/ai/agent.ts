@@ -106,6 +106,8 @@ export interface AgentJourneyPlan {
     } | null;
     connecting: AgentConnection[];
     alternativeDates: AgentJourneyPlan["alternativeDates"];
+    /** Round-18 §8: same-city alternate boarding/destination — different assumption, needs user confirm. */
+    alternateStations?: { from: string; to: string; changed: "origin" | "destination" | "both"; count: number; best: AgentRouteOption | null; source: string; note: string }[];
   } | null;
   sources: string[];
   notes: string[];

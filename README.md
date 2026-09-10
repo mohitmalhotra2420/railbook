@@ -153,6 +153,11 @@ only provider-verified alternatives.
 - **Smart train picker** (§9/§10): `SEARCH_TRAIN_BY_NUMBER` / `SEARCH_TRAIN_BY_NAME` (`GET /api/trains/pick?q=`) — exact number → exact name → normalized/fuzzy partial name (handles erail spellings like "SHTABDI") → route context. Ambiguous names open a **SELECT TRAIN** card list in chat; the user taps to choose. Typing a bare number or a short name in chat shows the picker instantly, before the LLM round-trip.
 - No auto-booking: `Confirm & Book` remains the only booking action; payment/wallet/booking stay deterministic.
 
+### Round-18c — gap-fill vs spec
+- **§8 alternate boarding/destination station**: `findAlternateStationOptions` / `clusterSiblings` (`server/journey/engine.ts`) probe same-city siblings from `MULTI_STATION_CITIES` (max 2 per side, fastest train availability-verified). Attached as `plan.recovery.alternateStations` only when no good direct option; UI shows "📍 Doosra station, same city — confirm karein" cards; tapping sends an explicit new query — origin/destination are never changed silently.
+- **§5 proactive plan on deterministic path**: when the LLM engine is unavailable, `/api/agent` still returns `journey` (BEST FOR YOU + chips) built from the same real search (no extra provider call).
+- **§14 live-status freshness**: TRACK_TRAIN attaches `provenance{retrievedAt,source,sourceType,requestDate,travelDate,freshness}`; stale provider updates are labelled "purana update hai" instead of being presented as current.
+
 ## Extra fallback APIs (Round-16o, optional)
 
 Data chain per method: **RailCore → RailKit → RailRadar → Indian Rail API → verified-site web-scrape → none**. The two new providers are *additional* and fully optional — with no key set they are skipped and nothing else changes.

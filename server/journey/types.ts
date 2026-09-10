@@ -169,6 +169,17 @@ export type AlternativeTrainsResult = {
   provenance: { retrievedAt: string; requestDate: string; travelDate: string; freshness: string; sourceTypes: string[] };
 };
 
+/** Round-18 §8: alternate boarding / destination station within the same city cluster. */
+export type AlternateStationOption = {
+  from: string;
+  to: string;
+  changed: "origin" | "destination" | "both";
+  count: number;
+  best: RouteOption | null;
+  source: string;
+  note: string;
+};
+
 export type JourneyPlan = {
   query: { from: string; to: string; date: string; travelClass: string | null; preference: string };
   best: RouteOption | null;
@@ -183,6 +194,8 @@ export type JourneyPlan = {
     partialRoute: PartialRoutePlan | null;
     connecting: Connection[];
     alternativeDates: JourneyPlan["alternativeDates"];
+    /** Round-18 §8: same-city alternate boarding/destination station — presented as a DIFFERENT journey assumption (never silently applied). */
+    alternateStations: AlternateStationOption[];
   } | null;
   sources: string[];
   notes: string[];

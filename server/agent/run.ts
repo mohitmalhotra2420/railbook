@@ -35,6 +35,8 @@ import {
 } from "./agentic.js";
 import { routedClassBoard, routedLiveStatus, routedSchedule, routedStationSearch, routedTrainInfo, searchTrainsRouted } from "../railway/router.js";
 import { pickTrains, type TrainPickerResult } from "../journey/trainpicker.js";
+import { planJourney } from "../journey/engine.js";
+import type { JourneyPlan } from "../journey/types.js";
 import { webSourceLabel } from "../railway/webscrape.js";
 import {findWikipediaPage, webSearch, generalWebSearch, scrapeWebPage } from "./websearch.js";
 import { railKbAnswer } from "./railkb.js";
@@ -162,7 +164,7 @@ async function atlasFallback(
   pref: "fastest" | "cheapest" | "best",
   ctx: AgentContext,
   nlu: NluResult,
-): Promise<{ reply: string; ok: boolean; trace: ToolTraceStep; grounded: boolean; trains: AgentTrainTable | null }> {
+): Promise<{ reply: string; ok: boolean; trace: ToolTraceStep; grounded: boolean; trains: AgentTrainTable | null; journey?: JourneyPlan | null }> {
   /* 2026-09-06: "12014 vs 12054 kon si better" — deterministic compare pehle. */
   if (nlu.intent === "COMPARE_TRAINS" && (nlu.compareNumbers?.length ?? 0) >= 2) {
     const cmp = await compareTrainsDeterministic(nlu.compareNumbers!);
@@ -325,9 +327,18 @@ async function atlasFallback(
   const fares = new Map<string, { classCode: string; amount: number } | null>(
     [...probe.entries()].map(([n, f]) => [n, f ? { classCode: f.classCode, amount: f.fare } : null]),
   );
+  /* Round-18 §5: deterministic path bhi proactive BEST FOR YOU + YOU MAY ALSO
+   * CONSIDER plan deta hai (searched trains reuse — extra search nahi). */
+  let journey: JourneyPlan | null = null;
+  try {
+    journey = await planJourney({ from: ctx.origin!.code, to: ctx.destination!.code, date: ctx.date!, travelClass: ctx.classCode ?? null, preference: pref === "cheapest" ? "cheapest" : pref === "fastest" ? "fastest" : "best_overall", includeConnections: false, includeAlternativeDates: false, trains, searchProvider: search.provider });
+  } catch {
+    journey = null;
+  }
   return {
     reply,
     ok: true,
+    journey,
     trains: tableFromSearch(ctx.origin!.code, ctx.destination!.code, ctx.date!, ranked.slice(0, 12), fares),
     trace: trace(
       true,
@@ -1726,6 +1737,7 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
   const atlasPref = ATLAS_PREF[understood.nlu.intent];
   const searchishIntent = Boolean(atlasPref) || understood.nlu.intent === "SEARCH_TRAIN" || understood.nlu.intent === "BOOK_TRAIN";
   let detTrains: AgentTrainTable | null = null;
+  let detJourney: JourneyPlan | null = null;
   // tool === "searchTrains" ka deterministic executor hai hi nahi (agentic
   // engine ka tool hai) — searchish intent + complete slots par atlasFallback
   // hi real search + table + memory dega. Warna agentic timeout par EMPTY reply.
@@ -1743,6 +1755,7 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
     atlasTrace = outcome.trace;
     atlasGrounded = outcome.grounded;
     detTrains = outcome.trains;
+    detJourney = outcome.journey ?? null;
     rememberSearch(ctx, detTrains);
   }
 
@@ -2183,6 +2196,7 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
     resumeAsk: null,
     resumeText: null,
     trains: detTrains,
+    journey: detJourney,
     confirmBook: false,
     missingFields: understood.missingFields,
     modelUsed: understood.modelUsed,

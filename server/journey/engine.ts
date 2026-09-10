@@ -22,6 +22,7 @@ import { env } from "../env.js";
 import type { ClassAvailability, TrainResult } from "../providers/types.js";
 import { routedClassBoard, routedSchedule, searchTrainsRouted, type ServedProvider } from "../railway/router.js";
 import { todayYmd } from "../util.js";
+import { MULTI_STATION_CITIES } from "../railway/station-resolve.js";
 import { CONFLICT_MESSAGE, availabilityEquals, freshnessOf, resolveConflict, sourceTypeOf } from "../providers/provenance.js";
 import {
   CLASS_CODES,
@@ -32,6 +33,7 @@ import {
   type PartialRoutePlan,
   type PartialSegment,
   type AlternativeTrainsResult,
+  type AlternateStationOption,
   type RankCategory,
   type RouteAvailability,
   type RouteLeg,
@@ -557,7 +559,7 @@ export async function findAlternativeTrains(args: {
   }
 
   /* Alternatives: full plan on same route/date, excluding this train; keep only provider-verified AVAILABLE/RAC. */
-  const plan = await planJourney({ from, to, date: args.date, travelClass: cls, preference: "best_availability", includeConnections: false, includeAlternativeDates: true, includePartial: false });
+  const plan = await planJourney({ from, to, date: args.date, travelClass: cls, preference: "best_availability", includeConnections: false, includeAlternativeDates: true, includePartial: false, includeAlternateStations: false });
   plan.sources.forEach((x) => sources.add(x));
   const t = plan.routeOptions.find((o) => o.trainNumbers[0] === args.trainNumber);
   base.selected.trainName = t?.trainNames[0] ?? null;
@@ -593,6 +595,65 @@ export async function findAlternativeTrains(args: {
   };
 }
 
+/* ── Round-18 §8: alternate boarding / destination station (same city cluster) ── */
+export function clusterSiblings(code: string): string[] {
+  const up = code.toUpperCase();
+  const group = Object.values(MULTI_STATION_CITIES).find((list) => list.includes(up));
+  return group ? [...new Set(group.filter((c) => c !== up))] : [];
+}
+
+/**
+ * Same-city alternate stations (e.g. user asked NDLS but NZM/ANVT have seats).
+ * Bounded: max 2 siblings per side, availability probe only for the fastest
+ * train per alternate pair. Result is a SUGGESTION — origin/destination are
+ * never changed silently; UI/LLM must present it as a different assumption.
+ */
+export async function findAlternateStationOptions(args: { from: string; to: string; date: string; travelClass?: string | null; limitPerSide?: number }): Promise<{ options: AlternateStationOption[]; sources: Set<string> }> {
+  const from = args.from.toUpperCase();
+  const to = args.to.toUpperCase();
+  const n = args.limitPerSide ?? 2;
+  const pairs: { from: string; to: string; changed: AlternateStationOption["changed"] }[] = [
+    ...clusterSiblings(from).slice(0, n).map((f) => ({ from: f, to, changed: "origin" as const })),
+    ...clusterSiblings(to).slice(0, n).map((t) => ({ from, to: t, changed: "destination" as const })),
+  ];
+  const sources = new Set<string>();
+  const options: AlternateStationOption[] = [];
+  await Promise.all(
+    pairs.map(async (p) => {
+      try {
+        const s = await searchTrainsRouted({ from: p.from, to: p.to, date: args.date });
+        if (!s.trains.length) return;
+        sources.add(s.provider);
+        const fastest = [...s.trains].sort((a, b) => (a.durationMinutes || 9e9) - (b.durationMinutes || 9e9) || a.number.localeCompare(b.number))[0];
+        const availability = new Map<string, RouteAvailability | null>();
+        try {
+          const board = await routedClassBoard(fastest.number, args.date, p.from, p.to, "GN", args.travelClass ? [args.travelClass] : fastest.classes.map((c) => c.code));
+          const row = bestClassRow(board.classes, args.travelClass ?? null);
+          availability.set(fastest.number, row);
+          if (row) sources.add(row.source);
+        } catch {
+          availability.set(fastest.number, null);
+        }
+        const ranked = rankRouteOptions({ origin: p.from, destination: p.to, trains: s.trains, availability, source: s.provider, travelClass: args.travelClass ?? null });
+        const best = ranked.find((o) => o.trainNumbers[0] === fastest.number) ?? ranked[0] ?? null;
+        options.push({
+          from: p.from,
+          to: p.to,
+          changed: p.changed,
+          count: s.trains.length,
+          best,
+          source: s.provider,
+          note: `${p.changed === "origin" ? `Boarding ${p.from}` : `Destination ${p.to}`} (same city) — ${s.trains.length} trains${best?.availability ? `, ${best.trainNumbers[0]} ${best.availability.classCode} ${best.availability.status}${best.availability.seats != null ? ` ${best.availability.seats}` : ""}` : ""}. Ye aapki original ${p.changed === "origin" ? "boarding" : "destination"} station se ALAG hai — confirm karein.`,
+        });
+      } catch {
+        /* skip pair */
+      }
+    }),
+  );
+  options.sort((a, b) => availScore(a.best?.availability ?? null) - availScore(b.best?.availability ?? null) || a.from.localeCompare(b.from) || a.to.localeCompare(b.to));
+  return { options, sources };
+}
+
 /* ── Feature 2: plan + recovery ───────────────────────────────────── */
 export async function planJourney(args: {
   from: string;
@@ -603,6 +664,7 @@ export async function planJourney(args: {
   includeConnections?: boolean;
   includeAlternativeDates?: boolean;
   includePartial?: boolean;
+  includeAlternateStations?: boolean;
   trains?: TrainResult[];
   searchProvider?: ServedProvider;
 }): Promise<JourneyPlan> {
@@ -697,12 +759,24 @@ export async function planJourney(args: {
       connections = c.connections;
       c.sources.forEach((s) => sources.add(s));
     }
+    /* §8 alternate boarding/destination station (same city) — suggestion only. */
+    let alternateStations: AlternateStationOption[] = [];
+    if (args.includeAlternateStations !== false) {
+      try {
+        const alt = await findAlternateStationOptions({ from, to, date: args.date, travelClass: args.travelClass ?? null });
+        alternateStations = alt.options.filter((o) => o.count > 0);
+        alt.sources.forEach((s) => sources.add(s));
+      } catch {
+        alternateStations = [];
+      }
+    }
     recovery = {
       reason: trains.length === 0 ? "Koi direct train nahi mili." : `Direct trains mein ${args.travelClass ?? "kisi class"} mein AVAILABLE/RAC seat nahi (verified ${probedKnown} trains).`,
       differentTrain,
       partialRoute: partial,
       connecting: connections,
       alternativeDates,
+      alternateStations,
     };
   }
   if (!trains.length && provider === "none") notes.push("Railway data source unavailable — RailCore/RailKit/RailRadar/web sab se jawab nahi mila.");

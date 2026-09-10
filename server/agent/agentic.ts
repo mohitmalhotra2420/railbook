@@ -42,6 +42,7 @@ import { durationLabelOf, type JourneyPlan, type AlternativeTrainsResult } from 
 import { findAlternativeTrains } from "../journey/engine.js";
 import { pickTrains, type TrainPickerResult } from "../journey/trainpicker.js";
 import { capabilityAvailable, UNAVAILABLE_MESSAGES } from "../providers/capabilities.js";
+import { makeProvenance } from "../providers/provenance.js";
 import { webSearch } from "./websearch.js";
 import { findTopicAnswer, HINGLISH_TOPIC_WORDS, significantWords } from "./topicpage.js";
 import { railKbAnswer } from "./railkb.js";
@@ -1470,10 +1471,13 @@ export async function executeApprovedTool(
         const runLabel = liveRunDateLabel((live as { journeyDate?: string | null }).journeyDate);
         const runState = (live as { runState?: string | null }).runState;
         const nextBit = live.nextStation && runState !== "completed" ? `, next ${live.nextStation}` : "";
+        /* Round-18 §14: freshness envelope — stale live data is never presented as current. */
+        const provenance = makeProvenance({ source: res.provider, kind: "live_status", requestDate: todayYmd(), travelDate: (live as { journeyDate?: string | null }).journeyDate ?? null, providerUpdatedAt: live.lastUpdatedAt ?? null });
+        const staleNote = provenance.freshness === "stale" && runState !== "completed" ? ` ⚠ STALE: provider ka last update ${live.lastUpdatedAt} — ye position abhi ki nahi, user ko saaf bolo "purana update hai, dobara try karein".` : provenance.freshness === "unknown" && live.lastUpdatedAt ? ` (provider update: ${live.lastUpdatedAt})` : "";
         return okResult(
           res.provider,
-          `${live.trainNumber ?? a.train_number}${runLabel ? ` [${runLabel}]` : ""} — ${live.status ?? "unknown"}${livePositionLabel(live) ? `, ${livePositionLabel(live)}` : ""}${nextBit}${!/\d+\s*min/i.test(String(live.status ?? "")) && live.delayMinutes != null ? `, delay ${live.delayMinutes}m` : ""}.${runLabel ? ` (Ye ${runLabel} ka status hai — user ko run-date saaf batao.)` : ""}${webSourceLabel(res.provider)}`,
-          live,
+          `${live.trainNumber ?? a.train_number}${runLabel ? ` [${runLabel}]` : ""} — ${live.status ?? "unknown"}${livePositionLabel(live) ? `, ${livePositionLabel(live)}` : ""}${nextBit}${!/\d+\s*min/i.test(String(live.status ?? "")) && live.delayMinutes != null ? `, delay ${live.delayMinutes}m` : ""}.${runLabel ? ` (Ye ${runLabel} ka status hai — user ko run-date saaf batao.)` : ""}${staleNote}${webSourceLabel(res.provider)}`,
+          { ...live, provenance },
         );
       }
       case "CHECK_AVAILABILITY": {
@@ -1592,7 +1596,7 @@ export async function executeApprovedTool(
           `#${o.rank} ${o.trainNumbers.join("+")} ${o.trainNames[0] ?? ""} ${o.departure}→${o.arrival}${o.arrivalDayOffset ? ` (${arrivalDayLabel(o.arrivalDayOffset)})` : ""} ${o.durationLabel ?? ""} ${o.changes ? `${o.changes} change (layover ${o.layoverMinutes}m)` : "direct"}${o.availability ? ` · ${o.availability.classCode} ${o.availability.status}${o.availability.seats != null ? ` ${o.availability.seats}` : ""}${o.availability.fare != null ? ` ₹${o.availability.fare}` : ""}` : ""} [${o.badges.join(",") || o.category}]`;
         const extra = prefRaw === "reliable" ? " Reliability/punctuality data koi provider nahi deta — is par rank NAHI kiya, user ko saaf batao." : prefRaw === "comfortable" ? " Comfort = AC classes (1A/2A/3A/CC/EC) available hona — classes field dekho; comfort score invent mat karo." : "";
         const rec = plan.recovery
-          ? ` RECOVERY: ${plan.recovery.reason} different_train=${plan.recovery.differentTrain.length}, connecting=${plan.recovery.connecting.length}, partial=${plan.recovery.partialRoute?.plans.filter((p) => p.fullyAvailable).length ?? 0}, alt_dates=${plan.recovery.alternativeDates.map((d) => `${d.date}:${d.count}`).join("/")}. User ki date badli NAHI — alternatives sirf suggest karo.`
+          ? ` RECOVERY: ${plan.recovery.reason} different_train=${plan.recovery.differentTrain.length}, connecting=${plan.recovery.connecting.length}, partial=${plan.recovery.partialRoute?.plans.filter((p) => p.fullyAvailable).length ?? 0}, alt_dates=${plan.recovery.alternativeDates.map((d) => `${d.date}:${d.count}`).join("/")}${plan.recovery.alternateStations.length ? `, alternate_stations=${plan.recovery.alternateStations.map((o) => `${o.from}→${o.to} (${o.count}${o.best?.availability ? `, ${o.best.trainNumbers[0]} ${o.best.availability.classCode} ${o.best.availability.status}` : ""})`).join("; ")} — ye ALAG boarding/destination station hai, user se confirm karo pehle` : ""}. User ki date/stations badli NAHI — alternatives sirf suggest karo.`
           : "";
         return okResult(
           plan.sources[0] ?? null,
