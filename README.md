@@ -213,6 +213,11 @@ only provider-verified alternatives.
 - Every connecting leg now shows **train name + boarding/alighting station name (code) + calendar date** (no more bare "+1d"), plus a "↓ Yahan train badlo: Ambala Cant Jn (UMB)" marker.
 - **Seat per leg:** `probeConnectionLegs()` probes leg A (origin→hub) and leg B (hub→destination) separately — never origin→destination on a train that doesn't go there. Tapping a leg asks for that leg's segment and date only.
 
+### Round-18m-5 — connecting routes only when BOTH legs have seats
+- `bookableConnections()` keeps a connection only if **every leg** has provider-proven, fresh AVL/RAC; WL / N-A / unknown / stale legs are dropped (never shown as an "alternative").
+- More candidates: fixed hubs (up to 10 connections) + **route-derived hubs** (`routeDerivedHubs()` — junction/major stops from the direct trains' timetable, e.g. JAT→BDTS tries PTKC/LDH/NDLS/SWM/RTM/BH), all legs probed, then filtered.
+- When nothing passes: card + `plan.notes` say "Connecting routes mile lekin kisi mein dono trains par seat available nahi thi — isliye connecting option nahi dikhaya." Summary's "route via X" line lists per-leg seats.
+
 ## Extra fallback APIs (Round-16o, optional)
 
 Data chain per method: **RailCore → RailKit → RailRadar → Indian Rail API → verified-site web-scrape → none**. The two new providers are *additional* and fully optional — with no key set they are skipped and nothing else changes.

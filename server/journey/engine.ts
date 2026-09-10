@@ -277,7 +277,7 @@ export function evaluateConnection(
  * train wahan jaati hi nahi; dono trains ki seat alag-alag dikhao"):
  * har leg ka apna segment (A: from→hub, B: hub→to) probe hota hai. Bounded:
  * pehli `limit` connections, dono legs parallel, provider-proven only. */
-export async function probeConnectionLegs(connections: Connection[], date: string, travelClass: string | null, limit = 6): Promise<Set<string>> {
+export async function probeConnectionLegs(connections: Connection[], date: string, travelClass: string | null, limit = 10): Promise<Set<string>> {
   const sources = new Set<string>();
   const cache = new Map<string, Promise<RouteAvailability | null>>();
   const probe = (leg: RouteLeg): Promise<RouteAvailability | null> => {
@@ -299,6 +299,57 @@ export async function probeConnectionLegs(connections: Connection[], date: strin
     }),
   );
   return sources;
+}
+
+/* Round-18m-5 (user: "connecting mein WL wali train kyu — humein AVAILABLE seat
+ * wale route chahiye"): connection tabhi option hai jab DONO legs par
+ * provider-proven AVL/RAC (fresh) ho. Baaki drop — WL/N-A/unknown leg wali
+ * connection kabhi "alternative" nahi. Deterministic: seats-desc → duration. */
+export function legBookable(a: RouteAvailability | null | undefined): boolean {
+  return !!a && !a.stale && (a.status === "AVAILABLE" || a.status === "RAC");
+}
+export function bookableConnections(connections: Connection[]): Connection[] {
+  return connections
+    .filter((c) => c.legs.length > 0 && c.legs.every((l) => legBookable(l.availability)))
+    .sort((x, y) => {
+      const minSeats = (c: Connection) => Math.min(...c.legs.map((l) => (l.availability?.status === "AVAILABLE" ? l.availability.seats ?? 0 : 0)));
+      return (x.totalDurationMinutes ?? 9e9) - (y.totalDurationMinutes ?? 9e9) || minSeats(y) - minSeats(x) || x.arrivalTrain.localeCompare(y.arrivalTrain);
+    })
+    .slice(0, 4);
+}
+export const CONNECTION_NO_SEAT_NOTE = "Connecting routes mile lekin kisi mein dono trains par seat available nahi thi (WL/N-A) — isliye connecting option nahi dikhaya.";
+
+/* Round-18m-5: smart hubs — user ke route ki DIRECT trains ke beech wale
+ * bade stops (schedule se, invent nahi) ko bhi hub banao. Fixed hub list
+ * (NDLS/UMB…) long routes par seat-wali connection nahi de paati; asli
+ * route ke junctions (e.g. JAT→BDTS par RTM/KOTA/BRC) se milti hai.
+ * Bounded: 2 trains ki timetable, har train se max 4 evenly-spaced stops. */
+export async function routeDerivedHubs(directTrains: { number: string }[], from: string, to: string, limit = 6): Promise<string[]> {
+  const out: string[] = [];
+  for (const t of directTrains.slice(0, 2)) {
+    try {
+      const sched = await routedSchedule(t.number);
+      const stops = (sched.schedule && "stops" in sched.schedule ? (sched.schedule.stops as Stop[]) : []) ?? [];
+      const codes = stops.map((s) => String(s.code).toUpperCase());
+      const iFrom = codes.indexOf(from);
+      const iTo = codes.indexOf(to);
+      if (iFrom < 0 || iTo < 0 || iTo - iFrom < 3) continue;
+      /* Sirf junction/major stops (naam se: JN / JUNCTION / CANTT / CENTRAL /
+       * TERMINUS) ya configured hub list — chhote halts par connection nahi. */
+      const JN_RE = /\b(JN|JUNCTION|CANTT?|CENTRAL|TERMINUS|CITY)\b/i;
+      const mid = stops.slice(iFrom + 1, iTo).filter((s) => JN_RE.test(String(s.name ?? "")) || JOURNEY_CONFIG.connectionHubs.includes(String(s.code).toUpperCase()));
+      const step = Math.max(1, Math.ceil(mid.length / limit));
+      for (let i = 0; i < mid.length; i += step) {
+        const c = String(mid[i].code).toUpperCase();
+        if (c && !out.includes(c) && c !== from && c !== to) out.push(c);
+        if (out.length >= limit) break;
+      }
+    } catch {
+      /* timetable nahi — skip */
+    }
+    if (out.length >= limit) break;
+  }
+  return out;
 }
 
 export async function findConnections(
@@ -328,10 +379,11 @@ export async function findConnections(
     } catch {
       /* hub pair fail — skip, never invent */
     }
-    if (out.length >= 6) break;
+    if (out.length >= 12) break;
   }
   out.sort((x, y) => (x.totalDurationMinutes ?? 9e9) - (y.totalDurationMinutes ?? 9e9) || x.layoverMinutes - y.layoverMinutes || x.arrivalTrain.localeCompare(y.arrivalTrain));
-  return { connections: out.slice(0, 4), hubsTried: hubs, sources };
+  /* Round-18m-5: zyada candidates rakho — seat-filter (dono legs AVL/RAC) ke baad hi 4 tak dikhengi. */
+  return { connections: out.slice(0, 10), hubsTried: hubs, sources };
 }
 
 /* ── Feature 3: vacant seats ──────────────────────────────────────── */
@@ -609,9 +661,9 @@ export async function findAlternativeTrains(args: {
   let connecting: Connection[] = [];
   if (!alternatives.length) {
     const c = await findConnections(from, to, args.date, { maxHubs: 2 });
-    connecting = c.connections.slice(0, 2);
     c.sources.forEach((x) => sources.add(x));
-    (await probeConnectionLegs(connecting, args.date, cls ?? null, 2)).forEach((x) => sources.add(x));
+    (await probeConnectionLegs(c.connections, args.date, cls ?? null)).forEach((x) => sources.add(x));
+    connecting = bookableConnections(c.connections).slice(0, 2);
   }
   const why =
     reason === "waitlist" ? `${args.trainNumber} ${cls ?? ""} WL${selRow?.waitlist ?? ""}` : reason === "rac" ? `${args.trainNumber} ${cls ?? ""} RAC` : reason === "low_availability" ? `${args.trainNumber} ${cls ?? ""} mein sirf ${selRow?.seats} seats` : reason === "not_available" ? `${args.trainNumber} ${cls ?? ""} not available` : reason === "class_unavailable" ? `${args.trainNumber} mein ${cls} class ka data/seat nahi` : `${args.trainNumber} ki availability provider se nahi aayi`;
@@ -765,6 +817,18 @@ export async function planJourney(args: {
     connections = c.connections;
     c.sources.forEach((s) => sources.add(s));
     (await probeConnectionLegs(connections, args.date, args.travelClass ?? null)).forEach((s) => sources.add(s));
+    const found = connections.length;
+    connections = bookableConnections(connections);
+    if (!connections.length && trains.length) {
+      const hubs = await routeDerivedHubs(probeList, from, to);
+      if (hubs.length) {
+        const c2 = await findConnections(from, to, args.date, { hubs, maxHubs: hubs.length, legsPerHub: 5 });
+        c2.sources.forEach((s) => sources.add(s));
+        (await probeConnectionLegs(c2.connections, args.date, args.travelClass ?? null)).forEach((s) => sources.add(s));
+        connections = bookableConnections(c2.connections);
+      }
+    }
+    if ((found || trains.length) && !connections.length) notes.push(CONNECTION_NO_SEAT_NOTE);
   }
 
   const routeOptions = rankRouteOptions({ origin: from, destination: to, trains, availability, connections, source: provider, travelClass: args.travelClass ?? null });
@@ -827,6 +891,17 @@ export async function planJourney(args: {
       connections = c.connections;
       c.sources.forEach((s) => sources.add(s));
       (await probeConnectionLegs(connections, args.date, args.travelClass ?? null)).forEach((s) => sources.add(s));
+      connections = bookableConnections(connections);
+      if (!connections.length) {
+        const hubs = await routeDerivedHubs(probeList, from, to);
+        if (hubs.length) {
+          const c2 = await findConnections(from, to, args.date, { hubs, maxHubs: hubs.length, legsPerHub: 5 });
+          c2.sources.forEach((s) => sources.add(s));
+          (await probeConnectionLegs(c2.connections, args.date, args.travelClass ?? null)).forEach((s) => sources.add(s));
+          connections = bookableConnections(c2.connections);
+        }
+      }
+      if (!connections.length && !notes.includes(CONNECTION_NO_SEAT_NOTE)) notes.push(CONNECTION_NO_SEAT_NOTE);
     }
     /* §8 alternate boarding/destination station (same city) — suggestion only. */
     let alternateStations: AlternateStationOption[] = [];
@@ -920,7 +995,8 @@ export function journeySummary(plan: JourneyPlan): string | null {
   } else if (!bestOk && conn && conn.legs.length >= 2) {
     const via = conn.stationName ?? conn.station;
     const trains = conn.legs.map((l) => l.trainNumber).join("→");
-    parts.push(`If it slips, route via ${via} (${trains}, layover ${conn.layoverMinutes} min).`);
+    const legSeats = conn.legs.map((l) => (l.availability ? `${l.trainNumber} ${l.availability.classCode} ${l.availability.status === "AVAILABLE" ? `AVL ${l.availability.seats ?? ""}`.trim() : l.availability.status === "RAC" ? "RAC" : l.availability.status}` : null)).filter(Boolean);
+    parts.push(`If it slips, route via ${via} (${trains}, layover ${conn.layoverMinutes} min${legSeats.length ? `; ${legSeats.join(", ")}` : ""}).`);
   }
   /* Alternative date with real trains. */
   /* Later dates first (a "shift to today" suggestion is usually already past departure). */

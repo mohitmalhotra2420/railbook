@@ -230,6 +230,9 @@ export function JourneyOptions({
       {plan.directUnavailable && (
         <div className="jo-alert">
           Direct seat nahi mili. Ye alternatives mile:
+          {!connections.length && plan.notes.some((n) => /Connecting routes mile lekin/.test(n)) && (
+            <div className="jo-split-note">🔁 Connecting routes mile, lekin kisi mein dono trains par seat available nahi thi (WL/N-A) — isliye connecting option nahi diya.</div>
+          )}
           {!rec?.differentTrain.length && !connections.length && !partialPlans.length && !altDates.length && (
             <div className="jo-alert-sub">Provider se koi verified alternative nahi aaya — invent nahi karenge.</div>
           )}
@@ -315,7 +318,7 @@ export function JourneyOptions({
           )}
           {connections.length > 0 && (
             <div className="jo-sec">
-              <div className="jo-sec-title">🔁 Connecting journey</div>
+              <div className="jo-sec-title">🔁 Connecting journey — dono trains mein seat available</div>
               {connections.slice(0, 2).map((c, i) => <ConnectionRow key={i} c={c} baseDate={baseDate} onPickLeg={pickLeg} />)}
             </div>
           )}

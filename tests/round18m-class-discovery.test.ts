@@ -71,3 +71,21 @@ describe("Round-18m-3 connecting legs carry their own segment seat + station nam
     expect(calls).toEqual([]);
   }, 30000);
 });
+
+describe("Round-18m-5 connecting options only when BOTH legs have seats", () => {
+  it("drops WL/stale legs, keeps AVL+RAC, deterministic order", async () => {
+    const { bookableConnections } = await import("../server/journey/engine.js");
+    const leg = (n: string, from: string, to: string, av: unknown) => ({ trainNumber: n, trainName: n, from, to, departure: "10:00", arrival: "12:00", arrivalDayOffset: 0, durationMinutes: 120, availability: av });
+    const avl = (seats: number, extra: object = {}) => ({ classCode: "SL", status: "AVAILABLE", seats, rac: null, waitlist: null, fare: 500, source: "web_railyatri", ...extra });
+    const wl = { classCode: "SL", status: "WAITLIST", seats: null, rac: null, waitlist: 44, fare: 500, source: "web_railyatri" };
+    const conn = (id: string, a: unknown, b: unknown, total: number) => ({ station: "UMB", arrivalTrain: id, departureTrain: "x", arrivalAt: "", departsAt: "", arrivalDayOffset: 0, layoverMinutes: 60, valid: true, reason: null, totalDurationMinutes: total, source: "t", legs: [leg(id, "JAT", "UMB", a), leg("x", "UMB", "BDTS", b)] });
+    const out = bookableConnections([
+      conn("A", avl(10), wl, 100),                 // 2nd leg WL → drop
+      conn("B", avl(5), avl(3), 300),              // ok
+      conn("C", avl(12, { stale: true }), avl(9), 200), // stale leg → drop
+      conn("D", avl(1), { ...wl, status: "RAC", rac: 2 }, 250), // AVL + RAC → ok
+      conn("E", avl(4), null, 150),                // unknown leg → drop
+    ] as never);
+    expect(out.map((c) => c.arrivalTrain)).toEqual(["D", "B"]);
+  });
+});
