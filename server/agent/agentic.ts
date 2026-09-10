@@ -37,6 +37,8 @@ import { executeTool, livePositionLabel, liveRunDateLabel } from "./tools.js";
 import {
   GENERAL_FACT_RE, isQuestionPhraseNotTrainName, segmentOfStops } from "./context.js";
 import { routedTrainNameSearch, routedTrainHistory } from "../railway/router.js";
+import { JOURNEY_CONFIG, findConnections, findPartialRouteSeats, findVacantSeats, planJourney } from "../journey/engine.js";
+import { durationLabelOf, type JourneyPlan } from "../journey/types.js";
 import { webSearch } from "./websearch.js";
 import { findTopicAnswer, HINGLISH_TOPIC_WORDS, significantWords } from "./topicpage.js";
 import { railKbAnswer } from "./railkb.js";
@@ -58,7 +60,11 @@ export type AgenticToolName =
   | "CHECK_PNR"
   | "GET_CANCELLED_TRAINS"
   | "GENERAL_RAILWAY_ANSWER"
-  | "JOURNEY_ANALYZE";
+  | "JOURNEY_ANALYZE"
+  | "RANK_JOURNEY_OPTIONS"
+  | "FIND_VACANT_SEATS"
+  | "FIND_PARTIAL_ROUTE_SEATS"
+  | "FIND_CONNECTIONS";
 
 const APPROVED: readonly AgenticToolName[] = [
   "WEB_SEARCH",
@@ -77,6 +83,10 @@ const APPROVED: readonly AgenticToolName[] = [
   "GET_CANCELLED_TRAINS",
   "GENERAL_RAILWAY_ANSWER",
   "JOURNEY_ANALYZE",
+  "RANK_JOURNEY_OPTIONS",
+  "FIND_VACANT_SEATS",
+  "FIND_PARTIAL_ROUTE_SEATS",
+  "FIND_CONNECTIONS",
 ];
 
 export type ToolTraceStep = {
@@ -124,7 +134,7 @@ export type AgentTrainTable = {
   rows: AgentTrainRow[];
 };
 
-export type SearchCapture = { table: AgentTrainTable | null };
+export type SearchCapture = { table: AgentTrainTable | null; plan?: JourneyPlan | null };
 
 /* ── Injectable NVIDIA fetch (tests) ─────────────────────────────── */
 
@@ -218,6 +228,36 @@ const ArgSchemas = {
     preferred_class: z.string().regex(/^[A-Z0-9]{1,3}$/).nullish(),
     depart_after: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).nullish(),
     depart_before: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).nullish(),
+  }),
+  /* Round-17: journey intelligence tools (deterministic engine, model sirf explain karta hai). */
+  RANK_JOURNEY_OPTIONS: z.object({
+    origin: StationRef,
+    destination: StationRef,
+    date: Ymd,
+    preference: z.enum(["best_overall", "fastest", "direct", "fewest_changes", "best_availability", "cheapest", "earliest", "comfortable", "reliable", "alternative"]).nullish(),
+    travel_class: z.string().regex(/^[A-Z0-9]{1,3}$/).nullish(),
+    include_connections: z.boolean().nullish(),
+    include_alternative_dates: z.boolean().nullish(),
+  }),
+  FIND_VACANT_SEATS: z.object({
+    train_number: TrainNo,
+    origin: StationRef,
+    destination: StationRef,
+    date: Ymd,
+    travel_class: z.string().regex(/^[A-Z0-9]{1,3}$/).nullish(),
+  }),
+  FIND_PARTIAL_ROUTE_SEATS: z.object({
+    train_number: TrainNo,
+    origin: StationRef,
+    destination: StationRef,
+    date: Ymd,
+    travel_class: z.string().regex(/^[A-Z0-9]{1,3}$/),
+  }),
+  FIND_CONNECTIONS: z.object({
+    origin: StationRef,
+    destination: StationRef,
+    date: Ymd,
+    via: StationRef.nullish(),
   }),
 } as const;
 
@@ -462,6 +502,78 @@ export const AGENTIC_TOOLS = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "RANK_JOURNEY_OPTIONS",
+      description:
+        "RailBook Atlas ranking engine (deterministic, real railway data): 'best/sabse achhi train', 'fastest', 'easiest route', 'least/fewest changes', 'comfortable', 'reliable', 'best overall', 'alternative route' — in sab ke liye YEHI tool. Backend rank karta hai (fastest / direct / fewest changes / best availability / cheapest / earliest / best_overall) + connections + alternative dates (suggestion only — user ki date nahi badalta). Direct seat na ho to recovery block deta hai (different train / partial route / connecting / alternative dates). Reliability data koi provider nahi deta — score invent mat karo. Tum sirf result EXPLAIN karo.",
+      parameters: {
+        type: "object",
+        properties: {
+          origin: { type: "string", description: "City naam ya station code" },
+          destination: { type: "string" },
+          date: { type: "string", description: "YYYY-MM-DD — user se aayi date; assume mat karo" },
+          preference: { type: "string", enum: ["best_overall", "fastest", "direct", "fewest_changes", "best_availability", "cheapest", "earliest", "comfortable", "reliable", "alternative"] },
+          travel_class: { type: "string", description: "Optional class (3A/SL/CC…) — availability isi class ki" },
+          include_connections: { type: "boolean" },
+          include_alternative_dates: { type: "boolean" },
+        },
+        required: ["origin", "destination", "date"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "FIND_VACANT_SEATS",
+      description:
+        "Ek train ke segment par vacant seats (class-wise AVAILABLE/RAC/WL count + fare) provider se. Coach/berth-level vacancy (B4 · 32 LB) abhi koi provider nahi deta — result ka capability.berthLevel dekho aur user ko honestly batao.",
+      parameters: {
+        type: "object",
+        properties: {
+          train_number: { type: "string" },
+          origin: { type: "string" },
+          destination: { type: "string" },
+          date: { type: "string" },
+          travel_class: { type: "string" },
+        },
+        required: ["train_number", "origin", "destination", "date"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "FIND_PARTIAL_ROUTE_SEATS",
+      description:
+        "Direct seat na mile to USI train par split plan: origin→X + X→destination dono segments provider-verified (route sequence, class, date check). Same-train switch bhi detect karta hai ('seat X ke baad AVAILABLE'). Sirf real availability — berth number nahi (provider nahi deta).",
+      parameters: {
+        type: "object",
+        properties: {
+          train_number: { type: "string" },
+          origin: { type: "string" },
+          destination: { type: "string" },
+          date: { type: "string" },
+          travel_class: { type: "string" },
+        },
+        required: ["train_number", "origin", "destination", "date", "travel_class"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "FIND_CONNECTIONS",
+      description:
+        "Connecting-train options (1 change) real search legs se: layover = departureB − arrivalA, configurable minimum buffer; invalid/unsafe connections reject. 'via <station>' de sakte ho.",
+      parameters: {
+        type: "object",
+        properties: { origin: { type: "string" }, destination: { type: "string" }, date: { type: "string" }, via: { type: "string" } },
+        required: ["origin", "destination", "date"],
+      },
+    },
+  },
 ] as const;
 
 /**
@@ -534,6 +646,17 @@ async function resolveStationRef(raw: string): Promise<ResolvedStn> {
   }
   if (res.stations.length) return { code: res.stations[0].code };
   return { error: `"${s}" station lookup mein nahi mila — invent nahi karunga.` };
+}
+
+/** Round-17: origin+destination dono resolve; ambiguous → needs_choice fail. */
+async function resolvePair(origin: string, destination: string): Promise<{ from: string; to: string } | { fail: ApprovedToolResult }> {
+  const fromRes = await resolveStationRef(origin);
+  if ("error" in fromRes) return { fail: failResult(null, fromRes.error) };
+  if ("candidates" in fromRes) return { fail: failResult(null, `${fromRes.city} ambiguous hai — pehle user se station poochna hoga.`, { needs_choice: true, city: fromRes.city, stations: fromRes.candidates }) };
+  const toRes = await resolveStationRef(destination);
+  if ("error" in toRes) return { fail: failResult(null, toRes.error) };
+  if ("candidates" in toRes) return { fail: failResult(null, `${toRes.city} ambiguous hai — pehle user se station poochna hoga.`, { needs_choice: true, city: toRes.city, stations: toRes.candidates }) };
+  return { from: fromRes.code, to: toRes.code };
 }
 
 /** Station code ka OFFICIAL naam (station API se) — code-mixups (DEL≠Delhi) pakadne ke liye. */
@@ -1395,6 +1518,69 @@ export async function executeApprovedTool(
       }
       case "JOURNEY_ANALYZE":
         return await journeyAnalyze(a as never);
+      case "RANK_JOURNEY_OPTIONS": {
+        const st = await resolvePair(a.origin as string, a.destination as string);
+        if ("fail" in st) return st.fail;
+        const prefRaw = String(a.preference ?? "best_overall");
+        const pref = prefRaw === "comfortable" || prefRaw === "reliable" || prefRaw === "alternative" ? "best_overall" : prefRaw;
+        const plan = await planJourney({
+          from: st.from,
+          to: st.to,
+          date: a.date as string,
+          travelClass: (a.travel_class as string | undefined)?.toUpperCase() ?? null,
+          preference: pref,
+          includeConnections: Boolean(a.include_connections) || prefRaw === "alternative" || prefRaw === "fewest_changes",
+          includeAlternativeDates: Boolean(a.include_alternative_dates) || prefRaw === "alternative",
+        });
+        const top = plan.routeOptions.slice(0, 5);
+        const line = (o: (typeof top)[number]) =>
+          `#${o.rank} ${o.trainNumbers.join("+")} ${o.trainNames[0] ?? ""} ${o.departure}→${o.arrival}${o.arrivalDayOffset ? ` (${arrivalDayLabel(o.arrivalDayOffset)})` : ""} ${o.durationLabel ?? ""} ${o.changes ? `${o.changes} change (layover ${o.layoverMinutes}m)` : "direct"}${o.availability ? ` · ${o.availability.classCode} ${o.availability.status}${o.availability.seats != null ? ` ${o.availability.seats}` : ""}${o.availability.fare != null ? ` ₹${o.availability.fare}` : ""}` : ""} [${o.badges.join(",") || o.category}]`;
+        const extra = prefRaw === "reliable" ? " Reliability/punctuality data koi provider nahi deta — is par rank NAHI kiya, user ko saaf batao." : prefRaw === "comfortable" ? " Comfort = AC classes (1A/2A/3A/CC/EC) available hona — classes field dekho; comfort score invent mat karo." : "";
+        const rec = plan.recovery
+          ? ` RECOVERY: ${plan.recovery.reason} different_train=${plan.recovery.differentTrain.length}, connecting=${plan.recovery.connecting.length}, partial=${plan.recovery.partialRoute?.plans.filter((p) => p.fullyAvailable).length ?? 0}, alt_dates=${plan.recovery.alternativeDates.map((d) => `${d.date}:${d.count}`).join("/")}. User ki date badli NAHI — alternatives sirf suggest karo.`
+          : "";
+        return okResult(
+          plan.sources[0] ?? null,
+          `Atlas rank (${plan.query.from}→${plan.query.to} ${plan.query.date}, pref=${prefRaw}): ${plan.routeOptions.length} options.${plan.best ? ` BEST: ${line(plan.best)}.` : " Koi option nahi."}${top.length > 1 ? ` Others: ${top.slice(1).map(line).join("; ")}.` : ""}${plan.notes.length ? ` ${plan.notes.join(" ")}` : ""}${rec}${extra} (Sources: ${plan.sources.join(", ") || "none"}.)`,
+          plan,
+        );
+      }
+      case "FIND_VACANT_SEATS": {
+        const st = await resolvePair(a.origin as string, a.destination as string);
+        if ("fail" in st) return st.fail;
+        const v = await findVacantSeats({ trainNumber: a.train_number as string, origin: st.from, destination: st.to, date: a.date as string, travelClass: (a.travel_class as string | undefined)?.toUpperCase() ?? null });
+        if (!v.rows.length) return failResult(v.source, `${a.train_number} ${st.from}→${st.to} ${a.date}: seat data provider se nahi aaya — kuch invent nahi karunga.`, v);
+        return okResult(
+          v.source,
+          `${a.train_number} ${st.from}→${st.to} (${a.date}) vacant seats: ${v.rows.map((r) => `${r.classCode} ${r.status}${r.seats != null ? ` ${r.seats}` : ""}${r.waitlist != null ? ` WL${r.waitlist}` : ""}${r.fare != null ? ` ₹${r.fare}` : ""}`).join(", ")}. Berth-level (coach/berth no.) data provider nahi deta — user ko saaf bolo.${webSourceLabel(v.source)}`,
+          v,
+        );
+      }
+      case "FIND_PARTIAL_ROUTE_SEATS": {
+        const st = await resolvePair(a.origin as string, a.destination as string);
+        if ("fail" in st) return st.fail;
+        const pr = await findPartialRouteSeats({ trainNumber: a.train_number as string, origin: st.from, destination: st.to, date: a.date as string, classCode: String(a.travel_class) });
+        const okPlans = pr.plans.filter((p) => p.fullyAvailable);
+        const sw = pr.sameTrainSwitch;
+        return okResult(
+          pr.source,
+          `${pr.trainNumber} ${pr.trainName ?? ""} ${pr.origin}→${pr.destination} ${pr.classCode} (${pr.date}): direct ${pr.direct ? `${pr.direct.status}${pr.direct.seats != null ? ` ${pr.direct.seats}` : ""}${pr.direct.waitlist != null ? ` WL${pr.direct.waitlist}` : ""}` : "data nahi"}. ${pr.note}${okPlans.length ? ` Split plans: ${okPlans.map((p) => `${p.segments.map((x) => `${x.from}→${x.to} ${x.status}${x.seats != null ? ` ${x.seats}` : ""}`).join(" + ")} (switch @${p.switchStation})`).join("; ")}.` : ""}${sw ? ` Same-train switch: seat ${sw.afterStationName ?? sw.afterStation} (${sw.afterStation}) ke baad AVAILABLE (${sw.segment.seats ?? ""} seats ${sw.segment.classCode}).` : ""} Berth numbers provider nahi deta — chart ke baad hi. Verification: sequence=${pr.verification.stationSequenceValid}, class=${pr.verification.classValid}, date=${pr.verification.dateValid}.${webSourceLabel(pr.source)}`,
+          pr,
+        );
+      }
+      case "FIND_CONNECTIONS": {
+        const st = await resolvePair(a.origin as string, a.destination as string);
+        if ("fail" in st) return st.fail;
+        const via = a.via ? await resolveStationRef(String(a.via)) : null;
+        const hubs = via && "code" in via ? [via.code] : undefined;
+        const c = await findConnections(st.from, st.to, a.date as string, { hubs, maxHubs: hubs ? 1 : 3 });
+        if (!c.connections.length) return failResult(null, `${st.from}→${st.to} (${a.date}): koi valid connection nahi mili (hubs tried: ${c.hubsTried.join(", ")}; buffer ≥ ${JOURNEY_CONFIG.minTransferMinutes} min). Invent nahi karunga.`, { connections: [], hubsTried: c.hubsTried });
+        return okResult(
+          [...c.sources][0] ?? null,
+          `${st.from}→${st.to} (${a.date}) connections: ${c.connections.map((x) => `${x.legs[0].trainNumber} ${x.legs[0].departure}→${x.station} ${x.arrivalAt}, layover ${x.layoverMinutes}m, ${x.legs[1].trainNumber} ${x.departsAt}→${x.legs[1].arrival}${x.totalDurationMinutes != null ? ` (total ${durationLabelOf(x.totalDurationMinutes)})` : ""}`).join("; ")}. Min buffer ${JOURNEY_CONFIG.minTransferMinutes} min (configurable).`,
+          { connections: c.connections, hubsTried: c.hubsTried },
+        );
+      }
       default:
         return { ok: false, source: null, summary: "Unknown tool.", data: null, rejected: "not_in_allowlist" };
     }
@@ -1517,7 +1703,7 @@ function systemPrompt(
       : "",
     "RULES:",
     "1. Railway data ke liye khud decide karke approved tools call karo — tabhi jab jawab ke liye data chahiye. Agar context/history se required info (origin/destination/date/train) already pata hai to poochho mat, seedha tool call karo.",
-    "2. Fastest/cheapest/earliest/best/compare/alternative-dates/connecting routes ke liye JOURNEY_ANALYZE use karo (yeh deterministic Atlas engine hai — uske output par explain karo).",
+    "2. 'best/sabse achhi/fastest/easiest/least changes/comfortable/reliable/best overall/alternative route' jaise RANKING sawaalon ke liye RANK_JOURNEY_OPTIONS use karo (deterministic Atlas engine — backend rank karta hai, tum sirf BEST option + 1-2 alternatives 2-4 line mein explain karo; app khud card dikhata hai). Cheapest-with-fare-cap/depart-window filters ke liye JOURNEY_ANALYZE. Reliability ka data koi provider nahi deta — 'reliable' poochhe to saaf bolo ki punctuality data available nahi, aur direct/fastest ke basis par option do. Direct seat na ho (recovery block) to bolo 'Direct seat nahi mili. Ye alternatives mile:' aur SIRF tool ke verified alternatives do — user ki date khud kabhi mat badlo, alternative date sirf suggest karo.",
     "3. Multi-step tool calling allowed + encouraged hai: pehle SEARCH_TRAINS, phir results dekh kar zaroorat ke hisaab se GET_TIMETABLE / GET_FARE / CHECK_AVAILABILITY / GET_TRAIN_INFO call karo. Ek tool call mein sab na mile to agla tool call karo.",
     "3b. User sirf train number + class poochhe (route na de) to bhi GET_FARE / CHECK_AVAILABILITY bulao — route optional hai, server timetable se route khud lagata hai. Par DATE zaroori hai: Known context mein date=- ho aur user ne is message mein date na di ho to tool call MAT karo (server reject karega) — sirf date poochho (class bhi missing ho to saath mein). Aaj ki date kabhi assume mat karo.",
     "4. Sirf tool results ke facts bolo. Train number, naam, time, fare, seats, delay, STATION CODE — kuch bhi invent mat karo. Station codes/options sirf tool results se; apni knowledge se station code mat banao.",
@@ -1593,7 +1779,7 @@ function sanitizeToolName(raw: string): string {
     .replace(/<\|[^|]*\|>/g, "")
     .trim();
   if ((APPROVED as readonly string[]).includes(s)) return s;
-  const m = s.match(/^(SEARCH_TRAINS|TRAIN_NAME_SEARCH|SEARCH_STATIONS|GET_COACH_POSITION|GET_STATION_BOARD|GET_TRAIN_HISTORY|GET_TRAIN_INFO|GET_TIMETABLE|TRACK_TRAIN|CHECK_AVAILABILITY|GET_FARE|CHECK_PNR|GET_CANCELLED_TRAINS|GENERAL_RAILWAY_ANSWER|JOURNEY_ANALYZE)/);
+  const m = s.match(/^(SEARCH_TRAINS|TRAIN_NAME_SEARCH|SEARCH_STATIONS|GET_COACH_POSITION|GET_STATION_BOARD|GET_TRAIN_HISTORY|GET_TRAIN_INFO|GET_TIMETABLE|TRACK_TRAIN|CHECK_AVAILABILITY|GET_FARE|CHECK_PNR|GET_CANCELLED_TRAINS|GENERAL_RAILWAY_ANSWER|JOURNEY_ANALYZE|RANK_JOURNEY_OPTIONS|FIND_VACANT_SEATS|FIND_PARTIAL_ROUTE_SEATS|FIND_CONNECTIONS)/);
   return m ? m[1] : s;
 }
 
@@ -2132,7 +2318,7 @@ export async function runAgenticTurn(input: {
             rejected: "general_fact_tool_block",
           };
         } else if (
-          (toolName === "CHECK_AVAILABILITY" || toolName === "GET_FARE") &&
+          (toolName === "CHECK_AVAILABILITY" || toolName === "GET_FARE" || toolName === "FIND_VACANT_SEATS" || toolName === "FIND_PARTIAL_ROUTE_SEATS") &&
           input.known?.dateProvided === false &&
           dateHint?.kind !== "date"
         ) {
@@ -2147,7 +2333,7 @@ export async function runAgenticTurn(input: {
             rejected: "date_required",
           };
         } else if (
-          (toolName === "SEARCH_TRAINS" || toolName === "JOURNEY_ANALYZE") &&
+          (toolName === "SEARCH_TRAINS" || toolName === "JOURNEY_ANALYZE" || toolName === "RANK_JOURNEY_OPTIONS" || toolName === "FIND_CONNECTIONS") &&
           input.known?.dateProvided === false &&
           dateHint?.kind !== "date"
         ) {
@@ -2167,6 +2353,30 @@ export async function runAgenticTurn(input: {
         // Structured table capture (user feedback 2026-09-05): SEARCH/JOURNEY
         // success par rows nikalo — client proper <table> render karega, aur
         // run.ts inhi se ctx memory (lastTrainNumbers/fastest) bharta hai.
+        if (result.ok && input.capture && toolName === "RANK_JOURNEY_OPTIONS") {
+          const plan = result.data as JourneyPlan;
+          input.capture.plan = plan;
+          const direct = plan.routeOptions.filter((o) => o.changes === 0);
+          if (direct.length) {
+            input.capture.table = {
+              from: plan.query.from,
+              to: plan.query.to,
+              date: plan.query.date,
+              fastest: direct.find((o) => o.badges.includes("fastest"))?.trainNumbers[0] ?? null,
+              rows: direct.map((o) => ({
+                number: o.trainNumbers[0],
+                name: o.trainNames[0] ?? "",
+                departure: o.departure,
+                arrival: o.arrival,
+                arrivalDayOffset: o.arrivalDayOffset,
+                durationMinutes: o.durationMinutes,
+                durationLabel: o.durationLabel,
+                classes: o.classes,
+                fare: o.availability?.fare != null ? { classCode: o.availability.classCode, amount: o.availability.fare } : null,
+              })),
+            };
+          }
+        }
         if (result.ok && input.capture && (toolName === "SEARCH_TRAINS" || toolName === "JOURNEY_ANALYZE")) {
           const d = result.data as
             | {

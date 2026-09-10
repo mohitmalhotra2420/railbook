@@ -30,6 +30,7 @@ import { isPastDate } from "./util.js";
 import { runUnderstand } from "./understand/index.js";
 import { runAgent } from "./agent/run.js";
 import { runAutonomousAgent } from "./agent/autonomous.js";
+import { JOURNEY_CONFIG, findConnections, findPartialRouteSeats, findVacantSeats, planJourney } from "./journey/engine.js";
 import { railcoreBlockState } from "./railway/railcore.js";
 import { getNvidiaCatalog, publicNvidiaPayload, refreshNvidiaCatalog } from "./understand/nvidia.js";
 import { answerFromEvidence, compactScheduleEvidence, shouldGroundFact } from "./understand/ground.js";
@@ -622,6 +623,62 @@ export function createApp() {
         quota,
       );
       res.json({ availability: row, bookable: isBookable(row.status) });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  /* ---------- Round-17: Journey intelligence (deterministic engine, real data only) ---------- */
+  const ymdSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+  const stnSchema = z.string().trim().regex(/^[A-Za-z0-9]{2,5}$/).transform((v) => v.toUpperCase());
+  const clsSchema = z.string().trim().regex(/^[A-Za-z0-9]{1,3}$/).transform((v) => v.toUpperCase());
+  const journeyPlanBody = z.object({
+    from: stnSchema,
+    to: stnSchema,
+    date: ymdSchema,
+    travelClass: clsSchema.nullish(),
+    preference: z.enum(["best_overall", "fastest", "direct", "fewest_changes", "best_availability", "cheapest", "earliest"]).nullish(),
+    includeConnections: z.boolean().nullish(),
+    includeAlternativeDates: z.boolean().nullish(),
+  });
+  app.post("/api/journey/plan", async (req, res, next) => {
+    try {
+      const b = journeyPlanBody.parse(req.body ?? {});
+      const plan = await planJourney({
+        from: b.from,
+        to: b.to,
+        date: b.date,
+        travelClass: b.travelClass ?? null,
+        preference: b.preference ?? "best_overall",
+        includeConnections: b.includeConnections ?? true,
+        includeAlternativeDates: b.includeAlternativeDates ?? true,
+      });
+      res.json(plan);
+    } catch (err) {
+      next(err);
+    }
+  });
+  app.post("/api/journey/vacant", async (req, res, next) => {
+    try {
+      const b = z.object({ trainNumber: z.string().regex(/^\d{5}$/), from: stnSchema, to: stnSchema, date: ymdSchema, travelClass: clsSchema.nullish() }).parse(req.body ?? {});
+      res.json(await findVacantSeats({ trainNumber: b.trainNumber, origin: b.from, destination: b.to, date: b.date, travelClass: b.travelClass ?? null }));
+    } catch (err) {
+      next(err);
+    }
+  });
+  app.post("/api/journey/partial", async (req, res, next) => {
+    try {
+      const b = z.object({ trainNumber: z.string().regex(/^\d{5}$/), from: stnSchema, to: stnSchema, date: ymdSchema, travelClass: clsSchema }).parse(req.body ?? {});
+      res.json(await findPartialRouteSeats({ trainNumber: b.trainNumber, origin: b.from, destination: b.to, date: b.date, classCode: b.travelClass }));
+    } catch (err) {
+      next(err);
+    }
+  });
+  app.post("/api/journey/connections", async (req, res, next) => {
+    try {
+      const b = z.object({ from: stnSchema, to: stnSchema, date: ymdSchema, via: stnSchema.nullish() }).parse(req.body ?? {});
+      const c = await findConnections(b.from, b.to, b.date, { hubs: b.via ? [b.via] : undefined, maxHubs: b.via ? 1 : 3 });
+      res.json({ connections: c.connections, hubsTried: c.hubsTried, sources: [...c.sources], minTransferMinutes: JOURNEY_CONFIG.minTransferMinutes, maxLayoverMinutes: JOURNEY_CONFIG.maxLayoverMinutes });
     } catch (err) {
       next(err);
     }

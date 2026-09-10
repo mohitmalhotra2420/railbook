@@ -10,6 +10,7 @@ import { loadTravellers } from "../data/travellers";
 import { availabilityLabel, formatShortDate, inr, newId, todayYmd } from "../format";
 import { BERTH_BY_CLASS, CLASS_LABELS, isBookable, type ClassAvailability, type ClassCode, type Passenger, type Station, type TrainResult } from "../types";
 import type { AgentTrainTable } from "../ai/agent";
+import { JourneyOptions } from "../components/JourneyOptions";
 
 import type { ChatMessage } from "../conversation/types";
 import { useVoiceInput } from "../voice/useVoiceInput";
@@ -817,10 +818,13 @@ export function Concierge() {
             : "";
           setThinking(false);
           // User feedback (2026-09-05): train list chat-text nahi — proper organized TABLE.
-          const tableBlock =
-            agentRes.trains && agentRes.trains.rows.length
-              ? [{ type: "traintable" as const, table: agentRes.trains }]
-              : undefined;
+          // Round-17: RANK_JOURNEY_OPTIONS → BEST OPTION card (table ki jagah); warna table.
+          const tableBlock: Block[] | undefined =
+            agentRes.journey && (agentRes.journey.routeOptions.length || agentRes.journey.directUnavailable)
+              ? [{ type: "journey" as const, plan: agentRes.journey }]
+              : agentRes.trains && agentRes.trains.rows.length
+                ? [{ type: "traintable" as const, table: agentRes.trains }]
+                : undefined;
           setMessages((m) => [
             ...m,
             { id: newId(), role: "assistant", text: agentRes.reply! + traceLine, blocks: tableBlock },
@@ -1470,6 +1474,15 @@ function BlockView({
   const { updatePassenger } = useBooking();
   if (block.type === "traintable") {
     return <TrainTableView table={block.table} />;
+  }
+  if (block.type === "journey") {
+    return (
+      <JourneyOptions
+        plan={block.plan}
+        onPickTrain={(n) => onChip(`${n} ki seat availability ${block.plan.query.travelClass ? block.plan.query.travelClass + " " : ""}${block.plan.query.date} ko ${block.plan.query.from} se ${block.plan.query.to}`)}
+        onPickDate={(d) => onChip(`${block.plan.query.from} se ${block.plan.query.to} ${d} ki trains dikhao`)}
+      />
+    );
   }
   if (block.type === "chips") {
     return (

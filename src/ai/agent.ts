@@ -24,6 +24,93 @@ export interface AgentTrainTable {
   rows: AgentTrainRow[];
 }
 
+/** Round-17: server RANK_JOURNEY_OPTIONS ka deterministic plan (BEST OPTION card). */
+export interface AgentRouteLeg {
+  trainNumber: string;
+  trainName: string;
+  from: string;
+  to: string;
+  departure: string;
+  arrival: string;
+  arrivalDayOffset: number;
+  durationMinutes: number | null;
+}
+export interface AgentRouteOption {
+  rank: number;
+  category: string;
+  badges: string[];
+  trainNumbers: string[];
+  trainNames: string[];
+  origin: string;
+  destination: string;
+  departure: string;
+  arrival: string;
+  arrivalDayOffset: number;
+  durationMinutes: number | null;
+  durationLabel: string | null;
+  changes: number;
+  legs: AgentRouteLeg[];
+  layoverMinutes: number | null;
+  classes: string[];
+  availability: { classCode: string; status: string; seats: number | null; rac: number | null; waitlist: number | null; fare: number | null; source: string } | null;
+  reliability: null;
+  source: string;
+  why: string;
+}
+export interface AgentConnection {
+  station: string;
+  stationName?: string | null;
+  arrivalTrain: string;
+  departureTrain: string;
+  arrivalAt: string;
+  departsAt: string;
+  layoverMinutes: number;
+  valid: boolean;
+  totalDurationMinutes: number | null;
+  legs: AgentRouteLeg[];
+  source: string;
+}
+export interface AgentPartialSegment {
+  from: string;
+  fromName: string | null;
+  to: string;
+  toName: string | null;
+  trainNumber: string;
+  classCode: string;
+  status: string;
+  seats: number | null;
+  waitlist: number | null;
+  fare: number | null;
+  departure: string | null;
+  arrival: string | null;
+  berth: { coach: string; berth: number; type: string } | null;
+}
+export interface AgentJourneyPlan {
+  query: { from: string; to: string; date: string; travelClass: string | null; preference: string };
+  best: AgentRouteOption | null;
+  routeOptions: AgentRouteOption[];
+  connections: AgentConnection[];
+  alternativeDates: { date: string; count: number; fastest: { number: string; durationMinutes: number } | null }[];
+  directUnavailable: boolean;
+  recovery: {
+    reason: string;
+    differentTrain: AgentRouteOption[];
+    partialRoute: {
+      trainNumber: string;
+      trainName: string | null;
+      classCode: string;
+      direct: AgentPartialSegment | null;
+      plans: { switchStation: string; switchStationName: string | null; segments: AgentPartialSegment[]; fullyAvailable: boolean; note: string }[];
+      sameTrainSwitch: { afterStation: string; afterStationName: string | null; segment: AgentPartialSegment } | null;
+      note: string;
+    } | null;
+    connecting: AgentConnection[];
+    alternativeDates: AgentJourneyPlan["alternativeDates"];
+  } | null;
+  sources: string[];
+  notes: string[];
+}
+
 export type AgentToolName =
   | "searchStations"
   | "searchTrains"

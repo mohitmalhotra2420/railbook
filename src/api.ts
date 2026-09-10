@@ -177,6 +177,7 @@ export const api = {
       failureReason?: string | null;
       engine?: "agentic_tool_calling" | "deterministic" | null;
       trains?: import("./ai/agent").AgentTrainTable | null;
+      journey?: import("./ai/agent").AgentJourneyPlan | null;
       toolTrace?: {
         step: number;
         tool: string;
@@ -326,3 +327,16 @@ export const api = {
       { method: "POST" },
     ),
 };
+
+/* ── Round-17: Journey intelligence endpoints (deterministic engine) ── */
+export function planJourneyApi(body: {
+  from: string;
+  to: string;
+  date: string;
+  travelClass?: string | null;
+  preference?: string | null;
+  includeConnections?: boolean;
+  includeAlternativeDates?: boolean;
+}) {
+  return request<import("./ai/agent").AgentJourneyPlan>("/api/journey/plan", { method: "POST", body: JSON.stringify(body) });
+}

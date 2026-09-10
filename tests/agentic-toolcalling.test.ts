@@ -250,12 +250,15 @@ function chatResponse(step: ScriptStep) {
 }
 
 describe("agentic tool-calling layer", () => {
-  it("exposes exactly the 16 approved tools (15 railway + WEB_SEARCH last-resort)", () => {
+  it("exposes exactly the 20 approved tools (19 railway incl. Round-17 journey tools + WEB_SEARCH last-resort)", () => {
     const names = AGENTIC_TOOLS.map((t) => t.function.name).sort();
     expect(names).toEqual(
       [
         "CHECK_AVAILABILITY",
         "CHECK_PNR",
+        "FIND_CONNECTIONS",
+        "FIND_PARTIAL_ROUTE_SEATS",
+        "FIND_VACANT_SEATS",
         "GENERAL_RAILWAY_ANSWER",
         "GET_CANCELLED_TRAINS",
         "GET_COACH_POSITION",
@@ -265,6 +268,7 @@ describe("agentic tool-calling layer", () => {
         "GET_TRAIN_HISTORY",
         "GET_TRAIN_INFO",
         "JOURNEY_ANALYZE",
+        "RANK_JOURNEY_OPTIONS",
         "SEARCH_STATIONS",
         "SEARCH_TRAINS",
         "TRACK_TRAIN",

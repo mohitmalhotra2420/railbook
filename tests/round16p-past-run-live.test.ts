@@ -12,7 +12,7 @@
  * router auto-probe pichhle 3 din, run-date label in replies, GET_TRAIN_HISTORY
  * fallback to same-date live.
  */
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import request from "supertest";
 import { createApp } from "../server/app";
 import { setRailcoreFetch, resetRailcoreBookings } from "../server/railway/railcore";
@@ -67,6 +67,8 @@ function rajdhaniMock() {
 }
 
 beforeEach(() => {
+  /* Round-17: test clock pin (mock dates 06–09 Sep fixed hain; real "aaj" badalta rehta hai). */
+  vi.useFakeTimers({ now: NOW, toFake: ["Date"] });
   process.env.RAILWAY_PROVIDER = "railcore";
   process.env.RAILCORE_API_KEY = "rk_live_test";
   process.env.RAILKIT_API_KEY = "";
@@ -77,6 +79,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   setRailcoreFetch(null);
   setScrapeFetch(null);
   resetRailcoreBookings();

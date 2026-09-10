@@ -123,6 +123,27 @@ its origin (multi-day trains), the router auto-probes the previous 3 days and
 returns the run that is actually moving. Completed runs return their final
 status/delay. Replies label the run: `[kal (08 Sep) se chali wali run]`.
 
+## Journey intelligence — RailBook Atlas (Round-17)
+
+`server/journey/engine.ts` is a **deterministic** ranking/recovery engine over
+real provider data; the LLM only picks the tool and explains the result.
+
+| Tool / endpoint | What it does | Data source |
+| --- | --- | --- |
+| `RANK_JOURNEY_OPTIONS` · `POST /api/journey/plan` | Ranks direct + connecting options: `best_overall`, `fastest`, `direct`/`fewest_changes`, `best_availability`, `cheapest`, `earliest`. Stable order, ties by train number. Returns `recovery{differentTrain, partialRoute, connecting, alternativeDates}` when the direct train has no seat. | `searchTrainsRouted`, bounded `routedClassBoard` probe (`JOURNEY_AVAIL_PROBE`, default 4) |
+| `FIND_VACANT_SEATS` · `POST /api/journey/vacant` | Class-level AVAILABLE/RAC/WL counts + fare for one train segment. | `routedClassBoard` (RailCore → RailKit → RailRadar → RailYatri scrape) |
+| `FIND_PARTIAL_ROUTE_SEATS` · `POST /api/journey/partial` | Same-train split (`origin→X` + `X→destination`) and same-train switch ("seat available after X"). Verifies station order, class, date, running day; probes ≤ `PARTIAL_SPLIT_LIMIT` (3) mid-halts. | timetable + class board |
+| `FIND_CONNECTIONS` · `POST /api/journey/connections` | One-change connections via hubs; `layoverMinutes = departureB − arrivalA`; rejected if `< MIN_TRANSFER_MINUTES` (default 30), `> MAX_LAYOVER_MINUTES` (default 360) or negative/next-day. | two routed searches |
+
+Honesty rules baked in: `reliability` is always `null` (no provider gives
+punctuality data), `berths`/`berth` are always `null` (no configured provider —
+RailCore, RailKit, RailRadar — exposes coach/berth-level or post-chart vacancy;
+the engine says so in `capability.note`). The user's date is never changed —
+alternative dates are suggestions only. The chat UI renders the plan as a
+**BEST OPTION** card (⚡ ⏱ 🚆 💺 ₹) with **OTHER OPTIONS** chips; when the direct
+train has no seat it shows "Direct seat nahi mili. Ye alternatives mile:" with
+only provider-verified alternatives.
+
 ## Extra fallback APIs (Round-16o, optional)
 
 Data chain per method: **RailCore → RailKit → RailRadar → Indian Rail API → verified-site web-scrape → none**. The two new providers are *additional* and fully optional — with no key set they are skipped and nothing else changes.

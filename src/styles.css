@@ -1457,3 +1457,145 @@ table.traintable {
   font-size: 11px;
   background: var(--paper);
 }
+
+/* ── Round-17: RailBook Atlas journey options (BEST OPTION card) ───── */
+.jo-wrap {
+  margin-top: 10px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--card);
+  overflow: hidden;
+  box-shadow: var(--shadow);
+  font-size: 13px;
+}
+.jo-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 14px;
+  background: var(--navy);
+  color: #fff;
+}
+.jo-kicker { font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--gold-soft); margin-bottom: 2px; }
+.jo-muted { color: #c9d4e4; }
+.jo-count { font-size: 11px; color: #c9d4e4; white-space: nowrap; }
+.jo-alert {
+  margin: 10px 12px 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--amber-soft);
+  color: var(--amber);
+  font-weight: 600;
+}
+.jo-alert-sub { margin-top: 4px; font-weight: 400; font-size: 12px; }
+.jo-best {
+  margin: 10px 12px 0;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: linear-gradient(160deg, #fffaf0 0%, #fff 60%);
+  border: 1px solid var(--gold);
+  box-shadow: inset 0 0 0 1px rgba(200, 150, 46, 0.15);
+}
+.jo-best-label { font-size: 10px; letter-spacing: 0.14em; color: var(--gold); font-weight: 700; margin-bottom: 4px; }
+.jo-best-title { font-size: 14px; font-weight: 600; color: var(--ink); line-height: 1.3; }
+.jo-no {
+  display: inline-block;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-weight: 700;
+  color: var(--navy);
+  margin-right: 6px;
+}
+.jo-best-times { margin-top: 6px; font-size: 20px; color: var(--navy); display: flex; align-items: baseline; gap: 6px; }
+.jo-arrow { color: var(--saffron); font-size: 16px; }
+.jo-day { font-size: 11px; color: var(--saffron); font-weight: 700; }
+.jo-best-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 10px;
+  margin-top: 10px;
+  color: var(--ink);
+}
+.jo-best-grid > div { display: flex; align-items: center; gap: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.jo-ic { width: 18px; text-align: center; opacity: 0.85; }
+.jo-badges { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.jo-badge {
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--paper);
+  color: var(--muted);
+  border: 1px solid var(--line);
+}
+.jo-badge-best_overall { background: var(--gold-soft); color: #7a5410; border-color: var(--gold); }
+.jo-badge-fastest { background: var(--violet-soft); color: var(--violet); border-color: #d9c8ff; }
+.jo-badge-best_availability, .jo-badge-direct { background: var(--green-soft); color: var(--green); border-color: #bfe3cf; }
+.jo-cta {
+  margin-top: 12px;
+  width: 100%;
+  padding: 10px 12px;
+  border: none;
+  border-radius: 12px;
+  background: var(--saffron);
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.jo-cta:active { background: var(--saffron-2); }
+.jo-avl { font-weight: 700; font-size: 12px; white-space: nowrap; }
+.jo-avl-ok, .jo-avl-cell.jo-avl-ok { color: var(--green); }
+.jo-avl-warn, .jo-avl-cell.jo-avl-warn { color: var(--amber); }
+.jo-avl-bad, .jo-avl-cell.jo-avl-bad { color: var(--red); }
+.jo-avl-muted, .jo-avl-cell.jo-avl-muted { color: var(--muted); font-weight: 500; }
+.jo-fare { font-weight: 700; color: var(--navy); }
+.jo-others, .jo-recovery { padding: 10px 12px 4px; }
+.jo-others-label, .jo-sec-title { font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); font-weight: 700; margin-bottom: 6px; }
+.jo-sec { margin-bottom: 10px; }
+.jo-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.jo-chip {
+  font: inherit;
+  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--ink);
+  cursor: pointer;
+}
+.jo-chip.active { background: var(--navy); color: #fff; border-color: var(--navy); }
+.jo-list { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.jo-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: #fff;
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink);
+  cursor: pointer;
+}
+.jo-row-main { min-width: 0; }
+.jo-row-title { display: flex; gap: 4px; align-items: baseline; min-width: 0; }
+.jo-name { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jo-row-times { margin-top: 2px; color: var(--ink); white-space: nowrap; }
+.jo-dot { color: var(--faint); margin: 0 4px; }
+.jo-row-side { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+.jo-conn { padding: 8px 10px; border: 1px dashed var(--line); border-radius: 12px; margin-bottom: 6px; background: #fff; }
+.jo-conn-leg { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.jo-conn-wait { font-size: 12px; color: var(--amber); margin: 3px 0 3px 8px; }
+.jo-conn-total { font-size: 11px; color: var(--muted); margin-top: 4px; }
+.jo-split { padding: 8px 10px; border: 1px solid var(--line); border-radius: 12px; margin-bottom: 6px; background: #fff; }
+.jo-split-seg { display: flex; justify-content: space-between; padding: 2px 0; }
+.jo-split-note { font-size: 11px; color: var(--muted); margin-top: 4px; }
+.jo-foot { padding: 8px 14px 10px; font-size: 11px; color: var(--muted); border-top: 1px solid var(--line); margin-top: 6px; }
+@media (max-width: 380px) {
+  .jo-best-grid { grid-template-columns: 1fr; }
+  .jo-best-times { font-size: 18px; }
+}

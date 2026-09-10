@@ -379,6 +379,8 @@ export type AgentResponse = {
   toolTrace?: ToolTraceStep[];
   /** Structured search results — client isse organized TABLE banata hai (2026-09-05 feedback). */
   trains?: AgentTrainTable | null;
+  /** Round-17: RANK_JOURNEY_OPTIONS ka full deterministic plan (BEST OPTION + alternatives card). */
+  journey?: import("../journey/types.js").JourneyPlan | null;
   grounded?: boolean;
   /** Agentic turn chala par model/provider fail hua to wajah (observability; success par null). */
   agenticFailureReason?: string | null;
@@ -1556,6 +1558,7 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
           resumeAsk: null,
           resumeText: null,
           trains: capture.table,
+          journey: capture.plan ?? null,
           confirmBook: false,
           missingFields: missingOf({
             from: det.from,
