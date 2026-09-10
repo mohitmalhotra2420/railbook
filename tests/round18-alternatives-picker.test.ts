@@ -342,7 +342,8 @@ describe("Round-18 §5/§16: proactive alternatives via /api/agent, endpoints, n
     expect(r.status).toBe(200);
     expect(r.body.alternatives?.reason).toBe("waitlist");
     expect(r.body.alternatives?.alternatives?.[0]?.trainNumbers).toEqual(["12904"]);
-    expect(r.body.toolTrace?.[0]?.summary).toMatch(/AUTO-ALTERNATIVES/);
+    expect(r.body.toolTrace?.[0]?.summary).toMatch(/YOU MAY ALSO CONSIDER: 12904 GOLDEN TEMPLE MAIL .* \(SL AVL 44/);
+    expect(r.body.toolTrace?.[0]?.summary).not.toMatch(/Reply mein|app cards/);
   });
   it("SEARCH_TRAIN_BY_NAME via agent → trainPicker in response", async () => {
     railcoreMock(() => null);

@@ -507,6 +507,8 @@ export async function findAlternativeTrains(args: {
   date: string;
   travelClass?: string | null;
   lowSeatThreshold?: number;
+  /** Already-verified row for the selected train/class (from CHECK_AVAILABILITY) — avoids a second probe & provider drift. */
+  knownRow?: { status: string; seats?: number | null; waitlist?: number | null; rac?: number | null; source?: string | null } | null;
 }): Promise<AlternativeTrainsResult> {
   const from = args.origin.toUpperCase();
   const to = args.destination.toUpperCase();
@@ -520,7 +522,12 @@ export async function findAlternativeTrains(args: {
   const known = board.classes.filter((c) => c.status && c.status !== "UNKNOWN");
   known.forEach((c) => sources.add(String(c.source ?? board.provider)));
   const sel = cls ? known.find((c) => c.code === cls) : bestClassRow(board.classes, null);
-  const selRow = sel ? { status: sel.status, seats: (sel as ClassAvailability).seats ?? null, waitlist: (sel as ClassAvailability).waitlist ?? null, rac: (sel as ClassAvailability).rac ?? null, source: String((sel as ClassAvailability).source ?? board.provider) } : null;
+  let selRow = sel ? { status: sel.status, seats: (sel as ClassAvailability).seats ?? null, waitlist: (sel as ClassAvailability).waitlist ?? null, rac: (sel as ClassAvailability).rac ?? null, source: String((sel as ClassAvailability).source ?? board.provider) } : null;
+  if (!selRow && args.knownRow && args.knownRow.status && args.knownRow.status !== "UNKNOWN") {
+    /* Board probe missed this class (provider quota/segment) — use the row we already verified. */
+    selRow = { status: args.knownRow.status, seats: args.knownRow.seats ?? null, waitlist: args.knownRow.waitlist ?? null, rac: args.knownRow.rac ?? null, source: String(args.knownRow.source ?? "railcore") };
+    sources.add(selRow.source);
+  }
   const boardHasClass = cls ? board.classes.some((c) => c.code === cls) : true;
 
   let reason: AlternativeTrainsResult["reason"] = "unknown";
