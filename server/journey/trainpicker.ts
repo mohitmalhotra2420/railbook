@@ -145,7 +145,8 @@ export async function pickTrains(query: string, opts: { context?: { from?: strin
   const ctxFrom = opts.context?.from?.toUpperCase();
   const ctxTo = opts.context?.to?.toUpperCase();
   const contextual = ctxFrom || ctxTo ? scored.filter((x) => (x.t.from && x.t.from.toUpperCase() === ctxFrom) || (x.t.to && x.t.to.toUpperCase() === ctxTo)) : [];
-  const ordered = contextual.length ? [...contextual, ...scored.filter((x) => !contextual.includes(x))] : scored;
+  const ordered = (contextual.length ? [...contextual, ...scored.filter((x) => !contextual.includes(x))] : scored)
+    .filter((x, i, arr) => arr.findIndex((y) => y.t.number === x.t.number) === i);
 
   const matches: TrainPick[] = ordered.slice(0, limit).map((x) => ({
     number: x.t.number,
