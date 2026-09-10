@@ -1646,7 +1646,7 @@ export async function executeApprovedTool(
           : "";
         return okResult(
           plan.sources[0] ?? null,
-          `Atlas rank (${plan.query.from}→${plan.query.to} ${plan.query.date}, pref=${prefRaw}): ${plan.routeOptions.length} options.${plan.best ? ` BEST: ${line(plan.best)}.` : " Koi option nahi."}${top.length > 1 ? ` Others: ${top.slice(1).map(line).join("; ")}.` : ""}${plan.notes.length ? ` ${plan.notes.join(" ")}` : ""}${rec}${extra} (Sources: ${plan.sources.join(", ") || "none"}.)`,
+          `${plan.summary ? `JOURNEY SUMMARY (verified, ise Hinglish mein user ko 2-3 line mein do, numbers/trains waise hi): ${plan.summary} ` : ""}Atlas rank (${plan.query.from}→${plan.query.to} ${plan.query.date}, pref=${prefRaw}): ${plan.routeOptions.length} options.${plan.best ? ` BEST: ${line(plan.best)}.` : " Koi option nahi."}${top.length > 1 ? ` Others: ${top.slice(1).map(line).join("; ")}.` : ""}${plan.notes.length ? ` ${plan.notes.join(" ")}` : ""}${rec}${extra} (Sources: ${plan.sources.join(", ") || "none"}.)`,
           plan,
         );
       }
@@ -2560,8 +2560,8 @@ export async function runAgenticTurn(input: {
               const plan = await planJourney({ from: String(d.from), to: String(d.to), date: String(d.date), travelClass: (args.travel_class as string | undefined)?.toUpperCase() ?? null, preference: "best_overall", includeConnections: false, includeAlternativeDates: false });
               if (plan.routeOptions.length) {
                 input.capture.plan = plan;
-                const b = plan.best!;
-                result = { ...result, summary: `${result.summary} ATLAS (deterministic rank, app BEST card dikhata hai): BEST ${b.trainNumbers[0]} ${b.trainNames[0]} ${b.departure}→${b.arrival} ${b.durationLabel ?? ""}${b.availability ? ` · ${b.availability.classCode} ${b.availability.status}${b.availability.seats != null ? ` ${b.availability.seats}` : ""}${b.availability.fare != null ? ` ₹${b.availability.fare}` : ""}` : " · seat data nahi"} [${b.badges.join(",")}]${plan.conflicts?.length ? ` CONFLICT: ${plan.conflicts.map((c) => c.trainNumber).join(",")} — "${plan.conflicts[0].message}"` : ""}. Reply short rakho: best + kyun, 1-2 alternatives.` };
+                /* Round-18l: user-visible text (verbatim when every model times out) — no model instructions. */
+                result = { ...result, summary: `${result.summary}${plan.summary ? `\nAI journey summary: ${plan.summary}` : ""}${plan.conflicts?.length ? `\n${plan.conflicts[0].message}` : ""}` };
               }
             } catch {
               /* proactive plan is best-effort */

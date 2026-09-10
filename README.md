@@ -192,6 +192,13 @@ only provider-verified alternatives.
 - The user kept reporting behaviour that no longer exists on the deployed build. Now the header shows a small build tag (short commit, e.g. `9dd6e9c`) and `GET /api/version` returns `{commit, startedAt, primaryModel, fallbackModel}`. If the header tag ≠ `/api/version.commit`, the browser is serving a cached bundle → hard refresh.
 - `index.html` is served with `Cache-Control: no-store`; hashed `/assets/*` are `immutable` (1y). Previously everything was `max-age=0`, which some mobile browsers/CDNs still revalidated lazily.
 
+### Round-18l — "AI journey summary" for any route (screenshot parity)
+- `planJourney()` now returns `summary` — a deterministic plain-language line built ONLY from retrieved data: `Best plan: <train> <dep→arr>, <duration> (<class avail>). If it slips, route via <hub> (<legs>, layover) / take <alt train>. Or shift to <Day dd Mon> — N trains.` Shown in the journey card ("AI journey summary" panel), fed to Muse as `JOURNEY SUMMARY` in `RANK_JOURNEY_OPTIONS`, and used verbatim when every model times out (replaces the old model-instruction text that leaked into replies).
+- "Goa" is now a multi-station region (MAO/VSG/THVM/KRMI) — RailRadar lookup returned "GOA Gohad Road Halt".
+- "is weekend" → date-ask offers the real Sat/Sun dates (never assumed).
+- Route-level seat question without a train ("Amritsar se Goa … confirm seat hai?") no longer hits `getAvailability` ("Train, date, stations aur class chahiye") — it goes through the journey flow.
+- Muse latency note: no model/timeout config changed in this round. Muse on NIM measures 20–40 s per tool round (see Round-18g-3); when NVIDIA is loaded it exceeds the 40 s per-call cap and GPT-OSS/GLM answer with the same deterministic data.
+
 ## Extra fallback APIs (Round-16o, optional)
 
 Data chain per method: **RailCore → RailKit → RailRadar → Indian Rail API → verified-site web-scrape → none**. The two new providers are *additional* and fully optional — with no key set they are skipped and nothing else changes.

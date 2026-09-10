@@ -54,6 +54,12 @@ export const MULTI_STATION_CITIES: Record<string, string[]> = {
   पठानकोट: ["PTK", "PTKC"],
   thiruvananthapuram: ["TVC", "KCVL"],
   trivandrum: ["TVC", "KCVL"],
+  /* Round-18l: "Goa" is a STATE — RailRadar lookup returned "GOA Gohad Road
+   * Halt" (wrong). Real Goa stations; user picks. */
+  goa: ["MAO", "VSG", "THVM", "KRMI"],
+  गोवा: ["MAO", "VSG", "THVM", "KRMI"],
+  madgaon: ["MAO"],
+  margao: ["MAO"],
 };
 
 /** Preferred codes used only to rank real API hits — never invented. */
@@ -72,6 +78,8 @@ const PREFERRED: Record<string, string[]> = {
   ernakulam: ["ERS", "ERN"],
   haridwar: ["HW"],
   हरिद्वार: ["HW"],
+  madgaon: ["MAO"],
+  margao: ["MAO"],
 };
 
 function norm(s: string): string {

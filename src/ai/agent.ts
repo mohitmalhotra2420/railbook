@@ -92,6 +92,8 @@ export interface AgentJourneyPlan {
   connections: AgentConnection[];
   alternativeDates: { date: string; count: number; fastest: { number: string; durationMinutes: number } | null }[];
   directUnavailable: boolean;
+  /** Round-18l: server-built plain-language summary (best → fallback → alt date). */
+  summary?: string | null;
   recovery: {
     reason: string;
     differentTrain: AgentRouteOption[];

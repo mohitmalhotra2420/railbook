@@ -147,6 +147,17 @@ export function JourneyOptions({
         <span className="jo-count">{plan.routeOptions.length} option{plan.routeOptions.length === 1 ? "" : "s"}</span>
       </div>
 
+      {plan.summary && (
+        <div className="jo-summary">
+          <span className="jo-summary-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" /></svg>
+          </span>
+          <div className="jo-summary-text">
+            <div className="jo-summary-label">AI journey summary</div>
+            {plan.summary}
+          </div>
+        </div>
+      )}
       {plan.conflicts && plan.conflicts.length > 0 && (
         <div className="jo-alert">{plan.conflicts[0].message} <span className="jo-alert-sub">({plan.conflicts.map((c) => c.trainNumber).join(", ")} — sources: {plan.conflicts[0].sources.join(" vs ")})</span></div>
       )}

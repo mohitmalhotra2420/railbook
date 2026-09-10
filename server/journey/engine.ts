@@ -808,7 +808,7 @@ export async function planJourney(args: {
   const retrievedAt = new Date().toISOString();
   const sourceTypes = [...new Set([...sources].map(sourceTypeOf))];
 
-  return {
+  const plan: JourneyPlan = {
     provenance: { retrievedAt, requestDate: todayYmd(), travelDate: args.date, freshness: freshnessOf("availability", retrievedAt), sourceTypes },
     conflicts: conflicts.length ? conflicts : undefined,
     query: { from, to, date: args.date, travelClass: args.travelClass ?? null, preference: args.preference ?? "best_overall" },
@@ -820,7 +820,69 @@ export async function planJourney(args: {
     recovery,
     sources: [...sources],
     notes,
+    summary: null,
   };
+  plan.summary = journeySummary(plan);
+  return plan;
+}
+
+/* ── Round-18l: plain-language journey summary (deterministic) ─────────
+ * Screenshot-style: "Best plan: 12779 Goa Express (SL AVAILABLE 42). If it
+ * slips, route via Madgaon (…) — or shift to Mon 15 Sep (1 train)."
+ * Every clause comes from a REAL retrieved object; nothing is made up. */
+const WD = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const MO = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+export function dayLabel(ymd: string): string {
+  const [y, m, d] = ymd.split("-").map(Number);
+  if (!y || !m || !d) return ymd;
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return `${WD[dt.getUTCDay()]} ${d} ${MO[m - 1]}`;
+}
+function availPhrase(a: RouteAvailability | null | undefined): string | null {
+  if (!a) return null;
+  if (a.status === "AVAILABLE") return `${a.classCode} ${a.seats != null ? `${a.seats} seats open` : "available"}`;
+  if (a.status === "RAC") return `${a.classCode} RAC${a.rac != null ? ` ${a.rac}` : ""}`;
+  if (a.status === "WAITLIST") return `${a.classCode} WL${a.waitlist != null ? ` ${a.waitlist}` : ""}`;
+  return `${a.classCode} ${a.status}`;
+}
+export function journeySummary(plan: JourneyPlan): string | null {
+  const parts: string[] = [];
+  const best = plan.best;
+  const rec = plan.recovery;
+  if (best) {
+    const name = best.trainNames[0] ? ` ${best.trainNames[0]}` : "";
+    const av = availPhrase(best.availability);
+    const dur = best.durationLabel ? `, ${best.durationLabel}` : "";
+    const changes = best.changes ? `, ${best.changes} change` : "";
+    parts.push(`Best plan: ${best.trainNumbers.join("+")}${name} ${best.departure}→${best.arrival}${dur}${changes}${av ? ` (${av})` : ""}.`);
+  } else if (rec) {
+    parts.push(`${plan.query.from}→${plan.query.to} ${dayLabel(plan.query.date)}: ${rec.reason}`);
+  } else {
+    return null;
+  }
+  /* Fallback route: a verified connecting option (only when best isn't already a clean AVAILABLE seat). */
+  const bestOk = best?.availability?.status === "AVAILABLE";
+  const conn = (plan.connections.length ? plan.connections : rec?.connecting ?? []).find((c) => c.valid) ?? null;
+  const diff = rec?.differentTrain.find((o) => o.availability && (o.availability.status === "AVAILABLE" || o.availability.status === "RAC")) ?? null;
+  if (!bestOk && diff && diff.trainNumbers[0] !== best?.trainNumbers[0]) {
+    parts.push(`If it slips, take ${diff.trainNumbers[0]}${diff.trainNames[0] ? ` ${diff.trainNames[0]}` : ""} (${availPhrase(diff.availability) ?? "seats"}).`);
+  } else if (!bestOk && conn && conn.legs.length >= 2) {
+    const via = conn.stationName ?? conn.station;
+    const trains = conn.legs.map((l) => l.trainNumber).join("→");
+    parts.push(`If it slips, route via ${via} (${trains}, layover ${conn.layoverMinutes} min).`);
+  }
+  /* Alternative date with real trains. */
+  const altDates = (plan.alternativeDates.length ? plan.alternativeDates : rec?.alternativeDates ?? []).filter((d) => d.count > 0 && !d.providerFailed);
+  if (!bestOk && altDates.length) {
+    const d = altDates[0];
+    parts.push(`Or shift to ${dayLabel(d.date)} — ${d.count} train${d.count > 1 ? "s" : ""}${d.fastest ? ` (${d.fastest.number})` : ""}.`);
+  }
+  /* Same-city alternate station (suggestion only). */
+  const altSt = rec?.alternateStations?.[0];
+  if (!bestOk && altSt && altSt.count > 0 && parts.length < 3) {
+    parts.push(`Alternate station: ${altSt.from}→${altSt.to} has ${altSt.count} train${altSt.count > 1 ? "s" : ""} — confirm before switching.`);
+  }
+  return parts.join(" ");
 }
 
 export const __test = { availScore, bestClassRow, toLeg };

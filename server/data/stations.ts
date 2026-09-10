@@ -2,6 +2,10 @@ import type { Station } from "../providers/types.js";
 
 export const STATIONS: Station[] = [
   { code: "LDH", name: "Ludhiana Junction", city: "Ludhiana" },
+  { code: "MAO", name: "Madgaon Junction", city: "Goa" },
+  { code: "VSG", name: "Vasco da Gama", city: "Goa" },
+  { code: "THVM", name: "Thivim", city: "Goa" },
+  { code: "KRMI", name: "Karmali", city: "Goa" },
   { code: "ASR", name: "Amritsar Junction", city: "Amritsar" },
   { code: "JUC", name: "Jalandhar City", city: "Jalandhar" },
   { code: "JRC", name: "Jalandhar Cantt", city: "Jalandhar" },

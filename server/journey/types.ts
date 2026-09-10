@@ -201,6 +201,10 @@ export type JourneyPlan = {
   } | null;
   sources: string[];
   notes: string[];
+  /** Round-18l: deterministic plain-language "AI journey summary" — best plan,
+   *  then the fallback route, then an alternative date. Built ONLY from data
+   *  actually retrieved in this plan (never invented); null when nothing real. */
+  summary: string | null;
   /** Round-18 freshness envelope (dynamic data must not be shown as current when stale). */
   provenance?: { retrievedAt: string; requestDate: string; travelDate: string; freshness: string; sourceTypes: string[] };
   /** Round-18: any availability source conflict detected (values never blended). */

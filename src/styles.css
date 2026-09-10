@@ -1688,3 +1688,36 @@ table.traintable {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   vertical-align: middle;
 }
+
+/* Round-18l: AI journey summary (plain-language best → fallback → alt date). */
+.jo-summary {
+  display: flex;
+  gap: 10px;
+  margin: 10px 12px 0;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #eef3ff, #f6f8ff);
+  border: 1px solid #dbe4ff;
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.45;
+}
+.jo-summary-icon {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: #fff;
+  color: #1d5cff;
+  border: 1px solid #dbe4ff;
+}
+.jo-summary-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #1d5cff;
+  margin-bottom: 3px;
+}

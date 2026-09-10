@@ -237,7 +237,10 @@ async function atlasFallback(
     : !ctx.destination
       ? "Kahan jaana hai? Station bataiye."
       : !ctx.date || !ctx.dateProvided
-        ? `${ctx.origin.code} → ${ctx.destination.code} — kis date ko jaana hai? (aaj/kal/parso ya tareekh)`
+        ? nlu.dateAmbiguous?.length
+          ? /* Round-18l: "is weekend" → real Sat/Sun options, user chune (date kabhi assume nahi). */
+            `${ctx.origin.code} → ${ctx.destination.code} — weekend mein kaunsa din? ${nlu.dateAmbiguous.map((d) => `${d.label} (${d.date})`).join(" ya ")}?`
+          : `${ctx.origin.code} → ${ctx.destination.code} — kis date ko jaana hai? (aaj/kal/parso ya tareekh)`
         : null;
   if (missingAsk) {
     return { reply: missingAsk, ok: false, trace: trace(false, null, "slot missing — clarification"), grounded: true, trains: null };
@@ -1228,7 +1231,7 @@ async function askStationChoiceFirst(
       .map((s, i) => `${i + 1}. ${s.code} – ${s.name}`)
       .join(", ");
     const known = side === "to" && ctx.origin ? `${ctx.origin.code} se ${city}: ` : side === "from" && ctx.destination ? `${city} se ${ctx.destination.code}: ` : "";
-    const dateNote = ctx.dateProvided && ctx.date ? "" : " Station batane ke baad date poochhunga.";
+    const dateNote = ctx.dateProvided && ctx.date ? "" : det.dateAmbiguous?.length ? ` Weekend mein kaunsa din — ${det.dateAmbiguous.map((d) => d.label).join(" ya ")} — bhi bata dena.` : " Station batane ke baad date poochhunga.";
     return {
       side,
       reply: `${known}${city} mein kaunsa station chahiye? Options: ${list}.${dateNote}`,
@@ -1683,6 +1686,19 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
    * tha, speed ka jawab nahi. Fact-sawal par railway tool mat chalao —
    * deterministic web fallback (neeche) labeled fact jawab dega. */
   if (tool && GENERAL_FACT_RE.test(String(req.text ?? ""))) tool = null;
+  /* Round-18l (screenshot: "Amritsar se Goa is weekend, koi direct confirm
+   * seat hai?") — availability/fare words WITHOUT any train → ye ROUTE ka
+   * sawaal hai (journey plan availability probe karta hi hai). Pehle
+   * getAvailability chal kar "Train, date, stations aur class chahiye."
+   * bolta tha. Train context na ho to searchTrains/slot flow par jao. */
+  if (
+    (tool === "getAvailability" || tool === "getFare") &&
+    !trainNo &&
+    !ctx.selectedTrainNumber &&
+    (understood.nlu.from || understood.nlu.to || understood.nlu.unresolvedFrom || understood.nlu.unresolvedTo || ctx.origin || ctx.destination || ctx.pendingDestinationChoice || ctx.pendingOriginChoice)
+  ) {
+    tool = ctx.origin && ctx.destination && ctx.dateProvided ? "searchTrains" : null;
+  }
   ctx.lastTool = tool;
 
   /* Concept-question detector (2026-09-06 #4/#7): "2s class kya hoti hai" /
@@ -1881,9 +1897,11 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
     reply = "Train number kya hai? 5-digit number boliye.";
   } else if (follow === "coach" && !trainNo) {
     reply = "Kaunsi train ki coach position? 5-digit train number boliye.";
-  } else if (follow === "fare" && (!ctx.selectedTrainNumber || !ctx.classCode || !ctx.date || !ctx.origin || !ctx.destination)) {
+  } else if (!reply && follow === "fare" && (!ctx.selectedTrainNumber || !ctx.classCode || !ctx.date || !ctx.origin || !ctx.destination)) {
     reply = "Fare ke liye train, class aur date chahiye. Jo missing hai woh batao — main figure invent nahi karunga.";
-  } else if (follow === "availability" && (!ctx.selectedTrainNumber || !ctx.classCode || !ctx.date)) {
+  } else if (!reply && follow === "availability" && (!ctx.selectedTrainNumber || !ctx.classCode || !ctx.date)) {
+    /* Round-18l: route-level seat sawaal ka jawab atlasFallback de chuka ho
+     * (station/date ask ya plan) to overwrite mat karo. */
     reply = "Availability ke liye train, class aur date chahiye.";
   }
 
