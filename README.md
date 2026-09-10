@@ -173,6 +173,10 @@ only provider-verified alternatives.
 - **General railway questions** already route to `WEB_SEARCH` (Wikipedia etc.) or the KB — verified live: longest journey (Vivek Express 4,154 km), Vande Bharat speed, Tatkal timings.
 - **Fare on RailRadar/IndianRailAPI seat rows**: those APIs return seats without fare (fare 0 → "Fare on select", no 💰 Lowest fare chip). `withFareFilled` adds fare from RailRadar fare API → erail (web), recorded as `fareSource` (seats and fare provenance never merged).
 
+### Round-18g-3 — Muse primary: measured & fixed
+- New telemetry: every `/api/agent` response carries `modelFallbacks[{model,reason,ms,round}]` (+ structured log line). Prod showed Muse **timing out** in rounds 2+ (it got only 4–8 s after the first round, while Muse needs 20–35 s per round on NIM), so GPT-OSS/GLM answered.
+- Fix: primary model always gets ≥ `AI_PRIMARY_MIN_MS` (25 s on Render) while budget remains; turn budget 120 s, per-call 40 s (Render env updated). Fallback reserve 8 s → 6 s. Muse stays primary; GPT-OSS/GLM only when Muse genuinely fails.
+
 ## Extra fallback APIs (Round-16o, optional)
 
 Data chain per method: **RailCore → RailKit → RailRadar → Indian Rail API → verified-site web-scrape → none**. The two new providers are *additional* and fully optional — with no key set they are skipped and nothing else changes.
