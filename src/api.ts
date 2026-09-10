@@ -343,6 +343,11 @@ export function planJourneyApi(body: {
   return request<import("./ai/agent").AgentJourneyPlan>("/api/journey/plan", { method: "POST", body: JSON.stringify(body) });
 }
 
+/** Round-18e: alternatives for a low/WL/RAC train+class (server-verified only). */
+export function journeyAlternativesApi(body: { trainNumber: string; from: string; to: string; date: string; travelClass?: string | null; knownRow?: { status: string; seats?: number | null; waitlist?: number | null; rac?: number | null; source?: string | null } | null }) {
+  return request<import("./ai/agent").AgentAlternatives>("/api/journey/alternatives", { method: "POST", body: JSON.stringify(body) });
+}
+
 /** Round-18: smart train picker (number or name → real validated matches). */
 export function pickTrainsApi(q: string, ctx?: { from?: string | null; to?: string | null }) {
   const p = new URLSearchParams({ q });

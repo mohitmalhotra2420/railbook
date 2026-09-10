@@ -681,8 +681,20 @@ export function createApp() {
   });
   app.post("/api/journey/alternatives", async (req, res, next) => {
     try {
-      const b = z.object({ trainNumber: z.string().regex(/^\d{5}$/), from: stnSchema, to: stnSchema, date: ymdSchema, travelClass: clsSchema.nullish() }).parse(req.body ?? {});
-      res.json(await findAlternativeTrains({ trainNumber: b.trainNumber, origin: b.from, destination: b.to, date: b.date, travelClass: b.travelClass ?? null }));
+      const b = z
+        .object({
+          trainNumber: z.string().regex(/^\d{5}$/),
+          from: stnSchema,
+          to: stnSchema,
+          date: ymdSchema,
+          travelClass: clsSchema.nullish(),
+          /* Round-18e: client already holds a provider-verified row for this train/class (TrainBoard cell) — reuse it, no second probe / drift. */
+          knownRow: z
+            .object({ status: z.string(), seats: z.number().nullish(), waitlist: z.number().nullish(), rac: z.number().nullish(), source: z.string().nullish() })
+            .nullish(),
+        })
+        .parse(req.body ?? {});
+      res.json(await findAlternativeTrains({ trainNumber: b.trainNumber, origin: b.from, destination: b.to, date: b.date, travelClass: b.travelClass ?? null, knownRow: b.knownRow ?? null }));
     } catch (err) {
       next(err);
     }

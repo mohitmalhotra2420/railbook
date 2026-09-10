@@ -91,12 +91,15 @@ export function JourneyOptions({
   onPickTrain,
   onPickDate,
   onPickStations,
+  onOpenBoard,
 }: {
   plan: AgentJourneyPlan;
   onPickTrain?: (trainNumber: string) => void;
   onPickDate?: (ymd: string) => void;
   /** Round-18 §8: user explicitly confirms a different boarding/destination station. */
   onPickStations?: (from: string, to: string) => void;
+  /** Round-18e: open the bookable TrainBoard (explicit user action, never auto). */
+  onOpenBoard?: () => void;
 }) {
   const [tab, setTab] = useState<Tab | null>(null);
   const best = plan.best;
@@ -179,12 +182,24 @@ export function JourneyOptions({
               <span key={b} className={`jo-badge jo-badge-${b}`}>{BADGE_LABEL[b] ?? b}</span>
             ))}
           </div>
-          {pick && (
-            <button type="button" className="jo-cta" onClick={() => pick(best)}>
-              Is train ko dekho
-            </button>
-          )}
+          <div className="jo-cta-row">
+            {pick && (
+              <button type="button" className="jo-cta" onClick={() => pick(best)}>
+                Is train ko dekho
+              </button>
+            )}
+            {onOpenBoard && (
+              <button type="button" className="jo-cta jo-cta-book" onClick={onOpenBoard}>
+                Sabhi trains · Book →
+              </button>
+            )}
+          </div>
         </div>
+      )}
+      {plan.directUnavailable && onOpenBoard && (
+        <button type="button" className="jo-cta jo-cta-book jo-cta-wide" onClick={onOpenBoard}>
+          Phir bhi sabhi trains dekho / book →
+        </button>
       )}
 
       {plan.directUnavailable && rec && (

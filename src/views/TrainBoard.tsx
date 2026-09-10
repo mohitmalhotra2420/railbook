@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { understand } from "../ai/nlu";
 import { pickFastest } from "../ai/filter";
-import { api } from "../api";
+import { api, journeyAlternativesApi } from "../api";
+import { AlternativesCard } from "../components/AlternativesCard";
+import type { AgentAlternatives } from "../ai/agent";
 import { useBooking } from "../booking/context";
 import { VoiceBar, fieldPrompt } from "../components/VoiceBar";
 import { RouteTimeline, type RouteSheetData } from "../components/RouteTimeline";
@@ -108,6 +110,9 @@ export function TrainBoard() {
   const [coachSheet, setCoachSheet] = useState<CoachSheet | null>(null);
   const [routeSheet, setRouteSheet] = useState<RouteSheetData | null>(null);
   const [pickedNo, setPickedNo] = useState<string | null>(null);
+  /* Round-18e §6: WL/RAC/low class tap → YOU MAY ALSO CONSIDER sheet (server-verified alternatives only). */
+  const [altSheet, setAltSheet] = useState<{ train: TrainResult; cell: ClassAvailability; alt: AgentAlternatives | null; loading: boolean; error: string | null } | null>(null);
+  const LOW_SEATS = 10;
   const [hint, setHint] = useState<ReactNode>(
     fieldPrompt("TRAIN", "number ya naam boliye, phir class"),
   );
@@ -305,9 +310,48 @@ export function TrainBoard() {
       await loadTrain(train, true);
       return;
     }
+    const weak = cell.status === "WAITLIST" || cell.status === "RAC" || cell.status === "NOT_AVAILABLE" || (cell.status === "AVAILABLE" && cell.seats != null && cell.seats < LOW_SEATS);
+    if (weak) {
+      /* §6: proactively show real alternatives; user can still continue with this class. */
+      setAltSheet({ train, cell, alt: null, loading: true, error: null });
+      try {
+        const alt = await journeyAlternativesApi({
+          trainNumber: train.number,
+          from: train.from.code,
+          to: train.to.code,
+          date: train.date,
+          travelClass: cell.code,
+          knownRow: { status: cell.status, seats: cell.seats ?? null, waitlist: cell.waitlist ?? null, rac: cell.rac ?? null, source: (cell as { source?: string }).source ?? null },
+        });
+        setAltSheet((cur) => (cur && cur.train.number === train.number && cur.cell.code === cell.code ? { ...cur, alt, loading: false } : cur));
+      } catch {
+        setAltSheet((cur) => (cur && cur.train.number === train.number ? { ...cur, loading: false, error: "Alternatives abhi provider se nahi aaye." } : cur));
+      }
+      return;
+    }
     if (!isBookable(cell.status)) return;
     speakGuide(`Aapki class select ho gayi hai, ${cell.label}. Ab aap seat preference select karein.`);
     selectTrainAndClass({ ...train, classes: train.classes }, cell);
+  }
+
+  function continueWithWeakClass() {
+    if (!altSheet) return;
+    const { train, cell } = altSheet;
+    setAltSheet(null);
+    if (!isBookable(cell.status)) return;
+    speakGuide(`Aapki class select ho gayi hai, ${cell.label}. Ab aap seat preference select karein.`);
+    selectTrainAndClass({ ...train, classes: train.classes }, cell);
+  }
+
+  async function jumpToTrain(trainNumber: string) {
+    setAltSheet(null);
+    const t = state.trains.find((x) => x.number === trainNumber);
+    if (t) {
+      await pickTrain(t, false);
+      setQ("");
+    } else {
+      setQ(trainNumber);
+    }
   }
 
   async function openRoute(train: TrainResult) {
@@ -704,6 +748,39 @@ export function TrainBoard() {
 
       {routeSheet && <RouteTimeline data={routeSheet} onClose={() => setRouteSheet(null)} />}
 
+      {altSheet && (
+        <div className="sheet-backdrop" onClick={() => setAltSheet(null)}>
+          <div className="sheet tb-alt-sheet" onClick={(e) => e.stopPropagation()}>
+            <div className="grab" />
+            <h2>{altSheet.train.number} · {altSheet.cell.code}</h2>
+            <p className="lede" style={{ marginTop: 2 }}>
+              {altSheet.cell.status === "WAITLIST" ? `Waitlist${altSheet.cell.waitlist != null ? ` ${altSheet.cell.waitlist}` : ""}` : altSheet.cell.status === "RAC" ? `RAC${altSheet.cell.rac != null ? ` ${altSheet.cell.rac}` : ""}` : altSheet.cell.status === "NOT_AVAILABLE" ? "Seat available nahi" : `Sirf ${altSheet.cell.seats} seats bachi hain`} — is train mein availability kam hai.
+            </p>
+            {altSheet.loading && <div className="skel" />}
+            {altSheet.error && <p className="lede">{altSheet.error}</p>}
+            {altSheet.alt && (
+              <AlternativesCard
+                alt={altSheet.alt}
+                onPickTrain={(n) => void jumpToTrain(n)}
+                onPickDate={(d) => {
+                  setAltSheet(null);
+                  setDate(d);
+                }}
+              />
+            )}
+            <div className="tb-empty-actions" style={{ marginTop: 10 }}>
+              {isBookable(altSheet.cell.status) && (
+                <button type="button" onClick={continueWithWeakClass}>
+                  Phir bhi {altSheet.cell.code} {altSheet.cell.status === "WAITLIST" ? "WL" : altSheet.cell.status === "RAC" ? "RAC" : ""} book karo
+                </button>
+              )}
+              <button type="button" className="ghost" onClick={() => setAltSheet(null)}>
+                Wapas list
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {coachSheet && (
         <div className="sheet-backdrop" onClick={() => setCoachSheet(null)}>
           <div className="sheet" onClick={(e) => e.stopPropagation()}>

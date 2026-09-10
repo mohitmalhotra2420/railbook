@@ -1665,3 +1665,12 @@ table.traintable {
 
 /* Round-18c: alternate-station provenance tag */
 .jo-src { font-size: 10px; opacity: 0.55; text-transform: lowercase; letter-spacing: 0.02em; }
+
+/* Round-18e: BEST FOR YOU CTA row — board opens only on explicit tap */
+.jo-cta-row { display: flex; gap: 8px; margin-top: 12px; }
+.jo-cta-row .jo-cta { margin-top: 0; flex: 1; }
+.jo-cta-book { background: var(--navy); }
+.jo-cta-book:active { background: #0b1f3a; }
+.jo-cta-wide { margin: 8px 12px 12px; width: calc(100% - 24px); }
+.tb-alt-sheet { max-height: 86vh; overflow-y: auto; }
+.tb-alt-sheet .alt-wrap { margin: 8px 0 0; }

@@ -782,7 +782,26 @@ export function Concierge() {
       }
     }
 
-    /* ── AI-FIRST TOOL CALLING ─────────────────────────────────────────
+    /* Round-18e: BEST FOR YOU card ka explicit CTA — tabhi TrainBoard khulta hai. */
+  async function openBoardFor(fromCode: string, toCode: string, date: string) {
+    const c = agentCtxRef.current;
+    const from: Station | null = state.from?.code === fromCode ? state.from : c?.origin?.code === fromCode ? (c.origin as Station) : null;
+    const to: Station | null = state.to?.code === toCode ? state.to : c?.destination?.code === toCode ? (c.destination as Station) : null;
+    if (!from || !to || from.code === to.code) {
+      await handleText(`${fromCode} se ${toCode} ${date} ki trains book karni hai`);
+      return;
+    }
+    setBusy(true);
+    try {
+      await searchRoute(from, to, date);
+    } catch {
+      /* TrainBoard surfaces search errors */
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /* ── AI-FIRST TOOL CALLING ─────────────────────────────────────────
      * USER → NVIDIA GPT-OSS-20B → model selects approved tools → server
      * executes them on RailCore (primary) → RailKit (fallback) → results
      * go back to the model → it may chain more tools → grounded reply.
@@ -881,8 +900,14 @@ export function Concierge() {
             state.from?.code === c?.origin?.code &&
             state.to?.code === c?.destination?.code &&
             state.date === c?.date;
+          /* Round-18e (user bug): agar server ne BEST FOR YOU / YOU MAY ALSO
+           * CONSIDER / SELECT TRAIN block diya hai to TrainBoard AUTO mat kholo —
+           * warna full-screen board chat ke Round-18 cards ko chhupa deta tha
+           * ("sidha card open"). Board ab card ke "Sabhi trains · Book →" CTA
+           * ya explicit train pick se khulta hai. */
+          const hasSmartBlock = blocks.some((b) => b.type === "journey" || b.type === "alternatives" || b.type === "trainpicker");
           /* Round-16g: from == to par kabhi card mat kholo (server guard bhi hai). */
-          if (wantBooking && c?.origin && c?.destination && c.origin.code !== c.destination.code && c?.date && !sameSearch) {
+          if (!hasSmartBlock && wantBooking && c?.origin && c?.destination && c.origin.code !== c.destination.code && c?.date && !sameSearch) {
             setBusy(true);
             try {
               await searchRoute(c.origin, c.destination, c.date);
@@ -1412,6 +1437,7 @@ export function Concierge() {
                 onPay={() => void onPay()}
                 onWallet={() => go("wallet")}
                 onBookings={() => go("bookings")}
+                onOpenBoard={(from, to, date) => void openBoardFor(from, to, date)}
               />
             ))}
           </article>
@@ -1508,6 +1534,8 @@ function BlockView({
   onPay: () => void;
   onWallet: () => void;
   onBookings: () => void;
+  /** Round-18e: explicit "Sabhi trains · Book" CTA from BEST FOR YOU card → TrainBoard. */
+  onOpenBoard?: (from: string, to: string, date: string, trainNumber: string | null) => void;
 }) {
   const { updatePassenger } = useBooking();
   if (block.type === "traintable") {
@@ -1537,6 +1565,7 @@ function BlockView({
         onPickTrain={(n) => onChip(`${n} ki seat availability ${block.plan.query.travelClass ? block.plan.query.travelClass + " " : ""}${block.plan.query.date} ko ${block.plan.query.from} se ${block.plan.query.to}`)}
         onPickDate={(d) => onChip(`${block.plan.query.from} se ${block.plan.query.to} ${d} ki trains dikhao`)}
         onPickStations={(f, t) => onChip(`${f} se ${t} ${block.plan.query.date} ki trains dikhao`)}
+        onOpenBoard={onOpenBoard ? () => onOpenBoard(block.plan.query.from, block.plan.query.to, block.plan.query.date, block.plan.best?.trainNumbers[0] ?? null) : undefined}
       />
     );
   }

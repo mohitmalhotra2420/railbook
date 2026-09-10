@@ -158,6 +158,11 @@ only provider-verified alternatives.
 - **§5 proactive plan on deterministic path**: when the LLM engine is unavailable, `/api/agent` still returns `journey` (BEST FOR YOU + chips) built from the same real search (no extra provider call).
 - **§14 live-status freshness**: TRACK_TRAIN attaches `provenance{retrievedAt,source,sourceType,requestDate,travelDate,freshness}`; stale provider updates are labelled "purana update hai" instead of being presented as current.
 
+### Round-18e — user-reported bug: "sidha card open ho jata, alternatives nahi dikhte"
+- Root cause: after a journey search the client auto-opened the full-screen TrainBoard (booking continuity) which covered the chat's BEST FOR YOU / YOU MAY ALSO CONSIDER / SELECT TRAIN blocks.
+- Fix: no auto-open when the agent reply carries a `journey` / `alternatives` / `trainPicker` block. BEST FOR YOU card now has an explicit **"Sabhi trains · Book →"** CTA (and "Phir bhi sabhi trains dekho / book →" when direct is unavailable) — the board opens only on that tap.
+- TrainBoard: tapping a WL / RAC / Not-available / <10-seat class opens a **YOU MAY ALSO CONSIDER** sheet (`POST /api/journey/alternatives` with the cell's verified `knownRow`) — other trains verified AVL/RAC, other classes, split, connecting, alt dates; "Phir bhi … book karo" keeps the explicit user choice.
+
 ## Extra fallback APIs (Round-16o, optional)
 
 Data chain per method: **RailCore → RailKit → RailRadar → Indian Rail API → verified-site web-scrape → none**. The two new providers are *additional* and fully optional — with no key set they are skipped and nothing else changes.
