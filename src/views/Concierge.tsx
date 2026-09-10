@@ -7,7 +7,7 @@ import { api, pickTrainsApi } from "../api";
 import { useBooking } from "../booking/context";
 import { validatePassengers } from "../booking/state";
 import { loadTravellers } from "../data/travellers";
-import { availabilityLabel, formatShortDate, inr, newId, todayYmd } from "../format";
+import { addDays, availabilityLabel, formatShortDate, inr, newId, todayYmd } from "../format";
 import { BERTH_BY_CLASS, CLASS_LABELS, isBookable, type ClassAvailability, type ClassCode, type Passenger, type Station, type TrainResult } from "../types";
 import type { AgentTrainTable } from "../ai/agent";
 import { JourneyOptions } from "../components/JourneyOptions";
@@ -715,6 +715,25 @@ export function Concierge() {
     return { searched: false, prefs: turn.prefs };
   }
 
+  /* Round-18e: BEST FOR YOU card ka explicit CTA — tabhi TrainBoard khulta hai. */
+  async function openBoardFor(fromCode: string, toCode: string, date: string) {
+    const c = agentCtxRef.current;
+    const from: Station | null = state.from?.code === fromCode ? state.from : c?.origin?.code === fromCode ? (c.origin as Station) : null;
+    const to: Station | null = state.to?.code === toCode ? state.to : c?.destination?.code === toCode ? (c.destination as Station) : null;
+    if (!from || !to || from.code === to.code) {
+      await handleText(`${fromCode} se ${toCode} ${date} ki trains book karni hai`);
+      return;
+    }
+    setBusy(true);
+    try {
+      await searchRoute(from, to, date);
+    } catch {
+      /* TrainBoard surfaces search errors */
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function handleText(text: string, asUser = true) {
     const trimmed = text.trim();
     if (!trimmed) return;
@@ -781,25 +800,6 @@ export function Concierge() {
         /* picker best-effort — agent flow continue */
       }
     }
-
-    /* Round-18e: BEST FOR YOU card ka explicit CTA — tabhi TrainBoard khulta hai. */
-  async function openBoardFor(fromCode: string, toCode: string, date: string) {
-    const c = agentCtxRef.current;
-    const from: Station | null = state.from?.code === fromCode ? state.from : c?.origin?.code === fromCode ? (c.origin as Station) : null;
-    const to: Station | null = state.to?.code === toCode ? state.to : c?.destination?.code === toCode ? (c.destination as Station) : null;
-    if (!from || !to || from.code === to.code) {
-      await handleText(`${fromCode} se ${toCode} ${date} ki trains book karni hai`);
-      return;
-    }
-    setBusy(true);
-    try {
-      await searchRoute(from, to, date);
-    } catch {
-      /* TrainBoard surfaces search errors */
-    } finally {
-      setBusy(false);
-    }
-  }
 
   /* ── AI-FIRST TOOL CALLING ─────────────────────────────────────────
      * USER → NVIDIA GPT-OSS-20B → model selects approved tools → server
@@ -1518,6 +1518,7 @@ function BlockView({
   onPay,
   onWallet,
   onBookings,
+  onOpenBoard,
 }: {
   block: Block;
   state: ReturnType<typeof useBooking>["state"];

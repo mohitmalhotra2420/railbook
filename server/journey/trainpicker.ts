@@ -137,7 +137,9 @@ export async function pickTrains(query: string, opts: { context?: { from?: strin
       return { t, score, exact, allTokens };
     })
     .filter((x) => x.score < 3)
-    .sort((a, b) => a.score - b.score || a.t.number.localeCompare(b.t.number));
+    .sort((a, b) => a.score - b.score || a.t.number.localeCompare(b.t.number))
+    /* Round-18f: providers return case/spelling variants of the same train — one card per number. */
+    .filter((x, i, arr) => arr.findIndex((y) => y.t.number === x.t.number) === i);
 
   /* 4. Route context: if user context has from/to, prefer trains whose provider route touches it. */
   const ctxFrom = opts.context?.from?.toUpperCase();

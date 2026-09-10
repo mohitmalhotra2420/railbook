@@ -163,6 +163,11 @@ only provider-verified alternatives.
 - Fix: no auto-open when the agent reply carries a `journey` / `alternatives` / `trainPicker` block. BEST FOR YOU card now has an explicit **"Sabhi trains · Book →"** CTA (and "Phir bhi sabhi trains dekho / book →" when direct is unavailable) — the board opens only on that tap.
 - TrainBoard: tapping a WL / RAC / Not-available / <10-seat class opens a **YOU MAY ALSO CONSIDER** sheet (`POST /api/journey/alternatives` with the cell's verified `knownRow`) — other trains verified AVL/RAC, other classes, split, connecting, alt dates; "Phir bhi … book karo" keeps the explicit user choice.
 
+### Round-18f — real-browser E2E of every Round-18 feature (headless Chromium against the production build)
+- Found & fixed: `BlockView` was missing the `onOpenBoard` prop → `ReferenceError` on render → blank reply right after the date (this is what made Round-18 look "not working"); `openBoardFor` was nested inside `handleText`. `scripts/release.sh` now fails on client undefined-name errors (TS2304/TS2552).
+- Picker: one card per train number (providers return case/spelling variants). Agent: user-typed station codes (FZR, CSMT…) are used directly — no "FZR ka matlab…?" confirmation.
+- Verified in-browser: date asked first → BEST FOR YOU + chips (no board auto-open) → chip list → "Sabhi trains · Book →" opens TrainBoard → WL cell tap opens YOU MAY ALSO CONSIDER sheet; "12014" / "Amritsar Shatabdi" → SELECT TRAIN cards with dep→arr; "12014 mein CC available hai?" asks date; WL query → alternatives card; `/api/capabilities` honest "Seat recovery data is currently unavailable.".
+
 ## Extra fallback APIs (Round-16o, optional)
 
 Data chain per method: **RailCore → RailKit → RailRadar → Indian Rail API → verified-site web-scrape → none**. The two new providers are *additional* and fully optional — with no key set they are skipped and nothing else changes.

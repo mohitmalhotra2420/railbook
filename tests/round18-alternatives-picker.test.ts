@@ -374,3 +374,16 @@ describe("Round-18 §5/§16: proactive alternatives via /api/agent, endpoints, n
     expect(c.body.matrix.SEARCH_TRAINS.providers).toContain("railcore");
   });
 });
+
+describe("Round-18f picker dedupe", () => {
+  it("one card per train number even if provider list has spelling/case variants", async () => {
+    const { pickTrains } = await import("../server/journey/trainpicker.js");
+    const { setScrapeFetch } = await import("../server/railway/webscrape.js");
+    const list = JSON.stringify(["12014 - Amritsar Shtabdi", "12014 - AMRITSAR SHTABDI", "12013 - AMRITSAR SHTABDI"]);
+    setScrapeFetch((async (url: string) => (String(url).includes("IRTrains") ? new Response(list, { status: 200 }) : new Response("", { status: 503 }))) as unknown as typeof fetch);
+    const r = await pickTrains("Amritsar Shatabdi", { enrich: false });
+    const nums = r.matches.map((m) => m.number);
+    expect(new Set(nums).size).toBe(nums.length);
+    expect(nums).toContain("12014");
+  }, 30_000);
+});

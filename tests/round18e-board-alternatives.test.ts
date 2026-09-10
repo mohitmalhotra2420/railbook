@@ -36,3 +36,19 @@ describe("Round-18e UI guard (source-level)", () => {
     expect(tb).toMatch(/cell\.status === "WAITLIST" \|\| cell\.status === "RAC"/);
   });
 });
+
+describe("Round-18f — regression guards from real-browser E2E", () => {
+  it("BlockView receives onOpenBoard (was ReferenceError → blank reply after date)", () => {
+    const c = readFileSync("src/views/Concierge.tsx", "utf8");
+    expect(c).toMatch(/onBookings,\n\s*onOpenBoard,\n\}: \{/);
+    // openBoardFor must be defined at component scope, not nested inside handleText
+    const idxOpen = c.indexOf("async function openBoardFor(");
+    const idxHandle = c.indexOf("async function handleText(");
+    expect(idxOpen).toBeGreaterThan(0);
+    expect(idxOpen).toBeLessThan(idxHandle);
+  });
+  it("release gate rejects undefined client names", () => {
+    const r = readFileSync("scripts/release.sh", "utf8");
+    expect(r).toContain('grep -E "error TS(2304|2552)"');
+  });
+});
