@@ -2277,9 +2277,25 @@ export async function runAgenticTurn(input: {
         failureReason: reason,
       };
     }
-    const toolCalls = (msg?.tool_calls ?? []).filter(
-      (tc) => tc && tc.function && typeof tc.function.name === "string",
-    );
+    /* Round-18g: Muse aksar ek hi tool (jaise WEB_SEARCH) ko same args ke
+     * saath 2-3 baar parallel maangta hai — har duplicate 5-10s khata hai aur
+     * turn budget toot jaata hai (phir fallback model chal jaata tha). Same
+     * name+args → sirf pehla execute; baaki ko wahi result relay hota hai. */
+    const seenCalls = new Set<string>();
+    const dupOf = new Map<string, string>();
+    const callKeyOf = (tc: { function: { name: string; arguments?: string } }) => `${tc.function.name}|${(tc.function.arguments ?? "").replace(/\s+/g, "")}`;
+    const toolCalls = (msg?.tool_calls ?? [])
+      .filter((tc) => tc && tc.function && typeof tc.function.name === "string")
+      .filter((tc) => {
+        const key = callKeyOf(tc);
+        if (seenCalls.has(key)) {
+          dupOf.set(tc.id, key);
+          return false;
+        }
+        seenCalls.add(key);
+        return true;
+      });
+    const dupIds = (msg?.tool_calls ?? []).filter((tc) => dupOf.has(tc.id));
 
     if (toolCalls.length) {
       messages.push({
@@ -2583,6 +2599,14 @@ export async function runAgenticTurn(input: {
           tool_call_id: tc.id,
           content: JSON.stringify({ ok: result.ok, source: result.source, summary: result.summary, data: result.data }),
         });
+      }
+      /* Round-18g: duplicate tool_calls ko unke original ka result relay karo
+       * (OpenAI-style APIs har tool_call_id ka tool message maangti hain). */
+      for (const d of dupIds) {
+        const key = dupOf.get(d.id)!;
+        const orig = toolCalls.find((tc) => callKeyOf(tc) === key);
+        const origMsg = orig ? [...messages].reverse().find((m) => m.role === "tool" && m.tool_call_id === orig.id) : undefined;
+        messages.push({ role: "tool", tool_call_id: d.id, content: origMsg?.content ?? JSON.stringify({ ok: false, summary: "duplicate call skipped" }) });
       }
       continue; // model dekhega results aur decide karega next step
     }

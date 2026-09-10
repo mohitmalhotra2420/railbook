@@ -49,6 +49,8 @@ export interface ClassAvailability {
   fare: number;
   quota?: string;
   date?: string;
+  source?: string;
+  fareSource?: string;
 }
 
 export interface TrainResult {

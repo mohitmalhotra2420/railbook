@@ -373,10 +373,39 @@ async function extraApiAvailability(
   quotaCode: string,
 ): Promise<ClassAvailability | null> {
   const rr = await railradarAvailability(trainNumber, date, from, to, classCode, quotaCode);
-  if (rr && rr.status !== "UNKNOWN") return rr;
+  if (rr && rr.status !== "UNKNOWN") return withFareFilled(rr, trainNumber, date, from, to, classCode, quotaCode);
   const ira = await indianRailApiAvailability(trainNumber, date, from, to, classCode, quotaCode);
-  if (ira && ira.status !== "UNKNOWN") return ira;
+  if (ira && ira.status !== "UNKNOWN") return withFareFilled(ira, trainNumber, date, from, to, classCode, quotaCode);
   return null;
+}
+
+/* Round-18g: RailRadar/IndianRailAPI seat rows fare nahi dete (fare 0) → card
+ * par "Fare on select" aur "Lowest fare" chip gayab. Fare alag se bharo:
+ * RailRadar fare API → erail (web) fare. Seats/status untouched, fare ka
+ * source alag se record hota hai (fareSource) — do sources mix nahi hote. */
+async function withFareFilled(
+  row: ClassAvailability,
+  trainNumber: string,
+  date: string,
+  from: string,
+  to: string,
+  classCode: ClassCode,
+  quotaCode: string,
+): Promise<ClassAvailability> {
+  if (row.fare > 0) return row;
+  try {
+    const rr = await railradarFare(trainNumber, date, from, to, classCode, 1);
+    if (rr?.railwayAvailable && rr.baseFare > 0) return { ...row, fare: rr.baseFare, fareSource: "railradar" };
+  } catch {
+    /* fall through */
+  }
+  try {
+    const web = await erailFareForClass(trainNumber, classCode, quotaCode);
+    if (web != null && web > 0) return { ...row, fare: web, fareSource: "web_erail" };
+  } catch {
+    /* fall through */
+  }
+  return row;
 }
 
 async function extraApiFare(

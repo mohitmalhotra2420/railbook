@@ -168,6 +168,11 @@ only provider-verified alternatives.
 - Picker: one card per train number (providers return case/spelling variants). Agent: user-typed station codes (FZR, CSMT…) are used directly — no "FZR ka matlab…?" confirmation.
 - Verified in-browser: date asked first → BEST FOR YOU + chips (no board auto-open) → chip list → "Sabhi trains · Book →" opens TrainBoard → WL cell tap opens YOU MAY ALSO CONSIDER sheet; "12014" / "Amritsar Shatabdi" → SELECT TRAIN cards with dep→arr; "12014 mein CC available hai?" asks date; WL query → alternatives card; `/api/capabilities` honest "Seat recovery data is currently unavailable.".
 
+### Round-18g — Muse stays primary; general-question web answers; fare on seat rows
+- **Muse duplicate tool calls**: Muse frequently emits the same tool call 2-3× in parallel (e.g. `WEB_SEARCH` ×3 for "India mein longest train journey"); each duplicate cost 5-10 s and blew the turn budget, so GPT-OSS/GLM answered instead. Now identical name+args calls execute once and every `tool_call_id` still receives the tool message → Muse finishes inside budget and remains the primary model.
+- **General railway questions** already route to `WEB_SEARCH` (Wikipedia etc.) or the KB — verified live: longest journey (Vivek Express 4,154 km), Vande Bharat speed, Tatkal timings.
+- **Fare on RailRadar/IndianRailAPI seat rows**: those APIs return seats without fare (fare 0 → "Fare on select", no 💰 Lowest fare chip). `withFareFilled` adds fare from RailRadar fare API → erail (web), recorded as `fareSource` (seats and fare provenance never merged).
+
 ## Extra fallback APIs (Round-16o, optional)
 
 Data chain per method: **RailCore → RailKit → RailRadar → Indian Rail API → verified-site web-scrape → none**. The two new providers are *additional* and fully optional — with no key set they are skipped and nothing else changes.
