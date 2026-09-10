@@ -41,6 +41,8 @@ export interface ClassAvailability {
   /** Round-18g: fare ka alag source jab seats kisi aur provider se aaye (provenance mix nahi). */
   fareSource?: "web_erail" | "railradar" | "indianrailapi";
   webNote?: string;
+  /** Round-18m: web cache SA_MAX_AGE (24h) se purani — "last known", ⚠ stale. */
+  stale?: boolean;
 }
 
 export interface TrainResult {

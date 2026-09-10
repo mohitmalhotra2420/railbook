@@ -32,14 +32,16 @@ function avlText(c: ClassAvailability, loading = false): { text: string; tone: "
   if (loading && (c.status === "UNKNOWN" || (c.status === "AVAILABLE" && c.seats == null && !c.fare))) {
     return { text: "Loading…", tone: "muted" };
   }
+  /* Round-18m: 24h+ purani web-cache = "last known" (⚠), fresh AVL jaisa green nahi. */
+  const st = c.stale ? " ⚠" : "";
   if (c.status === "AVAILABLE") {
-    return { text: c.seats != null ? `AVL ${c.seats}` : "AVL", tone: "ok" };
+    return { text: (c.seats != null ? `AVL ${c.seats}` : "AVL") + st, tone: c.stale ? "wl" : "ok" };
   }
   if (c.status === "WAITLIST") {
-    return { text: c.waitlist != null ? `WL ${c.waitlist}` : "WL", tone: "wl" };
+    return { text: (c.waitlist != null ? `WL ${c.waitlist}` : "WL") + st, tone: "wl" };
   }
   if (c.status === "RAC") {
-    return { text: c.rac != null ? `RAC ${c.rac}` : "RAC", tone: "rac" };
+    return { text: (c.rac != null ? `RAC ${c.rac}` : "RAC") + st, tone: "rac" };
   }
   if (c.status === "NOT_AVAILABLE") return { text: "N/A", tone: "muted" };
   return { text: "↻ Refresh", tone: "muted" };

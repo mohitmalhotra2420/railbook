@@ -204,6 +204,11 @@ only provider-verified alternatives.
 - **Seat availability on fallback:** RailRadar/erail search rows have no class list and RailCore schedule is blocked → `routedClassBoard` had no class codes → probe never ran ("Seat data nahi"). New `webTrainClasses()` discovers classes from the erail fare page (12h cache); the railyatri/railradar seat probe now runs — LDH→NDLS best became 12014 (EC AVL) instead of a WL Vande Bharat.
 - **Live status → choose the run date:** "12424 kahan hai" (no date cue) → `routedLiveDates()` probes today-3…today through the same provider chain and returns ONLY dates that have a run (`liveDates` in `/api/agent`); UI shows chips "Aaj (Thu 10) · chal rahi", "Kal (Wed 9) · chal rahi", "Tue 8 · poori" … Tap → "12424 2026-09-09 ka live status" → that run. Explicit cues (kal/parson/date) still go straight to the run.
 
+### Round-18m-2 — stale web rows shown (⚠), alt-date seat proof, no duplicate connections
+- **RailYatri rows older than 24h** are no longer hidden (that left cells as "↻ Refresh"): they come through with `stale: true` → UI shows "AVL 80 ⚠" / "WL 13 ⚠" (last known) and never counts as proven seat for ranking/recovery.
+- **Alternative date** now probes the fastest train's seat on that date → chip/summary say "22478 CC AVL 43" or "… WL 68"; the summary says "shift to <date>" only with proven AVL/RAC, otherwise "N trains run, seat status unverified". Count is trains, never seats.
+- **Connecting journey** — recovery block shows the first 2; the "🔁 Connecting" chip lists only the remaining ones (no duplicates).
+
 ## Extra fallback APIs (Round-16o, optional)
 
 Data chain per method: **RailCore → RailKit → RailRadar → Indian Rail API → verified-site web-scrape → none**. The two new providers are *additional* and fully optional — with no key set they are skipped and nothing else changes.

@@ -36,3 +36,15 @@ describe("Round-18m live-status date chooser", () => {
     expect(sample.label).toMatch(/Kal/);
   });
 });
+
+describe("Round-18m alt-date seat proof in summary", () => {
+  it("says AVL only when a provider proved it; WL date is stated as WL", async () => {
+    const { journeySummary } = await import("../server/journey/engine.js");
+    const best = { rank: 1, category: "fastest", trainNumbers: ["12484"], trainNames: ["AMRITSAR KCVL EXP"], durationLabel: "27h 10m", legs: [{ trainNumber: "12484", trainName: "AMRITSAR KCVL EXP", from: "ASR", to: "MAO", departure: "08:20", arrival: "11:30", dayOffset: 1 }], durationMinutes: 1630, changes: 0, availability: { classCode: "SL", status: "WAITLIST", seats: null, rac: null, waitlist: 18, fare: 700, source: "web_railyatri" }, score: 1, reasons: [], badges: [], reliability: null } as never;
+    const base = (alts: unknown[]) => ({ query: { from: "ASR", to: "MAO", date: "2026-09-13", travelClass: null, preference: "fastest" }, best, routeOptions: [best], connections: [], alternativeDates: alts, directUnavailable: true, recovery: null, provenance: { retrievedAt: new Date().toISOString(), freshness: "fresh", sources: [] }, sources: [], notes: [], conflicts: [] }) as never;
+    const wl = journeySummary(base([{ date: "2026-09-14", count: 1, fastest: { number: "12484", durationMinutes: 1630 }, seatProof: "12484 SL WL 30" }]));
+    expect(wl).toContain("Or shift to Mon 14 Sep — 1 train run (12484 SL WL 30).");
+    const avl = journeySummary(base([{ date: "2026-09-14", count: 1, fastest: null, seatProof: "12484 SL WL 30" }, { date: "2026-09-15", count: 2, fastest: null, seatProof: "12483 3A AVL 12" }]));
+    expect(avl).toContain("Or shift to Tue 15 Sep — 12483 3A AVL 12.");
+  });
+});

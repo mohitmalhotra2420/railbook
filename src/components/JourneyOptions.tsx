@@ -29,9 +29,11 @@ function dayTag(n: number): string {
 function availText(o: AgentRouteOption): { text: string; tone: "ok" | "warn" | "bad" | "muted" } {
   const a = o.availability;
   if (!a) return { text: "Seat data nahi", tone: "muted" };
-  if (a.status === "AVAILABLE") return { text: `${a.classCode} AVL${a.seats != null ? ` ${a.seats}` : ""}`, tone: "ok" };
-  if (a.status === "RAC") return { text: `${a.classCode} RAC${a.rac != null ? ` ${a.rac}` : ""}`, tone: "warn" };
-  if (a.status === "WAITLIST") return { text: `${a.classCode} WL${a.waitlist != null ? ` ${a.waitlist}` : ""}`, tone: "bad" };
+  /* Round-18m: 24h+ purani web-cache → "last known" + ⚠, kabhi fresh AVL nahi dikhta. */
+  const st = a.stale ? " ⚠ stale" : "";
+  if (a.status === "AVAILABLE") return { text: `${a.classCode} AVL${a.seats != null ? ` ${a.seats}` : ""}${st}`, tone: a.stale ? "warn" : "ok" };
+  if (a.status === "RAC") return { text: `${a.classCode} RAC${a.rac != null ? ` ${a.rac}` : ""}${st}`, tone: "warn" };
+  if (a.status === "WAITLIST") return { text: `${a.classCode} WL${a.waitlist != null ? ` ${a.waitlist}` : ""}${st}`, tone: "bad" };
   if (a.status === "NOT_AVAILABLE") return { text: `${a.classCode} Not available`, tone: "bad" };
   return { text: `${a.classCode} ${a.status}`, tone: "muted" };
 }
@@ -114,7 +116,7 @@ export function JourneyOptions({
     { id: "best_availability", label: "💺 Best availability", count: plan.routeOptions.filter((o) => o.availability?.status === "AVAILABLE").length },
     { id: "cheapest", label: "💰 Lowest fare", count: plan.routeOptions.filter((o) => o.availability?.fare != null).length },
     { id: "fewest_changes", label: "🚆 Fewest changes", count: plan.routeOptions.length ? Math.min(plan.routeOptions.length, 5) : 0 },
-    { id: "connecting", label: "🔁 Connecting", count: connections.length },
+    { id: "connecting", label: "🔁 Connecting", count: plan.recovery && plan.directUnavailable ? Math.max(0, connections.length - 2) : connections.length },
     { id: "alt_date", label: "📅 Alternative date", count: altDates.length },
   ];
   const tabs = allTabs.filter((t) => t.count > 0);
@@ -293,10 +295,12 @@ export function JourneyOptions({
               <div className="jo-chips">
                 {altDates.map((d) => (
                   <button key={d.date} type="button" className="jo-chip" onClick={onPickDate ? () => onPickDate(d.date) : undefined}>
-                    {formatShortDate(d.date)} · {d.count} trains
+                    {formatShortDate(d.date)} · {d.count} train{d.count > 1 ? "s" : ""}{d.seatProof ? ` · ${d.seatProof}` : ""}
                   </button>
                 ))}
               </div>
+              {/* Round-18m (user: "12th ko seat hai bola, wahan bhi WL thi") — count = trains chalti hain, seat ka daawa nahi. */}
+              <div className="jo-split-note">Ye sirf trains ka count hai — seat status us date par tap karke dekhein{altDates.some((d) => d.seatProof) ? "; jahan likha hai wahi seat-check hua hai" : ""}.</div>
             </div>
           )}
         </div>
@@ -315,12 +319,18 @@ export function JourneyOptions({
           {tab && tab !== "connecting" && tab !== "alt_date" && (
             <div className="jo-list">{sortedFor(tab).map((o) => <OptionRow key={o.rank} o={o} onPick={pick} />)}</div>
           )}
-          {tab === "connecting" && <div className="jo-list">{connections.slice(0, 3).map((c, i) => <ConnectionRow key={i} c={c} />)}</div>}
+          {tab === "connecting" && (
+            <div className="jo-list">
+              {/* Round-18m: recovery block mein pehli 2 already dikhi — yahan sirf BAAKI (duplicate nahi). */}
+              {(rec && plan.directUnavailable ? connections.slice(2, 6) : connections.slice(0, 4)).map((c, i) => <ConnectionRow key={i} c={c} />)}
+              {rec && plan.directUnavailable && connections.length <= 2 && <div className="jo-empty">Upar wale 2 hi verified connections mile.</div>}
+            </div>
+          )}
           {tab === "alt_date" && (
             <div className="jo-list jo-chips">
               {altDates.map((d) => (
                 <button key={d.date} type="button" className="jo-chip" onClick={onPickDate ? () => onPickDate(d.date) : undefined}>
-                  {formatShortDate(d.date)} · {d.count} trains{d.fastest ? ` · fastest ${d.fastest.number}` : ""}
+                  {formatShortDate(d.date)} · {d.count} train{d.count > 1 ? "s" : ""}{d.fastest ? ` · fastest ${d.fastest.number}` : ""}{d.seatProof ? ` · ${d.seatProof}` : ""}
                 </button>
               ))}
             </div>

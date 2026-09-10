@@ -116,8 +116,12 @@ describe("ROUND-16: booking-critical web fallback (API fail → verified sites)"
     expect(await scrapeSeatAvailabilityWeb("12904", D1, "ASR", "NDLS", "SL")).toBeNull();
   });
 
-  it("FRESHNESS: 24h se purana cached row reject (stale IRCTC cache par bharosa nahi)", async () => {
-    expect(await scrapeSeatAvailabilityWeb("12014", D3, "ASR", "NDLS", "CC")).toBeNull();
+  it("FRESHNESS: 24h se purana cached row → stale:true (Round-18m: dikhta hai, lekin ⚠ last-known label ke saath; fresh nahi maana jaata)", async () => {
+    const old = await scrapeSeatAvailabilityWeb("12014", D3, "ASR", "NDLS", "CC");
+    expect(old?.stale).toBe(true);
+    /* fresh rows carry no stale flag */
+    const fresh = await scrapeSeatAvailabilityWeb("12014", D1, "ASR", "NDLS", "CC");
+    expect(fresh?.stale).toBeUndefined();
   });
 
   it("provider.getAvailability: RailCore 402 → railyatri se AVAILABLE 288 seats, source label", async () => {

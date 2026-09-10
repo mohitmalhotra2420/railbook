@@ -82,10 +82,12 @@ function toLeg(t: TrainResult): RouteLeg {
 function bestClassRow(classes: ClassAvailability[], travelClass: string | null): RouteAvailability | null {
   const known = classes.filter((c) => c.status && c.status !== "UNKNOWN");
   if (!known.length) return null;
+  /* Round-18m: fresh rows beat stale (24h+) web-cache rows; stale flag carried. */
   const pick =
     (travelClass ? known.find((c) => c.code === travelClass) : undefined) ??
-    [...known].sort((a, b) => (AVAIL_RANK[a.status] ?? 5) - (AVAIL_RANK[b.status] ?? 5) || (a.fare || 9e9) - (b.fare || 9e9))[0];
+    [...known].sort((a, b) => Number(!!a.stale) - Number(!!b.stale) || (AVAIL_RANK[a.status] ?? 5) - (AVAIL_RANK[b.status] ?? 5) || (a.fare || 9e9) - (b.fare || 9e9))[0];
   return {
+    ...(pick.stale ? { stale: true } : {}),
     classCode: pick.code,
     status: pick.status,
     seats: pick.seats ?? null,
@@ -739,7 +741,7 @@ export async function planJourney(args: {
   let alternativeDates: JourneyPlan["alternativeDates"] = [];
   const directUnavailable =
     trains.length === 0 ||
-    (probedKnown > 0 && ![...availability.values()].some((a) => a && (a.status === "AVAILABLE" || a.status === "RAC")));
+    (probedKnown > 0 && ![...availability.values()].some((a) => a && !a.stale && (a.status === "AVAILABLE" || a.status === "RAC")));
   if (args.includeAlternativeDates || directUnavailable) {
     const [y, m, d] = args.date.split("-").map(Number);
     const shift = (n: number) => {
@@ -751,7 +753,23 @@ export async function planJourney(args: {
       dates.map(async (dd) => {
         const alt = await searchTrainsRouted({ from, to, date: dd });
         const fastest = [...alt.trains].sort((a, b) => (a.durationMinutes || 9e9) - (b.durationMinutes || 9e9))[0];
-        return { date: dd, count: alt.trains.length, fastest: fastest ? { number: fastest.number, durationMinutes: fastest.durationMinutes } : null, ...(alt.provider === "none" ? { providerFailed: true } : {}) };
+        /* Round-18m: alt-date par bhi seat PROVE karo (fastest train, 1 probe) —
+         * "12th ko seat hai" tab hi bole jab provider ne AVL/RAC dikhaya ho. */
+        let seatProof: string | null = null;
+        if (fastest) {
+          try {
+            const hint = args.travelClass ? [args.travelClass] : fastest.classes.map((c) => c.code);
+            const board = await routedClassBoard(fastest.number, dd, from, to, "GN", hint);
+            const row = bestClassRow(board.classes, args.travelClass ?? null);
+            if (row) {
+              const tag = row.status === "AVAILABLE" ? `AVL${row.seats != null ? ` ${row.seats}` : ""}` : row.status === "RAC" ? `RAC${row.rac != null ? ` ${row.rac}` : ""}` : row.status === "WAITLIST" ? `WL${row.waitlist != null ? ` ${row.waitlist}` : ""}` : row.status === "NOT_AVAILABLE" ? "N/A" : null;
+              if (tag) seatProof = `${fastest.number} ${row.classCode} ${tag}${row.stale ? " ⚠stale" : ""}`;
+            }
+          } catch {
+            seatProof = null;
+          }
+        }
+        return { date: dd, count: alt.trains.length, fastest: fastest ? { number: fastest.number, durationMinutes: fastest.durationMinutes } : null, seatProof, ...(alt.provider === "none" ? { providerFailed: true } : {}) };
       }),
     );
   }
@@ -759,7 +777,7 @@ export async function planJourney(args: {
   /* Recovery block. */
   let recovery: JourneyPlan["recovery"] = null;
   if (directUnavailable) {
-    const differentTrain = routeOptions.filter((o) => o.changes === 0 && o.availability && (o.availability.status === "AVAILABLE" || o.availability.status === "RAC"));
+    const differentTrain = routeOptions.filter((o) => o.changes === 0 && o.availability && !o.availability.stale && (o.availability.status === "AVAILABLE" || o.availability.status === "RAC"));
     let partial: PartialRoutePlan | null = null;
     if (args.includePartial !== false && args.travelClass && trains.length) {
       const target = probeList[0];
@@ -877,8 +895,11 @@ export function journeySummary(plan: JourneyPlan): string | null {
     .filter((d) => d.count > 0 && !d.providerFailed)
     .sort((a, b) => Number(b.date > plan.query.date) - Number(a.date > plan.query.date) || a.date.localeCompare(b.date));
   if (!bestOk && altDates.length) {
-    const d = altDates[0];
-    parts.push(`Or shift to ${dayLabel(d.date)} — ${d.count} train${d.count > 1 ? "s" : ""}${d.fastest ? ` (${d.fastest.number})` : ""}.`);
+    /* Round-18m: seat-proven date first; WL-only date is stated as WL, never as "seat hai". */
+    const proven = altDates.find((d) => d.seatProof && /\b(AVL|RAC)\b/.test(d.seatProof) && !/stale/.test(d.seatProof));
+    const d = proven ?? altDates[0];
+    if (proven) parts.push(`Or shift to ${dayLabel(d.date)} — ${d.seatProof}.`);
+    else parts.push(`Or shift to ${dayLabel(d.date)} — ${d.count} train${d.count > 1 ? "s" : ""} run${d.seatProof ? ` (${d.seatProof})` : ", seat status unverified"}.`);
   }
   /* Same-city alternate station (suggestion only). */
   const altSt = rec?.alternateStations?.[0];

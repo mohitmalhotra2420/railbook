@@ -28,7 +28,8 @@ describe("Round-18l journeySummary", () => {
       recovery: { reason: "WL", differentTrain: [], partialRoute: null, connecting: [conn], alternativeDates: [{ date: "2026-09-12", count: 0, fastest: null }, { date: "2026-09-15", count: 1, fastest: { number: "06904", durationMinutes: 6870 } }], alternateStations: [] } }));
     expect(s).toContain("Best plan: 12484 AMRITSAR KCVL EXP 08:20→11:30, 27h 10m (SL WL 18).");
     expect(s).toContain("If it slips, route via Hazrat Nizamuddin (12030→12780, layover 125 min).");
-    expect(s).toContain("Or shift to Tue 15 Sep — 1 train (06904).");
+    /* Round-18m: seat proof nahi → "seat hai" nahi bolte, sirf trains run + unverified. */
+    expect(s).toContain("Or shift to Tue 15 Sep — 1 train run, seat status unverified.");
     expect(s).not.toContain("Sat 12 Sep"); // 0-train dates never suggested
   });
   it("prefers a later alternative date over an earlier one", () => {

@@ -51,6 +51,8 @@ export interface ClassAvailability {
   date?: string;
   source?: string;
   fareSource?: string;
+  /** Round-18m: web cache 24h+ purana — "last known" (⚠). */
+  stale?: boolean;
 }
 
 export interface TrainResult {

@@ -52,7 +52,7 @@ export interface AgentRouteOption {
   legs: AgentRouteLeg[];
   layoverMinutes: number | null;
   classes: string[];
-  availability: { classCode: string; status: string; seats: number | null; rac: number | null; waitlist: number | null; fare: number | null; source: string } | null;
+  availability: { classCode: string; status: string; seats: number | null; rac: number | null; waitlist: number | null; fare: number | null; source: string; stale?: boolean } | null;
   reliability: null;
   source: string;
   why: string;
@@ -90,7 +90,7 @@ export interface AgentJourneyPlan {
   best: AgentRouteOption | null;
   routeOptions: AgentRouteOption[];
   connections: AgentConnection[];
-  alternativeDates: { date: string; count: number; fastest: { number: string; durationMinutes: number } | null }[];
+  alternativeDates: { date: string; count: number; fastest: { number: string; durationMinutes: number } | null; seatProof?: string | null }[];
   directUnavailable: boolean;
   /** Round-18l: server-built plain-language summary (best → fallback → alt date). */
   summary?: string | null;

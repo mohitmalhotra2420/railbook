@@ -23,6 +23,8 @@ export type RouteAvailability = {
   waitlist: number | null;
   fare: number | null;
   source: string;
+  /** Round-18m: web cache 24h+ purana — "last known" only. */
+  stale?: boolean;
 };
 
 export type RouteLeg = {
@@ -188,7 +190,8 @@ export type JourneyPlan = {
   routeOptions: RouteOption[];
   connections: Connection[];
   /** Alternative dates — SIRF suggestion (counts), user ki date badli nahi jaati. */
-  alternativeDates: { date: string; count: number; fastest: { number: string; durationMinutes: number } | null; providerFailed?: boolean }[];
+  /** Round-18m: `seatProof` = us date par fastest train ka PROVEN seat status (e.g. "12014 EC AVL 3"), warna null — count sirf trains hai. */
+  alternativeDates: { date: string; count: number; fastest: { number: string; durationMinutes: number } | null; providerFailed?: boolean; seatProof?: string | null }[];
   directUnavailable: boolean;
   recovery: {
     reason: string;

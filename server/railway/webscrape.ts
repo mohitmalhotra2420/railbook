@@ -668,6 +668,9 @@ export type ScrapedSeatAvailability = {
   totalFare: number | null;
   lastUpdatedAt: string | null;
   cacheText: string | null;
+  /** Round-18m: RailYatri ki cached entry SA_MAX_AGE se purani thi — status
+   * sirf "last known" hai (UI mein ⚠ stale label), fresh nahi maani jaati. */
+  stale?: boolean;
   provider: "web_railyatri";
   sourceUrl: string;
 };
@@ -749,7 +752,12 @@ export async function scrapeSeatAvailabilityWeb(
      * ago" dekha) — booking-critical data 24h se purana kabhi nahi dete;
      * stale = null (honest UNKNOWN upar). Timestamp parse na ho to bhi null. */
     const updatedMs = Date.parse(String(row.last_updated_at ?? "").replace(" +0530", "+05:30").replace(" ", "T"));
-    if (!Number.isFinite(updatedMs) || Date.now() - updatedMs > SA_MAX_AGE_MS) return null;
+    /* Round-18m (user: "fallback pe seat data poora nahi aa raha"): purani
+     * cache ko chhupane ki jagah STALE flag ke saath do — UI "⚠ stale" + "as of
+     * 2 months ago" dikhata hai, silent "Refresh" cell nahi. Timestamp hi na
+     * ho to ab bhi null (kab ka hai pata nahi). */
+    if (!Number.isFinite(updatedMs)) return null;
+    const stale = Date.now() - updatedMs > SA_MAX_AGE_MS;
     /* Journey date beet chuki ho to bhi nahi. */
     if (Date.parse(`${dateYmd}T23:59:59+05:30`) < Date.now()) return null;
     const seats = parsed.status === "AVAILABLE" && typeof row.seat_avl === "number" ? row.seat_avl : parsed.seats;
@@ -767,6 +775,7 @@ export async function scrapeSeatAvailabilityWeb(
       totalFare: typeof row.total_fare === "number" ? row.total_fare : null,
       lastUpdatedAt: row.last_updated_at ?? null,
       cacheText: row.cache_text ?? null,
+      ...(stale ? { stale: true } : {}),
       provider: "web_railyatri",
       sourceUrl: `https://www.railyatri.in/seat-availability/${num}`,
     };

@@ -299,7 +299,8 @@ async function railyatriAvailability(
       quota: sc.quota,
       date,
       source: "web_railyatri",
-      webNote: `web: railyatri.in (IRCTC data${sc.cacheText ? `, ${sc.cacheText.toLowerCase()}` : ""}) — status "${sc.statusText}"`,
+      webNote: `web: railyatri.in (IRCTC data${sc.cacheText ? `, ${sc.cacheText.toLowerCase()}` : ""}) — status "${sc.statusText}"${sc.stale ? " — ⚠ STALE (24h+ purana), book se pehle refresh" : ""}`,
+      ...(sc.stale ? { stale: true } : {}),
     };
   } catch {
     return null;
