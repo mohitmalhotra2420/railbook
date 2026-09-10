@@ -212,7 +212,9 @@ const ENTRIES: KbEntry[] = [
 
 /* ── Scoring: question text mein kitne KB keys overlap karte hain. ── */
 export function railKbAnswer(questionText: string): string | null {
-  const q = ` ${questionText.toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ")} `;
+  /* Round-18i: "RAC ka matlab kya hai" / "WL ki meaning" → "rac kya" key. */
+  const normalized = questionText.toLowerCase().replace(/\b(ka|ki|ke)\s+(matlab|meaning|arth|mtlb)\b/g, "kya");
+  const q = ` ${normalized.replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ")} `;
   if (q.trim().length < 4) return null;
   let best: { score: number; entry: KbEntry } | null = null;
   for (const entry of ENTRIES) {

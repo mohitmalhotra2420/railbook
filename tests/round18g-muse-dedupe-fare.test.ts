@@ -43,3 +43,17 @@ describe("Round-18h client: knowledge questions never classified as list-pick", 
     expect(classifyFollowUp("pehli wali")).toBe("train_pick");
   });
 });
+
+describe("Round-18i: rules questions answer from KB (tatkal timing), fact questions still go to web", () => {
+  it("WEB_SEARCH for 'IRCTC tatkal booking kab shuru hoti hai' returns kb with 10:00 AM timing", async () => {
+    const { executeApprovedTool } = await import("../server/agent/agentic");
+    const r = await executeApprovedTool("WEB_SEARCH", { query: "IRCTC tatkal booking timing" }, { userText: "IRCTC tatkal booking kab shuru hoti hai" } as never);
+    expect(r.ok).toBe(true);
+    expect(r.source).toBe("kb");
+    expect(r.summary).toMatch(/10:00 AM/);
+  });
+  it("railKbAnswer resolves 'RAC ka matlab kya hai'", async () => {
+    const { railKbAnswer } = await import("../server/agent/railkb");
+    expect(railKbAnswer("RAC ka matlab kya hai")).toMatch(/Reservation Against Cancellation/);
+  });
+});

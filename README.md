@@ -181,6 +181,10 @@ only provider-verified alternatives.
 - Client bug: "Bharat ki pehli train kab chali thi" never reached the server — `classifyFollowUp` treated "pehli train" as a list pick ("Pehle trains search karni hongi"). Knowledge phrasing (kab/kahan/history/bharat/india/…) now bypasses `train_pick`.
 - Verified live in Chromium: longest journey (Muse + Wikipedia), first train 1853 (Muse + Wikipedia), Rajdhani vs Shatabdi (KB+web), 12014 CC seats **with fare** (RailRadar seats + fare fill), and with all API keys removed seats+fare still come from railyatri.in (web) — CC AVL ₹1,125.
 
+### Round-18i — rules questions prefer KB, fact questions prefer web
+- Browser E2E: "IRCTC tatkal booking kab shuru hoti hai" got a generic IRCTC Wikipedia paragraph (no timing). `WEB_SEARCH` now checks `RULES_TOPIC_RE` (tatkal/RAC/WL/chart/PNR/refund/luggage/ID/quota/concession…) and answers from the stable KB first (10:00 AM AC / 11:00 AM non-AC). Fact questions (longest/fastest/zones/history/largest) still go to Wikipedia topic-page first.
+- `railKbAnswer` normalises "X ka matlab/meaning kya hai" → "X kya" so "RAC ka matlab kya hai" hits the KB.
+
 ## Extra fallback APIs (Round-16o, optional)
 
 Data chain per method: **RailCore → RailKit → RailRadar → Indian Rail API → verified-site web-scrape → none**. The two new providers are *additional* and fully optional — with no key set they are skipped and nothing else changes.

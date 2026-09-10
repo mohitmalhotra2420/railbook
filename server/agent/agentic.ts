@@ -46,6 +46,8 @@ import { makeProvenance } from "../providers/provenance.js";
 import { webSearch } from "./websearch.js";
 import { findTopicAnswer, HINGLISH_TOPIC_WORDS, significantWords } from "./topicpage.js";
 import { railKbAnswer } from "./railkb.js";
+/* Round-18i: rules/procedure topics → KB before Wikipedia (see WEB_SEARCH). */
+const RULES_TOPIC_RE = /\b(tatkal|premium tatkal|rac|waiting list|waitlist|wl|gnwl|pqwl|rlwl|chart|pnr|refund|cancel(?:lation)?|luggage|saman|samaan|blanket|bedroll|pantry|catering|id proof|photo id|concession|senior citizen|quota|break journey|child (?:ticket|fare)|bachcha|tte|ticket checker|arp|advance reservation|kitne din pehle)\b/i;
 import { stationBoard, trainHistory } from "../railway/railkit.js";
 
 export type AgenticToolName =
@@ -1144,6 +1146,26 @@ export async function executeApprovedTool(
         const userHasSubject = Boolean(userText) && significantWords(userText).filter((w) => !HINGLISH_TOPIC_WORDS.has(w)).length > 0;
         const tries = userHasSubject && userText.toLowerCase() !== q.toLowerCase() ? [userText, q] : [q];
         if (!userHasSubject && userText && userText.toLowerCase() !== q.toLowerCase()) tries.push(userText);
+        /* Round-18i (browser E2E "IRCTC tatkal booking kab shuru hoti hai" →
+         * Wikipedia ne IRCTC ka generic para diya, timing nahi): RULES /
+         * PROCEDURE sawaal (tatkal, RAC, WL, chart, refund, luggage, ID,
+         * quota…) ke liye local KB (stable IRCTC rules) PEHLE — Wikipedia
+         * topic-page sirf FACT sawaalon (longest/fastest/zones/history) ke
+         * liye pehle rahe. */
+        const rulesTopic = RULES_TOPIC_RE.test(userText || q);
+        if (rulesTopic) {
+          const kbFirst = railKbAnswer(userText || q) ?? (userText ? railKbAnswer(q) : null);
+          if (kbFirst) {
+            const kbText = kbFirst.replace(/\n\(Ye general railway knowledge hai[^)]*\)\s*$/, "").trim();
+            return okResult("kb", kbText, {
+              query: q,
+              answer_found: true,
+              answer: kbText,
+              kind: "kb",
+              note: "YAHI JAWAB HAI (RailBook knowledge base — stable railway rules) — dobara WEB_SEARCH MAT karo. Is text ko 2-4 line Hinglish mein do, numbers waise hi; end mein '(General railway rules — official/IRCTC se verify karein.)' likho.",
+            });
+          }
+        }
         for (const t of tries) {
           const ans = await findTopicAnswer(t);
           if (!ans) continue;
