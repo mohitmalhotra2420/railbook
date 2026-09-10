@@ -209,6 +209,10 @@ only provider-verified alternatives.
 - **Alternative date** now probes the fastest train's seat on that date → chip/summary say "22478 CC AVL 43" or "… WL 68"; the summary says "shift to <date>" only with proven AVL/RAC, otherwise "N trains run, seat status unverified". Count is trains, never seats.
 - **Connecting journey** — recovery block shows the first 2; the "🔁 Connecting" chip lists only the remaining ones (no duplicates).
 
+### Round-18m-3 — connecting journeys: boarding station, train name, real dates, per-leg seat
+- Every connecting leg now shows **train name + boarding/alighting station name (code) + calendar date** (no more bare "+1d"), plus a "↓ Yahan train badlo: Ambala Cant Jn (UMB)" marker.
+- **Seat per leg:** `probeConnectionLegs()` probes leg A (origin→hub) and leg B (hub→destination) separately — never origin→destination on a train that doesn't go there. Tapping a leg asks for that leg's segment and date only.
+
 ## Extra fallback APIs (Round-16o, optional)
 
 Data chain per method: **RailCore → RailKit → RailRadar → Indian Rail API → verified-site web-scrape → none**. The two new providers are *additional* and fully optional — with no key set they are skipped and nothing else changes.

@@ -32,10 +32,17 @@ export type RouteLeg = {
   trainName: string;
   from: string;
   to: string;
+  /** Round-18m-3: boarding / alighting station names (user: "kis station se board karu"). */
+  fromName?: string | null;
+  toName?: string | null;
   departure: string;
   arrival: string;
   arrivalDayOffset: number;
+  /** Round-18m-3: is leg ka departure kis din (journey date se offset) — connection ki 2nd leg. */
+  departureDayOffset?: number;
   durationMinutes: number | null;
+  /** Round-18m-3: is LEG ke segment (from→to) ki seat — provider-proven, warna null. */
+  availability?: RouteAvailability | null;
 };
 
 export type RouteOption = {

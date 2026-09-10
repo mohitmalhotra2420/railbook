@@ -72,6 +72,8 @@ function toLeg(t: TrainResult): RouteLeg {
     trainName: t.name,
     from: t.from.code,
     to: t.to.code,
+    fromName: t.from.name ?? null,
+    toName: t.to.name ?? null,
     departure: t.departure,
     arrival: t.arrival,
     arrivalDayOffset: t.arrivalDayOffset || 0,
@@ -269,6 +271,34 @@ export function evaluateConnection(
     legs: [legA, legB],
     source: opts.source ?? "railcore",
   };
+}
+
+/* Round-18m-3 (user: "connecting option par seat JAT→BDTS dhoondhta hai jabki
+ * train wahan jaati hi nahi; dono trains ki seat alag-alag dikhao"):
+ * har leg ka apna segment (A: from→hub, B: hub→to) probe hota hai. Bounded:
+ * pehli `limit` connections, dono legs parallel, provider-proven only. */
+export async function probeConnectionLegs(connections: Connection[], date: string, travelClass: string | null, limit = 3): Promise<Set<string>> {
+  const sources = new Set<string>();
+  const cache = new Map<string, Promise<RouteAvailability | null>>();
+  const probe = (leg: RouteLeg): Promise<RouteAvailability | null> => {
+    const key = `${leg.trainNumber}:${leg.from}:${leg.to}`;
+    let p = cache.get(key);
+    if (!p) {
+      p = routedClassBoard(leg.trainNumber, date, leg.from, leg.to, "GN", travelClass ? [travelClass] : [])
+        .then((b) => bestClassRow(b.classes, travelClass))
+        .catch(() => null);
+      cache.set(key, p);
+    }
+    return p;
+  };
+  await Promise.all(
+    connections.slice(0, limit).map(async (c) => {
+      const rows = await Promise.all(c.legs.map((l) => probe(l)));
+      c.legs = c.legs.map((l, i) => ({ ...l, availability: rows[i] }));
+      rows.forEach((r) => r && sources.add(r.source));
+    }),
+  );
+  return sources;
 }
 
 export async function findConnections(
@@ -581,6 +611,7 @@ export async function findAlternativeTrains(args: {
     const c = await findConnections(from, to, args.date, { maxHubs: 2 });
     connecting = c.connections.slice(0, 2);
     c.sources.forEach((x) => sources.add(x));
+    (await probeConnectionLegs(connecting, args.date, cls ?? null, 2)).forEach((x) => sources.add(x));
   }
   const why =
     reason === "waitlist" ? `${args.trainNumber} ${cls ?? ""} WL${selRow?.waitlist ?? ""}` : reason === "rac" ? `${args.trainNumber} ${cls ?? ""} RAC` : reason === "low_availability" ? `${args.trainNumber} ${cls ?? ""} mein sirf ${selRow?.seats} seats` : reason === "not_available" ? `${args.trainNumber} ${cls ?? ""} not available` : reason === "class_unavailable" ? `${args.trainNumber} mein ${cls} class ka data/seat nahi` : `${args.trainNumber} ki availability provider se nahi aayi`;
@@ -733,6 +764,7 @@ export async function planJourney(args: {
     const c = await findConnections(from, to, args.date, { maxHubs: trains.length ? 2 : 3 });
     connections = c.connections;
     c.sources.forEach((s) => sources.add(s));
+    (await probeConnectionLegs(connections, args.date, args.travelClass ?? null)).forEach((s) => sources.add(s));
   }
 
   const routeOptions = rankRouteOptions({ origin: from, destination: to, trains, availability, connections, source: provider, travelClass: args.travelClass ?? null });
@@ -794,6 +826,7 @@ export async function planJourney(args: {
       const c = await findConnections(from, to, args.date, { maxHubs: 3 });
       connections = c.connections;
       c.sources.forEach((s) => sources.add(s));
+      (await probeConnectionLegs(connections, args.date, args.travelClass ?? null)).forEach((s) => sources.add(s));
     }
     /* §8 alternate boarding/destination station (same city) — suggestion only. */
     let alternateStations: AlternateStationOption[] = [];

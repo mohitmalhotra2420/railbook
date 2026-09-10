@@ -48,3 +48,26 @@ describe("Round-18m alt-date seat proof in summary", () => {
     expect(avl).toContain("Or shift to Tue 15 Sep — 12483 3A AVL 12.");
   });
 });
+
+describe("Round-18m-3 connecting legs carry their own segment seat + station names", () => {
+  it("probeConnectionLegs probes A: from→hub and B: hub→to (never from→to)", async () => {
+    const { probeConnectionLegs, __test } = await import("../server/journey/engine.js");
+    void __test;
+    const router = await import("../server/railway/router.js");
+    const calls: string[] = [];
+    const spy = vi.spyOn(router, "routedClassBoard");
+    void spy;
+    const conn = { station: "UMB", stationName: "Ambala Cant Jn", arrivalTrain: "22478", departureTrain: "12926", arrivalAt: "11:48", departsAt: "13:10", arrivalDayOffset: 0, layoverMinutes: 82, valid: true, reason: null, totalDurationMinutes: 1888, source: "web_erail",
+      legs: [
+        { trainNumber: "22478", trainName: "VANDE BHARAT EXP", from: "JAT", fromName: "Jammu Tawi", to: "UMB", toName: "Ambala Cant Jn", departure: "07:12", arrival: "11:48", arrivalDayOffset: 0, durationMinutes: 276 },
+        { trainNumber: "12926", trainName: "PASCHIM EXPRESS", from: "UMB", fromName: "Ambala Cant Jn", to: "BDTS", toName: "Bandra Terminus", departure: "13:10", arrival: "14:40", arrivalDayOffset: 1, durationMinutes: 1530 },
+      ] } as never;
+    // shape contract: legs get an `availability` slot (null when provider had nothing) and keep station names
+    await probeConnectionLegs([conn], "2026-09-11", null, 1);
+    const legs = (conn as { legs: { from: string; to: string; fromName?: string | null; availability?: unknown }[] }).legs;
+    expect(legs.map((l) => `${l.from}>${l.to}`)).toEqual(["JAT>UMB", "UMB>BDTS"]);
+    expect(legs[0].fromName).toBe("Jammu Tawi");
+    expect(legs.every((l) => "availability" in l)).toBe(true);
+    expect(calls).toEqual([]);
+  }, 30000);
+});

@@ -30,10 +30,15 @@ export interface AgentRouteLeg {
   trainName: string;
   from: string;
   to: string;
+  fromName?: string | null;
+  toName?: string | null;
   departure: string;
   arrival: string;
   arrivalDayOffset: number;
+  departureDayOffset?: number;
   durationMinutes: number | null;
+  /** Round-18m-3: is leg ke segment ki seat (provider-proven) — null = data nahi. */
+  availability?: { classCode: string; status: string; seats: number | null; rac: number | null; waitlist: number | null; fare: number | null; source: string; stale?: boolean } | null;
 }
 export interface AgentRouteOption {
   rank: number;

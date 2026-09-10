@@ -1577,6 +1577,8 @@ function BlockView({
       <JourneyOptions
         plan={block.plan}
         onPickTrain={(n) => onChip(`${n} ki seat availability ${block.plan.query.travelClass ? block.plan.query.travelClass + " " : ""}${block.plan.query.date} ko ${block.plan.query.from} se ${block.plan.query.to}`)}
+        /* Round-18m-3: connecting leg → SIRF us leg ka segment + us leg ki date. */
+        onPickLeg={(l) => onChip(`${l.trainNumber} ki seat availability ${block.plan.query.travelClass ? block.plan.query.travelClass + " " : ""}${l.date} ko ${l.from} se ${l.to}`)}
         onPickDate={(d) => onChip(`${block.plan.query.from} se ${block.plan.query.to} ${d} ki trains dikhao`)}
         onPickStations={(f, t) => onChip(`${f} se ${t} ${block.plan.query.date} ki trains dikhao`)}
         onOpenBoard={onOpenBoard ? () => onOpenBoard(block.plan.query.from, block.plan.query.to, block.plan.query.date, block.plan.best?.trainNumbers[0] ?? null) : undefined}

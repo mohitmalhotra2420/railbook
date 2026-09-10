@@ -9,8 +9,8 @@
  * Koi client-side ranking/guess nahi — jo plan mein nahi hai wo dikhta nahi.
  */
 import { useState } from "react";
-import type { AgentConnection, AgentJourneyPlan, AgentRouteOption } from "../ai/agent";
-import { formatShortDate, inr } from "../format";
+import type { AgentConnection, AgentJourneyPlan, AgentRouteLeg, AgentRouteOption } from "../ai/agent";
+import { addDays, formatShortDate, inr } from "../format";
 
 const BADGE_LABEL: Record<string, string> = {
   best_overall: "Best overall",
@@ -24,6 +24,25 @@ const BADGE_LABEL: Record<string, string> = {
 
 function dayTag(n: number): string {
   return n > 0 ? ` +${n}d` : "";
+}
+/* Round-18m-3 (user: "+1d ki jagah proper date likho"): journey date + offset → "12 Sep". */
+function dateTag(baseYmd: string | null | undefined, n: number): string {
+  if (!baseYmd) return dayTag(n);
+  return n > 0 ? ` · ${formatShortDate(addDays(baseYmd, n))}` : "";
+}
+function legDateLabel(baseYmd: string | null | undefined, n: number): string {
+  return baseYmd ? formatShortDate(addDays(baseYmd, n || 0)) : n > 0 ? `+${n}d` : "";
+}
+
+type AvailLike = NonNullable<AgentRouteLeg["availability"]>;
+function availTextOf(a: AvailLike | null | undefined): { text: string; tone: "ok" | "warn" | "bad" | "muted" } {
+  if (!a) return { text: "Seat data nahi", tone: "muted" };
+  const st = a.stale ? " ⚠ stale" : "";
+  if (a.status === "AVAILABLE") return { text: `${a.classCode} AVL${a.seats != null ? ` ${a.seats}` : ""}${st}`, tone: a.stale ? "warn" : "ok" };
+  if (a.status === "RAC") return { text: `${a.classCode} RAC${a.rac != null ? ` ${a.rac}` : ""}${st}`, tone: "warn" };
+  if (a.status === "WAITLIST") return { text: `${a.classCode} WL${a.waitlist != null ? ` ${a.waitlist}` : ""}${st}`, tone: "bad" };
+  if (a.status === "NOT_AVAILABLE") return { text: `${a.classCode} Not available`, tone: "bad" };
+  return { text: `${a.classCode} ${a.status}`, tone: "muted" };
 }
 
 function availText(o: AgentRouteOption): { text: string; tone: "ok" | "warn" | "bad" | "muted" } {
@@ -44,8 +63,54 @@ function layoverLabel(m: number): string {
   return h ? `${h}h${r ? ` ${r}m` : ""}` : `${r}m`;
 }
 
-function OptionRow({ o, onPick }: { o: AgentRouteOption; onPick?: (o: AgentRouteOption) => void }) {
+/* Round-18m-3: connecting option ke har leg ki apni row — train NAAM, boarding
+ * station (naam+code), date, aur US SEGMENT ki seat. Tap → usi leg ki seat query
+ * (JAT→BDTS jaisi galat poori-route query kabhi nahi). */
+function LegRows({ legs, baseDate, onPickLeg }: { legs: AgentRouteLeg[]; baseDate?: string | null; onPickLeg?: (leg: AgentRouteLeg) => void }) {
+  let dayCursor = 0;
+  return (
+    <div className="jo-legs">
+      {legs.map((l, i) => {
+        const depDay = l.departureDayOffset ?? dayCursor;
+        const arrDay = depDay + (l.arrivalDayOffset || 0);
+        dayCursor = arrDay;
+        const av = availTextOf(l.availability);
+        return (
+          <button type="button" key={`${l.trainNumber}-${i}`} className="jo-leg" onClick={onPickLeg ? () => onPickLeg({ ...l, departureDayOffset: depDay }) : undefined}>
+            <div className="jo-leg-head">
+              <span className="jo-no">{l.trainNumber}</span> <span className="jo-name">{l.trainName}</span>
+              <span className={`jo-avl jo-avl-${av.tone}`}>{av.text}</span>
+            </div>
+            <div className="jo-leg-line">
+              <strong>{l.departure}</strong> {l.fromName ?? l.from} ({l.from}){baseDate ? ` · ${legDateLabel(baseDate, depDay)}` : ""} → <strong>{l.arrival}</strong> {l.toName ?? l.to} ({l.to}){baseDate ? ` · ${legDateLabel(baseDate, arrDay)}` : dayTag(l.arrivalDayOffset)}
+            </div>
+            {i < legs.length - 1 && <div className="jo-leg-change">↓ Yahan train badlo: {l.toName ?? l.to} ({l.to})</div>}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function OptionRow({ o, onPick, baseDate, onPickLeg }: { o: AgentRouteOption; onPick?: (o: AgentRouteOption) => void; baseDate?: string | null; onPickLeg?: (leg: AgentRouteLeg) => void }) {
   const av = availText(o);
+  if (o.changes > 0 && o.legs.length > 1) {
+    return (
+      <div className="jo-row jo-row-multi">
+        <div className="jo-row-main">
+          <div className="jo-row-times">
+            <strong>{o.departure}</strong> → <strong>{o.arrival}</strong>
+            <span className="jo-day">{dateTag(baseDate, o.arrivalDayOffset)}</span>
+            <span className="jo-dot">·</span>
+            <span>{o.durationLabel ?? "—"}</span>
+            <span className="jo-dot">·</span>
+            <span>{o.changes} change{o.layoverMinutes != null ? ` · ${layoverLabel(o.layoverMinutes)} layover` : ""}</span>
+          </div>
+          <LegRows legs={o.legs} baseDate={baseDate} onPickLeg={onPickLeg} />
+        </div>
+      </div>
+    );
+  }
   return (
     <button type="button" className="jo-row" onClick={onPick ? () => onPick(o) : undefined}>
       <div className="jo-row-main">
@@ -55,7 +120,7 @@ function OptionRow({ o, onPick }: { o: AgentRouteOption; onPick?: (o: AgentRoute
         </div>
         <div className="jo-row-times">
           <strong>{o.departure}</strong> → <strong>{o.arrival}</strong>
-          <span className="jo-day">{dayTag(o.arrivalDayOffset)}</span>
+          <span className="jo-day">{dateTag(baseDate, o.arrivalDayOffset)}</span>
           <span className="jo-dot">·</span>
           <span>{o.durationLabel ?? "—"}</span>
           <span className="jo-dot">·</span>
@@ -70,18 +135,12 @@ function OptionRow({ o, onPick }: { o: AgentRouteOption; onPick?: (o: AgentRoute
   );
 }
 
-function ConnectionRow({ c }: { c: AgentConnection }) {
-  const [a, b] = c.legs;
+function ConnectionRow({ c, baseDate, onPickLeg }: { c: AgentConnection; baseDate?: string | null; onPickLeg?: (leg: AgentRouteLeg) => void }) {
   return (
     <div className="jo-conn">
-      <div className="jo-conn-leg">
-        <span className="jo-no">{a.trainNumber}</span> {a.departure} {a.from} → {a.arrival}{dayTag(a.arrivalDayOffset)} {a.to}
-      </div>
-      <div className="jo-conn-wait">⏳ {layoverLabel(c.layoverMinutes)} layover @ {c.stationName ?? c.station}</div>
-      <div className="jo-conn-leg">
-        <span className="jo-no">{b.trainNumber}</span> {b.departure} {b.from} → {b.arrival}{dayTag(b.arrivalDayOffset)} {b.to}
-      </div>
-      {c.totalDurationMinutes != null && <div className="jo-conn-total">Total {layoverLabel(c.totalDurationMinutes)}</div>}
+      <LegRows legs={c.legs} baseDate={baseDate} onPickLeg={onPickLeg} />
+      <div className="jo-conn-wait">⏳ {layoverLabel(c.layoverMinutes)} layover @ {c.stationName ?? c.station} ({c.station})</div>
+      {c.totalDurationMinutes != null && <div className="jo-conn-total">Total {layoverLabel(c.totalDurationMinutes)} · dono trains ki seat alag-alag book hogi</div>}
     </div>
   );
 }
@@ -91,12 +150,15 @@ type Tab = "fastest" | "fewest_changes" | "best_availability" | "cheapest" | "co
 export function JourneyOptions({
   plan,
   onPickTrain,
+  onPickLeg,
   onPickDate,
   onPickStations,
   onOpenBoard,
 }: {
   plan: AgentJourneyPlan;
   onPickTrain?: (trainNumber: string) => void;
+  /** Round-18m-3: connecting leg tap → us leg ke segment+date ki seat query. */
+  onPickLeg?: (leg: { trainNumber: string; from: string; to: string; date: string }) => void;
   onPickDate?: (ymd: string) => void;
   /** Round-18 §8: user explicitly confirms a different boarding/destination station. */
   onPickStations?: (from: string, to: string) => void;
@@ -133,6 +195,8 @@ export function JourneyOptions({
   };
 
   const pick = onPickTrain ? (o: AgentRouteOption) => onPickTrain(o.trainNumbers[0]) : undefined;
+  const baseDate = plan.query.date;
+  const pickLeg = onPickLeg ? (l: AgentRouteLeg) => onPickLeg({ trainNumber: l.trainNumber, from: l.from, to: l.to, date: addDays(baseDate, l.departureDayOffset ?? 0) }) : undefined;
   const rec = plan.recovery;
   const altStations = (rec?.alternateStations ?? []).filter((o) => o.count > 0);
   const partial = rec?.partialRoute;
@@ -182,7 +246,7 @@ export function JourneyOptions({
             <strong>{best.departure}</strong>
             <span className="jo-arrow">→</span>
             <strong>{best.arrival}</strong>
-            <span className="jo-day">{dayTag(best.arrivalDayOffset)}</span>
+            <span className="jo-day">{dateTag(baseDate, best.arrivalDayOffset)}</span>
           </div>
           <div className="jo-best-grid">
             <div><span className="jo-ic">⏱</span>{best.durationLabel ?? "—"}</div>
@@ -190,6 +254,7 @@ export function JourneyOptions({
             <div className={`jo-avl-cell jo-avl-${availText(best).tone}`}><span className="jo-ic">💺</span>{availText(best).text}</div>
             <div><span className="jo-ic">₹</span>{best.availability?.fare != null ? inr(best.availability.fare) : "Fare on select"}</div>
           </div>
+          {best.changes > 0 && best.legs.length > 1 && <LegRows legs={best.legs} baseDate={baseDate} onPickLeg={pickLeg} />}
           <div className="jo-badges">
             {best.badges.map((b) => (
               <span key={b} className={`jo-badge jo-badge-${b}`}>{BADGE_LABEL[b] ?? b}</span>
@@ -220,7 +285,7 @@ export function JourneyOptions({
           {rec.differentTrain.length > 0 && (
             <div className="jo-sec">
               <div className="jo-sec-title">🚆 Doosri train (seat available)</div>
-              {rec.differentTrain.slice(0, 4).map((o) => <OptionRow key={o.trainNumbers.join("+")} o={o} onPick={pick} />)}
+              {rec.differentTrain.slice(0, 4).map((o) => <OptionRow key={o.trainNumbers.join("+")} o={o} onPick={pick} baseDate={baseDate} onPickLeg={pickLeg} />)}
             </div>
           )}
           {partial && (partialPlans.length > 0 || partial.sameTrainSwitch) && (
@@ -251,7 +316,7 @@ export function JourneyOptions({
           {connections.length > 0 && (
             <div className="jo-sec">
               <div className="jo-sec-title">🔁 Connecting journey</div>
-              {connections.slice(0, 2).map((c, i) => <ConnectionRow key={i} c={c} />)}
+              {connections.slice(0, 2).map((c, i) => <ConnectionRow key={i} c={c} baseDate={baseDate} onPickLeg={pickLeg} />)}
             </div>
           )}
           {altStations.length > 0 && (
@@ -274,7 +339,7 @@ export function JourneyOptions({
                       {o.best && (
                         <div className="jo-row-times">
                           <span className="jo-no">{o.best.trainNumbers[0]}</span> <strong>{o.best.departure}</strong> → <strong>{o.best.arrival}</strong>
-                          <span className="jo-day">{dayTag(o.best.arrivalDayOffset)}</span>
+                          <span className="jo-day">{dateTag(baseDate, o.best.arrivalDayOffset)}</span>
                           <span className="jo-dot">·</span>
                           <span>{o.best.durationLabel ?? "—"}</span>
                         </div>
@@ -317,12 +382,12 @@ export function JourneyOptions({
             ))}
           </div>
           {tab && tab !== "connecting" && tab !== "alt_date" && (
-            <div className="jo-list">{sortedFor(tab).map((o) => <OptionRow key={o.rank} o={o} onPick={pick} />)}</div>
+            <div className="jo-list">{sortedFor(tab).map((o) => <OptionRow key={o.rank} o={o} onPick={pick} baseDate={baseDate} onPickLeg={pickLeg} />)}</div>
           )}
           {tab === "connecting" && (
             <div className="jo-list">
               {/* Round-18m: recovery block mein pehli 2 already dikhi — yahan sirf BAAKI (duplicate nahi). */}
-              {(rec && plan.directUnavailable ? connections.slice(2, 6) : connections.slice(0, 4)).map((c, i) => <ConnectionRow key={i} c={c} />)}
+              {(rec && plan.directUnavailable ? connections.slice(2, 6) : connections.slice(0, 4)).map((c, i) => <ConnectionRow key={i} c={c} baseDate={baseDate} onPickLeg={pickLeg} />)}
               {rec && plan.directUnavailable && connections.length <= 2 && <div className="jo-empty">Upar wale 2 hi verified connections mile.</div>}
             </div>
           )}
