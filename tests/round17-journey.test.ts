@@ -19,7 +19,7 @@ import {
   rankRouteOptions,
 } from "../server/journey/engine";
 import type { RouteLeg } from "../server/journey/types";
-import { executeApprovedTool, AGENTIC_TOOLS } from "../server/agent/agentic";
+import { executeApprovedTool, AGENTIC_TOOLS, setAgenticNvidiaFetch } from "../server/agent/agentic";
 import type { TrainResult } from "../server/providers/types";
 
 function jsonResponse(status: number, body: unknown) {
@@ -329,5 +329,33 @@ describe("Round-17 F7: tools registered, honest tool summaries, HTTP endpoints",
     const conn = await request(app).post("/api/journey/connections").send({ from: "LDH", to: "CSMT", date: FUTURE, via: "NDLS" });
     expect(conn.status).toBe(200);
     expect(conn.body.minTransferMinutes).toBe(JOURNEY_CONFIG.minTransferMinutes);
+  });
+});
+
+/* ── F9 wiring: /api/agent must forward `journey` plan to the UI ─────── */
+describe("Round-17 F9: /api/agent returns journey plan for RANK_JOURNEY_OPTIONS", () => {
+  afterEach(() => {
+    setAgenticNvidiaFetch(null);
+    process.env.NVIDIA_API_KEY = "";
+  });
+  it("journey (BEST OPTION card data) + trains table both present in HTTP response", async () => {
+    railcoreMock(() => ({ status: "AVAILABLE", count: 40 }));
+    process.env.NVIDIA_API_KEY = "nvapi-test";
+    let call = 0;
+    setAgenticNvidiaFetch(async () => {
+      call += 1;
+      const msg =
+        call === 1
+          ? { role: "assistant", content: null, tool_calls: [{ id: "c1", type: "function", function: { name: "RANK_JOURNEY_OPTIONS", arguments: JSON.stringify({ origin: "LDH", destination: "CSMT", date: FUTURE, preference: "best_overall", travel_class: "SL" }) } }] }
+          : { role: "assistant", content: "Best: 12138 Punjab Mail 06:00 → 07:35 (+1d), SL AVAILABLE 40." };
+      return jsonResponse(200, { choices: [{ message: msg, finish_reason: call === 1 ? "tool_calls" : "stop" }], model: "test" });
+    });
+    const app = createApp();
+    const r = await request(app).post("/api/agent").send({ text: `LDH se CSMT ${FUTURE} ki best train SL mein`, now: new Date().toISOString() });
+    expect(r.status).toBe(200);
+    expect(r.body.toolTrace?.[0]?.tool).toBe("RANK_JOURNEY_OPTIONS");
+    expect(r.body.journey?.best?.trainNumbers).toEqual(["12138"]);
+    expect(r.body.journey?.query?.date).toBe(FUTURE);
+    expect(r.body.trains?.rows?.length).toBe(2);
   });
 });
