@@ -608,46 +608,57 @@ export function clusterSiblings(code: string): string[] {
  * train per alternate pair. Result is a SUGGESTION — origin/destination are
  * never changed silently; UI/LLM must present it as a different assumption.
  */
-export async function findAlternateStationOptions(args: { from: string; to: string; date: string; travelClass?: string | null; limitPerSide?: number }): Promise<{ options: AlternateStationOption[]; sources: Set<string> }> {
+export async function findAlternateStationOptions(args: { from: string; to: string; date: string; travelClass?: string | null; limitPerSide?: number; maxProbes?: number }): Promise<{ options: AlternateStationOption[]; sources: Set<string> }> {
   const from = args.from.toUpperCase();
   const to = args.to.toUpperCase();
-  const n = args.limitPerSide ?? 2;
+  const n = args.limitPerSide ?? 6;
+  const maxProbes = args.maxProbes ?? 3;
   const pairs: { from: string; to: string; changed: AlternateStationOption["changed"] }[] = [
     ...clusterSiblings(from).slice(0, n).map((f) => ({ from: f, to, changed: "origin" as const })),
     ...clusterSiblings(to).slice(0, n).map((t) => ({ from, to: t, changed: "destination" as const })),
   ];
   const sources = new Set<string>();
+  /* Step 1: schedule search for every sibling pair (cheap, cached per provider). */
+  const found = (
+    await Promise.all(
+      pairs.map(async (p) => {
+        try {
+          const s = await searchTrainsRouted({ from: p.from, to: p.to, date: args.date });
+          if (!s.trains.length) return null;
+          sources.add(s.provider);
+          return { p, s };
+        } catch {
+          return null;
+        }
+      }),
+    )
+  ).filter((x): x is NonNullable<typeof x> => x != null);
+  /* Step 2: availability probe only for pairs that really have trains (bounded). */
+  found.sort((a, b) => b.s.trains.length - a.s.trains.length || a.p.from.localeCompare(b.p.from) || a.p.to.localeCompare(b.p.to));
   const options: AlternateStationOption[] = [];
   await Promise.all(
-    pairs.map(async (p) => {
+    found.slice(0, maxProbes).map(async ({ p, s }) => {
+      const fastest = [...s.trains].sort((a, b) => (a.durationMinutes || 9e9) - (b.durationMinutes || 9e9) || a.number.localeCompare(b.number))[0];
+      const availability = new Map<string, RouteAvailability | null>();
       try {
-        const s = await searchTrainsRouted({ from: p.from, to: p.to, date: args.date });
-        if (!s.trains.length) return;
-        sources.add(s.provider);
-        const fastest = [...s.trains].sort((a, b) => (a.durationMinutes || 9e9) - (b.durationMinutes || 9e9) || a.number.localeCompare(b.number))[0];
-        const availability = new Map<string, RouteAvailability | null>();
-        try {
-          const board = await routedClassBoard(fastest.number, args.date, p.from, p.to, "GN", args.travelClass ? [args.travelClass] : fastest.classes.map((c) => c.code));
-          const row = bestClassRow(board.classes, args.travelClass ?? null);
-          availability.set(fastest.number, row);
-          if (row) sources.add(row.source);
-        } catch {
-          availability.set(fastest.number, null);
-        }
-        const ranked = rankRouteOptions({ origin: p.from, destination: p.to, trains: s.trains, availability, source: s.provider, travelClass: args.travelClass ?? null });
-        const best = ranked.find((o) => o.trainNumbers[0] === fastest.number) ?? ranked[0] ?? null;
-        options.push({
-          from: p.from,
-          to: p.to,
-          changed: p.changed,
-          count: s.trains.length,
-          best,
-          source: s.provider,
-          note: `${p.changed === "origin" ? `Boarding ${p.from}` : `Destination ${p.to}`} (same city) — ${s.trains.length} trains${best?.availability ? `, ${best.trainNumbers[0]} ${best.availability.classCode} ${best.availability.status}${best.availability.seats != null ? ` ${best.availability.seats}` : ""}` : ""}. Ye aapki original ${p.changed === "origin" ? "boarding" : "destination"} station se ALAG hai — confirm karein.`,
-        });
+        const board = await routedClassBoard(fastest.number, args.date, p.from, p.to, "GN", args.travelClass ? [args.travelClass] : fastest.classes.map((c) => c.code));
+        const row = bestClassRow(board.classes, args.travelClass ?? null);
+        availability.set(fastest.number, row);
+        if (row) sources.add(row.source);
       } catch {
-        /* skip pair */
+        availability.set(fastest.number, null);
       }
+      const ranked = rankRouteOptions({ origin: p.from, destination: p.to, trains: s.trains, availability, source: s.provider, travelClass: args.travelClass ?? null });
+      const best = ranked.find((o) => o.trainNumbers[0] === fastest.number) ?? ranked[0] ?? null;
+      options.push({
+        from: p.from,
+        to: p.to,
+        changed: p.changed,
+        count: s.trains.length,
+        best,
+        source: s.provider,
+        note: `${p.changed === "origin" ? `Boarding ${p.from}` : `Destination ${p.to}`} (same city) — ${s.trains.length} trains${best?.availability ? `, ${best.trainNumbers[0]} ${best.availability.classCode} ${best.availability.status}${best.availability.seats != null ? ` ${best.availability.seats}` : ""}` : ""}. Ye aapki original ${p.changed === "origin" ? "boarding" : "destination"} station se ALAG hai — confirm karein.`,
+      });
     }),
   );
   options.sort((a, b) => availScore(a.best?.availability ?? null) - availScore(b.best?.availability ?? null) || a.from.localeCompare(b.from) || a.to.localeCompare(b.to));
@@ -764,7 +775,14 @@ export async function planJourney(args: {
     if (args.includeAlternateStations !== false) {
       try {
         const alt = await findAlternateStationOptions({ from, to, date: args.date, travelClass: args.travelClass ?? null });
-        alternateStations = alt.options.filter((o) => o.count > 0);
+        /* Sirf useful: naya train (direct list mein nahi) ya sach mein AVAILABLE/RAC. */
+        const directSet = new Set(trains.map((t) => t.number));
+        alternateStations = alt.options.filter((o) => {
+          if (o.count <= 0) return false;
+          const st = o.best?.availability?.status;
+          if (st === "AVAILABLE" || st === "RAC") return true;
+          return o.best ? !directSet.has(o.best.trainNumbers[0]) : false;
+        });
         alt.sources.forEach((s) => sources.add(s));
       } catch {
         alternateStations = [];
