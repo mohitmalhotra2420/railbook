@@ -25,3 +25,11 @@ describe("Round-18g fare fill for extra-API seat rows", () => {
     expect(src).toMatch(/if \(row\.fare > 0\) return row;/);
   });
 });
+
+describe("Round-18g concept questions never open the train-name picker", () => {
+  it("CONCEPT_QUESTION_RE matches comparison/superlative phrasing", async () => {
+    const { CONCEPT_QUESTION_RE } = await import("../server/agent/context.js");
+    for (const q of ["Rajdhani aur Shatabdi mein kya fark hai", "India mein sabse lambi train journey kaunsi hai", "vande bharat kya hoti hai", "Bharat ka sabse bada railway station kaunsa hai"]) expect(CONCEPT_QUESTION_RE.test(q), q).toBe(true);
+    expect(CONCEPT_QUESTION_RE.test("Amritsar Shatabdi ka time kya hai?")).toBe(false);
+  });
+});

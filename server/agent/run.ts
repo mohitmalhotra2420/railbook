@@ -4,6 +4,7 @@ import { generalRailwayAnswer } from "../understand/llm.js";
 import { understand as deterministicUnderstand, type DialogSlot, type KnownSlots, type NluResult } from "../understand/legacy-nlu.js";
 import {
   GENERAL_FACT_RE,
+  CONCEPT_QUESTION_RE,
   TRAIN_NAME_SUFFIX_RE,
   TRAIN_TYPE_KEYWORD_RE,
   bookingInProgress,
@@ -384,6 +385,7 @@ export type AgentResponse = {
   confirmBook: false;
   missingFields: string[];
   modelUsed: string | null;
+  modelFallbacks?: { model: string; reason: string; ms: number; round: number }[];
   latencyMs: number;
   failureReason: string | null;
   engine?: "agentic_tool_calling" | "deterministic";
@@ -668,7 +670,7 @@ async function resolveTrainByName(
   /* 2026-09-06 (screenshot): "vande bharat ki top speed" GENERAL-FACT sawaal
    * hai — train-number resolve karke "kaunsi?" poochna hi nahi. Fact words +
    * no number → naam-resolution skip, general-fact web path jawab dega. */
-  if (GENERAL_FACT_RE.test(text) && !/\b\d{5}\b/.test(text)) return null;
+  if ((GENERAL_FACT_RE.test(text) || CONCEPT_QUESTION_RE.test(text)) && !/\b\d{5}\b/.test(text)) return null;
   if (!hasNameKeyword) {
     const followish =
       /^(timetable|live|fare|availability|coach|train_pick)$/.test(classifyFollowUp(text) ?? "") ||
@@ -1592,6 +1594,7 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
             passengerCount: det.passengerCount,
           }),
           modelUsed: turn.modelUsed,
+          modelFallbacks: turn.modelFallbacks ?? [],
           latencyMs: turn.latencyMs,
           failureReason: null,
           engine: "agentic_tool_calling",

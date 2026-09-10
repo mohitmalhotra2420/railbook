@@ -117,6 +117,8 @@ export type AgenticTurn = {
   grounded: boolean;
   steps: ToolTraceStep[];
   modelUsed: string | null;
+  /** Round-18g: why each earlier model in the chain failed this turn (empty = primary answered). */
+  modelFallbacks?: { model: string; reason: string; ms: number; round: number }[];
   latencyMs: number;
   failureReason: string | null;
 };
@@ -2145,6 +2147,7 @@ export async function runAgenticTurn(input: {
   const evidenceParts: string[] = [];
   let lastNeedsChoice: { city: string; stations: { code: string; name: string }[] } | null = null;
   let modelUsed: string | null = null;
+  const modelFallbacks: { model: string; reason: string; ms: number; round: number }[] = [];
   const url = transport.url;
 
   // AI chain: NVIDIA = primary (GPT-OSS) -> fallback (Nemotron); HF = single GLM.
@@ -2162,7 +2165,7 @@ export async function runAgenticTurn(input: {
       if (steps.length && timeLeft() > -20000 && webRescueEligible(input.text, steps, { allowOkSteps: knowledgeQuestion(input.text) })) {
         const rescued = await webRescueAnswer(input.text, steps, steps.length + 1);
         if (rescued) {
-          return { ok: true, reply: rescued, grounded: true, steps, modelUsed, latencyMs: Date.now() - startedAll, failureReason: "turn_time_budget_rescued_by_web" };
+          return { ok: true, reply: rescued, grounded: true, steps, modelUsed, modelFallbacks, latencyMs: Date.now() - startedAll, failureReason: "turn_time_budget_rescued_by_web" };
         }
       }
       return {
@@ -2170,8 +2173,7 @@ export async function runAgenticTurn(input: {
         reply: steps.length ? deterministicSummary(steps) : null,
         grounded: steps.length > 0,
         steps,
-        modelUsed,
-        latencyMs: Date.now() - startedAll,
+        modelUsed, modelFallbacks, latencyMs: Date.now() - startedAll,
         failureReason: "turn_time_budget",
       };
     }
@@ -2182,6 +2184,12 @@ export async function runAgenticTurn(input: {
     let json: NvidiaChatJson | null = null;
     let msg: { content?: string | null; reasoning_content?: string | null; tool_calls?: ChatMsg["tool_calls"] } | undefined;
     let lastFailure: string | null = null;
+    /* Round-18g: har model-fail ek structured log line + response.modelFallbacks —
+     * warna "Muse kyun nahi chala" prod par andaza rehta tha. */
+    const noteModelFailure = (m: string, why: string, ms: number) => {
+      modelFallbacks.push({ model: m, reason: why, ms, round: steps.length });
+      console.log(JSON.stringify({ agenticModel: m, failure: why, ms, round: steps.length, budgetLeftMs: timeLeft() }));
+    };
     for (const model of modelChain) {
       /* Round-13b: HF fallback model chain ke end mein — uska endpoint/key
        * alag hai (HF router), baaki sab NVIDIA NIM par. */
@@ -2199,6 +2207,7 @@ export async function runAgenticTurn(input: {
       );
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), agenticTimeoutMs);
+      const callStarted = Date.now();
       try {
         const res = await fetchImpl()(callUrl, {
           method: "POST",
@@ -2233,6 +2242,7 @@ export async function runAgenticTurn(input: {
         clearTimeout(timer);
         if (!res.ok) {
           lastFailure = `http_${res.status}`;
+          noteModelFailure(model, lastFailure, Date.now() - callStarted);
           continue;
         }
         let parsed: NvidiaChatJson;
@@ -2240,11 +2250,13 @@ export async function runAgenticTurn(input: {
           parsed = await res.json();
         } catch {
           lastFailure = "bad_json";
+          noteModelFailure(model, lastFailure, Date.now() - callStarted);
           continue;
         }
         const m = parsed.choices?.[0]?.message;
         if (!m || (m.content == null && !(m.tool_calls ?? []).length && !m.reasoning_content)) {
           lastFailure = "empty_content";
+          noteModelFailure(model, lastFailure, Date.now() - callStarted);
           continue;
         }
         json = parsed;
@@ -2254,6 +2266,7 @@ export async function runAgenticTurn(input: {
       } catch (err) {
         clearTimeout(timer);
         lastFailure = err instanceof Error && err.name === "AbortError" ? "timeout" : "network";
+        noteModelFailure(model, lastFailure, Date.now() - callStarted);
         continue;
       }
     }
@@ -2264,7 +2277,7 @@ export async function runAgenticTurn(input: {
       if (steps.length && webRescueEligible(input.text, steps, { allowOkSteps: knowledgeQuestion(input.text) })) {
         const rescued = await webRescueAnswer(input.text, steps, steps.length + 1);
         if (rescued) {
-          return { ok: true, reply: rescued, grounded: true, steps, modelUsed, latencyMs: Date.now() - startedAll, failureReason: `${reason}_rescued_by_web` };
+          return { ok: true, reply: rescued, grounded: true, steps, modelUsed, modelFallbacks, latencyMs: Date.now() - startedAll, failureReason: `${reason}_rescued_by_web` };
         }
       }
       return {
@@ -2272,8 +2285,7 @@ export async function runAgenticTurn(input: {
         reply: steps.length ? deterministicSummary(steps) : null,
         grounded: steps.length > 0,
         steps,
-        modelUsed,
-        latencyMs: Date.now() - startedAll,
+        modelUsed, modelFallbacks, latencyMs: Date.now() - startedAll,
         failureReason: reason,
       };
     }
@@ -2619,8 +2631,7 @@ export async function runAgenticTurn(input: {
         reply: steps.length ? deterministicSummary(steps) : null,
         grounded: steps.length > 0,
         steps,
-        modelUsed,
-        latencyMs: Date.now() - startedAll,
+        modelUsed, modelFallbacks, latencyMs: Date.now() - startedAll,
         failureReason: "empty_content",
       };
     }
@@ -2664,8 +2675,7 @@ export async function runAgenticTurn(input: {
         reply: deterministicSummary(steps),
         grounded: true,
         steps,
-        modelUsed,
-        latencyMs: Date.now() - startedAll,
+        modelUsed, modelFallbacks, latencyMs: Date.now() - startedAll,
         failureReason: "model_asked_instead_of_answered",
       };
     }
@@ -2685,8 +2695,7 @@ export async function runAgenticTurn(input: {
           reply: relay,
           grounded: true,
           steps,
-          modelUsed,
-          latencyMs: Date.now() - startedAll,
+          modelUsed, modelFallbacks, latencyMs: Date.now() - startedAll,
           failureReason: "needs_choice_relayed_deterministically",
         };
       }
@@ -2710,8 +2719,7 @@ export async function runAgenticTurn(input: {
               reply: relay,
               grounded: true,
               steps,
-              modelUsed,
-              latencyMs: Date.now() - startedAll,
+              modelUsed, modelFallbacks, latencyMs: Date.now() - startedAll,
               failureReason: "origin_choice_relayed_deterministically",
             };
           }
@@ -2734,8 +2742,7 @@ export async function runAgenticTurn(input: {
           reply: relay,
           grounded: true,
           steps,
-          modelUsed,
-          latencyMs: Date.now() - startedAll,
+          modelUsed, modelFallbacks, latencyMs: Date.now() - startedAll,
           failureReason: `ungrounded_options_replaced:${check.evidence}`,
         };
       }
@@ -2752,8 +2759,7 @@ export async function runAgenticTurn(input: {
               reply: relay,
               grounded: true,
               steps,
-              modelUsed,
-              latencyMs: Date.now() - startedAll,
+              modelUsed, modelFallbacks, latencyMs: Date.now() - startedAll,
               failureReason: `ungrounded_options_replaced:${check.evidence}`,
             };
           }
@@ -2774,8 +2780,7 @@ export async function runAgenticTurn(input: {
               reply: relay,
               grounded: true,
               steps,
-              modelUsed,
-              latencyMs: Date.now() - startedAll,
+              modelUsed, modelFallbacks, latencyMs: Date.now() - startedAll,
               failureReason: `origin_choice_relayed:${check.evidence}`,
             };
           }
@@ -2793,8 +2798,7 @@ export async function runAgenticTurn(input: {
             reply: rescued,
             grounded: true,
             steps,
-            modelUsed,
-            latencyMs: Date.now() - startedAll,
+            modelUsed, modelFallbacks, latencyMs: Date.now() - startedAll,
             failureReason: `ungrounded_rescued_by_web:${check.evidence}`,
           };
         }
@@ -2804,19 +2808,18 @@ export async function runAgenticTurn(input: {
         reply: `${deterministicSummary(steps)}\n(AI ka jawab providers ke data se match nahi hua — sirf verified data dikha raha hoon.)`,
         grounded: false,
         steps,
-        modelUsed,
-        latencyMs: Date.now() - startedAll,
+        modelUsed, modelFallbacks, latencyMs: Date.now() - startedAll,
         failureReason: `ungrounded_numbers:${check.evidence}`,
       };
     }
-    return { ok: true, reply: clean, grounded: true, steps, modelUsed, latencyMs: Date.now() - startedAll, failureReason: null };
+    return { ok: true, reply: clean, grounded: true, steps, modelUsed, modelFallbacks, latencyMs: Date.now() - startedAll, failureReason: null };
   }
 
   // Step budget kharch — honest deterministic summary.
   if (webRescueEligible(input.text, steps, { allowOkSteps: knowledgeQuestion(input.text) })) {
     const rescued = await webRescueAnswer(input.text, steps, steps.length + 1);
     if (rescued) {
-      return { ok: true, reply: rescued, grounded: true, steps, modelUsed, latencyMs: Date.now() - startedAll, failureReason: "step_budget_rescued_by_web" };
+      return { ok: true, reply: rescued, grounded: true, steps, modelUsed, modelFallbacks, latencyMs: Date.now() - startedAll, failureReason: "step_budget_rescued_by_web" };
     }
   }
   return {
@@ -2824,8 +2827,7 @@ export async function runAgenticTurn(input: {
     reply: deterministicSummary(steps),
     grounded: true,
     steps,
-    modelUsed,
-    latencyMs: Date.now() - startedAll,
+    modelUsed, modelFallbacks, latencyMs: Date.now() - startedAll,
     failureReason: "step_budget_exhausted",
   };
 }

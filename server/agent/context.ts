@@ -7,6 +7,9 @@ import type { Station } from "../providers/types.js";
  * run.ts (naam-resolution skip + deterministic web fallback) aur
  * agentic.ts (user-message fact-nudge) dono yahi use karte hain. */
 export const GENERAL_FACT_RE = /\b(top speed|max speed|average speed|kitni tez|kitna tez|speed kya|speed kitni|kab (?:shuru|chalu|start)|kitne saal|history|kab bani|pehli train|sabse pehli|kitne coach|engine ka naam|kaise kaam)\b/i;
+/** Round-18g: concept/comparison/superlative questions that must NOT open the train-name picker
+ * ("Rajdhani aur Shatabdi mein kya fark hai", "sabse lambi train journey", "vande bharat kya hoti hai"). */
+export const CONCEPT_QUESTION_RE = /\b(kya fark|kya antar|difference|farak|kya hota hai|kya hoti hai|matlab kya|kise kehte|sabse (?:lamba|lambi|bada|badi|tez|purana|purani|zyada)|longest|largest|biggest|oldest|fastest train in|kitne (?:station|route|zone)|kaun sa (?:zone|division))\b/i;
 
 
 export type AgentToolName =

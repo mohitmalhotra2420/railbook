@@ -225,6 +225,7 @@ export function createApp() {
         confirmBook: false,
         missingFields: result.missingFields,
         modelUsed: result.modelUsed,
+        modelFallbacks: result.modelFallbacks ?? [],
         latencyMs: result.latencyMs,
         failureReason: result.failureReason,
         engine: result.engine ?? null,
