@@ -872,7 +872,10 @@ export function journeySummary(plan: JourneyPlan): string | null {
     parts.push(`If it slips, route via ${via} (${trains}, layover ${conn.layoverMinutes} min).`);
   }
   /* Alternative date with real trains. */
-  const altDates = (plan.alternativeDates.length ? plan.alternativeDates : rec?.alternativeDates ?? []).filter((d) => d.count > 0 && !d.providerFailed);
+  /* Later dates first (a "shift to today" suggestion is usually already past departure). */
+  const altDates = (plan.alternativeDates.length ? plan.alternativeDates : rec?.alternativeDates ?? [])
+    .filter((d) => d.count > 0 && !d.providerFailed)
+    .sort((a, b) => Number(b.date > plan.query.date) - Number(a.date > plan.query.date) || a.date.localeCompare(b.date));
   if (!bestOk && altDates.length) {
     const d = altDates[0];
     parts.push(`Or shift to ${dayLabel(d.date)} — ${d.count} train${d.count > 1 ? "s" : ""}${d.fastest ? ` (${d.fastest.number})` : ""}.`);

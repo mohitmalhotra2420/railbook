@@ -31,6 +31,11 @@ describe("Round-18l journeySummary", () => {
     expect(s).toContain("Or shift to Tue 15 Sep — 1 train (06904).");
     expect(s).not.toContain("Sat 12 Sep"); // 0-train dates never suggested
   });
+  it("prefers a later alternative date over an earlier one", () => {
+    const best = opt("12484", "X", { classCode: "SL", status: "WAITLIST", seats: null, waitlist: 3, rac: null, fare: 1, source: "railradar" } as never);
+    const s = journeySummary(base({ best, routeOptions: [best], alternativeDates: [{ date: "2026-09-12", count: 5, fastest: null }, { date: "2026-09-15", count: 1, fastest: null }] }));
+    expect(s).toContain("Or shift to Tue 15 Sep");
+  });
   it("nothing retrieved → null (never invents)", () => {
     expect(journeySummary(base({}))).toBeNull();
   });
