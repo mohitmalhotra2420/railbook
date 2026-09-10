@@ -34,7 +34,7 @@ import {
   type SearchCapture,
   type ToolTraceStep,
 } from "./agentic.js";
-import { routedClassBoard, routedLiveStatus, routedSchedule, routedStationSearch, routedTrainInfo, searchTrainsRouted } from "../railway/router.js";
+import { routedClassBoard, routedLiveDates, routedLiveStatus, routedSchedule, routedStationSearch, routedTrainInfo, searchTrainsRouted } from "../railway/router.js";
 import { pickTrains, type TrainPickerResult } from "../journey/trainpicker.js";
 import { planJourney } from "../journey/engine.js";
 import type { JourneyPlan } from "../journey/types.js";
@@ -400,6 +400,8 @@ export type AgentResponse = {
   /** Round-18: alternatives card + SELECT TRAIN picker. */
   alternatives?: import("../journey/types.js").AlternativeTrainsResult | null;
   trainPicker?: import("../journey/trainpicker.js").TrainPickerResult | null;
+  /** Round-18m: live-status run-date chooser — ONLY dates a provider actually has a run for. */
+  liveDates?: { trainNumber: string; trainName: string | null; options: import("../railway/router.js").LiveDateOption[] } | null;
   grounded?: boolean;
   /** Agentic turn chala par model/provider fail hua to wajah (observability; success par null). */
   agenticFailureReason?: string | null;
@@ -1484,14 +1486,52 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
         .toLowerCase()
         .split(/[^a-z0-9]+/)
         .filter(Boolean)
-        .filter((t) => t !== String(trainNo).toLowerCase() && !liveStop.has(t));
+        .filter((t) => t !== String(trainNo).toLowerCase() && !liveStop.has(t))
+        /* Round-18m: date tokens (2026-09-09 / 9 sep / 09/09) are handled by parseStatusDate. */
+        .filter((t) => !/^\d{1,4}$/.test(t) && !/^(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*$/.test(t));
       if (!leftovers.length) {
+        /* Round-18m (user): date cue NAHI diya → pehle poochho KIS DIN ka run —
+         * sirf wahi dates jinke liye API/web ke paas sach mein data hai. */
+        const statusDate = parseStatusDate(req.text, req.now ? new Date(req.now) : new Date());
+        if (!statusDate) {
+          try {
+            const options = await routedLiveDates(trainNo, ctx.selectedTrainName ?? null);
+            if (options.length > 1) {
+              ctx.intent = "LIVE_TRAIN_STATUS";
+              ctx.pendingAsk = null;
+              const name = ctx.selectedTrainName ?? (ctx.lastTrains ?? []).find((t) => t.number === trainNo)?.name ?? null;
+              return {
+                nlu: det,
+                source: "nlu",
+                context: ctx,
+                tool: "getLiveStatus",
+                toolOk: true,
+                reply: `${trainNo}${name ? ` ${name}` : ""} — kis din wale run ka live status chahiye? Data in dates ke liye available hai: ${options.map((o) => o.label).join(", ")}. Neeche se chuniye.`,
+                interrupt: false,
+                resumeAsk: null,
+                resumeText: null,
+                trains: null,
+                liveDates: { trainNumber: trainNo, trainName: name, options },
+                confirmBook: false,
+                missingFields: [],
+                modelUsed: null,
+                latencyMs: 0,
+                failureReason: null,
+                engine: "deterministic",
+                agenticFailureReason: null,
+                grounded: true,
+              };
+            }
+          } catch {
+            /* date discovery optional — fall through to direct live */
+          }
+        }
         try {
           const liveResult = await executeTool("getLiveStatus", {
             trainNumber: trainNo,
             trainName: ctx.selectedTrainName ?? undefined,
             /* Round-16p: "kal wali kahan hai" → pichhle din ka run. */
-            date: parseStatusDate(req.text, req.now ? new Date(req.now) : new Date()),
+            date: statusDate,
           });
           if (liveResult.ok && liveResult.summary) {
             ctx.intent = "LIVE_TRAIN_STATUS";
@@ -1828,9 +1868,22 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
    * number map nahi ho paya (model ne partial examples diye the) — honest
    * re-ask, kabhi khali/confusing nahi. */
   const lastAssistant = [...(req.history ?? [])].reverse().find((h) => h.role === "assistant")?.content;
-  const stationChoicePending = Boolean(lastAssistant && mentionsStationOptions(lastAssistant));
-  if (!tool && !reply && stationChoicePending && /^\d{1,2}[.!]?$/.test(String(req.text ?? "").trim())) {
+  const stationChoicePending = Boolean(lastAssistant && mentionsStationOptions(lastAssistant)) && !(ctx.origin && ctx.destination);
+  const bareIndex = String(req.text ?? "").trim().match(/^(\d{1,2})[.!]?$/);
+  if (!tool && !reply && stationChoicePending && bareIndex) {
     reply = "Number se station confirm nahi kar paya — station ka naam ya 4-letter code bataiye (jaise NDLS, DLI).";
+  }
+  /* Round-18m: "1" after a train list = 1st train of the list → selected;
+   * show what we know and offer the next step (date/class already in ctx →
+   * availability is one word away). Never books. */
+  if (!tool && !reply && bareIndex && trainNo && ctx.lastTrainNumbers.includes(trainNo)) {
+    const row = (ctx.lastTrains ?? []).find((t) => t.number === trainNo);
+    ctx.selectedTrainNumber = trainNo;
+    if (row?.name) ctx.selectedTrainName = row.name;
+    const route = ctx.origin && ctx.destination ? ` ${ctx.origin.code}→${ctx.destination.code}` : "";
+    const when = ctx.dateProvided && ctx.date ? ` (${ctx.date})` : "";
+    reply = `Theek hai — ${trainNo}${row?.name ? ` ${row.name}` : ""}${route}${when} select ki. Kaunsi class ka seat/fare dekhna hai — SL, 3A, 2A, CC, EC? (Booking sirf aapke "Confirm & Book" par hogi.)`;
+    toolOk = true;
   }
 
   if (tool === "getCoachPosition" && !trainNo) {

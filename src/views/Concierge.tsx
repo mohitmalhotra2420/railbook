@@ -874,6 +874,18 @@ export function Concierge() {
           const blocks: Block[] = [];
           // Round-18: SELECT TRAIN picker (number/name → real matches, user taps).
           if (agentRes.trainPicker && agentRes.trainPicker.matches.length) blocks.push({ type: "trainpicker", picker: agentRes.trainPicker });
+          /* Round-18m: live-status run-date chips — sirf un dates ke, jinke liye
+           * provider ke paas data hai. Tap → "<train> <date> ka live status". */
+          if (agentRes.liveDates && agentRes.liveDates.options.length) {
+            const tn = agentRes.liveDates.trainNumber;
+            blocks.push({
+              type: "dates",
+              options: agentRes.liveDates.options.map((o) => ({
+                date: `${tn} ${o.date} ka live status`,
+                label: `${o.label}${o.runState === "running" ? " · chal rahi" : o.runState === "completed" ? " · poori" : o.runState === "not_started" ? " · abhi nahi chali" : ""}`,
+              })),
+            });
+          }
           if (agentRes.journey && (agentRes.journey.routeOptions.length || agentRes.journey.directUnavailable)) {
             blocks.push({ type: "journey", plan: agentRes.journey });
           } else if (agentRes.trains && agentRes.trains.rows.length) {

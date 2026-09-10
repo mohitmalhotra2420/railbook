@@ -597,6 +597,45 @@ export async function routedLiveStatus(number: string, dateYmd?: string, trainNa
   return first;
 }
 
+/* ── Round-18m: which run-dates have live/history data RIGHT NOW ──────────
+ * User picks the date (never assumed). Probes today-3 … today in parallel
+ * through the same chain (RailCore → RailKit → RailRadar → IndianRailAPI →
+ * railyatri web) and keeps ONLY dates where a provider returned a run.
+ * Bounded: 4 probes, 12 s cap, cached 3 min per train. */
+export type LiveDateOption = { date: string; label: string; runState: "not_started" | "running" | "completed" | "unknown"; provider: ServedProvider };
+const liveDatesCache = new Map<string, { at: number; options: LiveDateOption[] }>();
+const LIVE_DATES_TTL_MS = 3 * 60_000;
+export async function routedLiveDates(number: string, trainNameHint?: string | null, daysBack = 3): Promise<LiveDateOption[]> {
+  const key = `${number}:${daysBack}`;
+  const hit = liveDatesCache.get(key);
+  if (hit && Date.now() - hit.at < LIVE_DATES_TTL_MS) return hit.options;
+  const today = istToday();
+  const dates = Array.from({ length: daysBack + 1 }, (_, i) => ymdShift(today, -i));
+  const WD = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const label = (ymd: string, i: number) => {
+    const [y, m, d] = ymd.split("-").map(Number);
+    const wd = WD[new Date(Date.UTC(y, m - 1, d)).getUTCDay()];
+    return i === 0 ? `Aaj (${wd} ${d})` : i === 1 ? `Kal (${wd} ${d})` : `${wd} ${d}`;
+  };
+  const probes = await Promise.all(
+    dates.map(async (dt, i): Promise<LiveDateOption | null> => {
+      try {
+        const r = await Promise.race([
+          routedLiveStatusForDate(number, dt, trainNameHint, true),
+          new Promise<RoutedLive>((resolve) => setTimeout(() => resolve({ live: null, provider: "none" }), 12_000)),
+        ]);
+        if (!r.live) return null;
+        return { date: dt, label: label(dt, i), runState: liveRunState(r.live), provider: r.provider };
+      } catch {
+        return null;
+      }
+    }),
+  );
+  const options = probes.filter((o): o is LiveDateOption => o != null);
+  liveDatesCache.set(key, { at: Date.now(), options });
+  return options;
+}
+
 /* ── Round-16p-2: station-wise history of a PAST run ───────────────────
  * RailKit getTrainHistory → RailCore /live?date= `stations[]` (actual_arrival/
  * actual_departure/delay) → RailRadar /live?date= `route[]` (halts). Har
@@ -966,6 +1005,23 @@ export async function routedCancelled(): Promise<{ fully: unknown[]; partial: un
 
 const KNOWN_BOARD: ClassCode[] = ["1A", "2A", "3A", "3E", "SL", "CC", "EC", "2S", "EA"];
 
+/* Round-18m: train → class codes via erail fare page (web fallback, cached). */
+const trainClassCache = new Map<string, { codes: ClassCode[]; at: number }>();
+const TRAIN_CLASS_TTL_MS = 12 * 60 * 60_000;
+export async function webTrainClasses(trainNumber: string): Promise<ClassCode[]> {
+  const key = String(trainNumber).trim();
+  const hit = trainClassCache.get(key);
+  if (hit && Date.now() - hit.at < TRAIN_CLASS_TTL_MS) return hit.codes;
+  try {
+    const scraped = await scrapeTrainFareWeb(key);
+    const codes = asClassCodes(scraped?.classes.map((c) => c.code));
+    if (codes.length) trainClassCache.set(key, { codes, at: Date.now() });
+    return codes;
+  } catch {
+    return [];
+  }
+}
+
 function asClassCodes(raw: string[] | undefined): ClassCode[] {
   return [...new Set((raw ?? []).map((c) => c.toUpperCase()))].filter((c): c is ClassCode =>
     (KNOWN_BOARD as string[]).includes(c),
@@ -989,6 +1045,12 @@ export async function routedClassBoard(
       const info = await railcoreSchedule(trainNumber);
       codes = asClassCodes(info?.classes);
     }
+    /* Round-18m (user: "fallback pe seat availability data nahi aa raha"):
+     * RailRadar / erail search rows carry NO class list and RailCore schedule
+     * is blocked → codes empty → seat probe never ran ("Seat data nahi").
+     * Discover the train's classes from the erail fare page (web, cached 12h)
+     * so the railyatri/railradar seat probe can run. */
+    if (!codes.length) codes = await webTrainClasses(trainNumber);
     if (codes.length) {
       const classes = await Promise.all(
         codes.map((code) => provider.getAvailability(trainNumber, date, from, to, code, quota)),

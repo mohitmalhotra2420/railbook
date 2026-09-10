@@ -199,6 +199,11 @@ only provider-verified alternatives.
 - Route-level seat question without a train ("Amritsar se Goa … confirm seat hai?") no longer hits `getAvailability` ("Train, date, stations aur class chahiye") — it goes through the journey flow.
 - Muse latency note: no model/timeout config changed in this round. Muse on NIM measures 20–40 s per tool round (see Round-18g-3); when NVIDIA is loaded it exceeds the 40 s per-call cap and GPT-OSS/GLM answer with the same deterministic data.
 
+### Round-18m — "1" picks the 1st train · seat data on fallback · live-status date chooser
+- **"1" after a train list** = first train of that list (`resolveTrainNumber` bare-index; only when route is set and no station choice is pending). Reply confirms the train and asks class; never books.
+- **Seat availability on fallback:** RailRadar/erail search rows have no class list and RailCore schedule is blocked → `routedClassBoard` had no class codes → probe never ran ("Seat data nahi"). New `webTrainClasses()` discovers classes from the erail fare page (12h cache); the railyatri/railradar seat probe now runs — LDH→NDLS best became 12014 (EC AVL) instead of a WL Vande Bharat.
+- **Live status → choose the run date:** "12424 kahan hai" (no date cue) → `routedLiveDates()` probes today-3…today through the same provider chain and returns ONLY dates that have a run (`liveDates` in `/api/agent`); UI shows chips "Aaj (Thu 10) · chal rahi", "Kal (Wed 9) · chal rahi", "Tue 8 · poori" … Tap → "12424 2026-09-09 ka live status" → that run. Explicit cues (kal/parson/date) still go straight to the run.
+
 ## Extra fallback APIs (Round-16o, optional)
 
 Data chain per method: **RailCore → RailKit → RailRadar → Indian Rail API → verified-site web-scrape → none**. The two new providers are *additional* and fully optional — with no key set they are skipped and nothing else changes.

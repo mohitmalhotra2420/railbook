@@ -310,6 +310,15 @@ export function resolveTrainNumber(text: string, ctx: AgentContext): string | un
   const listHit = listTrains.length ? matchTrainNameInList(text, listTrains) : null;
   if (listHit && !("ambiguous" in listHit)) return listHit.number;
   const list = ctx.lastTrainNumbers;
+  /* Round-18m (user: "1" after the train list should mean the 1st train):
+   * bare 1–2 digit reply while a train list is in memory and no station
+   * choice is pending → list index. Station picks are resolved earlier
+   * (resolveStationPick) so a pending station list never reaches here. */
+  const bare = text.trim().match(/^(\d{1,2})[.!]?$/);
+  if (bare && list.length && !ctx.pendingDestinationChoice && !ctx.pendingOriginChoice && ctx.origin && ctx.destination) {
+    const i = Number(bare[1]) - 1;
+    if (i >= 0 && list[i]) return list[i];
+  }
   const ordinal = text.match(/\b(\d+)(?:st|nd|rd|th)\s+train\b/i);
   if (ordinal) {
     const i = Number(ordinal[1]) - 1;

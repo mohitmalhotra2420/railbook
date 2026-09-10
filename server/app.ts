@@ -249,6 +249,7 @@ export function createApp() {
         journey: result.journey ?? null,
         alternatives: result.alternatives ?? null,
         trainPicker: result.trainPicker ?? null,
+        liveDates: result.liveDates ?? null,
         grounded: result.grounded ?? null,
         agenticFailureReason: (result as { agenticFailureReason?: string | null }).agenticFailureReason ?? null,
       });
