@@ -277,7 +277,7 @@ export function evaluateConnection(
  * train wahan jaati hi nahi; dono trains ki seat alag-alag dikhao"):
  * har leg ka apna segment (A: from→hub, B: hub→to) probe hota hai. Bounded:
  * pehli `limit` connections, dono legs parallel, provider-proven only. */
-export async function probeConnectionLegs(connections: Connection[], date: string, travelClass: string | null, limit = 3): Promise<Set<string>> {
+export async function probeConnectionLegs(connections: Connection[], date: string, travelClass: string | null, limit = 6): Promise<Set<string>> {
   const sources = new Set<string>();
   const cache = new Map<string, Promise<RouteAvailability | null>>();
   const probe = (leg: RouteLeg): Promise<RouteAvailability | null> => {
