@@ -48,7 +48,9 @@ export type Block =
   | { type: "ticket" }
   | { type: "empty"; date: string }
   | { type: "traintable"; table: import("./agent").AgentTrainTable }
-  | { type: "journey"; plan: import("./agent").AgentJourneyPlan };
+  | { type: "journey"; plan: import("./agent").AgentJourneyPlan }
+  | { type: "alternatives"; alt: import("./agent").AgentAlternatives }
+  | { type: "trainpicker"; picker: import("./agent").AgentTrainPicker };
 
 export interface AssistantTurn {
   text: string;

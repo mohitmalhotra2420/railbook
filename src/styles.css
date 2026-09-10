@@ -1599,3 +1599,66 @@ table.traintable {
   .jo-best-grid { grid-template-columns: 1fr; }
   .jo-best-times { font-size: 18px; }
 }
+
+/* ── Round-18: YOU MAY ALSO CONSIDER + SELECT TRAIN ─────────────────── */
+.alt-wrap, .tp-wrap {
+  margin-top: 10px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--card);
+  overflow: hidden;
+  box-shadow: var(--shadow);
+  font-size: 13px;
+}
+.alt-head { padding: 10px 14px; background: var(--navy); color: #fff; }
+.alt-reason { font-weight: 600; margin-top: 2px; }
+.alt-label { padding: 10px 14px 4px; font-size: 10px; letter-spacing: 0.14em; color: var(--saffron); font-weight: 700; }
+.alt-scroll { display: flex; gap: 8px; overflow-x: auto; padding: 4px 12px 8px; scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch; }
+.alt-card {
+  flex: 0 0 200px;
+  scroll-snap-align: start;
+  text-align: left;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: linear-gradient(160deg, #fffdf8 0%, #fff 70%);
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink);
+  cursor: pointer;
+}
+.alt-card:active { border-color: var(--gold); }
+.alt-card-top { display: flex; flex-direction: column; gap: 2px; }
+.alt-name { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.alt-times { margin-top: 6px; font-size: 14px; color: var(--navy); white-space: nowrap; }
+.alt-meta { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; }
+.alt-src { font-size: 10px; color: var(--faint); margin-top: 4px; }
+.alt-wrap .jo-sec { padding: 0 12px; }
+.tp-head { display: flex; justify-content: space-between; align-items: baseline; padding: 10px 14px; background: var(--navy); color: #fff; }
+.tp-label { font-size: 11px; letter-spacing: 0.14em; font-weight: 700; color: var(--gold-soft); }
+.tp-count { font-size: 11px; color: #c9d4e4; }
+.tp-list { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; }
+.tp-list.tp-scroll { max-height: 320px; overflow-y: auto; }
+.tp-card {
+  text-align: left;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: #fff;
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink);
+  cursor: pointer;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas: "title cta" "route cta";
+  align-items: center;
+  gap: 2px 10px;
+}
+.tp-card:active { border-color: var(--saffron); background: #fffaf5; }
+.tp-title { grid-area: title; display: flex; gap: 4px; align-items: baseline; min-width: 0; }
+.tp-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tp-route { grid-area: route; color: var(--muted); font-size: 12px; }
+.tp-route.muted { font-style: italic; }
+.tp-time { color: var(--ink); }
+.tp-cta { grid-area: cta; color: var(--saffron); font-weight: 700; white-space: nowrap; }

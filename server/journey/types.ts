@@ -150,6 +150,25 @@ export type PartialRoutePlan = {
   source: string;
 };
 
+/** Round-18: alternatives for ONE selected train when its seat is poor. */
+export type AlternativeTrainsResult = {
+  selected: { trainNumber: string; trainName: string | null; classCode: string | null; status: string | null; seats: number | null; waitlist: number | null; rac: number | null; source: string | null };
+  reason: "waitlist" | "rac" | "low_availability" | "not_available" | "class_unavailable" | "unknown" | "fine";
+  origin: string;
+  destination: string;
+  date: string;
+  /** Provider-verified alternatives (other trains, same day, same route) — ONLY with AVAILABLE/RAC data. */
+  alternatives: RouteOption[];
+  /** Same train, other class with AVAILABLE seats (real board rows). */
+  otherClasses: RouteAvailability[];
+  partialRoute: PartialRoutePlan | null;
+  connecting: Connection[];
+  alternativeDates: JourneyPlan["alternativeDates"];
+  sources: string[];
+  note: string;
+  provenance: { retrievedAt: string; requestDate: string; travelDate: string; freshness: string; sourceTypes: string[] };
+};
+
 export type JourneyPlan = {
   query: { from: string; to: string; date: string; travelClass: string | null; preference: string };
   best: RouteOption | null;
@@ -167,6 +186,10 @@ export type JourneyPlan = {
   } | null;
   sources: string[];
   notes: string[];
+  /** Round-18 freshness envelope (dynamic data must not be shown as current when stale). */
+  provenance?: { retrievedAt: string; requestDate: string; travelDate: string; freshness: string; sourceTypes: string[] };
+  /** Round-18: any availability source conflict detected (values never blended). */
+  conflicts?: { trainNumber: string; message: string; sources: string[] }[];
 };
 
 export const CLASS_CODES = ["1A", "2A", "3A", "3E", "SL", "CC", "EC", "2S", "EA"] as const;

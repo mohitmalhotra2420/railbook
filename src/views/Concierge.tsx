@@ -3,7 +3,7 @@ import { planTurn, type AssistantTurn, type Block } from "../ai/orchestrate";
 import type { DialogSlot, NluResult } from "../ai/nlu";
 import type { Prefs } from "../ai/filter";
 import { matchingClasses } from "../ai/filter";
-import { api } from "../api";
+import { api, pickTrainsApi } from "../api";
 import { useBooking } from "../booking/context";
 import { validatePassengers } from "../booking/state";
 import { loadTravellers } from "../data/travellers";
@@ -11,6 +11,8 @@ import { availabilityLabel, formatShortDate, inr, newId, todayYmd } from "../for
 import { BERTH_BY_CLASS, CLASS_LABELS, isBookable, type ClassAvailability, type ClassCode, type Passenger, type Station, type TrainResult } from "../types";
 import type { AgentTrainTable } from "../ai/agent";
 import { JourneyOptions } from "../components/JourneyOptions";
+import { AlternativesCard } from "../components/AlternativesCard";
+import { TrainPicker } from "../components/TrainPicker";
 
 import type { ChatMessage } from "../conversation/types";
 import { useVoiceInput } from "../voice/useVoiceInput";
@@ -749,6 +751,37 @@ export function Concierge() {
     let extraction: NluResult | undefined;
     setThinking(true);
 
+    /* ── Round-18 SMART TRAIN PICKER (instant) ──────────────────────────
+     * Bare train number ("12014") ya chhota naam ("Shatabdi", "Amritsar
+     * Shatabdi") → turant SELECT TRAIN cards (real validated matches,
+     * /api/trains/pick). Agent round-trip (20-60s) ka wait nahi. Sawaal
+     * saath ho ("12014 ka status") to agent hi handle karega + picker bhi. */
+    const bareNumber = /^\s*\d{5}\s*$/.test(trimmed);
+    const bareName = !/\d/.test(trimmed) && /\b(shatabdi|rajdhani|vande|duronto|garib|tejas|humsafar|jan\s*shatabdi|intercity|express|exp|mail|superfast|sampark|kranti|double\s*decker|amrit)\b/i.test(trimmed) && trimmed.split(/\s+/).length <= 4 && !/\b(se|to|from|tak|kab|kaha|kahan|status|time|fare|seat|book)\b/i.test(trimmed);
+    if (bareNumber || bareName) {
+      try {
+        const picker = await pickTrainsApi(trimmed, { from: state.from?.code ?? null, to: state.to?.code ?? null });
+        if (picker.matches.length) {
+          setThinking(false);
+          const one = picker.matches.length === 1 ? picker.matches[0] : null;
+          setMessages((m) => [
+            ...m,
+            {
+              id: newId(),
+              role: "assistant",
+              text: one
+                ? `${one.number} ${one.name}${one.from && one.to ? ` (${one.from} → ${one.to}${one.departure ? `, ${one.departure} → ${one.arrival ?? "—"}` : ""})` : ""} mili. Select karo — phir batao kya chahiye: status, timetable, seat ya fare.`
+                : `"${trimmed}" ke ${picker.matches.length} real matches mile — neeche se apni train select karo.`,
+              blocks: [{ type: "trainpicker", picker }],
+            },
+          ]);
+          return;
+        }
+      } catch {
+        /* picker best-effort — agent flow continue */
+      }
+    }
+
     /* ── AI-FIRST TOOL CALLING ─────────────────────────────────────────
      * USER → NVIDIA GPT-OSS-20B → model selects approved tools → server
      * executes them on RailCore (primary) → RailKit (fallback) → results
@@ -819,12 +852,17 @@ export function Concierge() {
           setThinking(false);
           // User feedback (2026-09-05): train list chat-text nahi — proper organized TABLE.
           // Round-17: RANK_JOURNEY_OPTIONS → BEST OPTION card (table ki jagah); warna table.
-          const tableBlock: Block[] | undefined =
-            agentRes.journey && (agentRes.journey.routeOptions.length || agentRes.journey.directUnavailable)
-              ? [{ type: "journey" as const, plan: agentRes.journey }]
-              : agentRes.trains && agentRes.trains.rows.length
-                ? [{ type: "traintable" as const, table: agentRes.trains }]
-                : undefined;
+          const blocks: Block[] = [];
+          // Round-18: SELECT TRAIN picker (number/name → real matches, user taps).
+          if (agentRes.trainPicker && agentRes.trainPicker.matches.length) blocks.push({ type: "trainpicker", picker: agentRes.trainPicker });
+          if (agentRes.journey && (agentRes.journey.routeOptions.length || agentRes.journey.directUnavailable)) {
+            blocks.push({ type: "journey", plan: agentRes.journey });
+          } else if (agentRes.trains && agentRes.trains.rows.length) {
+            blocks.push({ type: "traintable", table: agentRes.trains });
+          }
+          // Round-18: YOU MAY ALSO CONSIDER (only when server found verified alternatives).
+          if (agentRes.alternatives && agentRes.alternatives.reason !== "fine") blocks.push({ type: "alternatives", alt: agentRes.alternatives });
+          const tableBlock: Block[] | undefined = blocks.length ? blocks : undefined;
           setMessages((m) => [
             ...m,
             { id: newId(), role: "assistant", text: agentRes.reply! + traceLine, blocks: tableBlock },
@@ -1474,6 +1512,23 @@ function BlockView({
   const { updatePassenger } = useBooking();
   if (block.type === "traintable") {
     return <TrainTableView table={block.table} />;
+  }
+  if (block.type === "trainpicker") {
+    return (
+      <TrainPicker
+        picker={block.picker}
+        onSelect={(t) => onChip(`${t.number} ${t.name}${t.from && t.to ? ` (${t.from} → ${t.to})` : ""} select ki — iska kya chahiye: status, timetable, seat ya fare?`)}
+      />
+    );
+  }
+  if (block.type === "alternatives") {
+    return (
+      <AlternativesCard
+        alt={block.alt}
+        onPickTrain={(n) => onChip(`${n} ki seat availability ${block.alt.selected.classCode ? block.alt.selected.classCode + " " : ""}${block.alt.date} ko ${block.alt.origin} se ${block.alt.destination}`)}
+        onPickDate={(d) => onChip(`${block.alt.origin} se ${block.alt.destination} ${d} ki trains dikhao`)}
+      />
+    );
   }
   if (block.type === "journey") {
     return (

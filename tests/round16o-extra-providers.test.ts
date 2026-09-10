@@ -348,7 +348,8 @@ describe("Round-16o: TRAIN_NAME_SEARCH chain — RailCore limited → erail trai
     const vivek = await scrapeTrainNameSearchWeb("vivek express");
     expect(vivek.map((t) => t.number).sort()).toEqual(["19027", "19567", "22503", "22504"]);
     const sh = await scrapeTrainNameSearchWeb("shatabdi");
-    expect(sh.map((t) => t.number)).toEqual(["12002"]); // "SHTABDI" spelling erail ki — exact/prefix match hi (invent nahi)
+    /* Round-18: erail ki "SHTABDI" spelling bhi match (1-edit variant) — dono REAL list rows hain, invent nahi. */
+    expect(sh.map((t) => t.number).sort()).toEqual(["12002", "12014"]);
     const num = await scrapeTrainNameSearchWeb("12951");
     expect(num).toEqual([{ number: "12951", name: "MUMBAI RAJDHANI", provider: "web_erail" }]);
   });

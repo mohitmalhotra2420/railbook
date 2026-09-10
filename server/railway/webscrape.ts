@@ -980,6 +980,17 @@ export type ScrapedTrainName = { number: string; name: string; provider: "web_er
 
 /** Naam/number se trains — number exact, phir naam ke saare words match
  * (word-prefix), phir koi bhi word. Max `limit`. */
+/** Round-18: erail names have spelling variants ("SHTABDI", "RAJDHNI") — allow 1 edit for ≥5-letter words (2 for ≥8). */
+function looseWordMatch(a: string, b: string): boolean {
+  if (Math.abs(a.length - b.length) > 2) return false;
+  const max = a.length >= 8 ? 2 : 1;
+  const dp = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+  for (let j = 1; j <= b.length; j++) dp[0][j] = j;
+  for (let i = 1; i <= a.length; i++)
+    for (let j = 1; j <= b.length; j++) dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+  return dp[a.length][b.length] <= max;
+}
+
 export async function scrapeTrainNameSearchWeb(query: string, limit = 10): Promise<ScrapedTrainName[]> {
   const q = query.trim().toLowerCase().replace(/\s+/g, " ");
   if (q.length < 3) return [];
@@ -997,7 +1008,7 @@ export async function scrapeTrainNameSearchWeb(query: string, limit = 10): Promi
     const nWords = n.split(" ");
     let hits = 0;
     for (const w of words) {
-      if (nWords.some((nw) => nw === w || (w.length >= 4 && nw.startsWith(w)))) hits++;
+      if (nWords.some((nw) => nw === w || (w.length >= 4 && nw.startsWith(w)) || (w.length >= 5 && nw.length >= 5 && looseWordMatch(w, nw)))) hits++;
     }
     if (!hits) continue;
     scored.push({ t, hits, exact: n === words.join(" ") });

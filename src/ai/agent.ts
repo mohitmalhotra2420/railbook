@@ -109,6 +109,47 @@ export interface AgentJourneyPlan {
   } | null;
   sources: string[];
   notes: string[];
+  provenance?: { retrievedAt: string; requestDate: string; travelDate: string; freshness: string; sourceTypes: string[] };
+  conflicts?: { trainNumber: string; message: string; sources: string[] }[];
+}
+
+/** Round-18: alternatives when the selected train's seat is poor. */
+export interface AgentAlternatives {
+  selected: { trainNumber: string; trainName: string | null; classCode: string | null; status: string | null; seats: number | null; waitlist: number | null; rac: number | null; source: string | null };
+  reason: "waitlist" | "rac" | "low_availability" | "not_available" | "class_unavailable" | "unknown" | "fine";
+  origin: string;
+  destination: string;
+  date: string;
+  alternatives: AgentRouteOption[];
+  otherClasses: { classCode: string; status: string; seats: number | null; fare: number | null; source: string }[];
+  partialRoute: AgentJourneyPlan["recovery"] extends infer R ? (R extends { partialRoute: infer P } ? P : null) : null;
+  connecting: AgentConnection[];
+  alternativeDates: AgentJourneyPlan["alternativeDates"];
+  sources: string[];
+  note: string;
+  provenance: { retrievedAt: string; requestDate: string; travelDate: string; freshness: string; sourceTypes: string[] };
+}
+/** Round-18: SELECT TRAIN smart picker (real validated matches). */
+export interface AgentTrainPick {
+  number: string;
+  name: string;
+  from: string | null;
+  fromName?: string | null;
+  to: string | null;
+  toName?: string | null;
+  departure: string | null;
+  arrival: string | null;
+  type?: string | null;
+  match: "exact_number" | "exact_name" | "partial_name" | "route_context";
+  source: string;
+}
+export interface AgentTrainPicker {
+  query: string;
+  kind: "number" | "name";
+  matches: AgentTrainPick[];
+  single: boolean;
+  source: string;
+  note: string | null;
 }
 
 export type AgentToolName =

@@ -34,11 +34,11 @@ import {
   type ToolTraceStep,
 } from "./agentic.js";
 import { routedClassBoard, routedLiveStatus, routedSchedule, routedStationSearch, routedTrainInfo, searchTrainsRouted } from "../railway/router.js";
+import { pickTrains, type TrainPickerResult } from "../journey/trainpicker.js";
 import { webSourceLabel } from "../railway/webscrape.js";
 import {findWikipediaPage, webSearch, generalWebSearch, scrapeWebPage } from "./websearch.js";
 import { railKbAnswer } from "./railkb.js";
 import { wikiTableForPage } from "./websearch.js";
-import { searchRailcoreTrainsByName } from "../railway/railcore.js";
 
 /** Atlas analyse intents — decideTool inhe map nahi karta (model ki zimmedari hai),
  *  par agentic engine fail ho to deterministic fallback bhi inka honest answer deta hai. */
@@ -381,6 +381,9 @@ export type AgentResponse = {
   trains?: AgentTrainTable | null;
   /** Round-17: RANK_JOURNEY_OPTIONS ka full deterministic plan (BEST OPTION + alternatives card). */
   journey?: import("../journey/types.js").JourneyPlan | null;
+  /** Round-18: alternatives card + SELECT TRAIN picker. */
+  alternatives?: import("../journey/types.js").AlternativeTrainsResult | null;
+  trainPicker?: import("../journey/trainpicker.js").TrainPickerResult | null;
   grounded?: boolean;
   /** Agentic turn chala par model/provider fail hua to wajah (observability; success par null). */
   agenticFailureReason?: string | null;
@@ -626,7 +629,7 @@ function titleCaseWords(s: string): string {
 async function resolveTrainByName(
   text: string,
   ctx: AgentContext,
-): Promise<{ trainNumber: string; trainName: string } | { clarify: string } | null> {
+): Promise<{ trainNumber: string; trainName: string } | { clarify: string; picker?: TrainPickerResult } | null> {
   if (/\b\d{4,6}\b/.test(text)) return null; // number already diya
   const list = ctx.lastTrains ?? [];
 
@@ -676,8 +679,12 @@ async function resolveTrainByName(
     /* station check fail — train search chalne do */
   }
   let results: { number: string; name: string; from: string; to: string }[] = [];
+  let pickerResult: TrainPickerResult | null = null;
   try {
-    results = await searchRailcoreTrainsByName(phrase);
+    /* Round-18: routed chain (RailCore → RailRadar → IndianRailAPI → erail list)
+     * + normalized/fuzzy ranking; ambiguity → SELECT TRAIN picker for the UI. */
+    pickerResult = await pickTrains(phrase, { context: { from: ctx.origin?.code ?? null, to: ctx.destination?.code ?? null }, limit: 6 });
+    results = pickerResult.matches.map((m) => ({ number: m.number, name: m.name, from: m.from ?? "", to: m.to ?? "" }));
   } catch {
     return null; // API fail — engine seedha jaane de (deterministic honest ask)
   }
@@ -691,8 +698,11 @@ async function resolveTrainByName(
   const exact = o && d ? results.filter((t) => t.from === o && t.to === d) : [];
   const pool = exact.length === 1 ? exact : exact.length > 1 ? exact : results;
   if (pool.length === 1) return { trainNumber: pool[0].number, trainName: pool[0].name };
-  const lines = pool.slice(0, 4).map((t) => `${t.number} ${t.name} (${t.from}→${t.to})`).join("; ");
-  return { clarify: `\"${phrase}\" se ${pool.length} trains mili — kaunsi? ${lines}. Train number bata dijiye.` };
+  const lines = pool.slice(0, 4).map((t) => `${t.number} ${t.name}${t.from && t.to ? ` (${t.from}→${t.to})` : ""}`).join("; ");
+  return {
+    clarify: `\"${phrase}\" se ${pool.length} trains mili — kaunsi? ${lines}. Neeche list se select karo ya train number bata dijiye.`,
+    picker: pickerResult && pickerResult.matches.length ? { ...pickerResult, matches: pickerResult.matches.filter((m) => pool.some((t) => t.number === m.number)) } : undefined,
+  };
 }
 
 /** Search memory (2026-09-05 user feedback: "memory yaad nahi rehti"):
@@ -1248,6 +1258,7 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
    * → dono engines ke liye selectedTrain set; ambiguous/zero → honest clarify
    * (model ko galat train answer karne ka mauka hi nahi). */
   let nameClarify: string | null = null;
+  let namePicker: TrainPickerResult | null = null;
   let nameResolvedTrain: { number: string; name: string } | null = null;
   if (!isBookingMutation(req)) {
     try {
@@ -1258,6 +1269,7 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
         seeded.selectedTrainName = resolved.trainName;
       } else if (resolved && "clarify" in resolved) {
         nameClarify = resolved.clarify;
+        namePicker = resolved.picker ?? null;
       }
     } catch {
       /* optional hai — normal flow continue */
@@ -1559,6 +1571,8 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
           resumeText: null,
           trains: capture.table,
           journey: capture.plan ?? null,
+          alternatives: capture.alternatives ?? null,
+          trainPicker: capture.trainPicker ?? null,
           confirmBook: false,
           missingFields: missingOf({
             from: det.from,
@@ -1688,6 +1702,7 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
       resumeAsk: null,
       resumeText: null,
       trains: null,
+      trainPicker: namePicker,
       confirmBook: false,
       missingFields: understood.missingFields,
       modelUsed: understood.modelUsed,

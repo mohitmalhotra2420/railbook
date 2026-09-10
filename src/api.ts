@@ -178,6 +178,8 @@ export const api = {
       engine?: "agentic_tool_calling" | "deterministic" | null;
       trains?: import("./ai/agent").AgentTrainTable | null;
       journey?: import("./ai/agent").AgentJourneyPlan | null;
+      alternatives?: import("./ai/agent").AgentAlternatives | null;
+      trainPicker?: import("./ai/agent").AgentTrainPicker | null;
       toolTrace?: {
         step: number;
         tool: string;
@@ -339,4 +341,12 @@ export function planJourneyApi(body: {
   includeAlternativeDates?: boolean;
 }) {
   return request<import("./ai/agent").AgentJourneyPlan>("/api/journey/plan", { method: "POST", body: JSON.stringify(body) });
+}
+
+/** Round-18: smart train picker (number or name → real validated matches). */
+export function pickTrainsApi(q: string, ctx?: { from?: string | null; to?: string | null }) {
+  const p = new URLSearchParams({ q });
+  if (ctx?.from) p.set("from", ctx.from);
+  if (ctx?.to) p.set("to", ctx.to);
+  return request<import("./ai/agent").AgentTrainPicker>(`/api/trains/pick?${p.toString()}`);
 }

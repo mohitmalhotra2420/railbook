@@ -22,6 +22,7 @@ import { env } from "../env.js";
 import type { ClassAvailability, TrainResult } from "../providers/types.js";
 import { routedClassBoard, routedSchedule, searchTrainsRouted, type ServedProvider } from "../railway/router.js";
 import { todayYmd } from "../util.js";
+import { CONFLICT_MESSAGE, availabilityEquals, freshnessOf, resolveConflict, sourceTypeOf } from "../providers/provenance.js";
 import {
   CLASS_CODES,
   durationLabelOf,
@@ -30,6 +31,7 @@ import {
   type JourneyPlan,
   type PartialRoutePlan,
   type PartialSegment,
+  type AlternativeTrainsResult,
   type RankCategory,
   type RouteAvailability,
   type RouteLeg,
@@ -476,6 +478,114 @@ export async function findPartialRouteSeats(args: {
   return base;
 }
 
+/** Round-18: same class from two different sources with different values → conflict (never blended). */
+export function detectBoardConflict(classes: ClassAvailability[]): string[] | null {
+  const byCode = new Map<string, ClassAvailability[]>();
+  for (const c of classes) {
+    if (!c.status || c.status === "UNKNOWN") continue;
+    const arr = byCode.get(c.code) ?? [];
+    arr.push(c);
+    byCode.set(c.code, arr);
+  }
+  for (const rows of byCode.values()) {
+    if (rows.length < 2) continue;
+    const r = resolveConflict(
+      "availability",
+      rows.map((x) => ({ value: { status: x.status, seats: x.seats ?? null, waitlist: x.waitlist ?? null, rac: x.rac ?? null }, source: String(x.source ?? "railcore"), providerUpdatedAt: x.webNote?.match(/as of ([^)]*)/i)?.[1] ?? null })),
+      availabilityEquals,
+    );
+    if (!r.ok) return rows.map((x) => String(x.source ?? "railcore"));
+  }
+  return null;
+}
+
+/* ── Round-18: alternatives for ONE selected train ─────────────────── */
+export async function findAlternativeTrains(args: {
+  trainNumber: string;
+  origin: string;
+  destination: string;
+  date: string;
+  travelClass?: string | null;
+  lowSeatThreshold?: number;
+}): Promise<AlternativeTrainsResult> {
+  const from = args.origin.toUpperCase();
+  const to = args.destination.toUpperCase();
+  const cls = args.travelClass?.toUpperCase() ?? null;
+  const low = args.lowSeatThreshold ?? (Number(process.env.LOW_SEAT_THRESHOLD ?? 10) || 10);
+  const sources = new Set<string>();
+  const retrievedAt = new Date().toISOString();
+
+  /* Poora class board (hint = []) — "usi train ki doosri class" real rows se; schedule ke classes use hote hain. */
+  const board = await routedClassBoard(args.trainNumber, args.date, from, to, "GN", []);
+  const known = board.classes.filter((c) => c.status && c.status !== "UNKNOWN");
+  known.forEach((c) => sources.add(String(c.source ?? board.provider)));
+  const sel = cls ? known.find((c) => c.code === cls) : bestClassRow(board.classes, null);
+  const selRow = sel ? { status: sel.status, seats: (sel as ClassAvailability).seats ?? null, waitlist: (sel as ClassAvailability).waitlist ?? null, rac: (sel as ClassAvailability).rac ?? null, source: String((sel as ClassAvailability).source ?? board.provider) } : null;
+  const boardHasClass = cls ? board.classes.some((c) => c.code === cls) : true;
+
+  let reason: AlternativeTrainsResult["reason"] = "unknown";
+  if (!selRow) reason = cls && known.length && !boardHasClass ? "class_unavailable" : cls && known.length ? "class_unavailable" : "unknown";
+  else if (selRow.status === "WAITLIST") reason = "waitlist";
+  else if (selRow.status === "RAC") reason = "rac";
+  else if (selRow.status === "NOT_AVAILABLE") reason = "not_available";
+  else if (selRow.status === "AVAILABLE" && selRow.seats != null && selRow.seats < low) reason = "low_availability";
+  else if (selRow.status === "AVAILABLE") reason = "fine";
+
+  const otherClasses: RouteAvailability[] = known
+    .filter((c) => c.code !== cls && c.status === "AVAILABLE")
+    .map((c) => ({ classCode: c.code, status: c.status, seats: c.seats ?? null, rac: c.rac ?? null, waitlist: c.waitlist ?? null, fare: c.fare > 0 ? c.fare : null, source: String(c.source ?? board.provider) }));
+
+  const base = {
+    selected: { trainNumber: args.trainNumber, trainName: null as string | null, classCode: cls, status: selRow?.status ?? null, seats: selRow?.seats ?? null, waitlist: selRow?.waitlist ?? null, rac: selRow?.rac ?? null, source: selRow?.source ?? null },
+    reason,
+    origin: from,
+    destination: to,
+    date: args.date,
+    otherClasses,
+  };
+  const prov = () => ({ retrievedAt, requestDate: todayYmd(), travelDate: args.date, freshness: freshnessOf("availability", retrievedAt), sourceTypes: [...new Set([...sources].map(sourceTypeOf))] });
+
+  if (reason === "fine") {
+    return { ...base, alternatives: [], partialRoute: null, connecting: [], alternativeDates: [], sources: [...sources], note: `${args.trainNumber} ${cls ?? ""} AVAILABLE (${selRow?.seats ?? "?"} seats) — alternatives ki zaroorat nahi.`, provenance: prov() };
+  }
+
+  /* Alternatives: full plan on same route/date, excluding this train; keep only provider-verified AVAILABLE/RAC. */
+  const plan = await planJourney({ from, to, date: args.date, travelClass: cls, preference: "best_availability", includeConnections: false, includeAlternativeDates: true, includePartial: false });
+  plan.sources.forEach((x) => sources.add(x));
+  const t = plan.routeOptions.find((o) => o.trainNumbers[0] === args.trainNumber);
+  base.selected.trainName = t?.trainNames[0] ?? null;
+  const alternatives = plan.routeOptions.filter((o) => o.trainNumbers[0] !== args.trainNumber && o.availability && (o.availability.status === "AVAILABLE" || o.availability.status === "RAC")).slice(0, 4);
+
+  let partialRoute: PartialRoutePlan | null = null;
+  if (cls && reason !== "class_unavailable") {
+    try {
+      partialRoute = await findPartialRouteSeats({ trainNumber: args.trainNumber, origin: from, destination: to, date: args.date, classCode: cls });
+      if (partialRoute.source !== "none") sources.add(partialRoute.source);
+    } catch {
+      partialRoute = null;
+    }
+  }
+  let connecting: Connection[] = [];
+  if (!alternatives.length) {
+    const c = await findConnections(from, to, args.date, { maxHubs: 2 });
+    connecting = c.connections.slice(0, 2);
+    c.sources.forEach((x) => sources.add(x));
+  }
+  const why =
+    reason === "waitlist" ? `${args.trainNumber} ${cls ?? ""} WL${selRow?.waitlist ?? ""}` : reason === "rac" ? `${args.trainNumber} ${cls ?? ""} RAC` : reason === "low_availability" ? `${args.trainNumber} ${cls ?? ""} mein sirf ${selRow?.seats} seats` : reason === "not_available" ? `${args.trainNumber} ${cls ?? ""} not available` : reason === "class_unavailable" ? `${args.trainNumber} mein ${cls} class ka data/seat nahi` : `${args.trainNumber} ki availability provider se nahi aayi`;
+  const found = alternatives.length + otherClasses.length + (partialRoute?.plans.filter((p) => p.fullyAvailable).length ?? 0) + connecting.length;
+  return {
+    ...base,
+    alternatives,
+    partialRoute,
+    connecting,
+    alternativeDates: plan.alternativeDates,
+    sources: [...sources],
+    note: found ? `${why} — ${found} verified alternative(s) mile.` : `${why} — koi verified alternative nahi mila (invent nahi kiya).`,
+    provenance: prov(),
+  };
+}
+
 /* ── Feature 2: plan + recovery ───────────────────────────────────── */
 export async function planJourney(args: {
   from: string;
@@ -504,12 +614,19 @@ export async function planJourney(args: {
 
   /* Bounded availability probe: fastest N trains. */
   const availability = new Map<string, RouteAvailability | null>();
+  const conflicts: { trainNumber: string; message: string; sources: string[] }[] = [];
   const probeList = [...trains].sort((a, b) => (a.durationMinutes || 9e9) - (b.durationMinutes || 9e9) || a.number.localeCompare(b.number)).slice(0, JOURNEY_CONFIG.availabilityProbeLimit);
   await Promise.all(
     probeList.map(async (t) => {
       try {
         const hint = args.travelClass ? [args.travelClass] : t.classes.map((c) => c.code);
         const board = await routedClassBoard(t.number, args.date, from, to, "GN", hint);
+        const c = detectBoardConflict(board.classes);
+        if (c) {
+          conflicts.push({ trainNumber: t.number, message: CONFLICT_MESSAGE, sources: c });
+          availability.set(t.number, null);
+          return;
+        }
         const row = bestClassRow(board.classes, args.travelClass ?? null);
         availability.set(t.number, row);
         if (row) sources.add(row.source);
@@ -582,8 +699,12 @@ export async function planJourney(args: {
     };
   }
   if (!trains.length && provider === "none") notes.push("Railway data source unavailable — RailCore/RailKit/RailRadar/web sab se jawab nahi mila.");
+  const retrievedAt = new Date().toISOString();
+  const sourceTypes = [...new Set([...sources].map(sourceTypeOf))];
 
   return {
+    provenance: { retrievedAt, requestDate: todayYmd(), travelDate: args.date, freshness: freshnessOf("availability", retrievedAt), sourceTypes },
+    conflicts: conflicts.length ? conflicts : undefined,
     query: { from, to, date: args.date, travelClass: args.travelClass ?? null, preference: args.preference ?? "best_overall" },
     best: routeOptions[0] ?? null,
     routeOptions,

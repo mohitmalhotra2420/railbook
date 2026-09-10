@@ -30,7 +30,9 @@ import { isPastDate } from "./util.js";
 import { runUnderstand } from "./understand/index.js";
 import { runAgent } from "./agent/run.js";
 import { runAutonomousAgent } from "./agent/autonomous.js";
-import { JOURNEY_CONFIG, findConnections, findPartialRouteSeats, findVacantSeats, planJourney } from "./journey/engine.js";
+import { JOURNEY_CONFIG, findAlternativeTrains, findConnections, findPartialRouteSeats, findVacantSeats, planJourney } from "./journey/engine.js";
+import { pickTrains } from "./journey/trainpicker.js";
+import { publicCapabilityPayload } from "./providers/capabilities.js";
 import { railcoreBlockState } from "./railway/railcore.js";
 import { getNvidiaCatalog, publicNvidiaPayload, refreshNvidiaCatalog } from "./understand/nvidia.js";
 import { answerFromEvidence, compactScheduleEvidence, shouldGroundFact } from "./understand/ground.js";
@@ -229,6 +231,8 @@ export function createApp() {
         toolTrace: result.toolTrace ?? null,
         trains: result.trains ?? null,
         journey: result.journey ?? null,
+        alternatives: result.alternatives ?? null,
+        trainPicker: result.trainPicker ?? null,
         grounded: result.grounded ?? null,
         agenticFailureReason: (result as { agenticFailureReason?: string | null }).agenticFailureReason ?? null,
       });
@@ -674,6 +678,33 @@ export function createApp() {
     } catch (err) {
       next(err);
     }
+  });
+  app.post("/api/journey/alternatives", async (req, res, next) => {
+    try {
+      const b = z.object({ trainNumber: z.string().regex(/^\d{5}$/), from: stnSchema, to: stnSchema, date: ymdSchema, travelClass: clsSchema.nullish() }).parse(req.body ?? {});
+      res.json(await findAlternativeTrains({ trainNumber: b.trainNumber, origin: b.from, destination: b.to, date: b.date, travelClass: b.travelClass ?? null }));
+    } catch (err) {
+      next(err);
+    }
+  });
+  /* Round-18: smart train picker (number or name → real validated matches). */
+  app.get("/api/trains/pick", async (req, res, next) => {
+    try {
+      const q = String(req.query.q ?? "").trim();
+      if (q.length < 3) {
+        res.json({ query: q, kind: "name", matches: [], single: false, source: "none", note: "Query too short." });
+        return;
+      }
+      const from = String(req.query.from ?? "").trim().toUpperCase() || null;
+      const to = String(req.query.to ?? "").trim().toUpperCase() || null;
+      res.json(await pickTrains(q, { context: { from, to }, limit: 6 }));
+    } catch (err) {
+      next(err);
+    }
+  });
+  /* Round-18: provider capability registry (public, no secrets). */
+  app.get("/api/capabilities", (_req, res) => {
+    res.json(publicCapabilityPayload());
   });
   app.post("/api/journey/connections", async (req, res, next) => {
     try {

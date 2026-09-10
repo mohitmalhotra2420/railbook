@@ -144,6 +144,15 @@ alternative dates are suggestions only. The chat UI renders the plan as a
 train has no seat it shows "Direct seat nahi mili. Ye alternatives mile:" with
 only provider-verified alternatives.
 
+## Round-18 — capability registry, provenance, proactive alternatives, smart train picker
+
+- **Provider capability registry** (`server/providers/capabilities.ts`, `GET /api/capabilities`): per provider (RailCore, RailKit, RailRadar, Indian Rail API, verified web sites, RailBook engine) each internal capability is `available | unavailable | needs_key | derived`. The backend only selects supported capabilities. Berth-level vacancy, post-chart vacancy and reliability scores are `unavailable` everywhere → the UI/LLM says **"Seat recovery data is currently unavailable."** — never a fake coach/berth.
+- **Provenance & freshness** (`server/providers/provenance.ts`): dynamic results carry `retrievedAt, source, sourceType, requestDate, travelDate, freshness (live/fresh/recent/stale)`. Stale live data is labelled, never presented as current.
+- **Data-conflict resolution**: two sources disagreeing are never blended (10 + 15 ≠ 25). Rule = source priority (RailCore > RailKit > RailRadar > IndianRailAPI > web) + freshness; if a lower-priority source is materially fresher and disagrees, the response says **"Data sources are conflicting right now. Please retry."**
+- **Proactive alternatives** (§5/§6): every journey search attaches the deterministic Atlas plan (BEST FOR YOU + YOU MAY ALSO CONSIDER chips: ⚡ Fastest · 💺 Best availability · 💰 Lowest fare · 🚆 Fewest changes · 🔁 Connecting · 📅 Alternative date) — cards only when backed by real data. When a checked train is WL/RAC/low/no-class, `FIND_ALTERNATIVE_TRAINS` (`POST /api/journey/alternatives`) runs automatically: other trains (verified AVAILABLE/RAC), same-train other class, split booking, connecting, alternative dates (suggestion only — origin/destination/date never changed silently).
+- **Smart train picker** (§9/§10): `SEARCH_TRAIN_BY_NUMBER` / `SEARCH_TRAIN_BY_NAME` (`GET /api/trains/pick?q=`) — exact number → exact name → normalized/fuzzy partial name (handles erail spellings like "SHTABDI") → route context. Ambiguous names open a **SELECT TRAIN** card list in chat; the user taps to choose. Typing a bare number or a short name in chat shows the picker instantly, before the LLM round-trip.
+- No auto-booking: `Confirm & Book` remains the only booking action; payment/wallet/booking stay deterministic.
+
 ## Extra fallback APIs (Round-16o, optional)
 
 Data chain per method: **RailCore → RailKit → RailRadar → Indian Rail API → verified-site web-scrape → none**. The two new providers are *additional* and fully optional — with no key set they are skipped and nothing else changes.

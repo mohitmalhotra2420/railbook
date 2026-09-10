@@ -84,7 +84,7 @@ function ConnectionRow({ c }: { c: AgentConnection }) {
   );
 }
 
-type Tab = "fastest" | "fewest_changes" | "best_availability" | "connecting" | "alt_date";
+type Tab = "fastest" | "fewest_changes" | "best_availability" | "cheapest" | "connecting" | "alt_date";
 
 export function JourneyOptions({
   plan,
@@ -105,8 +105,9 @@ export function JourneyOptions({
 
   const allTabs: { id: Tab; label: string; count: number }[] = [
     { id: "fastest", label: "⚡ Fastest", count: direct.length ? Math.min(direct.length, 5) : 0 },
-    { id: "fewest_changes", label: "🚆 Fewest changes", count: plan.routeOptions.length ? Math.min(plan.routeOptions.length, 5) : 0 },
     { id: "best_availability", label: "💺 Best availability", count: plan.routeOptions.filter((o) => o.availability?.status === "AVAILABLE").length },
+    { id: "cheapest", label: "💰 Lowest fare", count: plan.routeOptions.filter((o) => o.availability?.fare != null).length },
+    { id: "fewest_changes", label: "🚆 Fewest changes", count: plan.routeOptions.length ? Math.min(plan.routeOptions.length, 5) : 0 },
     { id: "connecting", label: "🔁 Connecting", count: connections.length },
     { id: "alt_date", label: "📅 Alternative date", count: altDates.length },
   ];
@@ -118,6 +119,8 @@ export function JourneyOptions({
     if (t === "fewest_changes") return all.sort((x, y) => x.changes - y.changes || (x.durationMinutes ?? 1e9) - (y.durationMinutes ?? 1e9)).slice(0, 5);
     if (t === "best_availability")
       return all.filter((o) => o.availability?.status === "AVAILABLE").sort((x, y) => (y.availability?.seats ?? 0) - (x.availability?.seats ?? 0) || x.trainNumbers[0].localeCompare(y.trainNumbers[0])).slice(0, 5);
+    if (t === "cheapest")
+      return all.filter((o) => o.availability?.fare != null).sort((x, y) => (x.availability!.fare! - y.availability!.fare!) || x.trainNumbers[0].localeCompare(y.trainNumbers[0])).slice(0, 5);
     return [];
   };
 
@@ -137,6 +140,9 @@ export function JourneyOptions({
         <span className="jo-count">{plan.routeOptions.length} option{plan.routeOptions.length === 1 ? "" : "s"}</span>
       </div>
 
+      {plan.conflicts && plan.conflicts.length > 0 && (
+        <div className="jo-alert">{plan.conflicts[0].message} <span className="jo-alert-sub">({plan.conflicts.map((c) => c.trainNumber).join(", ")} — sources: {plan.conflicts[0].sources.join(" vs ")})</span></div>
+      )}
       {plan.directUnavailable && (
         <div className="jo-alert">
           Direct seat nahi mili. Ye alternatives mile:
@@ -148,7 +154,7 @@ export function JourneyOptions({
 
       {best && !plan.directUnavailable && (
         <div className="jo-best">
-          <div className="jo-best-label">BEST OPTION</div>
+          <div className="jo-best-label">BEST FOR YOU</div>
           <div className="jo-best-title">
             <span className="jo-no">{best.trainNumbers.join(" + ")}</span> {best.trainNames[0]}
           </div>
@@ -233,7 +239,7 @@ export function JourneyOptions({
 
       {tabs.length > 0 && (
         <div className="jo-others">
-          <div className="jo-others-label">OTHER OPTIONS</div>
+          <div className="jo-others-label">YOU MAY ALSO CONSIDER</div>
           <div className="jo-chips">
             {tabs.map((t) => (
               <button key={t.id} type="button" className={`jo-chip${tab === t.id ? " active" : ""}`} onClick={() => setTab(tab === t.id ? null : t.id)}>
@@ -258,7 +264,9 @@ export function JourneyOptions({
       )}
 
       <div className="jo-foot">
-        Real railway data{plan.sources.length ? ` · ${plan.sources.join(", ")}` : ""} · ranking deterministic · reliability data unavailable
+        Real railway data{plan.sources.length ? ` · ${plan.sources.join(", ")}` : ""}
+        {plan.provenance ? (plan.provenance.freshness === "stale" ? " · ⚠ stale — refresh karein" : ` · as of ${new Date(plan.provenance.retrievedAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}`) : ""}
+        {" · ranking deterministic · reliability data unavailable"}
       </div>
     </div>
   );
