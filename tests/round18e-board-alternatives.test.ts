@@ -24,7 +24,9 @@ describe("Round-18e UI guard (source-level)", () => {
   const concierge = readFileSync("src/views/Concierge.tsx", "utf8");
   it("does not auto-open TrainBoard when a smart block is present", () => {
     expect(concierge).toMatch(/hasSmartBlock = blocks\.some\(\(b\) => b\.type === "journey" \|\| b\.type === "alternatives" \|\| b\.type === "trainpicker"\)/);
-    expect(concierge).toMatch(/if \(!hasSmartBlock && wantBooking/);
+    /* Round-18m-7: board auto-open is fully disabled (AUTO_BOARD=false) — chat journey card is the planner. */
+    expect(concierge).toMatch(/const AUTO_BOARD = false;/);
+    expect(concierge).toMatch(/if \(AUTO_BOARD && !hasSmartBlock && wantBooking/);
   });
   it("BEST FOR YOU card exposes an explicit book CTA (no auto-booking)", () => {
     const jo = readFileSync("src/components/JourneyOptions.tsx", "utf8");
