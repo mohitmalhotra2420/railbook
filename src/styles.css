@@ -1749,3 +1749,49 @@ table.traintable {
 .jo-cls-chip { font-size: 11px; font-weight: 600; padding: 2px 7px; border-radius: 999px; border: 1px solid rgba(15, 33, 71, 0.14); background: rgba(255,255,255,0.7); }
 .jo-cls-chip.jo-avl-ok { color: #0d6b3a; border-color: rgba(13,107,58,0.35); background: rgba(13,107,58,0.08); }
 .jo-cls-chip.jo-avl-warn { color: #8a5a00; border-color: rgba(138,90,0,0.35); background: rgba(138,90,0,0.08); }
+
+/* ── Round-18m-8: journey card layout — structured, numbered, less prose ── */
+.jo-status { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 12px 0; }
+.jo-status-pill { font-size: 11.5px; font-weight: 600; padding: 4px 10px; border-radius: 999px; border: 1px solid transparent; }
+.jo-status-bad { background: #fdecec; color: #9b1c1c; border-color: #f5c2c2; }
+.jo-status-ok { background: #e8f7ee; color: #0d6b3a; border-color: #bfe3c9; }
+.jo-status-muted { background: #f1f3f7; color: var(--muted); border-color: #e2e6ee; }
+.jo-best-bfe { border-color: #7fc79a; background: linear-gradient(160deg, #f2fbf5 0%, #fff 65%); box-shadow: inset 0 0 0 1px rgba(13, 107, 58, 0.12); }
+.jo-best-bfe .jo-best-label { color: #0d6b3a; }
+.jo-best-title { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.jo-avl-hero { margin-left: auto; }
+.jo-bfe-grid-hero { margin-top: 12px; padding: 10px 8px 8px; background: #fff; border: 1px solid #d9efe0; border-radius: 12px; }
+.jo-bfe-grid-hero::before { left: 14%; right: 14%; top: 17px; }
+.jo-kv { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin-top: 10px; font-size: 12px; align-items: baseline; }
+.jo-kv-compact { margin-top: 6px; font-size: 11.5px; }
+.jo-kv-k { color: var(--muted); font-weight: 600; letter-spacing: .02em; white-space: nowrap; }
+.jo-kv-v { color: var(--ink); }
+.jo-avl-ok-text { color: #0d6b3a; font-weight: 600; }
+.jo-avl-bad-text { color: #9b1c1c; font-weight: 600; }
+.jo-why { margin: 8px 12px 0; border: 1px solid #dbe4ff; border-radius: 12px; background: linear-gradient(135deg, #eef3ff, #f8faff); }
+.jo-why > summary { list-style: none; cursor: pointer; padding: 9px 12px; font-size: 12.5px; font-weight: 600; color: var(--navy); display: flex; align-items: center; gap: 6px; }
+.jo-why > summary::-webkit-details-marker { display: none; }
+.jo-why-ic { color: var(--gold); }
+.jo-why-hint { margin-left: auto; font-size: 11px; font-weight: 500; color: var(--muted); }
+.jo-why[open] .jo-why-hint { display: none; }
+.jo-why .jo-summary-text { padding: 0 12px 10px; font-size: 12.5px; line-height: 1.5; color: var(--ink); }
+.jo-recovery { counter-reset: josec; }
+.jo-recovery .jo-sec-title { display: flex; align-items: center; gap: 8px; }
+.jo-recovery .jo-sec-title::before { counter-increment: josec; content: counter(josec); display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; background: var(--navy); color: #fff; font-size: 10.5px; font-weight: 700; letter-spacing: 0; flex: none; }
+.jo-sec-count { margin-left: auto; font-size: 10.5px; font-weight: 700; background: #eef1f6; color: var(--navy); padding: 1px 7px; border-radius: 999px; letter-spacing: 0; }
+
+/* Round-18m-8: chat text collapsed when a journey card is the answer */
+.msg-note { margin: 0 0 6px; }
+.msg-note > summary { list-style: none; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; font-size: 11.5px; font-weight: 600; color: var(--muted); padding: 4px 10px; border: 1px dashed #d5dbe6; border-radius: 999px; background: #fff; }
+.msg-note > summary::-webkit-details-marker { display: none; }
+.msg-note-hint { font-weight: 500; opacity: .8; }
+.msg-note[open] .msg-note-hint { display: none; }
+.msg-note[open] > summary { border-style: solid; }
+.msg-note .msg-text { margin-top: 8px; font-size: 13px; }
+/* Journey header v2 — results page, not chat */
+.jo-head-v2 { display: flex; flex-direction: column; gap: 8px; align-items: stretch; }
+.jo-head-codes { display: flex; align-items: center; gap: 10px; margin-top: 2px; }
+.jo-head-code { font-size: 22px; font-weight: 700; letter-spacing: .02em; color: #fff; }
+.jo-head-arrow { color: var(--gold); font-size: 18px; }
+.jo-head-meta { display: flex; flex-wrap: wrap; gap: 6px; }
+.jo-head-pill { font-size: 11px; font-weight: 600; color: #fff; background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.18); padding: 3px 9px; border-radius: 999px; }

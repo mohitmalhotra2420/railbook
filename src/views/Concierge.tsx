@@ -1436,7 +1436,16 @@ export function Concierge() {
         {thread.map((msg) => (
           <article key={msg.id} className={`msg ${msg.role}`}>
             {msg.role === "assistant" && <div className="msg-kicker">RailBook</div>}
-            {msg.text && <p className="msg-text">{msg.text}</p>}
+            {/* Round-18m-8 (layout): journey planner card ke saath lamba AI text "chat" jaisa
+              * lagta tha — card hi result hai; text ek collapsed note mein (tap → padho). */}
+            {msg.text && msg.blocks?.some((b) => b.type === "journey") ? (
+              <details className="msg-note">
+                <summary>AI note <span className="msg-note-hint">tap karo</span></summary>
+                <p className="msg-text">{msg.text}</p>
+              </details>
+            ) : (
+              msg.text && <p className="msg-text">{msg.text}</p>
+            )}
             {msg.blocks?.map((b, i) => (
               <BlockView
                 key={i}

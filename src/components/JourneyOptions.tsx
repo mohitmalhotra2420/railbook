@@ -223,40 +223,44 @@ export function JourneyOptions({
   const altStations = (rec?.alternateStations ?? []).filter((o) => o.count > 0);
   const partial = rec?.partialRoute;
   const partialPlans = partial?.plans.filter((p) => p.fullyAvailable) ?? [];
+  /* Round-18m-8 (layout): seat nahi mili to BEST FOR YOU hero = fresh seat-proof
+   * "same train, pichhle station se" option (ConfirmTkt-style card, prose nahi). */
+  const bfeAll = rec?.boardFromEarlier ?? [];
+  const bfeHero = plan.directUnavailable ? bfeAll.find((b) => !b.availability.stale) ?? null : null;
+  const bfeRest = bfeAll.filter((b) => b !== bfeHero);
+  const pickBfe = onPickBoardEarlier ? (b: NonNullable<AgentJourneyPlan["recovery"]>["boardFromEarlier"] extends (infer T)[] | undefined ? T : never) => onPickBoardEarlier({ trainNumber: b.trainNumber, bookFrom: b.bookFrom, boardAt: b.boardAt, destination: b.destination, classCode: b.availability.classCode }) : undefined;
+  const bfeDur = (m?: number | null) => (m != null && m > 0 ? `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m` : null);
 
   return (
     <div className="jo-wrap">
-      <div className="jo-head">
-        <div>
-          <div className="jo-kicker">RailBook Atlas</div>
-          <strong>{plan.query.from} → {plan.query.to}</strong>
-          <span className="jo-muted"> · {formatShortDate(plan.query.date)}{plan.query.travelClass ? ` · ${plan.query.travelClass}` : ""}</span>
-        </div>
-        <span className="jo-count">{plan.routeOptions.length} option{plan.routeOptions.length === 1 ? "" : "s"}</span>
-      </div>
-
-      {plan.summary && (
-        <div className="jo-summary">
-          <span className="jo-summary-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" /></svg>
-          </span>
-          <div className="jo-summary-text">
-            <div className="jo-summary-label">AI journey summary</div>
-            {plan.summary}
+      <div className="jo-head jo-head-v2">
+        <div className="jo-head-route">
+          <div className="jo-kicker">RailBook Atlas · Journey plan</div>
+          <div className="jo-head-codes">
+            <span className="jo-head-code">{plan.query.from}</span>
+            <span className="jo-head-arrow">→</span>
+            <span className="jo-head-code">{plan.query.to}</span>
           </div>
         </div>
-      )}
+        <div className="jo-head-meta">
+          <span className="jo-head-pill">📅 {formatShortDate(plan.query.date)}</span>
+          {plan.query.travelClass && <span className="jo-head-pill">🎟 {plan.query.travelClass}</span>}
+          <span className="jo-head-pill">{plan.routeOptions.length} train{plan.routeOptions.length === 1 ? "" : "s"}</span>
+        </div>
+      </div>
+
       {plan.conflicts && plan.conflicts.length > 0 && (
         <div className="jo-alert">{plan.conflicts[0].message} <span className="jo-alert-sub">({plan.conflicts.map((c) => c.trainNumber).join(", ")} — sources: {plan.conflicts[0].sources.join(" vs ")})</span></div>
       )}
       {plan.directUnavailable && (
-        <div className="jo-alert">
-          Direct seat nahi mili. Ye alternatives mile:
-          {!connections.length && plan.notes.some((n) => /Connecting routes mile lekin/.test(n)) && (
-            <div className="jo-split-note">🔁 Connecting routes mile, lekin kisi mein dono trains par seat available nahi thi (WL/N-A) — isliye connecting option nahi diya.</div>
-          )}
-          {!rec?.differentTrain.length && !connections.length && !partialPlans.length && !altDates.length && (
-            <div className="jo-alert-sub">Provider se koi verified alternative nahi aaya — invent nahi karenge.</div>
+        <div className="jo-status">
+          <span className="jo-status-pill jo-status-bad">Direct: seat nahi</span>
+          {bfeHero && <span className="jo-status-pill jo-status-ok">Same train, pichhle station se: {availTextOf(bfeHero.availability).text}</span>}
+          {!bfeHero && rec?.differentTrain.length ? <span className="jo-status-pill jo-status-ok">Doosri train: seat hai</span> : null}
+          {!bfeHero && !rec?.differentTrain.length && connections.length ? <span className="jo-status-pill jo-status-ok">Connecting: seat hai</span> : null}
+          {!connections.length && plan.notes.some((n) => /Connecting routes mile lekin/.test(n)) && <span className="jo-status-pill jo-status-muted">Connecting: dono legs par seat nahi</span>}
+          {!bfeHero && !rec?.differentTrain.length && !connections.length && !partialPlans.length && !altDates.length && (
+            <span className="jo-status-pill jo-status-muted">Koi verified alternative nahi (invent nahi karte)</span>
           )}
         </div>
       )}
@@ -299,7 +303,51 @@ export function JourneyOptions({
           </div>
         </div>
       )}
-      {plan.directUnavailable && onOpenBoard && (
+      {bfeHero && (
+        <div className="jo-best jo-best-bfe">
+          <div className="jo-best-label">BEST FOR YOU · SAME TRAIN, PICHHLE STATION SE TICKET</div>
+          <div className="jo-best-title">
+            <span className="jo-no">{bfeHero.trainNumber}</span> {bfeHero.trainName}
+            <span className={`jo-avl jo-avl-${availTextOf(bfeHero.availability).tone} jo-avl-hero`}>{availTextOf(bfeHero.availability).text}</span>
+          </div>
+          <div className="jo-bfe-grid jo-bfe-grid-hero">
+            <div><div className="jo-bfe-k">Book from</div><div className="jo-bfe-v">{bfeHero.bookFromName ?? bfeHero.bookFrom}</div><div className="jo-bfe-s">{bfeHero.bookFrom}{bfeHero.bookFromDeparture ? `, ${bfeHero.bookFromDeparture}` : ""}</div></div>
+            <div><div className="jo-bfe-k">Boarding</div><div className="jo-bfe-v">{bfeHero.boardAtName ?? bfeHero.boardAt}</div><div className="jo-bfe-s">{bfeHero.boardAt}{bfeHero.boardAtDeparture ? `, ${bfeHero.boardAtDeparture}` : ""}</div></div>
+            <div><div className="jo-bfe-k">Deboarding</div><div className="jo-bfe-v">{bfeHero.destinationName ?? bfeHero.destination}</div><div className="jo-bfe-s">{bfeHero.destination}{bfeHero.arrival ? `, ${bfeHero.arrival}` : ""}{bfeHero.arrivalDayOffset ? ` · ${formatShortDate(addDays(baseDate, bfeHero.arrivalDayOffset))}` : ""}</div></div>
+          </div>
+          <div className="jo-best-grid">
+            <div><span className="jo-ic">⏱</span>{bfeDur(bfeHero.durationMinutes) ?? "—"}</div>
+            <div><span className="jo-ic">🚆</span>Direct · board {bfeHero.boardAt}</div>
+            <div className={`jo-avl-cell jo-avl-${availTextOf(bfeHero.availability).tone}`}><span className="jo-ic">💺</span>{availTextOf(bfeHero.availability).text}</div>
+            <div><span className="jo-ic">₹</span>{bfeHero.availability.fare != null ? inr(bfeHero.availability.fare) : "Fare on select"}</div>
+          </div>
+          <ClassChips rows={bfeHero.classOptions} skip={bfeHero.availability.classCode} />
+          <div className="jo-kv">
+            <span className="jo-kv-k">{bfeHero.boardAt}→{bfeHero.destination}</span><span className="jo-kv-v jo-avl-bad-text">{bfeHero.directStatus === "WAITLIST" ? "WL" : bfeHero.directStatus ?? "seat nahi"}</span>
+            <span className="jo-kv-k">{bfeHero.bookFrom}→{bfeHero.destination}</span><span className="jo-kv-v jo-avl-ok-text">{availTextOf(bfeHero.availability).text}</span>
+            <span className="jo-kv-k">IRCTC</span><span className="jo-kv-v">Boarding point {bfeHero.boardAt} chuno</span>
+          </div>
+          <div className="jo-cta-row">
+            {pickBfe && (
+              <button type="button" className="jo-cta" onClick={() => pickBfe(bfeHero)}>
+                Seat check {bfeHero.availability.classCode} →
+              </button>
+            )}
+            {onOpenBoard && (
+              <button type="button" className="jo-cta jo-cta-book" onClick={onOpenBoard}>
+                Sabhi trains · Book →
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+      {plan.summary && (
+        <details className="jo-why">
+          <summary><span className="jo-why-ic" aria-hidden="true">✦</span> AI ne ye plan kyun chuna <span className="jo-why-hint">tap karo</span></summary>
+          <div className="jo-summary-text">{plan.summary}</div>
+        </details>
+      )}
+      {plan.directUnavailable && !bfeHero && onOpenBoard && (
         <button type="button" className="jo-cta jo-cta-book jo-cta-wide" onClick={onOpenBoard}>
           Phir bhi sabhi trains dekho / book →
         </button>
@@ -307,10 +355,10 @@ export function JourneyOptions({
 
       {plan.directUnavailable && rec && (
         <div className="jo-recovery">
-          {(rec.boardFromEarlier ?? []).length > 0 && (
+          {bfeRest.length > 0 && (
             <div className="jo-sec">
-              <div className="jo-sec-title">🎫 Same train — pichhle station se ticket, board yahin se ({(rec.boardFromEarlier ?? []).length} option{(rec.boardFromEarlier ?? []).length > 1 ? "s" : ""})</div>
-              {(rec.boardFromEarlier ?? []).slice(0, 8).map((b) => {
+              <div className="jo-sec-title">🎫 Aur same-train options <span className="jo-sec-count">{bfeRest.length}</span></div>
+              {bfeRest.slice(0, 7).map((b) => {
                 const av = availTextOf(b.availability);
                 return (
                   <button
@@ -329,8 +377,9 @@ export function JourneyOptions({
                       <div><div className="jo-bfe-k">Boarding</div><div className="jo-bfe-v">{b.boardAtName ?? b.boardAt}</div><div className="jo-bfe-s">{b.boardAt}{b.boardAtDeparture ? `, ${b.boardAtDeparture}` : ""}</div></div>
                       <div><div className="jo-bfe-k">Deboarding</div><div className="jo-bfe-v">{b.destinationName ?? b.destination}</div><div className="jo-bfe-s">{b.destination}{b.arrival ? `, ${b.arrival}` : ""}{b.arrivalDayOffset ? ` · ${formatShortDate(addDays(baseDate, b.arrivalDayOffset))}` : ""}</div></div>
                     </div>
-                    <div className="jo-split-note">
-                      {b.boardAt}→{b.destination} par {b.directStatus === "WAITLIST" ? "WL" : b.directStatus ?? "seat nahi"} tha; {b.bookFrom} se book karne par {av.text}{b.availability.fare != null ? ` · ${inr(b.availability.fare)}` : ""}. Boarding point {b.boardAt} rakhein (IRCTC mein boarding station change option). Provider: {b.source}.
+                    <div className="jo-kv jo-kv-compact">
+                      <span className="jo-kv-k">{b.boardAt}→{b.destination}</span><span className="jo-kv-v jo-avl-bad-text">{b.directStatus === "WAITLIST" ? "WL" : b.directStatus ?? "seat nahi"}</span>
+                      <span className="jo-kv-k">{b.bookFrom}→{b.destination}</span><span className="jo-kv-v jo-avl-ok-text">{av.text}{b.availability.fare != null ? ` · ${inr(b.availability.fare)}` : ""}{bfeDur(b.durationMinutes) ? ` · ${bfeDur(b.durationMinutes)}` : ""}</span>
                     </div>
                   </button>
                 );
@@ -339,7 +388,7 @@ export function JourneyOptions({
           )}
           {rec.differentTrain.length > 0 && (
             <div className="jo-sec">
-              <div className="jo-sec-title">🚆 Doosri train (seat available)</div>
+              <div className="jo-sec-title">🚆 Doosri train (seat available) <span className="jo-sec-count">{rec.differentTrain.length}</span></div>
               {rec.differentTrain.slice(0, 4).map((o) => <OptionRow key={o.trainNumbers.join("+")} o={o} onPick={pick} baseDate={baseDate} onPickLeg={pickLeg} />)}
             </div>
           )}
@@ -370,13 +419,13 @@ export function JourneyOptions({
           )}
           {connections.length > 0 && (
             <div className="jo-sec">
-              <div className="jo-sec-title">🔁 Connecting journey — dono trains mein seat available</div>
+              <div className="jo-sec-title">🔁 Connecting — dono trains mein seat <span className="jo-sec-count">{connections.length}</span></div>
               {connections.slice(0, 2).map((c, i) => <ConnectionRow key={i} c={c} baseDate={baseDate} onPickLeg={pickLeg} />)}
             </div>
           )}
           {altStations.length > 0 && (
             <div className="jo-sec">
-              <div className="jo-sec-title">📍 Doosra station, same city (aapka route badla nahi — confirm karein)</div>
+              <div className="jo-sec-title">📍 Doosra station, same city <span className="jo-sec-count">{altStations.length}</span></div>
               {altStations.slice(0, 3).map((o) => {
                 const av = o.best ? availText(o.best) : null;
                 return (
@@ -411,7 +460,7 @@ export function JourneyOptions({
           )}
           {altDates.length > 0 && (
             <div className="jo-sec">
-              <div className="jo-sec-title">📅 Alternative date (aapki date badli nahi)</div>
+              <div className="jo-sec-title">📅 Doosri date (aapki date badli nahi) <span className="jo-sec-count">{altDates.length}</span></div>
               <div className="jo-chips">
                 {altDates.map((d) => (
                   <button key={d.date} type="button" className="jo-chip" onClick={onPickDate ? () => onPickDate(d.date) : undefined}>
