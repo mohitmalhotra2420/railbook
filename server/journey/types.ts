@@ -269,6 +269,8 @@ export type JourneyPlan = {
   whySource?: "ai" | "rules";
   /** Round-18m-10: per-hub leg-1 / leg-2 seat-wale options + joint best. */
   legPlans?: LegPlan[];
+  /** Round-18m-11: kya-kya check hua (UI strip) — sirf real counts. */
+  audit?: { passengers: number | null; directTrains: number; directProbed: number; bfeTrains: number; bfeStopsChecked: number; connHubs: string[]; connLeg1Checked: number; connLeg2Checked: number };
   /** Round-18 freshness envelope (dynamic data must not be shown as current when stale). */
   provenance?: { retrievedAt: string; requestDate: string; travelDate: string; freshness: string; sourceTypes: string[] };
   /** Round-18: any availability source conflict detected (values never blended). */

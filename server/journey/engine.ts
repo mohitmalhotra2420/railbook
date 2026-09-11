@@ -58,7 +58,7 @@ export const JOURNEY_CONFIG = {
   /** Partial-route: max intermediate halts probed (each = 1 availability call). */
   partialSplitLimit: Number(process.env.PARTIAL_SPLIT_LIMIT ?? 3) || 3,
   /** Round-18m-6: how many stops BEFORE origin to try for "book from earlier station". */
-  boardEarlierStops: Number(process.env.BOARD_EARLIER_STOPS ?? 5) || 5,
+  boardEarlierStops: Number(process.env.BOARD_EARLIER_STOPS ?? 15) || 15, // Round-18m-11: train origin tak (bounded)
   boardEarlierTrains: Number(process.env.BOARD_EARLIER_TRAINS ?? 10) || 10,
 };
 
@@ -693,12 +693,14 @@ export async function findBoardFromEarlier(args: {
   stopsBack?: number;
   limitTrains?: number;
   passengers?: number | null;
-}): Promise<{ options: BoardFromEarlierOption[]; sources: Set<string> }> {
+}): Promise<{ options: BoardFromEarlierOption[]; sources: Set<string>; stopsChecked: number; trainsChecked: number }> {
   const from = args.origin.toUpperCase();
   const to = args.destination.toUpperCase();
   const stopsBack = args.stopsBack ?? JOURNEY_CONFIG.boardEarlierStops;
   const sources = new Set<string>();
   const options: BoardFromEarlierOption[] = [];
+  let stopsChecked = 0;
+  let trainsChecked = 0;
   await Promise.all(
     args.trains.slice(0, args.limitTrains ?? 3).map(async (t) => {
       try {
@@ -708,9 +710,11 @@ export async function findBoardFromEarlier(args: {
         const iFrom = codes.indexOf(from);
         const iTo = codes.indexOf(to);
         if (iFrom <= 0 || iTo < 0 || iTo <= iFrom) return;
-        const earlier = stops.slice(Math.max(0, iFrom - stopsBack), iFrom).reverse(); // nearest first
+        trainsChecked++;
+        const earlier = stops.slice(Math.max(0, iFrom - stopsBack), iFrom).reverse(); // nearest first … train origin tak
         for (let k = 0; k < earlier.length; k++) {
           const s = earlier[k];
+          stopsChecked++;
           const board = await routedClassBoard(t.number, args.date, s.code, to, "GN", args.travelClass ? [args.travelClass] : []);
           /* Round-18m-7: SAB classes check — jis class mein bhi seat mile, sab dikhao. */
           /* Stale (24h+ web-cache) AVL/RAC bhi option hai — ⚠ "last known" ke saath; fresh pehle. */
@@ -757,7 +761,7 @@ export async function findBoardFromEarlier(args: {
   );
   /* Round-18m-7: seat pehle (AVL > RAC), phir SABSE KAM travel time, phir nazdeek ka stop. */
   options.sort((a, b) => Number(!!a.availability.stale) - Number(!!b.availability.stale) || (AVAIL_RANK[a.availability.status] ?? 5) - (AVAIL_RANK[b.availability.status] ?? 5) || (a.durationMinutes ?? 9e9) - (b.durationMinutes ?? 9e9) || a.stopsBefore - b.stopsBefore || a.trainNumber.localeCompare(b.trainNumber));
-  return { options, sources };
+  return { options, sources, stopsChecked, trainsChecked };
 }
 
 /** Round-18: same class from two different sources with different values → conflict (never blended). */
@@ -1017,6 +1021,7 @@ export async function planJourney(args: {
   let connections: Connection[] = [];
   /* Round-18m-10: har probed connection (bookable ya nahi) — legPlans ke liye. */
   const probedConnections: Connection[] = [];
+  let bfeAudit = { trains: 0, stops: 0 };
   if (args.includeConnections || trains.length <= 1) {
     const c = await findConnections(from, to, args.date, { maxHubs: trains.length ? 2 : 3 });
     connections = c.connections;
@@ -1106,6 +1111,7 @@ export async function planJourney(args: {
         /* Round-18m-7: ConfirmTkt jaisa — SAARI direct trains (bounded 10) × pichhle stops × har class. */
         const r = await findBoardFromEarlier({ trains: wlDirect, origin: from, destination: to, date: args.date, travelClass: args.travelClass ?? null, limitTrains: JOURNEY_CONFIG.boardEarlierTrains, passengers: pax });
         boardFromEarlier = r.options;
+        bfeAudit = { trains: r.trainsChecked, stops: r.stopsChecked };
         r.sources.forEach((s) => sources.add(s));
       }
     } catch {
@@ -1194,6 +1200,16 @@ export async function planJourney(args: {
       /* expanded plan optional */
     }
   }
+  plan.audit = {
+    passengers: pax,
+    directTrains: trains.length,
+    directProbed: probedKnown,
+    bfeTrains: bfeAudit.trains,
+    bfeStopsChecked: bfeAudit.stops,
+    connHubs: (plan.legPlans ?? []).map((l) => l.hub),
+    connLeg1Checked: (plan.legPlans ?? []).reduce((n, l) => n + l.checkedLeg1, 0),
+    connLeg2Checked: (plan.legPlans ?? []).reduce((n, l) => n + l.checkedLeg2, 0),
+  };
   plan.summary = journeySummary(plan);
   plan.whyPoints = journeyWhyPoints(plan);
   plan.whySource = "rules";
@@ -1233,6 +1249,7 @@ export function whyFactsSheet(plan: JourneyPlan): string {
   L.push(`Route ${plan.query.from}→${plan.query.to} on ${plan.query.date}${pax ? `, ${pax} passengers` : ""}${plan.query.travelClass ? `, class pref ${plan.query.travelClass}` : ""}.`);
   const direct = plan.routeOptions.filter((o) => o.changes === 0);
   L.push(`Direct trains checked: ${direct.length}. ${plan.directUnavailable ? "None has confirmed seat for this party." : "Seat found in direct train."}`);
+  if (plan.audit?.bfeStopsChecked) L.push(`Book-from-earlier scan: ${plan.audit.bfeTrains} trains × earlier stops back to each train's origin (${plan.audit.bfeStopsChecked} stop-segments probed, every class).`);
   for (const o of direct.slice(0, 8)) L.push(`- ${o.trainNumbers[0]} ${o.trainNames[0]} dep ${o.departure} arr ${o.arrival}${o.arrivalDayOffset ? ` +${o.arrivalDayOffset}d` : ""} ${o.durationLabel ?? ""} seat: ${av(o.availability)}`);
   const bfe = plan.recovery?.boardFromEarlier ?? [];
   if (bfe.length) {

@@ -349,6 +349,14 @@ export function JourneyOptions({
         </div>
       )}
       {plan.conflicts && plan.conflicts.length > 0 && <div className="jx-alert">{plan.conflicts[0].message}</div>}
+      {plan.audit && (plan.audit.directProbed > 0 || plan.audit.bfeStopsChecked > 0 || plan.audit.connLeg1Checked > 0) && (
+        <div className="jx-audit">
+          <span className="jx-audit-k">{IC.check} Checked{plan.audit.passengers ? ` for ${plan.audit.passengers} pax` : ""}:</span>
+          <span>{plan.audit.directProbed}/{plan.audit.directTrains} direct trains</span>
+          {plan.audit.bfeStopsChecked > 0 && <span>· {plan.audit.bfeTrains} trains × {plan.audit.bfeStopsChecked} earlier-stop segments (leg-1, every class)</span>}
+          {plan.audit.connLeg1Checked > 0 && <span>· via {plan.audit.connHubs.join("/")}: {plan.audit.connLeg1Checked} + {plan.audit.connLeg2Checked} trains (leg-1 + leg-2)</span>}
+        </div>
+      )}
 
       {/* ── Hero: book-from-earlier ── */}
       {bfeHero && (
