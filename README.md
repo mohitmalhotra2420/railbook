@@ -218,6 +218,13 @@ only provider-verified alternatives.
 - More candidates: fixed hubs (up to 10 connections) + **route-derived hubs** (`routeDerivedHubs()` — junction/major stops from the direct trains' timetable, e.g. JAT→BDTS tries PTKC/LDH/NDLS/SWM/RTM/BH), all legs probed, then filtered.
 - When nothing passes: card + `plan.notes` say "Connecting routes mile lekin kisi mein dono trains par seat available nahi thi — isliye connecting option nahi dikhaya." Summary's "route via X" line lists per-leg seats.
 
+### Round-18m-10 — Leg-wise joint planning (all trains per leg), AI-written "kyun chuna", pax gate hardening
+
+- **Leg-wise plan (`plan.legPlans[]`):** direct seat na mile to top hub (e.g. NDLS) ke liye **Leg 1 = origin→hub ki HAR train** aur **Leg 2 = hub→destination ki HAR train** (10+10, parallel) par pax-aware seat probe (`expandLegPlan`). UI mein "Connecting · leg-wise seat options": upar **AI ka joint best combo**, phir "Leg 1 · N of M with seats" / "Leg 2 · N of M with seats" lists — user apna combo bhi bana sakta hai. `buildLegPlans()` baaki hubs ko probed connections se group karta hai.
+- **"AI ne ye plan kyun chuna" — AI-written:** `aiWhyPoints()` model (Muse primary 12s → gpt-oss 12s → rules) ko sirf **facts sheet** deta hai (`whyFactsSheet`: har direct train ka seat status, bfe options, leg-wise counts, pre-computed COMPARISON/PRACTICAL/RISK lines, explicit RECOMMENDED/REJECTED). Output grounding-checked: unknown train no./₹ amount, WL train ko "confirmed" bolna, galat "fastest" claim → point drop; 4–5 se kam ho to rules-based points se top-up. `whySource: "ai"|"rules"` → UI "AI-WRITTEN" tag.
+- **Passenger gate:** bare "2" → server explicit search text banata hai (model "2 se kya matlab" nahi poochta); client deterministic `resumeAsk` par bhi `lastAsked` set karta hai. Station-pick / date-follow-up flows ke baad bhi gate fire hota hai (verified).
+- Tests: `tests/round18m9-pax-gate.test.ts` (+3: buildLegPlans, facts sheet, UI wiring).
+
 ### Round-18m-9 — Passenger-aware planning, full-route 2-leg search, journey card v3
 
 - **Passenger gate:** origin + destination + date pata hone par, train dhundhne/seat verify karne se PEHLE AI poochta hai "kitne passengers hain? (1–6)". Jawab ("2") deterministic resume ban kar poori search chalata hai — origin/destination/date change nahi hote. Seats ab `seats ≥ passengers` par hi "confirmed" maani jaati hain (RAC sirf ≤2 pax).
