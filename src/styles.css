@@ -1907,3 +1907,15 @@ table.traintable {
 .jx-list { margin-top: 10px; display: grid; gap: 6px; }
 .jx-foot { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; padding: 8px 14px 12px; font-size: 11.5px; color: #6b7280; }
 .jx-foot span { display: inline-flex; align-items: center; gap: 6px; }
+
+/* Round-18m-10: leg-wise connecting options */
+.jx-legplan { background: #fbfaf7; border: 1px solid #ebe6dd; border-radius: 12px; padding: 10px; margin-top: 8px; display: grid; gap: 8px; }
+.jx-legplan:first-of-type { margin-top: 0; }
+.jx-legplan-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 13px; color: var(--navy); }
+.jx-legplan-best { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 700; color: #0d6b3a; text-transform: uppercase; letter-spacing: .06em; }
+.jx-legplan .jx-conn { margin-top: 0; background: #fff; border-color: #cfe8d8; }
+.jx-leglist { display: grid; gap: 6px; }
+.jx-leglist-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 12px; font-weight: 700; color: var(--ink); padding-top: 4px; border-top: 1px dashed #e6e1d8; margin-top: 2px; }
+.jx-leglist .jx-lrow { margin-top: 0; background: #fff; }
+.jx-more { font: inherit; font-size: 12px; font-weight: 600; color: var(--navy); background: transparent; border: 1px dashed #c7d9f2; border-radius: 10px; padding: 7px 10px; cursor: pointer; }
+.jx-legplan-foot { padding-top: 2px; }

@@ -89,6 +89,21 @@ export type Connection = {
   source: string;
 };
 
+/** Round-18m-10: per-hub joint plan — leg-1 (origin→hub) ke SAB seat-wale trains,
+ *  leg-2 (hub→destination) ke SAB seat-wale trains, aur AI ka chosen best combo. */
+export type LegPlan = {
+  hub: string;
+  hubName: string | null;
+  /** origin→hub: har train jisme pax ke liye seat (fresh AVL/RAC), departure-sorted. */
+  leg1: RouteLeg[];
+  /** hub→destination: har train jisme pax ke liye seat, departure-sorted. */
+  leg2: RouteLeg[];
+  /** kitne trains/legs actually probe hue (options ka denominator). */
+  checkedLeg1: number;
+  checkedLeg2: number;
+  best: Connection | null;
+};
+
 export type VacantSeatRow = {
   classCode: string;
   status: string;
@@ -248,8 +263,12 @@ export type JourneyPlan = {
    *  then the fallback route, then an alternative date. Built ONLY from data
    *  actually retrieved in this plan (never invented); null when nothing real. */
   summary: string | null;
-  /** Round-18m-9: 3–5 deterministic reasons for the recommended plan — built only from retrieved data. */
+  /** Round-18m-9: 3–5 reasons for the recommended plan — AI-written from retrieved data (grounded), deterministic fallback. */
   whyPoints?: string[];
+  /** Round-18m-10: "ai" = model ne likha (grounding-checked), "rules" = deterministic. */
+  whySource?: "ai" | "rules";
+  /** Round-18m-10: per-hub leg-1 / leg-2 seat-wale options + joint best. */
+  legPlans?: LegPlan[];
   /** Round-18 freshness envelope (dynamic data must not be shown as current when stale). */
   provenance?: { retrievedAt: string; requestDate: string; travelDate: string; freshness: string; sourceTypes: string[] };
   /** Round-18: any availability source conflict detected (values never blended). */

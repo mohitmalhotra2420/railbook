@@ -25,7 +25,7 @@ import { todayYmd } from "../util.js";
 import { MULTI_STATION_CITIES } from "../railway/station-resolve.js";
 import { CONFLICT_MESSAGE, availabilityEquals, freshnessOf, resolveConflict, sourceTypeOf } from "../providers/provenance.js";
 import type { BoardFromEarlierOption } from "./types.js";
-import {
+import { type LegPlan,
   CLASS_CODES,
   durationLabelOf,
   minutesOf,
@@ -355,6 +355,36 @@ export function bookableConnections(connections: Connection[], pax?: number | nu
       return (x.totalDurationMinutes ?? 9e9) - (y.totalDurationMinutes ?? 9e9) || minSeats(y) - minSeats(x) || x.arrivalTrain.localeCompare(y.arrivalTrain);
     })
     .slice(0, 4);
+}
+/* Round-18m-10 (user: "2nd leg mein boarding→destination ki SAB trains ki
+ * availability dikhao, 1st leg mein origin→boarding ki har train — phir joint
+ * best"): probed connections ko hub ke hisaab se group karke har leg ke SAB
+ * seat-wale trains (pax ke liye kaafi) nikaalo. Sirf probed data — invent nahi. */
+export function buildLegPlans(probed: Connection[], pax?: number | null, opts: { maxHubs?: number } = {}): LegPlan[] {
+  const byHub = new Map<string, { name: string | null; a: Map<string, RouteLeg>; b: Map<string, RouteLeg>; conns: Connection[] }>();
+  const bestRowFor = (l: RouteLeg): RouteLeg => (legBookable(l.availability, pax) ? l : { ...l, availability: (l.classOptions ?? []).find((r) => legBookable(r, pax)) ?? l.availability });
+  for (const c of probed) {
+    if (!c.valid || c.legs.length !== 2) continue;
+    let g = byHub.get(c.station);
+    if (!g) {
+      g = { name: c.stationName ?? c.legs[0]?.toName ?? null, a: new Map(), b: new Map(), conns: [] };
+      byHub.set(c.station, g);
+    }
+    const [la, lb] = c.legs;
+    if (!g.a.has(la.trainNumber)) g.a.set(la.trainNumber, bestRowFor(la));
+    if (!g.b.has(lb.trainNumber)) g.b.set(lb.trainNumber, bestRowFor(lb));
+    g.conns.push(c);
+  }
+  const plans: LegPlan[] = [];
+  for (const [hub, g] of byHub) {
+    const okA = [...g.a.values()].filter((l) => legBookable(l.availability, pax)).sort((x, y) => x.departure.localeCompare(y.departure));
+    const okB = [...g.b.values()].filter((l) => legBookable(l.availability, pax)).sort((x, y) => x.departure.localeCompare(y.departure));
+    const bookable = bookableConnections(g.conns, pax);
+    if (!bookable.length) continue;
+    plans.push({ hub, hubName: g.name, leg1: okA, leg2: okB, checkedLeg1: g.a.size, checkedLeg2: g.b.size, best: bookable[0] });
+  }
+  plans.sort((x, y) => (x.best?.totalDurationMinutes ?? 9e9) - (y.best?.totalDurationMinutes ?? 9e9) || y.leg1.length + y.leg2.length - (x.leg1.length + x.leg2.length));
+  return plans.slice(0, opts.maxHubs ?? 2);
 }
 export const CONNECTION_NO_SEAT_NOTE = "Connecting routes mile lekin kisi mein dono trains par seat available nahi thi (WL/N-A) — isliye connecting option nahi dikhaya.";
 
@@ -891,6 +921,8 @@ export async function planJourney(args: {
   includeAlternateStations?: boolean;
   trains?: TrainResult[];
   searchProvider?: ServedProvider;
+  /** Round-18m-10: false → model-written why-points skip (tests / fast paths). */
+  aiWhy?: boolean;
   /** Round-18m-9: seats needed — bookable = AVL >= pax (RAC only for <=2). */
   passengers?: number | null;
 }): Promise<JourneyPlan> {
@@ -936,12 +968,15 @@ export async function planJourney(args: {
 
   /* Connections: only when thin direct list or requested. */
   let connections: Connection[] = [];
+  /* Round-18m-10: har probed connection (bookable ya nahi) — legPlans ke liye. */
+  const probedConnections: Connection[] = [];
   if (args.includeConnections || trains.length <= 1) {
     const c = await findConnections(from, to, args.date, { maxHubs: trains.length ? 2 : 3 });
     connections = c.connections;
     c.sources.forEach((s) => sources.add(s));
     (await probeConnectionLegs(connections, args.date, args.travelClass ?? null)).forEach((s) => sources.add(s));
     const found = connections.length;
+    probedConnections.push(...connections);
     connections = bookableConnections(connections, pax);
     if (!connections.length && trains.length) {
       const hubs = await routeDerivedHubs(probeList, from, to);
@@ -949,6 +984,7 @@ export async function planJourney(args: {
         const c2 = await findConnections(from, to, args.date, { hubs, maxHubs: hubs.length, legsPerHub: 5 });
         c2.sources.forEach((s) => sources.add(s));
         (await probeConnectionLegs(c2.connections, args.date, args.travelClass ?? null)).forEach((s) => sources.add(s));
+        probedConnections.push(...c2.connections);
         connections = bookableConnections(c2.connections, pax);
       }
     }
@@ -1033,6 +1069,7 @@ export async function planJourney(args: {
       connections = c.connections;
       c.sources.forEach((s) => sources.add(s));
       (await probeConnectionLegs(connections, args.date, args.travelClass ?? null)).forEach((s) => sources.add(s));
+      probedConnections.push(...connections);
       connections = bookableConnections(connections, pax);
       if (!connections.length) {
         const hubs = await routeDerivedHubs(probeList, from, to);
@@ -1040,6 +1077,7 @@ export async function planJourney(args: {
           const c2 = await findConnections(from, to, args.date, { hubs, maxHubs: hubs.length, legsPerHub: 5 });
           c2.sources.forEach((s) => sources.add(s));
           (await probeConnectionLegs(c2.connections, args.date, args.travelClass ?? null)).forEach((s) => sources.add(s));
+          probedConnections.push(...c2.connections);
           connections = bookableConnections(c2.connections, pax);
         }
       }
@@ -1091,9 +1129,102 @@ export async function planJourney(args: {
     notes,
     summary: null,
   };
+  plan.legPlans = buildLegPlans(probedConnections, pax);
   plan.summary = journeySummary(plan);
   plan.whyPoints = journeyWhyPoints(plan);
+  plan.whySource = "rules";
+  /* Round-18m-10: "AI ne ye plan kyun chuna" — model khud sochta hai (grounded
+   * facts sheet se), deterministic points sirf fallback. Bounded ~8s. */
+  if (args.aiWhy !== false) {
+    try {
+      const ai = await aiWhyPoints(plan);
+      if (ai && ai.length >= 3) {
+        plan.whyPoints = ai;
+        plan.whySource = "ai";
+      }
+    } catch {
+      /* rules-based points already set */
+    }
+  }
   return plan;
+}
+
+/* ── Round-18m-10: model-written why-points. Facts sheet = sirf plan ka retrieved
+ * data; output har point mein koi na koi fact (train no / class / seats / fare /
+ * duration / station) match kare warna drop — hallucinated point kabhi nahi. */
+export function whyFactsSheet(plan: JourneyPlan): string {
+  const L: string[] = [];
+  const pax = plan.query.passengers ?? null;
+  const av = (a: RouteAvailability | null | undefined) => (a ? `${a.classCode} ${a.status}${a.seats != null ? ` ${a.seats}` : ""}${a.rac != null ? ` RAC ${a.rac}` : ""}${a.waitlist != null ? ` WL ${a.waitlist}` : ""}${a.fare != null ? ` ₹${a.fare}` : ""}${a.stale ? " (stale)" : ""}` : "no data");
+  L.push(`Route ${plan.query.from}→${plan.query.to} on ${plan.query.date}${pax ? `, ${pax} passengers` : ""}${plan.query.travelClass ? `, class pref ${plan.query.travelClass}` : ""}.`);
+  const direct = plan.routeOptions.filter((o) => o.changes === 0);
+  L.push(`Direct trains checked: ${direct.length}. ${plan.directUnavailable ? "None has confirmed seat for this party." : "Seat found in direct train."}`);
+  for (const o of direct.slice(0, 8)) L.push(`- ${o.trainNumbers[0]} ${o.trainNames[0]} dep ${o.departure} arr ${o.arrival}${o.arrivalDayOffset ? ` +${o.arrivalDayOffset}d` : ""} ${o.durationLabel ?? ""} seat: ${av(o.availability)}`);
+  const bfe = plan.recovery?.boardFromEarlier ?? [];
+  if (bfe.length) {
+    L.push(`Book-from-earlier (same train, ticket from an earlier stop, user still boards at ${plan.query.from}):`);
+    for (const b of bfe.slice(0, 4)) L.push(`- ${b.trainNumber} ${b.trainName ?? ""} ticket from ${b.bookFrom} (${b.stopsBefore} stops before) board ${b.boardAt} ${b.boardAtDeparture ?? ""} → ${plan.query.to} ${b.arrival ?? ""} ${durationLabelOf(b.durationMinutes)} seat: ${av(b.availability)}${(b.classOptions ?? []).length > 1 ? `; other classes: ${(b.classOptions ?? []).filter((r) => r.classCode !== b.availability.classCode).map(av).join(", ")}` : ""}`);
+  }
+  for (const lp of plan.legPlans ?? []) {
+    L.push(`Connecting via ${lp.hubName ?? lp.hub} (${lp.hub}): leg-1 ${lp.leg1.length}/${lp.checkedLeg1} trains with seats, leg-2 ${lp.leg2.length}/${lp.checkedLeg2} trains with seats.`);
+    if (lp.best) L.push(`- best combo: ${lp.best.legs.map((l) => `${l.trainNumber} ${l.from} ${l.departure}→${l.to} ${l.arrival} ${av(l.availability)}`).join(" | ")} layover ${lp.best.layoverMinutes} min total ${durationLabelOf(lp.best.totalDurationMinutes)}`);
+  }
+  if (!plan.legPlans?.length && plan.notes.some((n) => /Connecting routes mile lekin/.test(n))) L.push("Connecting routes were checked but no route had seats on both legs.");
+  for (const d of plan.alternativeDates.slice(0, 3)) L.push(`Other date ${d.date}: ${d.count} trains${d.seatProof ? `, seat proof ${d.seatProof}` : ""}`);
+  if (plan.best) L.push(`Recommended (ranked #1): ${plan.best.trainNumbers.join("→")} ${plan.best.category} ${plan.best.durationLabel ?? ""} seat ${av(plan.best.availability)}.`);
+  else if (bfe[0]) L.push(`Recommended: book-from-earlier ${bfe[0].trainNumber} from ${bfe[0].bookFrom}.`);
+  else if (plan.legPlans?.[0]?.best) L.push(`Recommended: connecting via ${plan.legPlans[0].hub}.`);
+  return L.join("\n");
+}
+
+const WHY_TOKEN_RE = /\b\d{5}\b|\b[A-Z]{2,5}\b|₹\s?\d|\b\d+h\b|\bmin\b|AVL|RAC|WL|seat/;
+export async function aiWhyPoints(plan: JourneyPlan, opts: { timeoutMs?: number } = {}): Promise<string[] | null> {
+  const key = env.nvidiaApiKey;
+  if (!key || process.env.VITEST) return null;
+  const facts = whyFactsSheet(plan);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 9000);
+  try {
+    const res = await fetch(`${env.nvidiaBaseUrl.replace(/\/$/, "")}/chat/completions`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model: env.nluModel,
+        temperature: 0.2,
+        max_tokens: 500,
+        reasoning_effort: "low",
+        messages: [
+          {
+            role: "system",
+            content:
+              "You are RailBook's journey planner explaining WHY you recommended a plan to an Indian traveller. Write in Hinglish (Roman Hindi + English), like a smart friend. Output ONLY a JSON array of 4 to 5 short strings (max 22 words each). Each point must be a genuinely important, decision-relevant reason grounded ONLY in the facts sheet: seat certainty for the party size, speed vs alternatives, what was checked and rejected, cost/class trade-offs, boarding/IRCTC practicalities, risk (stale data / RAC / layover). Never invent trains, seats, fares, or times not in the sheet. No markdown.",
+          },
+          { role: "user", content: `FACTS:\n${facts}\n\nReturn the JSON array now.` },
+        ],
+      }),
+    });
+    if (!res.ok) return null;
+    const j = (await res.json()) as { choices?: { message?: { content?: string | null } }[] };
+    const raw = String(j.choices?.[0]?.message?.content ?? "");
+    const m = raw.match(/\[[\s\S]*\]/);
+    if (!m) return null;
+    const arr = JSON.parse(m[0]) as unknown;
+    if (!Array.isArray(arr)) return null;
+    const factTokens = new Set((facts.match(/\b\d{5}\b|\b[A-Z]{2,5}\b|₹\s?\d+/g) ?? []).map((t) => t.replace(/\s+/g, "")));
+    const out = arr
+      .filter((x): x is string => typeof x === "string")
+      .map((x) => x.trim().replace(/^[-•*]\s*/, ""))
+      .filter((x) => x.length >= 12 && x.length <= 220)
+      .filter((x) => {
+        /* grounding: har 5-digit train no / ₹fare jo point mein hai, facts mein bhi ho. */
+        const nums = x.match(/\b\d{5}\b|₹\s?\d+/g) ?? [];
+        return nums.every((n) => factTokens.has(n.replace(/\s+/g, ""))) && WHY_TOKEN_RE.test(x);
+      });
+    return out.length >= 3 ? out.slice(0, 5) : null;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /* ── Round-18m-9: "AI ne ye plan kyun chuna" — 3–5 concrete reasons, deterministic,

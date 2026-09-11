@@ -124,6 +124,9 @@ export interface AgentJourneyPlan {
   summary?: string | null;
   /** Round-18m-9: 3–5 deterministic reasons for the recommendation. */
   whyPoints?: string[];
+  whySource?: "ai" | "rules";
+  /** Round-18m-10: per-hub leg-1/leg-2 seat-wale trains + joint best. */
+  legPlans?: { hub: string; hubName: string | null; leg1: AgentRouteLeg[]; leg2: AgentRouteLeg[]; checkedLeg1: number; checkedLeg2: number; best: AgentConnection | null }[];
   recovery: {
     reason: string;
     differentTrain: AgentRouteOption[];
