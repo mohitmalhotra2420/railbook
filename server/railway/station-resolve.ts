@@ -33,6 +33,11 @@ export const MULTI_STATION_CITIES: Record<string, string[]> = {
   जलांधर: ["JUC", "JRC"],
   जलंदर: ["JUC", "JRC"],
   lucknow: ["LKO", "LJN"],
+  /* Round-18m-11: Prayagraj (Allahabad) — Jn pehle, phir Chheoki/Rambag/Sangam. */
+  prayagraj: ["PRYJ", "PCOI", "PRRB", "PYGS"],
+  allahabad: ["PRYJ", "PCOI", "PRRB", "PYGS"],
+  प्रयागराज: ["PRYJ", "PCOI", "PRRB", "PYGS"],
+  इलाहाबाद: ["PRYJ", "PCOI", "PRRB", "PYGS"],
   लखनऊ: ["LKO", "LJN"],
   kanpur: ["CNB", "CPA"],
   कानपुर: ["CNB", "CPA"],
@@ -131,9 +136,21 @@ export function scoreStation(query: string, station: Station): number {
   return 0;
 }
 
-export function pickStations(query: string, hits: Station[]): StationPick {
+/* Round-18m-11: passenger-irrelevant rows (goods sidings, power-plant/company
+ * sidings, "XYZ2" duplicate codes) options list se bahar — user ko sirf asli
+ * passenger stations dikhein. */
+const JUNK_STATION_RE = /\b(m\/s|siding|goods|yard|power ?generation|thermal|cement|refinery|co\.? ?(?:ltd|limited)|pvt|private|colliery|washery|depot)\b|,/i;
+export function isPassengerStation(s: { code: string; name: string }): boolean {
+  if (JUNK_STATION_RE.test(s.name)) return false;
+  if (/^[A-Z]{2,5}\d$/.test(s.code.toUpperCase())) return false; // PRYJ2 / NDLS2 style duplicates
+  return true;
+}
+
+export function pickStations(query: string, hitsRaw: Station[]): StationPick {
   const q = query.trim();
   if (!q) return { kind: "none", stations: [] };
+  const hits = hitsRaw.filter(isPassengerStation);
+  if (!hits.length && hitsRaw.length) return { kind: "none", stations: [] };
 
   const scored = hits
     .map((s) => ({ s, score: scoreStation(q, s) }))

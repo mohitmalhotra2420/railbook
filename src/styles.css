@@ -1922,3 +1922,13 @@ table.traintable {
 .jx-why-tag { font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #1d4ed8; background: #dbe4ff; padding: 2px 7px; border-radius: 999px; margin-left: 6px; }
 .jx-audit { display: flex; flex-wrap: wrap; gap: 4px 6px; margin: 0 14px 10px; font-size: 11.5px; color: #4b5563; line-height: 1.4; }
 .jx-audit-k { display: inline-flex; align-items: center; gap: 4px; font-weight: 700; color: #0d6b3a; }
+/* Round-18m-11: same-train alternative rows with book-from / boarding / deboarding strip */
+.jx-bfe-row { width: 100%; font: inherit; color: inherit; text-align: left; background: #fbfaf7; border: 1px solid #ebe6dd; border-radius: 12px; padding: 10px; display: grid; gap: 6px; cursor: pointer; margin-top: 6px; }
+.jx-bfe-row:first-of-type { margin-top: 0; }
+.jx-bfe-top { display: flex; align-items: center; gap: 8px; }
+.jx-bfe-top .jx-lrow-train { flex: 1; }
+.jx-strip-sm { margin-top: 2px; }
+.jx-strip-sm .jx-strip-name { font-size: 12.5px; }
+.jx-strip-sm .jx-strip-sub { font-size: 11.5px; }
+.jx-strip-sm .jx-strip-col { padding: 7px 9px; }
+.jx-bfe-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; font-size: 12px; color: var(--ink); }

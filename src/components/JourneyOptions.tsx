@@ -458,7 +458,26 @@ export function JourneyOptions({
       {bfeRest.length > 0 && (
         <Section ic={IC.refresh} title="Same-train alternatives" badge={`+${bfeRest.length} option${bfeRest.length > 1 ? "s" : ""}`}>
           {bfeRest.slice(0, 7).map((b) => (
-            <ListRow key={`${b.trainNumber}-${b.bookFrom}`} no={b.trainNumber} name={b.trainName} mid={`${b.bookFrom}→${b.boardAt}`} midSub={`${b.bookFromDeparture ?? "—"} · ${b.boardAtDeparture ?? "—"}`} dur={durLabel(b.durationMinutes)} durSub="Direct" seat={b.availability} chips={(b.classOptions ?? []).filter((r) => r.classCode !== b.availability.classCode)} onClick={pickBfe ? () => pickBfe(b) : undefined} />
+            <button key={`${b.trainNumber}-${b.bookFrom}`} type="button" className="jx-bfe-row" onClick={pickBfe ? () => pickBfe(b) : undefined}>
+              <div className="jx-bfe-top">
+                <div className="jx-lrow-train"><span className="jx-no">{b.trainNumber}</span> <span className="jx-name">{b.trainName}</span></div>
+                <SeatPill a={b.availability} />
+                <span className="jx-lrow-chev">{IC.chev}</span>
+              </div>
+              {/* Round-18m-11 (user: "proper do — kahan se book, kahan board, kahan tak") */}
+              <div className="jx-strip jx-strip-sm" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
+                <div className="jx-strip-col"><div className="jx-strip-name">{b.bookFromName ?? b.bookFrom}</div><div className="jx-strip-sub">{b.bookFrom}, {b.bookFromDeparture ?? "—"}</div></div>
+                <div className="jx-strip-col"><div className="jx-strip-name">{b.boardAtName ?? b.boardAt}</div><div className="jx-strip-sub">{b.boardAt}, {b.boardAtDeparture ?? "—"}</div></div>
+                <div className="jx-strip-col"><div className="jx-strip-name">{b.destinationName ?? b.destination}</div><div className="jx-strip-sub">{b.destination}, {b.arrival ?? "—"}{b.arrivalDayOffset ? ` (+${b.arrivalDayOffset}d)` : ""}</div></div>
+              </div>
+              <div className="jx-strip-labels"><span>Book from</span><span>Boarding</span><span>Deboarding</span></div>
+              <div className="jx-bfe-foot">
+                <span className="jx-stat"><span className="jx-stat-ic">{IC.clock}</span>{durLabel(b.durationMinutes) ?? "—"} · Direct · board {b.boardAt}</span>
+                {(b.classOptions ?? []).filter((r) => r.classCode !== b.availability.classCode).length > 0 && (
+                  <span className="jx-classes-chips">{(b.classOptions ?? []).filter((r) => r.classCode !== b.availability.classCode).slice(0, 3).map((r) => { const av = availTextOf(r); return <span key={r.classCode} className={`jx-cchip jx-cchip-${r.stale ? "stale" : av.tone}`}>{av.text.replace(" ⚠ stale", "")}{r.fare != null ? ` · ${inr(r.fare)}` : ""}</span>; })}</span>
+                )}
+              </div>
+            </button>
           ))}
         </Section>
       )}

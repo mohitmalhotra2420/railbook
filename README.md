@@ -218,6 +218,13 @@ only provider-verified alternatives.
 - More candidates: fixed hubs (up to 10 connections) + **route-derived hubs** (`routeDerivedHubs()` — junction/major stops from the direct trains' timetable, e.g. JAT→BDTS tries PTKC/LDH/NDLS/SWM/RTM/BH), all legs probed, then filtered.
 - When nothing passes: card + `plan.notes` say "Connecting routes mile lekin kisi mein dono trains par seat available nahi thi — isliye connecting option nahi dikhaya." Summary's "route via X" line lists per-leg seats.
 
+### Round-18m-11 — Station-safety fix (prayagraj ≠ Agra), alt-row book/board/deboard, audit strip
+
+- **Bug (screenshot):** "ludhiana se prayagraj" → AGC. Root cause: `matchStation()` ka `q.includes(city)` — "pr**agra**j" ke andar "agra" substring. Fix: city sirf **whole-word** match; fuzzy matcher ke liye `DISTINCT_CITIES` guard (raipur→Jaipur jaisi 1-edit galtiyan bhi band). Prayagraj/Allahabad ab `MULTI_STATION_CITIES` group (PRYJ → PCOI → PRRB → PYGS); goods/power-plant sidings aur "PRYJ2" duplicates options se hidden (`isPassengerStation`).
+- **Same-train alternatives rows:** ab har row mein hero jaisi strip — **Book from / Boarding / Deboarding** (station name, code, time, +1d), duration · board-at, other-class chips.
+- **Audit strip** card ke upar: "Checked for N pax: x/y direct trains · a trains × b earlier-stop segments (leg-1, every class) · via HUB: p + q trains (leg-1 + leg-2)" — sirf real counts. Book-from-earlier scan ab train origin tak (15 stops) jaata hai.
+- Tests: `tests/round18m11-station-safety.test.ts` (5).
+
 ### Round-18m-10 — Leg-wise joint planning (all trains per leg), AI-written "kyun chuna", pax gate hardening
 
 - **Leg-wise plan (`plan.legPlans[]`):** direct seat na mile to top hub (e.g. NDLS) ke liye **Leg 1 = origin→hub ki HAR train** aur **Leg 2 = hub→destination ki HAR train** (10+10, parallel) par pax-aware seat probe (`expandLegPlan`). UI mein "Connecting · leg-wise seat options": upar **AI ka joint best combo**, phir "Leg 1 · N of M with seats" / "Leg 2 · N of M with seats" lists — user apna combo bhi bana sakta hai. `buildLegPlans()` baaki hubs ko probed connections se group karta hai.
