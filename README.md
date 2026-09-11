@@ -218,6 +218,12 @@ only provider-verified alternatives.
 - More candidates: fixed hubs (up to 10 connections) + **route-derived hubs** (`routeDerivedHubs()` — junction/major stops from the direct trains' timetable, e.g. JAT→BDTS tries PTKC/LDH/NDLS/SWM/RTM/BH), all legs probed, then filtered.
 - When nothing passes: card + `plan.notes` say "Connecting routes mile lekin kisi mein dono trains par seat available nahi thi — isliye connecting option nahi dikhaya." Summary's "route via X" line lists per-leg seats.
 
+### Round-18m-8 — journey card layout v2 (results page, not chat) + new RailCore/RailKit keys
+
+- Chat prose collapses into an "AI note" pill when a journey card is the answer; the card is the result.
+- Card: navy route hero (`LDH → LKO`, date/class/train pills) → status pills (Direct: seat nahi · Same train pichhle station se: 2A AVL 36 · Connecting …) → **BEST FOR YOU** hero = the fresh seat-proven book-from-earlier option (ConfirmTkt-style Book from / Boarding / Deboarding strip, duration/seat/fare grid, all seat classes as chips, LDH→LKO vs PHR→LKO key-value lines, "Seat check" + "Sabhi trains · Book" CTAs) → collapsible "AI ne ye plan kyun chuna" → numbered sections with counts (aur same-train options, doosri train, connecting, doosri date, doosra station) → YOU MAY ALSO CONSIDER tabs.
+- Keys rotated (RailCore `rk_live_0yKp…`, RailKit `railkit_c842…`) in `.env` and Render env; RailCore search/availability verified live again.
+
 ### Round-18m-7 — date survives station pick; no auto TrainBoard; ConfirmTkt-style options for EVERY train & class
 
 - **Date kept across the station-choice turn.** "Ludhiana se Varanasi jaana hai kal" → "1. BSB / 2. BCY" → "Bsb" no longer re-asks the date. Root cause: `mergeAgentContext` (server + client) treated the picked station as a *new route* (`routeChanged`) and reset `date/dateProvided`; a pick that resolves a `pendingDestinationChoice`/`pendingOriginChoice` is now exempt. The station-pick turn also returns the full **journey planner card** (`planJourney`) instead of a plain table.
