@@ -351,7 +351,7 @@ describe("Round-17 F9: /api/agent returns journey plan for RANK_JOURNEY_OPTIONS"
       return jsonResponse(200, { choices: [{ message: msg, finish_reason: call === 1 ? "tool_calls" : "stop" }], model: "test" });
     });
     const app = createApp();
-    const r = await request(app).post("/api/agent").send({ text: `LDH se CSMT ${FUTURE} ki best train SL mein`, now: new Date().toISOString() });
+    const r = await request(app).post("/api/agent").send({ text: `LDH se CSMT ${FUTURE} ki best train SL mein, 2 logon ke liye`, now: new Date().toISOString() });
     expect(r.status).toBe(200);
     expect(r.body.toolTrace?.[0]?.tool).toBe("RANK_JOURNEY_OPTIONS");
     expect(r.body.journey?.best?.trainNumbers).toEqual(["12138"]);

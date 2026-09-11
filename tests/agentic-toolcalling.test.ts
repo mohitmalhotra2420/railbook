@@ -722,12 +722,33 @@ describe("agent integration: agentic path + deterministic fallback", () => {
     });
     // Turn 1 already happened (the model asked "Kis date ko jaana hai?").
     // Turn 2 carries the conversation state: known slots + history.
+    /* Round-18m-9: passenger count pehle se pata na ho to search se PEHLE
+     * deterministic gate poochta hai (seats pax ke hisaab se check hote hain). */
+    const gated = await runAgent({
+      text: "Saturday",
+      now: NOW,
+      known: {
+        from: { code: "ASR", name: "AMRITSAR JN", city: "Amritsar" },
+        to: { code: "NDLS", name: "NEW DELHI", city: "Delhi" },
+      },
+      history: [
+        { role: "user", content: "Amritsar se Delhi jaana hai" },
+        { role: "assistant", content: "Kis date ko jaana hai?" },
+      ],
+    });
+    expect(gated.engine).toBe("deterministic");
+    expect(gated.resumeAsk).toBe("passengers");
+    expect(gated.missingFields).toEqual(["passengers"]);
+    expect(gated.reply).toMatch(/kitne passengers/i);
+    expect(gated.context.date).toBe("2026-09-05");
+    expect(gated.trains).toBeNull();
     const result = await runAgent({
       text: "Saturday",
       now: NOW,
       known: {
         from: { code: "ASR", name: "AMRITSAR JN", city: "Amritsar" },
         to: { code: "NDLS", name: "NEW DELHI", city: "Delhi" },
+        passengerCount: 2,
       },
       history: [
         { role: "user", content: "Amritsar se Delhi jaana hai" },

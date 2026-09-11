@@ -218,6 +218,14 @@ only provider-verified alternatives.
 - More candidates: fixed hubs (up to 10 connections) + **route-derived hubs** (`routeDerivedHubs()` — junction/major stops from the direct trains' timetable, e.g. JAT→BDTS tries PTKC/LDH/NDLS/SWM/RTM/BH), all legs probed, then filtered.
 - When nothing passes: card + `plan.notes` say "Connecting routes mile lekin kisi mein dono trains par seat available nahi thi — isliye connecting option nahi dikhaya." Summary's "route via X" line lists per-leg seats.
 
+### Round-18m-9 — Passenger-aware planning, full-route 2-leg search, journey card v3
+
+- **Passenger gate:** origin + destination + date pata hone par, train dhundhne/seat verify karne se PEHLE AI poochta hai "kitne passengers hain? (1–6)". Jawab ("2") deterministic resume ban kar poori search chalata hai — origin/destination/date change nahi hote. Seats ab `seats ≥ passengers` par hi "confirmed" maani jaati hain (RAC sirf ≤2 pax).
+- **Joint 2-leg planning:** leg-1 = train ke origin se boarding tak HAR station × HAR class × HAR train (`findBoardFromEarlier(passengers)`); leg-2 = boarding → destination full route par har train ki availability (`findConnections` fan-out 8 legs/hub, 40 candidates, 24 probes). `bookableConnections()` class-agnostic — jis class mein pax ke liye seat ho wahi leg par dikhti hai; AI seat-proven + fastest combo chunta hai.
+- **"AI ne ye plan kyun chuna":** `journeyWhyPoints(plan)` 4–5 genuine, data-driven points banata hai (kitni direct trains check hui, bfe seat+fare, duration vs fastest, other classes, IRCTC boarding note, connecting comparison) → `journey.whyPoints[]`.
+- **Journey card v3 (`.jx-*`):** header "RAILBOOK ATLAS · JOURNEY PLAN" LDH → LKO + date/pax/trains pills; status pills (Direct / Recommended / Connecting); hero "RECOMMENDED · SAME TRAIN" (train, class AVL badge, 3-col Book-from / Boarding / Deboarding strip, duration·direct·fare row, Available/Other classes chips, "Availability may have changed" note, orange "Seat check 2A →", navy "SABHI TRAINS · BOOK →", light-blue why-list); Same-train alternatives (+N options), Connecting card, Other dates (N alternatives), Explore options chips, footer source/last-checked.
+- Tests: `tests/round18m9-pax-gate.test.ts`; 4 older tests updated for the gate (now pass `2 logon ke liye`).
+
 ### Round-18m-8 — journey card layout v2 (results page, not chat) + new RailCore/RailKit keys
 
 - Chat prose collapses into an "AI note" pill when a journey card is the answer; the card is the result.

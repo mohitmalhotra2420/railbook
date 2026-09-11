@@ -317,7 +317,7 @@ describe("Round-18 §5/§16: proactive alternatives via /api/agent, endpoints, n
       return jsonResponse(200, { choices: [{ message: msg, finish_reason: call === 1 ? "tool_calls" : "stop" }], model: "test" });
     });
     const app = createApp();
-    const r = await request(app).post("/api/agent").send({ text: `LDH se CSMT ${FUTURE} ki trains`, now: new Date().toISOString() });
+    const r = await request(app).post("/api/agent").send({ text: `LDH se CSMT ${FUTURE} ki trains, 2 logon ke liye`, now: new Date().toISOString() });
     expect(r.status).toBe(200);
     expect(r.body.toolTrace?.[0]?.tool).toBe("SEARCH_TRAINS");
     expect(r.body.journey?.best?.trainNumbers).toEqual(["12138"]);

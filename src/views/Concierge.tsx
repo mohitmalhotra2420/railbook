@@ -901,6 +901,10 @@ export function Concierge() {
           if (agentRes.interrupt && agentRes.resumeText) {
             if (agentRes.resumeAsk) setLastAsked(agentRes.resumeAsk);
             setMessages((m) => [...m, { id: newId(), role: "assistant", text: agentRes.resumeText! }]);
+          } else if (agentRes.resumeAsk) {
+            /* Round-18m-9: passenger-gate jaise deterministic sawaal bhi
+             * lastAsked set karein — warna agla "2" server par pax nahi banta. */
+            setLastAsked(agentRes.resumeAsk);
           }
           // Booking continuity: AI gathered all slots + booking intent → open the bookable TrainBoard.
           const wantBooking =

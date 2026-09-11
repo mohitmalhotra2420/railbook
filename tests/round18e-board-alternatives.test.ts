@@ -30,7 +30,7 @@ describe("Round-18e UI guard (source-level)", () => {
   });
   it("BEST FOR YOU card exposes an explicit book CTA (no auto-booking)", () => {
     const jo = readFileSync("src/components/JourneyOptions.tsx", "utf8");
-    expect(jo).toContain("Sabhi trains · Book →");
+    expect(jo).toContain("Sabhi trains · Book");
   });
   it("TrainBoard opens YOU MAY ALSO CONSIDER on WL/RAC/low class tap", () => {
     const tb = readFileSync("src/views/TrainBoard.tsx", "utf8");

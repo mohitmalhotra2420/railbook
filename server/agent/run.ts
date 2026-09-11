@@ -1606,9 +1606,20 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
     }
 
     const capture: SearchCapture = { table: null };
+    /* Round-18m-9: passenger-gate ka jawab ("2") akela model ko confuse karta
+     * hai ("2 se kya matlab?") — slots poore hain to explicit search request
+     * bana kar bhejo; origin/destination/date user ke hi rehte hain. */
+    const paxResume =
+      req.lastAsked === "passengers" &&
+      Boolean(ctx.paxProvided && ctx.passengers && ctx.origin && ctx.destination && ctx.date && ctx.dateProvided) &&
+      !trainNo &&
+      /^\s*(\d|ek|do|teen|char|chaar|paanch|panch|chhe|che|one|two|three|four|five|six)\b/i.test(req.text);
+    const agenticText = paxResume
+      ? `${ctx.origin!.name ?? ctx.origin!.code} (${ctx.origin!.code}) se ${ctx.destination!.name ?? ctx.destination!.code} (${ctx.destination!.code}) ${ctx.date} ko ${ctx.passengers} passengers ke liye trains aur seat availability dhundo`
+      : req.text;
     try {
       const turn = await runAgenticTurn({
-        text: req.text,
+        text: agenticText,
         now: req.now,
         history: req.history,
         capture,

@@ -558,7 +558,7 @@ describe("fix: preferred_class partition — probed class evidence", () => {
     });
     const app = createApp();
     const res = await request(app).post("/api/agent").send({
-      text: "Amritsar se New Delhi Saturday ko sabse sasta CC train batao",
+      text: "Amritsar se New Delhi Saturday ko 2 logon ke liye sabse sasta CC train batao",
       now: NOW,
     });
     const analyze = (res.body.toolTrace ?? []).find((t: { tool: string }) => t.tool === "JOURNEY_ANALYZE");
