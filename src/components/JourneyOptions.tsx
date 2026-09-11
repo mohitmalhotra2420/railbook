@@ -45,6 +45,24 @@ function availTextOf(a: AvailLike | null | undefined): { text: string; tone: "ok
   return { text: `${a.classCode} ${a.status}`, tone: "muted" };
 }
 
+/* Round-18m-7: leg / book-from-earlier par SAB seat-wali classes (user kisi bhi class mein book kar sake). */
+function ClassChips({ rows, skip }: { rows?: AvailLike[] | null; skip?: string | null }) {
+  const list = (rows ?? []).filter((r) => r.classCode !== skip);
+  if (!list.length) return null;
+  return (
+    <div className="jo-cls-chips">
+      {list.map((r) => {
+        const av = availTextOf(r);
+        return (
+          <span key={r.classCode} className={`jo-cls-chip jo-avl-${av.tone}`}>
+            {av.text}{r.fare != null ? ` · ${inr(r.fare)}` : ""}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
 function availText(o: AgentRouteOption): { text: string; tone: "ok" | "warn" | "bad" | "muted" } {
   const a = o.availability;
   if (!a) return { text: "Seat data nahi", tone: "muted" };
@@ -81,6 +99,7 @@ function LegRows({ legs, baseDate, onPickLeg }: { legs: AgentRouteLeg[]; baseDat
               <span className="jo-no">{l.trainNumber}</span> <span className="jo-name">{l.trainName}</span>
               <span className={`jo-avl jo-avl-${av.tone}`}>{av.text}</span>
             </div>
+            <ClassChips rows={l.classOptions} skip={l.availability?.classCode ?? null} />
             <div className="jo-leg-line">
               <strong>{l.departure}</strong> {l.fromName ?? l.from} ({l.from}){baseDate ? ` · ${legDateLabel(baseDate, depDay)}` : ""} → <strong>{l.arrival}</strong> {l.toName ?? l.to} ({l.to}){baseDate ? ` · ${legDateLabel(baseDate, arrDay)}` : dayTag(l.arrivalDayOffset)}
             </div>
@@ -290,8 +309,8 @@ export function JourneyOptions({
         <div className="jo-recovery">
           {(rec.boardFromEarlier ?? []).length > 0 && (
             <div className="jo-sec">
-              <div className="jo-sec-title">🎫 Same train — pichhle station se ticket, board yahin se</div>
-              {(rec.boardFromEarlier ?? []).slice(0, 2).map((b) => {
+              <div className="jo-sec-title">🎫 Same train — pichhle station se ticket, board yahin se ({(rec.boardFromEarlier ?? []).length} option{(rec.boardFromEarlier ?? []).length > 1 ? "s" : ""})</div>
+              {(rec.boardFromEarlier ?? []).slice(0, 8).map((b) => {
                 const av = availTextOf(b.availability);
                 return (
                   <button
@@ -304,6 +323,7 @@ export function JourneyOptions({
                       <span className="jo-no">{b.trainNumber}</span> <span className="jo-name">{b.trainName}</span>
                       <span className={`jo-avl jo-avl-${av.tone}`}>{av.text}</span>
                     </div>
+                    <ClassChips rows={b.classOptions} skip={b.availability.classCode} />
                     <div className="jo-bfe-grid">
                       <div><div className="jo-bfe-k">Book from</div><div className="jo-bfe-v">{b.bookFromName ?? b.bookFrom}</div><div className="jo-bfe-s">{b.bookFrom}{b.bookFromDeparture ? `, ${b.bookFromDeparture}` : ""}</div></div>
                       <div><div className="jo-bfe-k">Boarding</div><div className="jo-bfe-v">{b.boardAtName ?? b.boardAt}</div><div className="jo-bfe-s">{b.boardAt}{b.boardAtDeparture ? `, ${b.boardAtDeparture}` : ""}</div></div>

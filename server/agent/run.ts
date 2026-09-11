@@ -1844,6 +1844,15 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
         toolOk = search.trains.length > 0;
         detTrains = tableFromSearch(ctx.origin!.code, ctx.destination!.code, ctx.date!, search.trains.slice(0, 12));
         rememberSearch(ctx, detTrains);
+        /* Round-18m-7: station-pick ke baad bhi wahi JOURNEY PLANNER card (BEST FOR
+         * YOU / summary / seat-wale connections) — plain table nahi. */
+        if (search.trains.length) {
+          try {
+            detJourney = await planJourney({ from: ctx.origin!.code, to: ctx.destination!.code, date: ctx.date!, travelClass: ctx.classCode ?? null, preference: "best_overall", includeConnections: false, includeAlternativeDates: false, trains: search.trains, searchProvider: search.provider });
+          } catch {
+            detJourney = null;
+          }
+        }
         atlasTrace = {
           step: 1,
           tool: "SEARCH_TRAINS",

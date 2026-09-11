@@ -58,7 +58,8 @@ export const JOURNEY_CONFIG = {
   /** Partial-route: max intermediate halts probed (each = 1 availability call). */
   partialSplitLimit: Number(process.env.PARTIAL_SPLIT_LIMIT ?? 3) || 3,
   /** Round-18m-6: how many stops BEFORE origin to try for "book from earlier station". */
-  boardEarlierStops: Number(process.env.BOARD_EARLIER_STOPS ?? 3) || 3,
+  boardEarlierStops: Number(process.env.BOARD_EARLIER_STOPS ?? 5) || 5,
+  boardEarlierTrains: Number(process.env.BOARD_EARLIER_TRAINS ?? 10) || 10,
 };
 
 const AVAIL_RANK: Record<string, number> = { AVAILABLE: 0, RAC: 1, WAITLIST: 2, UNKNOWN: 3, NOT_AVAILABLE: 4 };
@@ -292,13 +293,15 @@ export function evaluateConnection(
  * pehli `limit` connections, dono legs parallel, provider-proven only. */
 export async function probeConnectionLegs(connections: Connection[], date: string, travelClass: string | null, limit = 10): Promise<Set<string>> {
   const sources = new Set<string>();
-  const cache = new Map<string, Promise<RouteAvailability | null>>();
-  const probe = (leg: RouteLeg): Promise<RouteAvailability | null> => {
+  const cache = new Map<string, Promise<{ best: RouteAvailability | null; all: RouteAvailability[] } | null>>();
+  const probe = (leg: RouteLeg): Promise<{ best: RouteAvailability | null; all: RouteAvailability[] } | null> => {
     const key = `${leg.trainNumber}:${leg.from}:${leg.to}`;
     let p = cache.get(key);
     if (!p) {
+      /* Round-18m-7: poora class board (user class na ho to SAB classes) — leg par
+       * har seat-wali class dikhegi, best row ranking ke liye. */
       p = routedClassBoard(leg.trainNumber, date, leg.from, leg.to, "GN", travelClass ? [travelClass] : [])
-        .then((b) => bestClassRow(b.classes, travelClass))
+        .then((b) => ({ best: bestClassRow(b.classes, travelClass), all: bookableRows(b.classes) }))
         .catch(() => null);
       cache.set(key, p);
     }
@@ -307,8 +310,8 @@ export async function probeConnectionLegs(connections: Connection[], date: strin
   await Promise.all(
     connections.slice(0, limit).map(async (c) => {
       const rows = await Promise.all(c.legs.map((l) => probe(l)));
-      c.legs = c.legs.map((l, i) => ({ ...l, availability: rows[i] }));
-      rows.forEach((r) => r && sources.add(r.source));
+      c.legs = c.legs.map((l, i) => ({ ...l, availability: rows[i]?.best ?? null, classOptions: rows[i]?.all ?? [] }));
+      rows.forEach((r) => r?.best && sources.add(r.best.source));
     }),
   );
   return sources;
@@ -318,6 +321,15 @@ export async function probeConnectionLegs(connections: Connection[], date: strin
  * wale route chahiye"): connection tabhi option hai jab DONO legs par
  * provider-proven AVL/RAC (fresh) ho. Baaki drop — WL/N-A/unknown leg wali
  * connection kabhi "alternative" nahi. Deterministic: seats-desc → duration. */
+/* Round-18m-7 (user: "har class mein seat check karo, jis class mein mile wo dikhao"):
+ * board ki SAB fresh AVL/RAC rows (AVL pehle, phir zyada seats, phir sasta). */
+export function bookableRows(classes: ClassAvailability[], opts: { includeStale?: boolean } = {}): RouteAvailability[] {
+  return classes
+    .filter((c) => (opts.includeStale || !c.stale) && (c.status === "AVAILABLE" || c.status === "RAC"))
+    .map((c) => ({ ...(c.stale ? { stale: true } : {}), classCode: c.code, status: c.status, seats: c.seats ?? null, rac: c.rac ?? null, waitlist: c.waitlist ?? null, fare: c.fare > 0 ? c.fare : null, source: String(c.source ?? "railcore") }))
+    .sort((a, b) => Number(!!a.stale) - Number(!!b.stale) || (AVAIL_RANK[a.status] ?? 5) - (AVAIL_RANK[b.status] ?? 5) || (b.seats ?? 0) - (a.seats ?? 0) || (a.fare ?? 9e9) - (b.fare ?? 9e9));
+}
+
 export function legBookable(a: RouteAvailability | null | undefined): boolean {
   return !!a && !a.stale && (a.status === "AVAILABLE" || a.status === "RAC");
 }
@@ -610,12 +622,23 @@ export async function findBoardFromEarlier(args: {
         for (let k = 0; k < earlier.length; k++) {
           const s = earlier[k];
           const board = await routedClassBoard(t.number, args.date, s.code, to, "GN", args.travelClass ? [args.travelClass] : []);
-          const row = bestClassRow(board.classes, args.travelClass ?? null);
-          if (row && !row.stale && (row.status === "AVAILABLE" || row.status === "RAC")) {
+          /* Round-18m-7: SAB classes check — jis class mein bhi seat mile, sab dikhao. */
+          /* Stale (24h+ web-cache) AVL/RAC bhi option hai — ⚠ "last known" ke saath; fresh pehle. */
+          const all = bookableRows(board.classes, { includeStale: true });
+          const row = (args.travelClass ? all.find((r) => r.classCode === args.travelClass) : undefined) ?? all[0] ?? null;
+          if (row) {
             sources.add(row.source);
             const dest = stops[iTo];
             const dayOf = (st: Stop) => (typeof st.day === "number" ? st.day : 1);
+            const depM = minutesOf(stops[iFrom].departure ?? stops[iFrom].arrival ?? "");
+            const arrM = minutesOf(dest.arrival ?? dest.departure ?? "");
+            const dayDiff = Math.max(0, dayOf(dest) - dayOf(stops[iFrom]));
+            let durationMinutes: number | null = depM != null && arrM != null ? arrM - depM + dayDiff * 1440 : null;
+            if (durationMinutes != null && durationMinutes <= 0) durationMinutes += 1440; // schedule bina day → overnight
+
             options.push({
+              classOptions: all,
+              durationMinutes,
               trainNumber: t.number,
               trainName: t.name,
               bookFrom: s.code,
@@ -641,7 +664,8 @@ export async function findBoardFromEarlier(args: {
       }
     }),
   );
-  options.sort((a, b) => (AVAIL_RANK[a.availability.status] ?? 5) - (AVAIL_RANK[b.availability.status] ?? 5) || a.stopsBefore - b.stopsBefore || a.trainNumber.localeCompare(b.trainNumber));
+  /* Round-18m-7: seat pehle (AVL > RAC), phir SABSE KAM travel time, phir nazdeek ka stop. */
+  options.sort((a, b) => Number(!!a.availability.stale) - Number(!!b.availability.stale) || (AVAIL_RANK[a.availability.status] ?? 5) - (AVAIL_RANK[b.availability.status] ?? 5) || (a.durationMinutes ?? 9e9) - (b.durationMinutes ?? 9e9) || a.stopsBefore - b.stopsBefore || a.trainNumber.localeCompare(b.trainNumber));
   return { options, sources };
 }
 
@@ -977,7 +1001,8 @@ export async function planJourney(args: {
         .filter((t) => { const a = availability.get(t.number); return !a || (a.status !== "AVAILABLE" && a.status !== "RAC") || a.stale; })
         .map((t) => ({ number: t.number, name: t.name, directStatus: availability.get(t.number)?.status ?? null }));
       if (wlDirect.length) {
-        const r = await findBoardFromEarlier({ trains: wlDirect, origin: from, destination: to, date: args.date, travelClass: args.travelClass ?? null, limitTrains: 6 });
+        /* Round-18m-7: ConfirmTkt jaisa — SAARI direct trains (bounded 10) × pichhle stops × har class. */
+        const r = await findBoardFromEarlier({ trains: wlDirect, origin: from, destination: to, date: args.date, travelClass: args.travelClass ?? null, limitTrains: JOURNEY_CONFIG.boardEarlierTrains });
         boardFromEarlier = r.options;
         r.sources.forEach((s) => sources.add(s));
       }
@@ -1076,11 +1101,19 @@ export function journeySummary(plan: JourneyPlan): string | null {
   const rec = plan.recovery;
   const isBookable = (a: RouteAvailability | null | undefined) => !!a && !a.stale && (a.status === "AVAILABLE" || a.status === "RAC");
   /* Round-18m-6: "Book from earlier station" (same train) beats a WL best. */
-  const bfe = rec?.boardFromEarlier?.[0] ?? null;
-  if (best && !isBookable(best.availability) && bfe) {
+  const bfeAll = rec?.boardFromEarlier ?? [];
+  const bfe = bfeAll.find((b) => !b.availability.stale) ?? null; // summary sirf FRESH proof par
+  /* Round-18m-7: bfe list seat-first + kam-time sorted hai; ye direct same-train
+   * option WL best ko aur LAMBI connecting best ko bhi beat karta hai (seat + time). */
+  const bfeBeatsBest =
+    !!bfe && !!best && (!isBookable(best.availability) || (best.changes > 0 && (bfe.durationMinutes ?? 9e9) <= (best.durationMinutes ?? 9e9)));
+  if (best && bfe && bfeBeatsBest) {
     const a = bfe.availability;
     const seat = a.status === "AVAILABLE" ? `${a.classCode} AVL${a.seats != null ? ` ${a.seats}` : ""}` : `${a.classCode} RAC${a.rac != null ? ` ${a.rac}` : ""}`;
-    parts.push(`Best plan: ${bfe.trainNumber} ${bfe.trainName} — ticket ${bfe.bookFromName ?? bfe.bookFrom} (${bfe.bookFrom}${bfe.bookFromDeparture ? ` ${bfe.bookFromDeparture}` : ""}) se book karo, board ${bfe.boardAtName ?? bfe.boardAt} (${bfe.boardAt}${bfe.boardAtDeparture ? ` ${bfe.boardAtDeparture}` : ""}) par hi — ${seat}${a.fare != null ? `, ₹${a.fare}` : ""}. (${bfe.boardAt}→${bfe.destination} par ${best.trainNumbers[0] === bfe.trainNumber && best.availability ? availPhrase(best.availability) : bfe.directStatus ?? "seat nahi"}.)`);
+    const otherCls = (bfe.classOptions ?? []).filter((r) => r.classCode !== a.classCode).map((r) => `${r.classCode} ${r.status === "AVAILABLE" ? `AVL ${r.seats ?? ""}`.trim() : `RAC ${r.rac ?? ""}`.trim()}`);
+    const dur = bfe.durationMinutes != null ? `, ${durationLabelOf(bfe.durationMinutes)}` : "";
+    const more = bfeAll.length > 1 ? ` Aise ${bfeAll.length} same-train options mile (card mein sab, har seat-wali class ke saath) — ye fresh seat-proof wala sabse kam time ka option hai.` : "";
+    parts.push(`Best plan: ${bfe.trainNumber} ${bfe.trainName} — ticket ${bfe.bookFromName ?? bfe.bookFrom} (${bfe.bookFrom}${bfe.bookFromDeparture ? ` ${bfe.bookFromDeparture}` : ""}) se book karo, board ${bfe.boardAtName ?? bfe.boardAt} (${bfe.boardAt}${bfe.boardAtDeparture ? ` ${bfe.boardAtDeparture}` : ""}) par hi — ${seat}${a.fare != null ? `, ₹${a.fare}` : ""}${dur}${otherCls.length ? ` (aur bhi classes: ${otherCls.join(", ")})` : ""}. (${bfe.boardAt}→${bfe.destination} par ${best.trainNumbers[0] === bfe.trainNumber && best.availability ? availPhrase(best.availability) : bfe.directStatus ?? "seat nahi"}.)${more}`);
   } else if (best) {
     const name = best.trainNames[0] ? ` ${best.trainNames[0]}` : "";
     const av = availPhrase(best.availability);
@@ -1104,7 +1137,12 @@ export function journeySummary(plan: JourneyPlan): string | null {
   } else if (!bestOk && conn && conn.legs.length >= 2) {
     const via = conn.stationName ?? conn.station;
     const trains = conn.legs.map((l) => l.trainNumber).join("→");
-    const legSeats = conn.legs.map((l) => (l.availability ? `${l.trainNumber} ${l.availability.classCode} ${l.availability.status === "AVAILABLE" ? `AVL ${l.availability.seats ?? ""}`.trim() : l.availability.status === "RAC" ? "RAC" : l.availability.status}` : null)).filter(Boolean);
+    /* Round-18m-7: har leg ki SAB seat-wali classes (jis class mein bhi mile). */
+    const legSeats = conn.legs.map((l) => {
+      const rows = l.classOptions?.length ? l.classOptions : l.availability ? [l.availability] : [];
+      if (!rows.length) return null;
+      return `${l.trainNumber} ${rows.map((r) => `${r.classCode} ${r.status === "AVAILABLE" ? `AVL ${r.seats ?? ""}`.trim() : r.status === "RAC" ? `RAC ${r.rac ?? ""}`.trim() : r.status}`).join("/")}`;
+    }).filter(Boolean);
     parts.push(`If it slips, route via ${via} (${trains}, layover ${conn.layoverMinutes} min${legSeats.length ? `; ${legSeats.join(", ")}` : ""}).`);
   }
   /* Alternative date with real trains. */

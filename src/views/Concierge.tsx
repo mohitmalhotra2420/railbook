@@ -919,7 +919,12 @@ export function Concierge() {
            * ya explicit train pick se khulta hai. */
           const hasSmartBlock = blocks.some((b) => b.type === "journey" || b.type === "alternatives" || b.type === "trainpicker");
           /* Round-16g: from == to par kabhi card mat kholo (server guard bhi hai). */
-          if (!hasSmartBlock && wantBooking && c?.origin && c?.destination && c.origin.code !== c.destination.code && c?.date && !sameSearch) {
+          /* Round-18m-7 (user: "14 ko bola, sidha train card khul gaya — journey planner
+           * khulna chahiye"): full-screen TrainBoard KABHI auto nahi — sirf card ke
+           * "Sabhi trains · Book →" ya train pick se. Server ka journey card / table chat
+           * mein hi dikhta hai; passengers server poochta hai. */
+          const AUTO_BOARD = false;
+          if (AUTO_BOARD && !hasSmartBlock && wantBooking && c?.origin && c?.destination && c.origin.code !== c.destination.code && c?.date && !sameSearch) {
             setBusy(true);
             try {
               await searchRoute(c.origin, c.destination, c.date);

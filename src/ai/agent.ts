@@ -39,6 +39,8 @@ export interface AgentRouteLeg {
   durationMinutes: number | null;
   /** Round-18m-3: is leg ke segment ki seat (provider-proven) — null = data nahi. */
   availability?: { classCode: string; status: string; seats: number | null; rac: number | null; waitlist: number | null; fare: number | null; source: string; stale?: boolean } | null;
+  /** Round-18m-7: is leg par har class jisme seat hai (AVL/RAC). */
+  classOptions?: { classCode: string; status: string; seats: number | null; rac: number | null; waitlist: number | null; fare: number | null; source: string; stale?: boolean }[];
 }
 export interface AgentRouteOption {
   rank: number;
@@ -76,6 +78,9 @@ export interface AgentBoardFromEarlier {
   arrival: string | null;
   arrivalDayOffset: number;
   availability: NonNullable<AgentRouteOption["availability"]>;
+  /** Round-18m-7: bookFrom→destination par sab seat-wali classes. */
+  classOptions?: NonNullable<AgentRouteOption["availability"]>[];
+  durationMinutes?: number | null;
   directStatus: string | null;
   stopsBefore: number;
   source: string;
@@ -455,8 +460,11 @@ export function mergeAgentContext(
   const routeChanged =
     (nlu.from && prev.origin && nlu.from.code !== prev.origin.code) ||
     (nlu.to && prev.destination && nlu.to.code !== prev.destination.code) ||
-    (nlu.from && !prev.origin) ||
-    (nlu.to && !prev.destination) ||
+    /* Round-18m-7 (user: "kal bola, station chunne ke baad date phir poochi"):
+     * pending city ka station pick (Varanasi → BSB) NAYA route nahi hai —
+     * us slot ko routeChanged mat maano, di hui date rakho. */
+    (nlu.from && !prev.origin && !prev.pendingOriginChoice) ||
+    (nlu.to && !prev.destination && !prev.pendingDestinationChoice) ||
     Boolean(nlu.unresolvedFrom) ||
     Boolean(nlu.unresolvedTo);
   if (routeChanged && !nlu.date && (nlu.from || nlu.to || nlu.unresolvedFrom || nlu.unresolvedTo)) {

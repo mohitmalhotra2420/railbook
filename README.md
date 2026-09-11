@@ -218,6 +218,13 @@ only provider-verified alternatives.
 - More candidates: fixed hubs (up to 10 connections) + **route-derived hubs** (`routeDerivedHubs()` — junction/major stops from the direct trains' timetable, e.g. JAT→BDTS tries PTKC/LDH/NDLS/SWM/RTM/BH), all legs probed, then filtered.
 - When nothing passes: card + `plan.notes` say "Connecting routes mile lekin kisi mein dono trains par seat available nahi thi — isliye connecting option nahi dikhaya." Summary's "route via X" line lists per-leg seats.
 
+### Round-18m-7 — date survives station pick; no auto TrainBoard; ConfirmTkt-style options for EVERY train & class
+
+- **Date kept across the station-choice turn.** "Ludhiana se Varanasi jaana hai kal" → "1. BSB / 2. BCY" → "Bsb" no longer re-asks the date. Root cause: `mergeAgentContext` (server + client) treated the picked station as a *new route* (`routeChanged`) and reset `date/dateProvided`; a pick that resolves a `pendingDestinationChoice`/`pendingOriginChoice` is now exempt. The station-pick turn also returns the full **journey planner card** (`planJourney`) instead of a plain table.
+- **Full-screen TrainBoard never auto-opens** after an agent reply (`AUTO_BOARD=false` in `Concierge.tsx`) — the chat journey card is the planner; the board opens only from "Sabhi trains · Book →" / a train pick.
+- **Book-from-earlier like ConfirmTkt:** `findBoardFromEarlier` now probes up to `BOARD_EARLIER_TRAINS` (10) direct trains × `BOARD_EARLIER_STOPS` (5) earlier stops, keeps **every** AVL/RAC class (`classOptions`, `bookableRows`), includes stale web-cache rows flagged ⚠ (fresh first), computes boardAt→destination `durationMinutes`, and ranks **fresh seat → AVL>RAC → least travel time → nearest stop**. Card shows up to 8 options with class chips; summary leads with the seat-proven least-time option, lists the other classes and the option count.
+- **Connections show every seat class per leg** (`RouteLeg.classOptions` from `probeConnectionLegs`), in the leg rows and in the summary ("12426 3A AVL 5/SL RAC 3, …").
+
 ### Round-18m-6 — honest "best plan" + ConfirmTkt-style "book from earlier station"
 - **Ranking fix:** a seat-proven (fresh AVL/RAC) option always outranks WL/N-A/unknown — even a connecting route; "no seat data" no longer ties with AVAILABLE (13152 bug). Connecting option's combined availability = weakest leg.
 - **Summary says why:** "… (SL WL 27) — kisi option mein confirmed seat nahi; ye sabse kam WL/fastest direct hai" or "— direct trains mein seat nahi, is route par dono legs available".

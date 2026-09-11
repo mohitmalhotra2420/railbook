@@ -505,3 +505,28 @@ describe("Round-16n: 'old delhi' / 'purani dilli' = DLI (Delhi Junction), not ND
     expect(nlu.to?.code).toBe(code);
   });
 });
+
+describe("Round-18m-7: date given before station-choice must survive the pick turn", () => {
+  it("'kal' + ambiguous city → station pick keeps date/dateProvided", () => {
+    const NOW = new Date("2026-09-11T10:00:00+05:30");
+    let ctx = emptyAgentContext();
+    const t1 = "Mujhe ludhiana se Varanasi jaana hai kal";
+    ctx = mergeAgentContext(ctx, understand(t1, { now: NOW }), t1);
+    expect(ctx.dateProvided).toBe(true);
+    const date1 = ctx.date;
+    ctx.pendingDestinationChoice = "Varanasi";
+    const nlu2 = { ...understand("Bsb", { now: NOW, lastAsked: "to" }), intent: "NONE" as const, from: null, to: { code: "BSB", name: "Varanasi Jn", city: "Varanasi" }, date: null, unresolvedFrom: null, unresolvedTo: null };
+    ctx = mergeAgentContext(ctx, nlu2 as never, "Bsb");
+    expect(ctx.destination?.code).toBe("BSB");
+    expect(ctx.dateProvided).toBe(true);
+    expect(ctx.date).toBe(date1);
+  });
+  it("a genuinely NEW destination (no pending choice) still resets a stale date", () => {
+    const NOW = new Date("2026-09-11T10:00:00+05:30");
+    let ctx = emptyAgentContext();
+    ctx = mergeAgentContext(ctx, understand("Ludhiana se Delhi kal", { now: NOW }), "Ludhiana se Delhi kal");
+    const nlu2 = { ...understand("Lucknow", { now: NOW }), intent: "NONE" as const, from: null, to: { code: "LKO", name: "Lucknow", city: "Lucknow" }, date: null, unresolvedFrom: null, unresolvedTo: null };
+    ctx = mergeAgentContext({ ...ctx, destination: null, pendingDestinationChoice: null }, nlu2 as never, "Lucknow");
+    expect(ctx.dateProvided).toBe(false);
+  });
+});

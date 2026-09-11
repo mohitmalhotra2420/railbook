@@ -115,3 +115,39 @@ describe("Round-18m-6 best plan = seat-proven first; board-from-earlier beats WL
     expect(s).toContain("Best plan: 13308 GANGASATLUJ EXP — ticket Phillaur Jn (PHR 19:00) se book karo, board Ludhiana Jn (LDH 19:55) par hi — SL RAC 31, ₹415. (LDH→LKO par SL WL 27.)");
   });
 });
+
+describe("Round-18m-7: ConfirmTkt-style many options, every class, seat+time ranking", () => {
+  it("bookableRows keeps every AVL/RAC class (fresh first, AVL > RAC, more seats first) and drops WL", async () => {
+    const { bookableRows } = await import("../server/journey/engine.js");
+    const c = (code: string, status: string, n: number, extra: object = {}) => ({ code, status, seats: status === "AVAILABLE" ? n : null, rac: status === "RAC" ? n : null, waitlist: status === "WAITLIST" ? n : null, fare: 900, source: "web_railyatri", ...extra });
+    const rows = bookableRows([c("SL", "RAC", 64), c("3A", "WAITLIST", 11), c("2A", "AVAILABLE", 36), c("1A", "AVAILABLE", 16), c("3E", "AVAILABLE", 41, { stale: true })] as never, { includeStale: true });
+    expect(rows.map((r) => `${r.classCode}:${r.status}${r.stale ? ":stale" : ""}`)).toEqual(["2A:AVAILABLE", "1A:AVAILABLE", "SL:RAC", "3E:AVAILABLE:stale"]);
+    expect(bookableRows([c("3E", "AVAILABLE", 41, { stale: true })] as never)).toEqual([]);
+  });
+  it("journeySummary: best bfe = fresh seat + least travel time, lists other classes and option count", async () => {
+    const { journeySummary } = await import("../server/journey/engine.js");
+    const best = { rank: 1, category: "best_overall", trainNumbers: ["13308"], trainNames: ["GANGASATLUJ EXP"], durationLabel: "14h 40m", legs: [], departure: "19:55", arrival: "10:35", arrivalDayOffset: 1, durationMinutes: 880, changes: 0, availability: { classCode: "SL", status: "WAITLIST", seats: null, rac: null, waitlist: 27, fare: 415, source: "railradar" }, score: 1, reasons: [], badges: [], reliability: null } as never;
+    const mk = (n: string, name: string, from: string, dur: number, cls: object[], stale = false) => ({ trainNumber: n, trainName: name, bookFrom: from, bookFromName: from, bookFromDeparture: "07:07", boardAt: "LDH", boardAtName: "Ludhiana Jn", boardAtDeparture: "08:12", destination: "LKO", destinationName: "Lucknow", arrival: "20:05", arrivalDayOffset: 0, durationMinutes: dur, availability: { ...(cls[0] as object), ...(stale ? { stale: true } : {}) }, classOptions: cls, directStatus: "WAITLIST", stopsBefore: 1, source: "web_railyatri" });
+    const avl = (code: string, seats: number, fare = 1000) => ({ classCode: code, status: "AVAILABLE", seats, rac: null, waitlist: null, fare, source: "web_railyatri" });
+    const opts = [
+      mk("12358", "DURGIANA EXP", "JUC", 713, [avl("2A", 6, 1500), avl("1A", 2, 2500)]),
+      mk("13308", "GANGASATLUJ EXP", "PHR", 880, [avl("2A", 36, 1545), avl("1A", 16, 2575)]),
+    ];
+    const s = journeySummary({ query: { from: "LDH", to: "LKO", date: "2026-09-14", travelClass: null, preference: "best_overall" }, best, routeOptions: [best], connections: [], alternativeDates: [], directUnavailable: true, recovery: { reason: "WL", differentTrain: [], partialRoute: null, connecting: [], alternativeDates: [], alternateStations: [], boardFromEarlier: opts }, provenance: { retrievedAt: new Date().toISOString(), freshness: "fresh", sources: [] }, sources: [], notes: [], conflicts: [] } as never);
+    expect(s).toContain("Best plan: 12358 DURGIANA EXP — ticket JUC (JUC 07:07) se book karo");
+    expect(s).toContain("2A AVL 6, ₹1500, 11h 53m (aur bhi classes: 1A AVL 2)");
+    expect(s).toContain("Aise 2 same-train options mile");
+    // stale-only first option must not lead the summary
+    const s2 = journeySummary({ query: { from: "LDH", to: "LKO", date: "2026-09-14", travelClass: null, preference: "best_overall" }, best, routeOptions: [best], connections: [], alternativeDates: [], directUnavailable: true, recovery: { reason: "WL", differentTrain: [], partialRoute: null, connecting: [], alternativeDates: [], alternateStations: [], boardFromEarlier: [mk("12358", "DURGIANA EXP", "JUC", 713, [avl("2A", 6)], true)] }, provenance: { retrievedAt: new Date().toISOString(), freshness: "fresh", sources: [] }, sources: [], notes: [], conflicts: [] } as never);
+    expect(s2).not.toContain("ticket JUC");
+  });
+  it("connecting summary lists EVERY seat class per leg", async () => {
+    const { journeySummary } = await import("../server/journey/engine.js");
+    const avl = (code: string, seats: number) => ({ classCode: code, status: "AVAILABLE", seats, rac: null, waitlist: null, fare: 1000, source: "railradar" });
+    const conn = { station: "NDLS", stationName: "New Delhi", arrivalTrain: "12426", departureTrain: "20504", arrivalAt: "05:55", departsAt: "11:25", arrivalDayOffset: 0, layoverMinutes: 330, valid: true, reason: null, totalDurationMinutes: 1015, source: "railradar",
+      legs: [{ trainNumber: "12426", trainName: "A", from: "LDH", to: "NDLS", departure: "01:45", arrival: "05:55", arrivalDayOffset: 0, durationMinutes: 250, availability: avl("3A", 5), classOptions: [avl("3A", 5), { classCode: "SL", status: "RAC", seats: null, rac: 3, waitlist: null, fare: 400, source: "railradar" }] }, { trainNumber: "20504", trainName: "B", from: "NDLS", to: "LKO", departure: "11:25", arrival: "18:40", arrivalDayOffset: 0, durationMinutes: 435, availability: avl("2A", 19), classOptions: [avl("2A", 19), avl("1A", 4)] }] };
+    const best = { rank: 1, category: "best_overall", trainNumbers: ["13308"], trainNames: ["X"], durationLabel: "14h", legs: [], departure: "19:55", arrival: "10:35", arrivalDayOffset: 1, durationMinutes: 880, changes: 0, availability: { classCode: "SL", status: "WAITLIST", seats: null, rac: null, waitlist: 27, fare: 415, source: "railradar" }, badges: [], reliability: null } as never;
+    const s = journeySummary({ query: { from: "LDH", to: "LKO", date: "2026-09-14", travelClass: null, preference: "best_overall" }, best, routeOptions: [best], connections: [conn], alternativeDates: [], directUnavailable: true, recovery: { reason: "WL", differentTrain: [], partialRoute: null, connecting: [], alternativeDates: [], alternateStations: [], boardFromEarlier: [] }, provenance: { retrievedAt: new Date().toISOString(), freshness: "fresh", sources: [] }, sources: [], notes: [], conflicts: [] } as never);
+    expect(s).toContain("12426 3A AVL 5/SL RAC 3, 20504 2A AVL 19/1A AVL 4");
+  });
+});

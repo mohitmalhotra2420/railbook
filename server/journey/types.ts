@@ -43,6 +43,8 @@ export type RouteLeg = {
   durationMinutes: number | null;
   /** Round-18m-3: is LEG ke segment (from→to) ki seat — provider-proven, warna null. */
   availability?: RouteAvailability | null;
+  /** Round-18m-7: is leg par HAR class jisme seat (AVL/RAC, fresh) — user kisi bhi class mein book kar sake. */
+  classOptions?: RouteAvailability[];
 };
 
 export type RouteOption = {
@@ -132,8 +134,12 @@ export type BoardFromEarlierOption = {
   destinationName: string | null;
   arrival: string | null;
   arrivalDayOffset: number;
-  /** Provider-proven row for bookFrom→destination. */
+  /** Provider-proven row for bookFrom→destination (best class). */
   availability: RouteAvailability;
+  /** Round-18m-7: bookFrom→destination par SAB classes jinme seat (AVL/RAC, fresh). */
+  classOptions?: RouteAvailability[];
+  /** Round-18m-7: boardAt→destination travel minutes (schedule se) — "seat + kam time" ranking. */
+  durationMinutes?: number | null;
   /** What the user's own segment showed (WL n / N-A) — for the "why" line. */
   directStatus: string | null;
   stopsBefore: number;
