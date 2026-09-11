@@ -221,7 +221,7 @@ export type AlternateStationOption = {
 };
 
 export type JourneyPlan = {
-  query: { from: string; to: string; date: string; travelClass: string | null; preference: string };
+  query: { from: string; to: string; date: string; travelClass: string | null; preference: string; passengers?: number | null };
   best: RouteOption | null;
   routeOptions: RouteOption[];
   connections: Connection[];
@@ -248,6 +248,8 @@ export type JourneyPlan = {
    *  then the fallback route, then an alternative date. Built ONLY from data
    *  actually retrieved in this plan (never invented); null when nothing real. */
   summary: string | null;
+  /** Round-18m-9: 3–5 deterministic reasons for the recommended plan — built only from retrieved data. */
+  whyPoints?: string[];
   /** Round-18 freshness envelope (dynamic data must not be shown as current when stale). */
   provenance?: { retrievedAt: string; requestDate: string; travelDate: string; freshness: string; sourceTypes: string[] };
   /** Round-18: any availability source conflict detected (values never blended). */

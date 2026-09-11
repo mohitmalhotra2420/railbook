@@ -291,7 +291,7 @@ export function evaluateConnection(
  * train wahan jaati hi nahi; dono trains ki seat alag-alag dikhao"):
  * har leg ka apna segment (A: from→hub, B: hub→to) probe hota hai. Bounded:
  * pehli `limit` connections, dono legs parallel, provider-proven only. */
-export async function probeConnectionLegs(connections: Connection[], date: string, travelClass: string | null, limit = 10): Promise<Set<string>> {
+export async function probeConnectionLegs(connections: Connection[], date: string, travelClass: string | null, limit = 24): Promise<Set<string>> {
   const sources = new Set<string>();
   const cache = new Map<string, Promise<{ best: RouteAvailability | null; all: RouteAvailability[] } | null>>();
   const probe = (leg: RouteLeg): Promise<{ best: RouteAvailability | null; all: RouteAvailability[] } | null> => {
@@ -330,12 +330,26 @@ export function bookableRows(classes: ClassAvailability[], opts: { includeStale?
     .sort((a, b) => Number(!!a.stale) - Number(!!b.stale) || (AVAIL_RANK[a.status] ?? 5) - (AVAIL_RANK[b.status] ?? 5) || (b.seats ?? 0) - (a.seats ?? 0) || (a.fare ?? 9e9) - (b.fare ?? 9e9));
 }
 
-export function legBookable(a: RouteAvailability | null | undefined): boolean {
-  return !!a && !a.stale && (a.status === "AVAILABLE" || a.status === "RAC");
+/* Round-18m-9 (user: "kitni seats chahiye tabhi train dhoondho"): AVAILABLE row must
+ * have >= pax seats (null seats = count unknown → accept), RAC accepted only for 1–2 pax. */
+export function enoughSeats(a: RouteAvailability | null | undefined, pax: number | null | undefined): boolean {
+  if (!a) return false;
+  const n = pax && pax > 0 ? pax : 1;
+  if (a.status === "AVAILABLE") return a.seats == null || a.seats >= n;
+  if (a.status === "RAC") return n <= 2;
+  return false;
 }
-export function bookableConnections(connections: Connection[]): Connection[] {
+export function legBookable(a: RouteAvailability | null | undefined, pax?: number | null): boolean {
+  return !!a && !a.stale && (a.status === "AVAILABLE" || a.status === "RAC") && enoughSeats(a, pax);
+}
+export function bookableConnections(connections: Connection[], pax?: number | null): Connection[] {
   return connections
-    .filter((c) => c.legs.length > 0 && c.legs.every((l) => legBookable(l.availability)))
+    .filter((c) => c.legs.length > 0 && c.legs.every((l) => legBookable(l.availability, pax) || (l.classOptions ?? []).some((r) => legBookable(r, pax))))
+    .map((c) => ({
+      ...c,
+      /* Har leg ki best row = pax ke liye kaafi seats wali (class-agnostic — user kisi bhi class mein book kare). */
+      legs: c.legs.map((l) => (legBookable(l.availability, pax) ? l : { ...l, availability: (l.classOptions ?? []).find((r) => legBookable(r, pax)) ?? l.availability })),
+    }))
     .sort((x, y) => {
       const minSeats = (c: Connection) => Math.min(...c.legs.map((l) => (l.availability?.status === "AVAILABLE" ? l.availability.seats ?? 0 : 0)));
       return (x.totalDurationMinutes ?? 9e9) - (y.totalDurationMinutes ?? 9e9) || minSeats(y) - minSeats(x) || x.arrivalTrain.localeCompare(y.arrivalTrain);
@@ -384,7 +398,7 @@ export async function findConnections(
   opts: { hubs?: string[]; maxHubs?: number; legsPerHub?: number } = {},
 ): Promise<{ connections: Connection[]; hubsTried: string[]; sources: Set<string> }> {
   const hubs = (opts.hubs ?? JOURNEY_CONFIG.connectionHubs).filter((h) => h !== from && h !== to).slice(0, opts.maxHubs ?? 3);
-  const legsPerHub = opts.legsPerHub ?? 4;
+  const legsPerHub = opts.legsPerHub ?? 8; // Round-18m-9: poore route ki trains (bounded), sirf 4 nahi
   const out: Connection[] = [];
   const sources = new Set<string>();
   for (const hub of hubs) {
@@ -393,7 +407,7 @@ export async function findConnections(
       if (a.provider !== "none") sources.add(a.provider);
       if (b.provider !== "none") sources.add(b.provider);
       const legA = [...a.trains].sort((x, y) => x.departure.localeCompare(y.departure)).slice(0, legsPerHub);
-      const legB = [...b.trains].sort((x, y) => x.departure.localeCompare(y.departure)).slice(0, legsPerHub + 2);
+      const legB = [...b.trains].sort((x, y) => x.departure.localeCompare(y.departure)).slice(0, legsPerHub + 4);
       for (const ta of legA) {
         for (const tb of legB) {
           if (ta.number === tb.number) continue; // same train = not a connection
@@ -404,11 +418,11 @@ export async function findConnections(
     } catch {
       /* hub pair fail — skip, never invent */
     }
-    if (out.length >= 12) break;
+    if (out.length >= 40) break;
   }
   out.sort((x, y) => (x.totalDurationMinutes ?? 9e9) - (y.totalDurationMinutes ?? 9e9) || x.layoverMinutes - y.layoverMinutes || x.arrivalTrain.localeCompare(y.arrivalTrain));
-  /* Round-18m-5: zyada candidates rakho — seat-filter (dono legs AVL/RAC) ke baad hi 4 tak dikhengi. */
-  return { connections: out.slice(0, 10), hubsTried: hubs, sources };
+  /* Round-18m-9: zyada candidates (24) — har leg ki seat probe ke baad joint best chunte hain. */
+  return { connections: out.slice(0, 24), hubsTried: hubs, sources };
 }
 
 /* ── Feature 3: vacant seats ──────────────────────────────────────── */
@@ -603,6 +617,7 @@ export async function findBoardFromEarlier(args: {
   travelClass?: string | null;
   stopsBack?: number;
   limitTrains?: number;
+  passengers?: number | null;
 }): Promise<{ options: BoardFromEarlierOption[]; sources: Set<string> }> {
   const from = args.origin.toUpperCase();
   const to = args.destination.toUpperCase();
@@ -624,7 +639,7 @@ export async function findBoardFromEarlier(args: {
           const board = await routedClassBoard(t.number, args.date, s.code, to, "GN", args.travelClass ? [args.travelClass] : []);
           /* Round-18m-7: SAB classes check — jis class mein bhi seat mile, sab dikhao. */
           /* Stale (24h+ web-cache) AVL/RAC bhi option hai — ⚠ "last known" ke saath; fresh pehle. */
-          const all = bookableRows(board.classes, { includeStale: true });
+          const all = bookableRows(board.classes, { includeStale: true }).filter((r) => enoughSeats(r, args.passengers));
           const row = (args.travelClass ? all.find((r) => r.classCode === args.travelClass) : undefined) ?? all[0] ?? null;
           if (row) {
             sources.add(row.source);
@@ -876,8 +891,11 @@ export async function planJourney(args: {
   includeAlternateStations?: boolean;
   trains?: TrainResult[];
   searchProvider?: ServedProvider;
+  /** Round-18m-9: seats needed — bookable = AVL >= pax (RAC only for <=2). */
+  passengers?: number | null;
 }): Promise<JourneyPlan> {
   const notes: string[] = [];
+  const pax = args.passengers && args.passengers > 0 ? args.passengers : null;
   const sources = new Set<string>();
   const from = args.from.toUpperCase();
   const to = args.to.toUpperCase();
@@ -924,14 +942,14 @@ export async function planJourney(args: {
     c.sources.forEach((s) => sources.add(s));
     (await probeConnectionLegs(connections, args.date, args.travelClass ?? null)).forEach((s) => sources.add(s));
     const found = connections.length;
-    connections = bookableConnections(connections);
+    connections = bookableConnections(connections, pax);
     if (!connections.length && trains.length) {
       const hubs = await routeDerivedHubs(probeList, from, to);
       if (hubs.length) {
         const c2 = await findConnections(from, to, args.date, { hubs, maxHubs: hubs.length, legsPerHub: 5 });
         c2.sources.forEach((s) => sources.add(s));
         (await probeConnectionLegs(c2.connections, args.date, args.travelClass ?? null)).forEach((s) => sources.add(s));
-        connections = bookableConnections(c2.connections);
+        connections = bookableConnections(c2.connections, pax);
       }
     }
     if ((found || trains.length) && !connections.length) notes.push(CONNECTION_NO_SEAT_NOTE);
@@ -943,7 +961,7 @@ export async function planJourney(args: {
   let alternativeDates: JourneyPlan["alternativeDates"] = [];
   const directUnavailable =
     trains.length === 0 ||
-    (probedKnown > 0 && ![...availability.values()].some((a) => a && !a.stale && (a.status === "AVAILABLE" || a.status === "RAC")));
+    (probedKnown > 0 && ![...availability.values()].some((a) => legBookable(a, pax)));
   if (args.includeAlternativeDates || directUnavailable) {
     const [y, m, d] = args.date.split("-").map(Number);
     const shift = (n: number) => {
@@ -979,7 +997,7 @@ export async function planJourney(args: {
   /* Recovery block. */
   let recovery: JourneyPlan["recovery"] = null;
   if (directUnavailable) {
-    const differentTrain = routeOptions.filter((o) => o.changes === 0 && o.availability && !o.availability.stale && (o.availability.status === "AVAILABLE" || o.availability.status === "RAC"));
+    const differentTrain = routeOptions.filter((o) => o.changes === 0 && legBookable(o.availability, pax));
     let partial: PartialRoutePlan | null = null;
     if (args.includePartial !== false && args.travelClass && trains.length) {
       const target = probeList[0];
@@ -999,11 +1017,11 @@ export async function planJourney(args: {
        * fastest pehle; bounded to 6 trains × 3 earlier stops. */
       const wlDirect = [...trains]
         .sort((a, b) => (a.durationMinutes || 9e9) - (b.durationMinutes || 9e9) || a.number.localeCompare(b.number))
-        .filter((t) => { const a = availability.get(t.number); return !a || (a.status !== "AVAILABLE" && a.status !== "RAC") || a.stale; })
+        .filter((t) => !legBookable(availability.get(t.number), pax))
         .map((t) => ({ number: t.number, name: t.name, directStatus: availability.get(t.number)?.status ?? null, durationMinutes: t.durationMinutes ?? null }));
       if (wlDirect.length) {
         /* Round-18m-7: ConfirmTkt jaisa — SAARI direct trains (bounded 10) × pichhle stops × har class. */
-        const r = await findBoardFromEarlier({ trains: wlDirect, origin: from, destination: to, date: args.date, travelClass: args.travelClass ?? null, limitTrains: JOURNEY_CONFIG.boardEarlierTrains });
+        const r = await findBoardFromEarlier({ trains: wlDirect, origin: from, destination: to, date: args.date, travelClass: args.travelClass ?? null, limitTrains: JOURNEY_CONFIG.boardEarlierTrains, passengers: pax });
         boardFromEarlier = r.options;
         r.sources.forEach((s) => sources.add(s));
       }
@@ -1015,14 +1033,14 @@ export async function planJourney(args: {
       connections = c.connections;
       c.sources.forEach((s) => sources.add(s));
       (await probeConnectionLegs(connections, args.date, args.travelClass ?? null)).forEach((s) => sources.add(s));
-      connections = bookableConnections(connections);
+      connections = bookableConnections(connections, pax);
       if (!connections.length) {
         const hubs = await routeDerivedHubs(probeList, from, to);
         if (hubs.length) {
           const c2 = await findConnections(from, to, args.date, { hubs, maxHubs: hubs.length, legsPerHub: 5 });
           c2.sources.forEach((s) => sources.add(s));
           (await probeConnectionLegs(c2.connections, args.date, args.travelClass ?? null)).forEach((s) => sources.add(s));
-          connections = bookableConnections(c2.connections);
+          connections = bookableConnections(c2.connections, pax);
         }
       }
       if (!connections.length && !notes.includes(CONNECTION_NO_SEAT_NOTE)) notes.push(CONNECTION_NO_SEAT_NOTE);
@@ -1062,7 +1080,7 @@ export async function planJourney(args: {
   const plan: JourneyPlan = {
     provenance: { retrievedAt, requestDate: todayYmd(), travelDate: args.date, freshness: freshnessOf("availability", retrievedAt), sourceTypes },
     conflicts: conflicts.length ? conflicts : undefined,
-    query: { from, to, date: args.date, travelClass: args.travelClass ?? null, preference: args.preference ?? "best_overall" },
+    query: { from, to, date: args.date, travelClass: args.travelClass ?? null, preference: args.preference ?? "best_overall", passengers: pax },
     best: routeOptions[0] ?? null,
     routeOptions,
     connections,
@@ -1074,7 +1092,46 @@ export async function planJourney(args: {
     summary: null,
   };
   plan.summary = journeySummary(plan);
+  plan.whyPoints = journeyWhyPoints(plan);
   return plan;
+}
+
+/* ── Round-18m-9: "AI ne ye plan kyun chuna" — 3–5 concrete reasons, deterministic,
+ * built only from data in this plan (no invented facts). ─────────────────── */
+export function journeyWhyPoints(plan: JourneyPlan): string[] {
+  const pts: string[] = [];
+  const pax = plan.query.passengers ?? null;
+  const paxTxt = pax ? `${pax} passenger${pax > 1 ? "s" : ""}` : null;
+  const best = plan.best;
+  const rec = plan.recovery;
+  const bfe = (rec?.boardFromEarlier ?? []).find((b) => !b.availability.stale) ?? null;
+  const direct = plan.routeOptions.filter((o) => o.changes === 0);
+  const fastestDirect = [...direct].sort((a, b) => (a.durationMinutes ?? 9e9) - (b.durationMinutes ?? 9e9))[0] ?? null;
+  const seatTxt = (a: RouteAvailability) => `${a.classCode} ${a.status === "AVAILABLE" ? `AVL ${a.seats ?? ""}`.trim() : a.status === "RAC" ? `RAC ${a.rac ?? ""}`.trim() : a.status}`;
+  if (plan.directUnavailable && bfe) {
+    const wlCount = direct.filter((o) => o.availability && !legBookable(o.availability, pax)).length;
+    pts.push(`${plan.query.from}→${plan.query.to} par ${wlCount || direct.length} direct train${(wlCount || direct.length) > 1 ? "s" : ""} check ki — kisi mein${paxTxt ? ` ${paxTxt} ke liye` : ""} confirmed seat nahi (WL/RAC/N-A).`);
+    pts.push(`${bfe.trainNumber} mein ${bfe.bookFrom} (${bfe.stopsBefore} stop pehle) se ticket lene par ${seatTxt(bfe.availability)}${bfe.availability.fare != null ? ` @ ₹${bfe.availability.fare}` : ""} — provider-verified, fresh data.`);
+    if (bfe.durationMinutes && fastestDirect?.durationMinutes) {
+      pts.push(bfe.durationMinutes <= fastestDirect.durationMinutes + 30 ? `Travel time ${durationLabelOf(bfe.durationMinutes)} — direct trains mein sabse kam ke barabar, train badalni nahi padti.` : `Travel time ${durationLabelOf(bfe.durationMinutes)}; fastest direct (${fastestDirect.trainNumbers[0]}, ${fastestDirect.durationLabel}) mein seat nahi thi, isliye seat-proven option upar rakha.`);
+    }
+    const extra = (bfe.classOptions ?? []).filter((r) => r.classCode !== bfe.availability.classCode && !r.stale);
+    if (extra.length) pts.push(`Isi option mein ${extra.map(seatTxt).join(", ")} bhi hai — budget ke hisaab se class chun sakte ho.`);
+    pts.push(`Boarding ${bfe.boardAt} hi rahega — IRCTC par boarding point ${bfe.boardAt} chuno; ${bfe.bookFrom}→${bfe.boardAt} ka chhota extra fare lagta hai.`);
+    const conn = plan.connections[0] ?? rec?.connecting?.[0];
+    if (conn) pts.push(`Connecting via ${conn.stationName ?? conn.station} bhi possible (${conn.legs.map((l) => l.trainNumber).join("→")}, ${durationLabelOf(conn.totalDurationMinutes)}) — lekin train change + layover ${conn.layoverMinutes} min, isliye 2nd option.`);
+    else if (plan.notes.some((n) => /Connecting routes mile lekin/.test(n))) pts.push("Connecting routes check kiye — kisi mein dono legs par seat nahi mili, isliye nahi dikhaya.");
+  } else if (best) {
+    if (best.changes === 0) pts.push(`Direct train — koi change nahi${best.durationLabel ? `, ${best.durationLabel}` : ""}.`);
+    else pts.push(`Direct trains mein${paxTxt ? ` ${paxTxt} ke liye` : ""} seat nahi — is route par dono legs verified seat ke saath (${best.legs.map((l) => `${l.trainNumber}${l.availability ? ` ${seatTxt(l.availability)}` : ""}`).join(" → ")}), layover ${best.layoverMinutes ?? "-"} min.`);
+    if (best.availability) pts.push(legBookable(best.availability, pax) ? `${seatTxt(best.availability)}${best.availability.fare != null ? ` @ ₹${best.availability.fare}` : ""} — provider-verified${paxTxt ? `, ${paxTxt} ke liye kaafi` : ""}.` : `Seat status ${seatTxt(best.availability)} — confirmed nahi; ye sabse kam WL/fastest option hai.`);
+    if (fastestDirect && best.trainNumbers[0] === fastestDirect.trainNumbers[0]) pts.push(`${direct.length} direct trains mein sabse fast.`);
+    else if (fastestDirect?.durationLabel) pts.push(`Fastest direct ${fastestDirect.trainNumbers[0]} (${fastestDirect.durationLabel}) mein seat nahi/kam thi, isliye ye upar.`);
+    const cheaper = plan.routeOptions.filter((o) => o !== best && o.availability?.fare != null && best.availability?.fare != null && o.availability!.fare! < best.availability!.fare! && legBookable(o.availability, pax))[0];
+    if (cheaper) pts.push(`Sasta option ${cheaper.trainNumbers[0]} (₹${cheaper.availability!.fare}) bhi hai — Lowest fare tab mein.`);
+    if (best.departure) pts.push(`Departure ${best.departure}, arrival ${best.arrival}${best.arrivalDayOffset ? ` (+${best.arrivalDayOffset} din)` : ""}.`);
+  }
+  return pts.slice(0, 5);
 }
 
 /* ── Round-18l: plain-language journey summary (deterministic) ─────────
