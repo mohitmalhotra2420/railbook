@@ -1919,3 +1919,4 @@ table.traintable {
 .jx-leglist .jx-lrow { margin-top: 0; background: #fff; }
 .jx-more { font: inherit; font-size: 12px; font-weight: 600; color: var(--navy); background: transparent; border: 1px dashed #c7d9f2; border-radius: 10px; padding: 7px 10px; cursor: pointer; }
 .jx-legplan-foot { padding-top: 2px; }
+.jx-why-tag { font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #1d4ed8; background: #dbe4ff; padding: 2px 7px; border-radius: 999px; margin-left: 6px; }

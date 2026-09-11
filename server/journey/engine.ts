@@ -72,6 +72,13 @@ function availScore(a: RouteAvailability | null): number {
   return base * 10000 - (a.status === "AVAILABLE" ? Math.min(a.seats ?? 0, 9999) : 0);
 }
 
+function addDays(ymd: string, n: number): string {
+  if (!n) return ymd;
+  const [y, m, d] = ymd.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d + n));
+  return dt.toISOString().slice(0, 10);
+}
+
 function toLeg(t: TrainResult): RouteLeg {
   return {
     trainNumber: t.number,
@@ -385,6 +392,44 @@ export function buildLegPlans(probed: Connection[], pax?: number | null, opts: {
   }
   plans.sort((x, y) => (x.best?.totalDurationMinutes ?? 9e9) - (y.best?.totalDurationMinutes ?? 9e9) || y.leg1.length + y.leg2.length - (x.leg1.length + x.leg2.length));
   return plans.slice(0, opts.maxHubs ?? 2);
+}
+/* Round-18m-10: chosen hub ke liye POORE route ki trains — leg-1 origin→hub ki
+ * har train, leg-2 hub→destination ki har train (bounded `perLeg`), sab par
+ * pax-aware seat probe; phir joint best = seat-wale pairs mein valid + fastest. */
+export async function expandLegPlan(args: { from: string; to: string; hub: string; hubName?: string | null; date: string; travelClass: string | null; pax: number | null; perLeg?: number; leg2DayOffset?: number }): Promise<{ plan: LegPlan | null; sources: Set<string> }> {
+  const sources = new Set<string>();
+  const perLeg = args.perLeg ?? 10;
+  const [a, b] = await Promise.all([searchTrainsRouted({ from: args.from, to: args.hub, date: args.date }), searchTrainsRouted({ from: args.hub, to: args.to, date: addDays(args.date, args.leg2DayOffset ?? 0) })]);
+  if (a.provider !== "none") sources.add(a.provider);
+  if (b.provider !== "none") sources.add(b.provider);
+  const legA = [...a.trains].sort((x, y) => x.departure.localeCompare(y.departure)).slice(0, perLeg).map(toLeg);
+  const legB = [...b.trains].sort((x, y) => x.departure.localeCompare(y.departure)).slice(0, perLeg).map(toLeg);
+  const probe = async (l: RouteLeg, date: string): Promise<RouteLeg> => {
+    try {
+      const board = await routedClassBoard(l.trainNumber, date, l.from, l.to, "GN", args.travelClass ? [args.travelClass] : []);
+      const all = bookableRows(board.classes);
+      const best = all.find((r) => legBookable(r, args.pax)) ?? bestClassRow(board.classes, args.travelClass);
+      if (best) sources.add(best.source);
+      return { ...l, availability: best, classOptions: all };
+    } catch {
+      return { ...l, availability: null, classOptions: [] };
+    }
+  };
+  const dateB = addDays(args.date, args.leg2DayOffset ?? 0);
+  const [pa, pb] = await Promise.all([Promise.all(legA.map((l) => probe(l, args.date))), Promise.all(legB.map((l) => probe(l, dateB)))]);
+  const okA = pa.filter((l) => legBookable(l.availability, args.pax));
+  const okB = pb.filter((l) => legBookable(l.availability, args.pax)).map((l) => ({ ...l, departureDayOffset: args.leg2DayOffset ?? 0 }));
+  const combos: Connection[] = [];
+  for (const la of okA) for (const lb of okB) {
+    if (la.trainNumber === lb.trainNumber) continue;
+    /* leg-2 agle din ki ho to layover mein +1440 (evaluateConnection same-day maanta hai). */
+    const shifted = args.leg2DayOffset ? { ...lb, departure: lb.departure } : lb;
+    const c = evaluateConnection(la, shifted, args.hub, { source: a.provider === b.provider ? a.provider : `${a.provider}+${b.provider}`, stationName: args.hubName ?? null, maxLayoverMinutes: 480 });
+    if (c.valid) combos.push(c);
+  }
+  const best = bookableConnections(combos, args.pax)[0] ?? null;
+  if (!okA.length && !okB.length) return { plan: null, sources };
+  return { plan: { hub: args.hub, hubName: args.hubName ?? null, leg1: okA, leg2: okB, checkedLeg1: pa.length, checkedLeg2: pb.length, best }, sources };
 }
 export const CONNECTION_NO_SEAT_NOTE = "Connecting routes mile lekin kisi mein dono trains par seat available nahi thi (WL/N-A) — isliye connecting option nahi dikhaya.";
 
@@ -923,6 +968,8 @@ export async function planJourney(args: {
   searchProvider?: ServedProvider;
   /** Round-18m-10: false → model-written why-points skip (tests / fast paths). */
   aiWhy?: boolean;
+  /** Round-18m-10: false → top-hub full-route leg expansion skip. */
+  expandLegs?: boolean;
   /** Round-18m-9: seats needed — bookable = AVL >= pax (RAC only for <=2). */
   passengers?: number | null;
 }): Promise<JourneyPlan> {
@@ -1130,6 +1177,23 @@ export async function planJourney(args: {
     summary: null,
   };
   plan.legPlans = buildLegPlans(probedConnections, pax);
+  /* Round-18m-10: top hub ko poore route par expand karo — leg-1 ki HAR train
+   * origin→hub, leg-2 ki HAR train hub→destination (seat ke saath), phir AI ka
+   * joint best. Bounded (10+10 probes, parallel). */
+  if (plan.directUnavailable && plan.legPlans[0] && args.expandLegs !== false) {
+    try {
+      const top = plan.legPlans[0];
+      const off = top.best?.legs[0]?.arrivalDayOffset ?? 0;
+      const ex = await expandLegPlan({ from, to, hub: top.hub, hubName: top.hubName, date: args.date, travelClass: args.travelClass ?? null, pax, leg2DayOffset: off });
+      ex.sources.forEach((x) => sources.add(x));
+      if (ex.plan && ex.plan.leg1.length + ex.plan.leg2.length >= top.leg1.length + top.leg2.length) {
+        plan.legPlans[0] = { ...ex.plan, best: ex.plan.best ?? top.best };
+        plan.sources = [...sources];
+      }
+    } catch {
+      /* expanded plan optional */
+    }
+  }
   plan.summary = journeySummary(plan);
   plan.whyPoints = journeyWhyPoints(plan);
   plan.whySource = "rules";
@@ -1137,9 +1201,19 @@ export async function planJourney(args: {
    * facts sheet se), deterministic points sirf fallback. Bounded ~8s. */
   if (args.aiWhy !== false) {
     try {
-      const ai = await aiWhyPoints(plan);
+      /* Muse (primary) 12s → gpt-oss (fallback) 8s → rules. Total bounded ~20s. */
+      const ai = (await aiWhyPoints(plan, { timeoutMs: 12000 }).catch(() => null)) ?? (env.nluModel !== env.nvidiaModel ? await aiWhyPoints(plan, { timeoutMs: 12000, model: env.nluModel }).catch(() => null) : null);
       if (ai && ai.length >= 3) {
-        plan.whyPoints = ai;
+        /* 4–5 points chahiye: model ke points pehle, kami rules-based se
+         * (jo baat model ne already kahi ho — word-overlap — wo skip). */
+        const words = (t: string) => new Set(t.toLowerCase().match(/[a-z0-9₹]+/g) ?? []);
+        const overlap = (a: string, b: string) => { const A = words(a), B = words(b); let n = 0; for (const w of A) if (B.has(w)) n++; return n / Math.max(1, Math.min(A.size, B.size)); };
+        const merged = [...ai];
+        for (const r of plan.whyPoints ?? []) {
+          if (merged.length >= 5) break;
+          if (merged.every((m) => overlap(m, r) < 0.5)) merged.push(r);
+        }
+        plan.whyPoints = merged.slice(0, 5);
         plan.whySource = "ai";
       }
     } catch {
@@ -1171,17 +1245,46 @@ export function whyFactsSheet(plan: JourneyPlan): string {
   }
   if (!plan.legPlans?.length && plan.notes.some((n) => /Connecting routes mile lekin/.test(n))) L.push("Connecting routes were checked but no route had seats on both legs.");
   for (const d of plan.alternativeDates.slice(0, 3)) L.push(`Other date ${d.date}: ${d.count} trains${d.seatProof ? `, seat proof ${d.seatProof}` : ""}`);
-  if (plan.best) L.push(`Recommended (ranked #1): ${plan.best.trainNumbers.join("→")} ${plan.best.category} ${plan.best.durationLabel ?? ""} seat ${av(plan.best.availability)}.`);
-  else if (bfe[0]) L.push(`Recommended: book-from-earlier ${bfe[0].trainNumber} from ${bfe[0].bookFrom}.`);
-  else if (plan.legPlans?.[0]?.best) L.push(`Recommended: connecting via ${plan.legPlans[0].hub}.`);
+  const rec = recommendedOf(plan);
+  /* Pre-computed comparisons — model inhe articulate kare, khud calculate na kare. */
+  const fastest = [...direct].sort((x, y) => (x.durationMinutes ?? 9e9) - (y.durationMinutes ?? 9e9))[0];
+  const recDur = rec.kind === "bfe" ? rec.bfe?.durationMinutes ?? null : rec.kind === "connecting" ? rec.conn?.totalDurationMinutes ?? null : plan.best?.durationMinutes ?? null;
+  if (fastest?.durationMinutes && recDur != null) {
+    const diff = recDur - fastest.durationMinutes;
+    L.push(`COMPARISON: fastest direct is ${fastest.trainNumbers[0]} (${fastest.durationLabel}, seat ${av(fastest.availability)}); recommended takes ${durationLabelOf(recDur)} = ${diff <= 0 ? "same/faster" : `${durationLabelOf(diff)} longer`}.`);
+  }
+  if (rec.kind === "bfe" && rec.bfe) {
+    const cheapestWl = [...direct].filter((o) => o.availability?.fare != null).sort((x, y) => x.availability!.fare! - y.availability!.fare!)[0];
+    if (cheapestWl?.availability?.fare != null) L.push(`COMPARISON: cheapest direct ticket ${cheapestWl.trainNumbers[0]} ${cheapestWl.availability!.classCode} ₹${cheapestWl.availability!.fare} is WL — recommended ${rec.bfe.availability.classCode} ₹${rec.bfe.availability.fare ?? "?"} is ${rec.bfe.availability.fare != null ? `₹${rec.bfe.availability.fare - cheapestWl.availability!.fare!} more` : "confirmed"} but confirmed.`);
+    const conn = plan.legPlans?.[0]?.best;
+    if (conn) L.push(`COMPARISON: connecting via ${plan.legPlans![0].hub} takes ${durationLabelOf(conn.totalDurationMinutes)} with a ${conn.layoverMinutes} min change and two tickets — recommended is one train, no change.`);
+    L.push(`PRACTICAL: passenger boards at ${rec.bfe.boardAt} as usual; on IRCTC choose boarding point ${rec.bfe.boardAt}; fare counted from ${rec.bfe.bookFrom} (${rec.bfe.stopsBefore} stop earlier) — small extra.`);
+    if (rec.bfe.availability.stale) L.push("RISK: recommended seat data is stale (web cache) — re-verify before paying.");
+  }
+  if (rec.kind === "bfe" && rec.bfe) L.push(`RECOMMENDED PLAN: book-from-earlier — ${rec.bfe.trainNumber} ticket from ${rec.bfe.bookFrom}, board at ${rec.bfe.boardAt}, seat ${av(rec.bfe.availability)}. Direct tickets from ${plan.query.from} on ALL direct trains are WL/RAC/no-data (REJECTED for this party).`);
+  else if (rec.kind === "connecting" && rec.conn) L.push(`RECOMMENDED PLAN: connecting via ${rec.conn.station} — ${rec.conn.legs.map((l) => `${l.trainNumber} ${av(l.availability)}`).join(" then ")}. All direct trains REJECTED (no confirmed seat).`);
+  else if (rec.kind === "direct" && plan.best) L.push(`RECOMMENDED PLAN: direct ${plan.best.trainNumbers[0]} ${plan.best.durationLabel ?? ""} seat ${av(plan.best.availability)}.`);
+  else L.push("RECOMMENDED PLAN: none has a confirmed seat; the least-bad direct option is shown with its WL status. Do NOT claim any seat is confirmed.");
   return L.join("\n");
 }
 
+/* Kaunsa plan actually recommend ho raha hai (UI hero ke same rules). */
+export function recommendedOf(plan: JourneyPlan): { kind: "direct" | "bfe" | "connecting" | "none"; bfe?: BoardFromEarlierOption | null; conn?: Connection | null } {
+  const pax = plan.query.passengers ?? null;
+  if (!plan.directUnavailable && plan.best && legBookable(plan.best.availability, pax)) return { kind: "direct" };
+  const bfe = (plan.recovery?.boardFromEarlier ?? []).find((b) => !b.availability.stale) ?? null;
+  if (bfe) return { kind: "bfe", bfe };
+  const conn = plan.legPlans?.[0]?.best ?? plan.connections[0] ?? plan.recovery?.connecting?.[0] ?? null;
+  if (conn) return { kind: "connecting", conn };
+  return { kind: "none" };
+}
+
 const WHY_TOKEN_RE = /\b\d{5}\b|\b[A-Z]{2,5}\b|₹\s?\d|\b\d+h\b|\bmin\b|AVL|RAC|WL|seat/;
-export async function aiWhyPoints(plan: JourneyPlan, opts: { timeoutMs?: number } = {}): Promise<string[] | null> {
+export async function aiWhyPoints(plan: JourneyPlan, opts: { timeoutMs?: number; model?: string } = {}): Promise<string[] | null> {
   const key = env.nvidiaApiKey;
   if (!key || process.env.VITEST) return null;
   const facts = whyFactsSheet(plan);
+  const pax = plan.query.passengers ?? null;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 9000);
   try {
@@ -1190,7 +1293,7 @@ export async function aiWhyPoints(plan: JourneyPlan, opts: { timeoutMs?: number 
       headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
       signal: controller.signal,
       body: JSON.stringify({
-        model: env.nluModel,
+        model: opts.model ?? env.nvidiaModel,
         temperature: 0.2,
         max_tokens: 500,
         reasoning_effort: "low",
@@ -1198,7 +1301,7 @@ export async function aiWhyPoints(plan: JourneyPlan, opts: { timeoutMs?: number 
           {
             role: "system",
             content:
-              "You are RailBook's journey planner explaining WHY you recommended a plan to an Indian traveller. Write in Hinglish (Roman Hindi + English), like a smart friend. Output ONLY a JSON array of 4 to 5 short strings (max 22 words each). Each point must be a genuinely important, decision-relevant reason grounded ONLY in the facts sheet: seat certainty for the party size, speed vs alternatives, what was checked and rejected, cost/class trade-offs, boarding/IRCTC practicalities, risk (stale data / RAC / layover). Never invent trains, seats, fares, or times not in the sheet. No markdown.",
+              "You are RailBook's journey planner explaining WHY you recommended a plan to an Indian traveller. Write in Hinglish (Roman Hindi mixed with English, e.g. \"12345 mein XYZ se ticket lene par 2A AVL 36 — 2 logon ke liye confirmed\"), like a smart friend; NOT pure English. Output ONLY a JSON array of 4 to 5 short strings (max 24 words each), no labels/prefixes like COMPARISON:, each a complete Hinglish sentence a traveller would understand. Explain the RECOMMENDED PLAN line only, using the COMPARISON/PRACTICAL/RISK lines for substance (what was rejected and why, time/cost trade-off, how to book, risk); trains marked REJECTED/WL must never be described as having a seat. Each point must be a genuinely important, decision-relevant reason grounded ONLY in the facts sheet: seat certainty for the party size, speed vs alternatives, what was checked and rejected, cost/class trade-offs, boarding/IRCTC practicalities, risk (stale data / RAC / layover). Never invent trains, seats, fares, or times not in the sheet; seat counts (AVL 36) are seats, never money; never say 'per person'. No markdown.",
           },
           { role: "user", content: `FACTS:\n${facts}\n\nReturn the JSON array now.` },
         ],
@@ -1207,20 +1310,49 @@ export async function aiWhyPoints(plan: JourneyPlan, opts: { timeoutMs?: number 
     if (!res.ok) return null;
     const j = (await res.json()) as { choices?: { message?: { content?: string | null } }[] };
     const raw = String(j.choices?.[0]?.message?.content ?? "");
+    if (process.env.WHY_DEBUG) console.error("[aiWhy raw]", raw.slice(0, 1200));
     const m = raw.match(/\[[\s\S]*\]/);
     if (!m) return null;
     const arr = JSON.parse(m[0]) as unknown;
     if (!Array.isArray(arr)) return null;
     const factTokens = new Set((facts.match(/\b\d{5}\b|\b[A-Z]{2,5}\b|₹\s?\d+/g) ?? []).map((t) => t.replace(/\s+/g, "")));
+    /* Grounding-2: jin trains mein pax ke liye seat NAHI (direct WL/RAC/no-data),
+     * unke saath "confirmed/available/AVL" claim → point drop. */
+    const noSeat = new Set(plan.routeOptions.filter((o) => o.changes === 0 && !legBookable(o.availability, pax)).map((o) => o.trainNumbers[0]));
+    const seatOk = new Set<string>();
+    for (const b of plan.recovery?.boardFromEarlier ?? []) if (!b.availability.stale) seatOk.add(b.trainNumber);
+    for (const lp of plan.legPlans ?? []) for (const l of [...lp.leg1, ...lp.leg2]) seatOk.add(l.trainNumber);
+    for (const c of plan.connections) for (const l of c.legs) seatOk.add(l.trainNumber);
+    const CONFIRM_RE = /confirm|available|\bAVL\b|seat certainty|seat (?:hai|milegi|mil rahi)|guaranteed/i;
+    const rec0 = recommendedOf(plan);
+    const fastest0 = [...plan.routeOptions].filter((o) => o.changes === 0).sort((x, y) => (x.durationMinutes ?? 9e9) - (y.durationMinutes ?? 9e9))[0];
+    const recDur0 = rec0.kind === "bfe" ? rec0.bfe?.durationMinutes ?? null : rec0.kind === "connecting" ? rec0.conn?.totalDurationMinutes ?? null : plan.best?.durationMinutes ?? null;
+    const recIsFastest = !fastest0?.durationMinutes || recDur0 == null || recDur0 <= fastest0.durationMinutes + 15;
+    /* Grounding-3: ₹ ke saath likha har number plan ka REAL fare ho (36 seats ko "36₹" banana → drop). */
+    const fares = new Set<number>();
+    const addFare = (a?: RouteAvailability | null) => { if (a?.fare != null) fares.add(a.fare); };
+    for (const o of plan.routeOptions) addFare(o.availability);
+    for (const b of plan.recovery?.boardFromEarlier ?? []) { addFare(b.availability); for (const r of b.classOptions ?? []) addFare(r); }
+    for (const lp of plan.legPlans ?? []) for (const l of [...lp.leg1, ...lp.leg2]) { addFare(l.availability); for (const r of l.classOptions ?? []) addFare(r); }
+    for (const c of plan.connections) for (const l of c.legs) { addFare(l.availability); for (const r of l.classOptions ?? []) addFare(r); }
+    const rupeeOk = (x: string) => {
+      const found = [...x.matchAll(/₹\s?(\d[\d,]*)|(\d[\d,]*)\s?₹|\bRs\.?\s?(\d[\d,]*)|(\d[\d,]*)\s?(?:rupees|rupaye)/gi)].map((m) => Number((m[1] ?? m[2] ?? m[3] ?? m[4]).replace(/,/g, "")));
+      return found.every((n) => fares.has(n));
+    };
     const out = arr
       .filter((x): x is string => typeof x === "string")
-      .map((x) => x.trim().replace(/^[-•*]\s*/, ""))
+      .map((x) => x.trim().replace(/^[-•*]\s*/, "").replace(/^(?:COMPARISON|PRACTICAL|RISK|TIME\/COST|COST|TIME|SEAT|BOOKING|WHY)\s*[:\-–]\s*/i, ""))
       .filter((x) => x.length >= 12 && x.length <= 220)
       .filter((x) => {
-        /* grounding: har 5-digit train no / ₹fare jo point mein hai, facts mein bhi ho. */
-        const nums = x.match(/\b\d{5}\b|₹\s?\d+/g) ?? [];
-        return nums.every((n) => factTokens.has(n.replace(/\s+/g, ""))) && WHY_TOKEN_RE.test(x);
+        const nums = x.match(/\b\d{5}\b/g) ?? [];
+        if (!nums.every((n) => factTokens.has(n)) || !WHY_TOKEN_RE.test(x) || !rupeeOk(x)) return false;
+        const trainsIn = x.match(/\b\d{5}\b/g) ?? [];
+        if (CONFIRM_RE.test(x) && trainsIn.some((t) => noSeat.has(t) && !seatOk.has(t)) && !/\b(WL|waitlist|nahi|not|no seat|rejected)\b/i.test(x)) return false;
+        /* "fastest" claim sirf tab jab recommended sach mein fastest ke barabar ho. */
+        if (/\b(fastest|sabse (?:fast|tez|jaldi)|quickest)\b/i.test(x) && !recIsFastest && !/\b(but|lekin|par|though|nahi|not|slower|longer)\b/i.test(x)) return false;
+        return true;
       });
+    if (process.env.WHY_DEBUG) console.error("[aiWhy kept]", out);
     return out.length >= 3 ? out.slice(0, 5) : null;
   } finally {
     clearTimeout(timer);

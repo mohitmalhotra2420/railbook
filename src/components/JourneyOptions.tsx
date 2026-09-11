@@ -386,7 +386,7 @@ export function JourneyOptions({
           </div>
           {why.length > 0 && (
             <div className={`jx-why${whyOpen ? " open" : ""}`}>
-              <button type="button" className="jx-why-head" onClick={() => setWhyOpen((v) => !v)}><span className="jx-why-ic">{IC.spark}</span> AI ne ye plan kyun chuna <span className={`jx-caret${whyOpen ? " open" : ""}`} /></button>
+              <button type="button" className="jx-why-head" onClick={() => setWhyOpen((v) => !v)}><span className="jx-why-ic">{IC.spark}</span> AI ne ye plan kyun chuna{plan.whySource === "ai" && <span className="jx-why-tag">AI-written</span>} <span className={`jx-caret${whyOpen ? " open" : ""}`} /></button>
               {whyOpen && <ul className="jx-why-list">{why.map((w, i) => <li key={i}><span className="jx-why-check">{IC.check}</span>{w}</li>)}</ul>}
             </div>
           )}
@@ -432,7 +432,7 @@ export function JourneyOptions({
           </div>
           {why.length > 0 && (
             <div className={`jx-why${whyOpen ? " open" : ""}`}>
-              <button type="button" className="jx-why-head" onClick={() => setWhyOpen((v) => !v)}><span className="jx-why-ic">{IC.spark}</span> AI ne ye plan kyun chuna <span className={`jx-caret${whyOpen ? " open" : ""}`} /></button>
+              <button type="button" className="jx-why-head" onClick={() => setWhyOpen((v) => !v)}><span className="jx-why-ic">{IC.spark}</span> AI ne ye plan kyun chuna{plan.whySource === "ai" && <span className="jx-why-tag">AI-written</span>} <span className={`jx-caret${whyOpen ? " open" : ""}`} /></button>
               {whyOpen && <ul className="jx-why-list">{why.map((w, i) => <li key={i}><span className="jx-why-check">{IC.check}</span>{w}</li>)}</ul>}
             </div>
           )}
