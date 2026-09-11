@@ -114,7 +114,7 @@ export interface AgentPartialSegment {
   berth: { coach: string; berth: number; type: string } | null;
 }
 export interface AgentJourneyPlan {
-  query: { from: string; to: string; date: string; travelClass: string | null; preference: string };
+  query: { from: string; to: string; date: string; travelClass: string | null; preference: string; passengers?: number | null };
   best: AgentRouteOption | null;
   routeOptions: AgentRouteOption[];
   connections: AgentConnection[];
@@ -122,6 +122,8 @@ export interface AgentJourneyPlan {
   directUnavailable: boolean;
   /** Round-18l: server-built plain-language summary (best → fallback → alt date). */
   summary?: string | null;
+  /** Round-18m-9: 3–5 deterministic reasons for the recommendation. */
+  whyPoints?: string[];
   recovery: {
     reason: string;
     differentTrain: AgentRouteOption[];

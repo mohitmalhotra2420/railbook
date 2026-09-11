@@ -1083,6 +1083,8 @@ export type ToolExecContext = {
   /** User ka original message — WEB_SEARCH isse Hinglish sawaal ka topic
    * (speed/history/coach) samajh kar Wikipedia se focused jawab nikalta hai. */
   userText?: string;
+  /** Round-18m-9: passengers from known context — seat filters use it. */
+  passengers?: number | null;
 };
 
 export async function executeApprovedTool(
@@ -1636,6 +1638,7 @@ export async function executeApprovedTool(
           preference: pref,
           includeConnections: Boolean(a.include_connections) || prefRaw === "alternative" || prefRaw === "fewest_changes",
           includeAlternativeDates: Boolean(a.include_alternative_dates) || prefRaw === "alternative",
+          passengers: ctx.passengers ?? (a.passengers as number | undefined) ?? null,
         });
         const top = plan.routeOptions.slice(0, 5);
         const line = (o: (typeof top)[number]) =>
@@ -2516,7 +2519,7 @@ export async function runAgenticTurn(input: {
             rejected: "date_required",
           };
         } else {
-          result = await executeApprovedTool(toolName, args, { userText: input.text });
+          result = await executeApprovedTool(toolName, args, { userText: input.text, passengers: input.known?.passengers ?? null });
         }
         // Structured table capture (user feedback 2026-09-05): SEARCH/JOURNEY
         // success par rows nikalo — client proper <table> render karega, aur
@@ -2557,7 +2560,7 @@ export async function runAgenticTurn(input: {
           const d = result.data as { from?: string; to?: string; date?: string; trains?: unknown[]; provider?: string } | null;
           if (d?.from && d?.to && d?.date && Array.isArray(d.trains) && d.trains.length) {
             try {
-              const plan = await planJourney({ from: String(d.from), to: String(d.to), date: String(d.date), travelClass: (args.travel_class as string | undefined)?.toUpperCase() ?? null, preference: "best_overall", includeConnections: false, includeAlternativeDates: false });
+              const plan = await planJourney({ from: String(d.from), to: String(d.to), date: String(d.date), travelClass: (args.travel_class as string | undefined)?.toUpperCase() ?? null, preference: "best_overall", includeConnections: false, includeAlternativeDates: false, passengers: input.known?.passengers ?? null });
               if (plan.routeOptions.length) {
                 input.capture.plan = plan;
                 /* Round-18l: user-visible text (verbatim when every model times out) — no model instructions. */

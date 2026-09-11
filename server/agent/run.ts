@@ -335,7 +335,7 @@ async function atlasFallback(
    * CONSIDER plan deta hai (searched trains reuse — extra search nahi). */
   let journey: JourneyPlan | null = null;
   try {
-    journey = await planJourney({ from: ctx.origin!.code, to: ctx.destination!.code, date: ctx.date!, travelClass: ctx.classCode ?? null, preference: pref === "cheapest" ? "cheapest" : pref === "fastest" ? "fastest" : "best_overall", includeConnections: false, includeAlternativeDates: false, trains, searchProvider: search.provider });
+    journey = await planJourney({ from: ctx.origin!.code, to: ctx.destination!.code, date: ctx.date!, travelClass: ctx.classCode ?? null, preference: pref === "cheapest" ? "cheapest" : pref === "fastest" ? "fastest" : "best_overall", includeConnections: false, includeAlternativeDates: false, trains, searchProvider: search.provider, passengers: ctx.paxProvided ? ctx.passengers : null });
   } catch {
     journey = null;
   }
@@ -934,6 +934,20 @@ async function answerFromWebScrape(questionText: string): Promise<string | null>
   }
 }
 
+/* Round-18m-9 (user: "kitni seats chahiye ye pata ho tabhi train dhoondho"):
+ * journey search se PEHLE passenger count — origin+destination+date lock hone ke
+ * baad, train-specific (number) sawaal par nahi, info-only follow-ups par nahi. */
+const PAX_GATE_INTENTS = new Set(["SEARCH_TRAIN", "BOOK_TRAIN", "NONE"]);
+function passengerGateAsk(ctx: AgentContext, det: { intent?: string | null; trainNumber?: string | null }, text: string, opts: { trainNo?: string | null; stationPick?: unknown } = {}): string | null {
+  if (opts.trainNo || det.trainNumber) return null;
+  if (!ctx.origin || !ctx.destination || !ctx.date || !ctx.dateProvided) return null;
+  if (ctx.paxProvided && ctx.passengers) return null;
+  if (!PAX_GATE_INTENTS.has(String(det.intent ?? "NONE"))) return null;
+  if (/\b(live|status|kahan hai|platform|timetable|schedule|time table|route|stops?|pnr|coach|fare|kiraya|cancel)\b/i.test(text) && !opts.stationPick) return null;
+  const when = ctx.date ? ` ${ctx.date} ko` : "";
+  return `${ctx.origin.code} → ${ctx.destination.code}${when} — kitne passengers hain? (1–6) Seats usi hisaab se check karunga.`;
+}
+
 function missingOf(known: KnownSlots): string[] {
   const missing: string[] = [];
   if (!known.from) missing.push("from");
@@ -1467,6 +1481,34 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
       }
     }
 
+    /* Round-18m-9: passenger-count gate — search se pehle. */
+    {
+      const paxAsk = passengerGateAsk(ctx, det, req.text, { trainNo, stationPick });
+      if (paxAsk) {
+        ctx.bookingStage = "collecting";
+        return {
+          nlu: det,
+          source: "nlu",
+          context: ctx,
+          tool: null,
+          toolOk: null,
+          reply: paxAsk,
+          interrupt: false,
+          resumeAsk: "passengers",
+          resumeText: null,
+          trains: null,
+          confirmBook: false,
+          missingFields: ["passengers"],
+          modelUsed: null,
+          latencyMs: 0,
+          failureReason: null,
+          engine: "deterministic",
+          agenticFailureReason: null,
+          grounded: true,
+        };
+      }
+    }
+
     /* ── ROUND-13d: LIVE fast-path — "18310 kahan hai abhi" jaisi UNAMBIGUOUS
      * query par LLM round-trip (10s+) bekar hai. Train number + live-phrase,
      * aur number ke siwaay sirf stopwords bache (koi station/city token nahi)
@@ -1853,7 +1895,7 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
          * YOU / summary / seat-wale connections) — plain table nahi. */
         if (search.trains.length) {
           try {
-            detJourney = await planJourney({ from: ctx.origin!.code, to: ctx.destination!.code, date: ctx.date!, travelClass: ctx.classCode ?? null, preference: "best_overall", includeConnections: false, includeAlternativeDates: false, trains: search.trains, searchProvider: search.provider });
+            detJourney = await planJourney({ from: ctx.origin!.code, to: ctx.destination!.code, date: ctx.date!, travelClass: ctx.classCode ?? null, preference: "best_overall", includeConnections: false, includeAlternativeDates: false, trains: search.trains, searchProvider: search.provider, passengers: ctx.paxProvided ? ctx.passengers : null });
           } catch {
             detJourney = null;
           }
