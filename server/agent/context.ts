@@ -407,8 +407,8 @@ export function mergeAgentContext(
      * us slot ko routeChanged mat maano, di hui date rakho. */
     (nlu.from && !prev.origin && !prev.pendingOriginChoice) ||
     (nlu.to && !prev.destination && !prev.pendingDestinationChoice) ||
-    Boolean(nlu.unresolvedFrom) ||
-    Boolean(nlu.unresolvedTo);
+    (Boolean(nlu.unresolvedFrom) && !prev.pendingOriginChoice) ||
+    (Boolean(nlu.unresolvedTo) && !prev.pendingDestinationChoice);
   if (routeChanged && !nlu.date && (nlu.from || nlu.to || nlu.unresolvedFrom || nlu.unresolvedTo)) {
     next.date = null;
     next.dateProvided = false;

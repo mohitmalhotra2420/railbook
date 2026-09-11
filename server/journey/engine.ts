@@ -596,7 +596,7 @@ export async function findPartialRouteSeats(args: {
  * provider-proven: timetable → up to `stopsBack` earlier stops → probe
  * bookFrom→destination → keep AVL/RAC only. Never invented. */
 export async function findBoardFromEarlier(args: {
-  trains: { number: string; name: string; directStatus?: string | null }[];
+  trains: { number: string; name: string; directStatus?: string | null; durationMinutes?: number | null }[];
   origin: string;
   destination: string;
   date: string;
@@ -633,7 +633,8 @@ export async function findBoardFromEarlier(args: {
             const depM = minutesOf(stops[iFrom].departure ?? stops[iFrom].arrival ?? "");
             const arrM = minutesOf(dest.arrival ?? dest.departure ?? "");
             const dayDiff = Math.max(0, dayOf(dest) - dayOf(stops[iFrom]));
-            let durationMinutes: number | null = depM != null && arrM != null ? arrM - depM + dayDiff * 1440 : null;
+            /* Search result ka duration (boardAt→destination) sabse reliable; schedule se sirf fallback. */
+            let durationMinutes: number | null = t.durationMinutes && t.durationMinutes > 0 ? t.durationMinutes : depM != null && arrM != null ? arrM - depM + dayDiff * 1440 : null;
             if (durationMinutes != null && durationMinutes <= 0) durationMinutes += 1440; // schedule bina day → overnight
 
             options.push({
@@ -999,7 +1000,7 @@ export async function planJourney(args: {
       const wlDirect = [...trains]
         .sort((a, b) => (a.durationMinutes || 9e9) - (b.durationMinutes || 9e9) || a.number.localeCompare(b.number))
         .filter((t) => { const a = availability.get(t.number); return !a || (a.status !== "AVAILABLE" && a.status !== "RAC") || a.stale; })
-        .map((t) => ({ number: t.number, name: t.name, directStatus: availability.get(t.number)?.status ?? null }));
+        .map((t) => ({ number: t.number, name: t.name, directStatus: availability.get(t.number)?.status ?? null, durationMinutes: t.durationMinutes ?? null }));
       if (wlDirect.length) {
         /* Round-18m-7: ConfirmTkt jaisa — SAARI direct trains (bounded 10) × pichhle stops × har class. */
         const r = await findBoardFromEarlier({ trains: wlDirect, origin: from, destination: to, date: args.date, travelClass: args.travelClass ?? null, limitTrains: JOURNEY_CONFIG.boardEarlierTrains });

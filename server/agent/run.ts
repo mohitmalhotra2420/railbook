@@ -1690,6 +1690,11 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
     const picked = stationPick.code;
     if (stationPick.side === "to" && understood.nlu.from?.code === picked) understood.nlu.from = undefined;
     if (stationPick.side === "from" && understood.nlu.to?.code === picked) understood.nlu.to = undefined;
+    /* Round-18m-7 (prod repro: "kal" + Varanasi → "Bsb" → date dobara poochhi):
+     * NLU "Bsb" ko unresolvedTo maanta hai → mergeAgentContext ise NAYA route
+     * samajh kar date reset kar deta tha. Pick server-verified hai → unresolved hatao. */
+    understood.nlu.unresolvedTo = stationPick.side === "to" ? undefined : understood.nlu.unresolvedTo;
+    understood.nlu.unresolvedFrom = stationPick.side === "from" ? undefined : understood.nlu.unresolvedFrom;
   }
   const ctx = mergeAgentContext(seeded2, understood.nlu, req.text);
   await autoResolveSingleStation(ctx, understood.nlu); // Round-16j
