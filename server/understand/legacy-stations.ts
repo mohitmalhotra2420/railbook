@@ -224,8 +224,23 @@ const FUZZ_TARGETS: FuzzTarget[] = [
     .filter((x): x is FuzzTarget => Boolean(x.st)),
 ];
 
+/* Round-18m-11: asli alag shehar jo local list mein nahi — fuzzy inhe kisi
+ * milte-julte naam (raipur→jaipur, prayagraj→?) se NAHI jodega; provider lookup
+ * karega ya options poochega. */
+const DISTINCT_CITIES = new Set([
+  "raipur", "prayagraj", "allahabad", "prayag", "rajkot", "udaipur", "jodhpur", "madurai", "guwahati", "ranchi", "patna", "surat", "indore", "bhopal",
+  "kota", "ajmer", "bikaner", "rishikesh", "shimla", "kanpur", "mathura", "gwalior", "jhansi", "bareilly", "moradabad", "aligarh", "ayodhya", "faizabad",
+  "panipat", "karnal", "kurukshetra", "rohtak", "hisar", "pathankot", "jalandhar", "firozpur", "sirsa", "meerut", "muzaffarnagar", "roorkee", "haldwani",
+  "kathgodam", "lucknow", "varanasi", "banaras", "gaya", "dhanbad", "asansol", "durgapur", "bilaspur", "jabalpur", "ujjain", "ratlam", "vadodara", "baroda",
+  "rajahmundry", "vijayawada", "warangal", "nanded", "solapur", "kolhapur", "belgaum", "hubli", "mysore", "mysuru", "mangalore", "mangaluru", "kochi", "ernakulam",
+  "thrissur", "kozhikode", "calicut", "kannur", "trivandrum", "thiruvananthapuram", "coimbatore", "salem", "erode", "trichy", "tiruchirappalli", "tirupati", "nellore",
+  "guntur", "puri", "cuttack", "bhubaneswar", "sambalpur", "rourkela", "siliguri", "malda", "agartala", "dibrugarh", "jorhat", "silchar", "imphal", "dimapur",
+  "jaipur", "jammu", "katra", "udhampur", "amritsar", "ludhiana", "chandigarh", "haridwar", "dehradun", "gorakhpur", "nagpur", "pune", "goa", "madgaon", "vasco",
+]);
+
 export function matchStationFuzzy(raw: string): Station | undefined {
   const q = raw.trim().toLowerCase().replace(/\s+/g, " ");
+  if (DISTINCT_CITIES.has(q) && !FUZZ_TARGETS.some((t) => t.key === q)) return undefined;
   /* Devanagari (Round-12b): matra-typos ("लुधिआना", "चंडीगढ") bhi —
    * Devanagari words codepoints mein lambe hote hain, min 6 ka guard
    * short Hindi words ("क्या") ke false-positive rokta hai. */
@@ -293,9 +308,20 @@ export function matchStation(raw: string): Station | undefined {
   );
   if (exact) return exact;
   if (/[a-z]/i.test(q) && q.length < 3) return undefined;
-  return CLIENT_STATIONS.find(
-    (s) => s.city.toLowerCase() === q || q.includes(s.city.toLowerCase()),
-  );
+  /* Round-18m-11 (user bug: "prayagraj" → AGC kyunki "pr-agra-j" mein "agra"
+   * substring tha): city sirf POORE WORD ke roop mein match ho — "agra cantt
+   * se" theek, "prayagraj"/"nagra" galat. Word-boundary Unicode-safe. */
+  const hasWord = (hay: string, word: string): boolean => {
+    let i = hay.indexOf(word);
+    while (i >= 0) {
+      const before = hay[i - 1] ?? "";
+      const after = hay[i + word.length] ?? "";
+      if (!/[\p{L}\p{N}]/u.test(before) && !/[\p{L}\p{N}]/u.test(after)) return true;
+      i = hay.indexOf(word, i + 1);
+    }
+    return false;
+  };
+  return CLIENT_STATIONS.find((s) => s.city.toLowerCase() === q || hasWord(q, s.city.toLowerCase()));
 }
 
 const ALIAS_KEYS = Object.keys(ALIASES).sort((a, b) => b.length - a.length);
