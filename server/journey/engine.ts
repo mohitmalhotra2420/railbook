@@ -798,9 +798,11 @@ export async function findBoardFromEarlier(args: {
         for (let j = 0; j < later.length; j++) {
           if (await tryOneSegment(stops[iFrom], later[j], 0, j + 1)) return;
         }
-        /* Phase 3: earlier × later combo (bounded — nazdeek ke 3×3). */
-        for (let k = 0; k < Math.min(3, earlier.length); k++) {
-          for (let j = 0; j < Math.min(3, later.length); j++) {
+        /* Phase 3: earlier × later combo — SAARE earlier stops (train origin tak) × nazdeek ke
+         * 3 later stops. User case: LDH→INDB par seat JAT(6 stops pehle)→DADN(1 aage) hi mili —
+         * 3×3 bound se chhoot jaata tha. Nazdeek wala later stop pehle, phir door ka earlier. */
+        for (let j = 0; j < Math.min(3, later.length); j++) {
+          for (let k = 0; k < earlier.length; k++) {
             if (await tryOneSegment(earlier[k], later[j], k + 1, j + 1)) return;
           }
         }

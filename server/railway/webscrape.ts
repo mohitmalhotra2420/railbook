@@ -671,6 +671,8 @@ export type ScrapedSeatAvailability = {
   /** Round-18m: RailYatri ki cached entry SA_MAX_AGE se purani thi — status
    * sirf "last known" hai (UI mein ⚠ stale label), fresh nahi maani jaati. */
   stale?: boolean;
+  /** Round-18m-17: RailYatri ne IRCTC se abhi live pull kiya (data_from:"IRCTC") — cache nahi. */
+  live?: boolean;
   provider: "web_railyatri";
   sourceUrl: string;
 };
@@ -682,6 +684,13 @@ export function parseIrctcAvailabilityText(raw: string): Pick<ScrapedSeatAvailab
     return m ? Number(m[1]) : null;
   };
   if (/^(AVAILABLE|AVL|CURR_AVBL)/.test(t)) return { status: "AVAILABLE", seats: num(/(\d+)/), rac: null, waitlist: null };
+  /* Round-18m-17 (user ConfirmTkt case 12920 JAT→DADN 1A): IRCTC live text
+   * "GNWL/AVAILABLE" = quota-type GNWL, CURRENT status AVAILABLE (WL number
+   * nahi hai) — ye seat hai, waitlist nahi. Isi tarah "GNWL/RAC 3" = RAC. */
+  const slash = t.match(/^(?:GNWL|RLWL|PQWL|TQWL|RSWL|RQWL|CKWL)\s*\/\s*(AVAILABLE|AVL|CURR_AVBL)\s*-?\s*(\d+)?/);
+  if (slash) return { status: "AVAILABLE", seats: slash[2] ? Number(slash[2]) : null, rac: null, waitlist: null };
+  const slashRac = t.match(/^(?:GNWL|RLWL|PQWL|TQWL|RSWL|RQWL|CKWL)\s*\/\s*RAC\s*-?\s*(\d+)?/);
+  if (slashRac) return { status: "RAC", seats: null, rac: slashRac[1] ? Number(slashRac[1]) : null, waitlist: null };
   if (/^RAC/.test(t)) return { status: "RAC", seats: null, rac: num(/RAC\s*-?\s*(\d+)/), waitlist: null };
   if (/WL\s*-?\s*\d+/.test(t) || /^(GNWL|RLWL|PQWL|TQWL|RSWL|RQWL|CKWL)/.test(t)) {
     /* "GNWL45/WL20" — current WL (second number) hi user ke liye matter karta hai. */
@@ -719,7 +728,12 @@ export async function scrapeSeatAvailabilityWeb(
   const q = String(quota || "GN").toUpperCase();
   const url =
     `https://sa.railyatri.in/api/v3/seat/availability/${num}/${dateYmd}/${f}/${t}/${c}/${q}.json` +
-    `?device_type_id=6&utm_source=dweb_sa&user_id=-2345434&authentication_token=&train_search=true&train_source=${f}&train_destination=${t}`;
+    /* Round-18m-17 (user: ConfirmTkt ne JAT→DADN 1A AVL dikhaya, hamare paas
+     * railyatri cache mein WL2 tha): `refresh=true` par RailYatri IRCTC se LIVE
+     * pull karta hai (data_from:"IRCTC", timestamp abhi ka) — API quota khatam
+     * hone par bhi fresh seat data. Verified 2026-09-12: 12920 JAT→DADN 1A
+     * cache "GNWL2/WL2" (10 Sep) → refresh "GNWL/AVAILABLE" ₹4345 (IRCTC, now). */
+    `?device_type_id=6&utm_source=dweb_sa&user_id=-2345434&authentication_token=&train_search=true&train_source=${f}&train_destination=${t}&refresh=true`;
   try {
     const res = await (scrapeFetchImpl ?? globalThis.fetch.bind(globalThis))(url, {
       headers: { "User-Agent": UA, Accept: "application/json", Referer: "https://www.railyatri.in/" },
@@ -738,6 +752,7 @@ export async function scrapeSeatAvailabilityWeb(
         last_updated_at?: string | null;
         cache_text?: string | null;
       }[];
+      data_from?: string | null;
     } | null;
     const rows = j?.seat_availibility ?? [];
     if (!j?.success || !rows.length) return null;
@@ -751,6 +766,7 @@ export async function scrapeSeatAvailabilityWeb(
     /* FRESHNESS guard: RailYatri cache purana ho sakta hai ("As of 16 days
      * ago" dekha) — booking-critical data 24h se purana kabhi nahi dete;
      * stale = null (honest UNKNOWN upar). Timestamp parse na ho to bhi null. */
+    /* Live rows: "2026-09-12T13:21:11+05:30"; cached rows: "2026-09-12 13:20:03 +0530". */
     const updatedMs = Date.parse(String(row.last_updated_at ?? "").replace(" +0530", "+05:30").replace(" ", "T"));
     /* Round-18m (user: "fallback pe seat data poora nahi aa raha"): purani
      * cache ko chhupane ki jagah STALE flag ke saath do — UI "⚠ stale" + "as of
@@ -775,6 +791,7 @@ export async function scrapeSeatAvailabilityWeb(
       totalFare: typeof row.total_fare === "number" ? row.total_fare : null,
       lastUpdatedAt: row.last_updated_at ?? null,
       cacheText: row.cache_text ?? null,
+      live: String(j.data_from ?? "").toUpperCase() === "IRCTC",
       ...(stale ? { stale: true } : {}),
       provider: "web_railyatri",
       sourceUrl: `https://www.railyatri.in/seat-availability/${num}`,

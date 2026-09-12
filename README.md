@@ -218,6 +218,12 @@ only provider-verified alternatives.
 - More candidates: fixed hubs (up to 10 connections) + **route-derived hubs** (`routeDerivedHubs()` — junction/major stops from the direct trains' timetable, e.g. JAT→BDTS tries PTKC/LDH/NDLS/SWM/RTM/BH), all legs probed, then filtered.
 - When nothing passes: card + `plan.notes` say "Connecting routes mile lekin kisi mein dono trains par seat available nahi thi — isliye connecting option nahi dikhaya." Summary's "route via X" line lists per-leg seats.
 
+### Round-18m-17 — LIVE IRCTC seat data via RailYatri refresh + "GNWL/AVAILABLE" parse fix (real seat found)
+- RailYatri SA API with `refresh=true` pulls LIVE from IRCTC (`data_from:"IRCTC"`, timestamp now) instead of a days-old cache — fresh seat data even when RailCore/RailKit/RailRadar quotas are exhausted. Scraped rows carry `live:true`.
+- Parser: IRCTC live text `GNWL/AVAILABLE` (quota GNWL, current status AVAILABLE) was mis-read as WAITLIST → now AVAILABLE; `GNWL/RAC n` → RAC. Regression tests.
+- Book-upto combo scan: ALL earlier stops (to train origin) × nearest 3 later stops (was 3×3 — missed JAT, 6 stops before LDH).
+- Verified live 2026-09-12: LDH→INDB 13 Sep, 12920 Malwa Exp — every class WL; engine found **Book From JAT · Board LDH · Deboard INDB · Book Upto DADN → 1A AVAILABLE ₹4,345** (same as ConfirmTkt).
+
 ### Round-18m-16 — ConfirmTkt-style "Book Upto" seat finder (ticket beyond destination)
 - User screenshot (LDH→INDB, 12920 Malwa Exp): direct WL, but ConfirmTkt found **Book From JAT · Boarding LDH · Deboarding INDB · Book Upto DADN → 1A AVL**.
 - `findBoardFromEarlier` now has `mode: "upto"`: for every WL direct train it probes origin→(stops after destination, up to `BOOK_UPTO_STOPS`=6) and earlier×later combos (3×3), **every class**, provider-proven rows only.
