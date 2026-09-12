@@ -53,6 +53,8 @@ export interface ClassAvailability {
   fareSource?: string;
   /** Round-18m: web cache 24h+ purana — "last known" (⚠). */
   stale?: boolean;
+  /** Round-18m-26: provider timestamp (ISO) — "X din pehle ka data". */
+  updatedAt?: string;
 }
 
 export interface TrainResult {

@@ -26,17 +26,41 @@ function legDateLabel(baseYmd: string | null | undefined, n: number): string {
 }
 
 type AvailLike = NonNullable<AgentRouteLeg["availability"]>;
-function availTextOf(a: AvailLike | null | undefined): { text: string; tone: "ok" | "warn" | "bad" | "muted" } {
+/* Round-18m-26 (user): EK colour scheme har jagah — green = available (AVL/RAC), tan = purana/stale data
+ * ("X din pehle ka"), blue = WL, red = Not available / Regret, grey = data nahi. Legend card ke upar. */
+type Tone = "ok" | "stale" | "wl" | "bad" | "muted";
+function availTextOf(a: AvailLike | null | undefined): { text: string; tone: Tone } {
   if (!a) return { text: "Seat data nahi", tone: "muted" };
   const st = a.stale ? " ⚠ stale" : "";
-  /* Round-18m-25 (user: "seat available hai to green kyun nahi"): AVL/RAC HAMESHA green — stale ho to bhi;
-   * stale ka sach "⚠ stale" / "(Not fresh)" tag se dikhta hai, rang se nahi. */
-  if (a.status === "AVAILABLE") return { text: `${a.classCode} AVL${a.seats != null ? ` ${a.seats}` : ""}${st}`, tone: "ok" };
+  const tone = (fresh: Tone): Tone => (a.stale ? "stale" : fresh);
+  if (a.status === "AVAILABLE") return { text: `${a.classCode} AVL${a.seats != null ? ` ${a.seats}` : ""}${st}`, tone: tone("ok") };
   /* Round-18m-22 (user): RAC = available ki tarah (chart ke baad confirm) → green; label RAC N hi rehta hai. */
-  if (a.status === "RAC") return { text: `${a.classCode} RAC${a.rac != null ? ` ${a.rac}` : ""}${st}`, tone: "ok" };
-  if (a.status === "WAITLIST") return { text: `${a.classCode} WL${a.waitlist != null ? ` ${a.waitlist}` : ""}${st}`, tone: "bad" };
-  if (a.status === "NOT_AVAILABLE") return { text: `${a.classCode} Not available`, tone: "bad" };
+  if (a.status === "RAC") return { text: `${a.classCode} RAC${a.rac != null ? ` ${a.rac}` : ""}${st}`, tone: tone("ok") };
+  if (a.status === "WAITLIST") return { text: `${a.classCode} WL${a.waitlist != null ? ` ${a.waitlist}` : ""}${st}`, tone: tone("wl") };
+  if (a.status === "NOT_AVAILABLE") return { text: `${a.classCode} Not available`, tone: tone("bad") };
+  if (/REGRET/i.test(String(a.status))) return { text: `${a.classCode} Regret`, tone: tone("bad") };
   return { text: `${a.classCode} ${a.status}`, tone: "muted" };
+}
+/** "2 ghante pehle" / "12 din pehle" — provider timestamp se; na ho to "purana data". */
+function ageLabel(asOf?: string | null): string {
+  const ms = asOf ? Date.parse(asOf) : NaN;
+  if (!Number.isFinite(ms)) return "purana data";
+  const mins = Math.max(1, Math.round((Date.now() - ms) / 60000));
+  if (mins < 60) return `${mins} min pehle ka data`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 48) return `${hrs} ghante pehle ka data`;
+  return `${Math.round(hrs / 24)} din pehle ka data`;
+}
+/** Colour legend — card ke upar, har jagah yahi matching. */
+function ToneLegend() {
+  return (
+    <div className="jx-legend" aria-label="Colour legend">
+      <span className="jx-legend-item"><i className="jx-legend-dot jx-cchip-ok" /> Available (AVL/RAC)</span>
+      <span className="jx-legend-item"><i className="jx-legend-dot jx-cchip-stale" /> Purana data (time likha hai)</span>
+      <span className="jx-legend-item"><i className="jx-legend-dot jx-cchip-wl" /> Waitlist</span>
+      <span className="jx-legend-item"><i className="jx-legend-dot jx-cchip-bad" /> Not available / Regret</span>
+    </div>
+  );
 }
 
 /* Round-18m-7: leg / book-from-earlier par SAB seat-wali classes (user kisi bhi class mein book kar sake). */
@@ -93,7 +117,7 @@ function SeatPill({ a, size }: { a?: AvailLike | null; size?: "lg" }) {
   return (
     <span className={`jx-seat jx-seat-${av.tone}${size === "lg" ? " jx-seat-lg" : ""}`}>
       <span className="jx-seat-main">{text}</span>
-      {a?.stale && <span className="jx-seat-sub">(Not fresh)</span>}
+      {a?.stale && <span className="jx-seat-sub">({ageLabel(a.asOf)})</span>}
     </span>
   );
 }
@@ -108,11 +132,11 @@ function ClassRow({ label, rows, onPick }: { label: string; rows: AvailLike[]; o
       <div className="jx-classes-chips">
         {rows.map((r) => {
           const av = availTextOf(r);
-          const inner = <>{av.text.replace(" ⚠ stale", "")}{r.fare != null ? ` · ${inr(r.fare)}` : ""}{r.stale ? <span className="jx-cchip-tag">{onPick ? "↻ Refresh" : "(Not fresh)"}</span> : null}</>;
+          const inner = <>{av.text.replace(" ⚠ stale", "")}{r.fare != null ? ` · ${inr(r.fare)}` : ""}{r.stale ? <span className="jx-cchip-tag">· {ageLabel(r.asOf)}{onPick ? " ↻" : ""}</span> : null}</>;
           return onPick ? (
-            <button key={r.classCode} type="button" className={`jx-cchip jx-cchip-btn jx-cchip-${av.tone}${r.stale ? " jx-cchip-notfresh" : ""}`} onClick={(e) => { e.stopPropagation(); onPick(r); }} title={`${r.classCode} ki fresh seat check`}>{inner}</button>
+            <button key={r.classCode} type="button" className={`jx-cchip jx-cchip-btn jx-cchip-${av.tone}`} onClick={(e) => { e.stopPropagation(); onPick(r); }} title={`${r.classCode} ki fresh seat check`}>{inner}</button>
           ) : (
-            <span key={r.classCode} className={`jx-cchip jx-cchip-${av.tone}${r.stale ? " jx-cchip-notfresh" : ""}`}>{inner}</span>
+            <span key={r.classCode} className={`jx-cchip jx-cchip-${av.tone}`}>{inner}</span>
           );
         })}
       </div>
@@ -165,7 +189,7 @@ function ListRow({ no, name, mid, midSub, dur, durSub, seat, chips, onClick }: {
         <div className="jx-lrow-train"><span className="jx-no">{no}</span> <span className="jx-name">{name}</span></div>
         {chips && chips.length > 0 && (
           <div className="jx-classes-chips jx-lrow-chips">
-            {chips.slice(0, 3).map((r) => { const av = availTextOf(r); return <span key={r.classCode} className={`jx-cchip jx-cchip-${av.tone}${r.stale ? " jx-cchip-notfresh" : ""}`}>{av.text.replace(" ⚠ stale", "")}{r.fare != null ? ` · ${inr(r.fare)}` : ""}</span>; })}
+            {chips.slice(0, 3).map((r) => { const av = availTextOf(r); return <span key={r.classCode} className={`jx-cchip jx-cchip-${av.tone}`}>{av.text.replace(" ⚠ stale", "")}{r.fare != null ? ` · ${inr(r.fare)}` : ""}{r.stale ? <span className="jx-cchip-tag"> · {ageLabel(r.asOf)}</span> : null}</span>; })}
           </div>
         )}
       </div>
@@ -192,7 +216,7 @@ function ConnCard({ c, baseDate, onPickLeg }: { c: AgentConnection; baseDate?: s
                 <div className="jx-lrow-train"><span className="jx-no">{l.trainNumber}</span> <span className="jx-name">{l.trainName}</span><SeatPill a={l.availability} /></div>
                 <div className="jx-leg-line"><strong>{l.departure}</strong> {l.fromName ?? l.from} ({l.from}){baseDate ? ` · ${legDateLabel(baseDate, depDay)}` : ""} <span className="jx-leg-arr">→</span> <strong>{l.arrival}</strong> {l.toName ?? l.to} ({l.to}){baseDate ? ` · ${legDateLabel(baseDate, arrDay)}` : ""}</div>
                 {(l.classOptions ?? []).filter((r) => r.classCode !== l.availability?.classCode).length > 0 && (
-                  <div className="jx-classes-chips">{(l.classOptions ?? []).filter((r) => r.classCode !== l.availability?.classCode).slice(0, 4).map((r) => { const av = availTextOf(r); return <span key={r.classCode} className={`jx-cchip jx-cchip-${av.tone}${r.stale ? " jx-cchip-notfresh" : ""}`}>{av.text.replace(" ⚠ stale", "")}{r.fare != null ? ` · ${inr(r.fare)}` : ""}</span>; })}</div>
+                  <div className="jx-classes-chips">{(l.classOptions ?? []).filter((r) => r.classCode !== l.availability?.classCode).slice(0, 4).map((r) => { const av = availTextOf(r); return <span key={r.classCode} className={`jx-cchip jx-cchip-${av.tone}`}>{av.text.replace(" ⚠ stale", "")}{r.fare != null ? ` · ${inr(r.fare)}` : ""}{r.stale ? <span className="jx-cchip-tag"> · {ageLabel(r.asOf)}</span> : null}</span>; })}</div>
                 )}
               </div>
             </button>
@@ -413,6 +437,7 @@ export function JourneyOptions({
           {plan.query.travelClass && <span className="jx-pill">{plan.query.travelClass}</span>}
           {pax && <span className="jx-pill">{IC.train} {plan.routeOptions.length} trains</span>}
         </div>
+        <ToneLegend />
       </header>
 
       {pills.length > 0 && (
@@ -579,7 +604,7 @@ export function JourneyOptions({
               <div className="jx-bfe-foot">
                 <span className="jx-stat"><span className="jx-stat-ic">{IC.clock}</span>{durLabel(b.durationMinutes) ?? "—"} · Direct · board {b.boardAt}</span>
                 {(b.classOptions ?? []).filter((r) => r.classCode !== b.availability.classCode).length > 0 && (
-                  <span className="jx-classes-chips">{(b.classOptions ?? []).filter((r) => r.classCode !== b.availability.classCode).slice(0, 3).map((r) => { const av = availTextOf(r); return <span key={r.classCode} className={`jx-cchip jx-cchip-${av.tone}${r.stale ? " jx-cchip-notfresh" : ""}`}>{av.text.replace(" ⚠ stale", "")}{r.fare != null ? ` · ${inr(r.fare)}` : ""}</span>; })}</span>
+                  <span className="jx-classes-chips">{(b.classOptions ?? []).filter((r) => r.classCode !== b.availability.classCode).slice(0, 3).map((r) => { const av = availTextOf(r); return <span key={r.classCode} className={`jx-cchip jx-cchip-${av.tone}`}>{av.text.replace(" ⚠ stale", "")}{r.fare != null ? ` · ${inr(r.fare)}` : ""}{r.stale ? <span className="jx-cchip-tag"> · {ageLabel(r.asOf)}</span> : null}</span>; })}</span>
                 )}
               </div>
             </div>

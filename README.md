@@ -218,6 +218,13 @@ only provider-verified alternatives.
 - More candidates: fixed hubs (up to 10 connections) + **route-derived hubs** (`routeDerivedHubs()` — junction/major stops from the direct trains' timetable, e.g. JAT→BDTS tries PTKC/LDH/NDLS/SWM/RTM/BH), all legs probed, then filtered.
 - When nothing passes: card + `plan.notes` say "Connecting routes mile lekin kisi mein dono trains par seat available nahi thi — isliye connecting option nahi dikhaya." Summary's "route via X" line lists per-leg seats.
 
+### Round-18m-26 — Ek colour scheme har jagah + "kitna purana data"
+- **Legend** (journey card ke header + Train Board ke upar): 🟩 green = Available (AVL/RAC) · 🟫 tan = Purana/stale data · 🟦 blue = Waitlist · 🟥 red = Not available / Regret.
+- **Stale rows tan rehte hain**, par label ke saath **"12 din pehle ka data"** (min/ghante/din — provider ke `last_updated_at` se; timestamp na ho to "purana data"). Label khud (AVL 56 / WL 4) provider ka hi rehta hai — kabhi rewrite nahi.
+- Age path: railyatri `last_updated_at` → `ClassAvailability.updatedAt` (ISO) → `RouteAvailability.asOf` → client (`SeatPill`, class chips, Train Board cell `tb-avl-age`).
+- Same palette: `jx-seat-*`, `jx-cchip-*` (journey card), `.chip.*` (results), `.tb-avl.*` (board), `.jo-avl-*` (alternatives). WL ab violet nahi — blue; N/A ab grey/strike nahi — red.
+- Tests: `tests/round18m26-colour-scheme.test.tsx` (3) — total 761.
+
 ### Round-18m-25 — Fresh RailYatri data (live retry), green AVL always, fare in seat pill
 
 User (JAT→NDLS, 12:57 IST): side pill "2A AVL 56" had no fare; stale AVL looked tan/yellow; data was

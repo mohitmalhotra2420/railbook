@@ -358,8 +358,10 @@ h2 { font-size: 17px; }
 }
 .chip.ok { background: var(--green-soft); color: var(--green); }
 .chip.rac { background: var(--green-soft); color: var(--green); } /* Round-18m-22: RAC = available (green) */
-.chip.wl { background: var(--violet-soft); color: var(--violet); }
-.chip.no { background: #f3f1ed; color: #9aa1a9; text-decoration: line-through; }
+.chip.wl { background: #e7eefc; color: #1d4ed8; } /* Round-18m-26: blue = WL */
+.chip.stale { background: #f4ecdc; color: #6b5b3e; } /* Round-18m-26: tan = purana */
+.chip.no { background: #fdecec; color: #9b1c1c; } /* Round-18m-26: red = N/A/Regret */
+.chip.unk { background: #f3f1ed; color: #9aa1a9; }
 
 .empty {
   text-align: center;
@@ -1017,10 +1019,17 @@ h2 { font-size: 17px; }
 .tb-cc { font-weight: 800; font-size: 14px; color: var(--navy); }
 .tb-fare { font-weight: 800; margin: 4px 0 2px; font-size: 15px; }
 .tb-avl { font-size: 12px; font-weight: 700; }
+/* Round-18m-26 scheme: green = available, tan = purana, blue = WL, red = N/A/Regret. */
 .tb-avl.ok { color: var(--green); }
-.tb-avl.wl { color: #7c3aed; }
+.tb-avl.wl { color: #1d4ed8; }
 .tb-avl.rac { color: var(--green); } /* Round-18m-22: RAC = available (green) */
+.tb-avl.stale { color: #6b5b3e; background: #f4ecdc; border-radius: 6px; padding: 1px 4px; }
+.tb-avl.bad { color: #9b1c1c; }
 .tb-avl.muted { color: var(--muted); font-weight: 600; }
+.tb-avl-age { font-size: 9.5px; font-weight: 600; opacity: .9; }
+.tb-legend { display: flex; flex-wrap: wrap; gap: 6px 12px; margin: 8px 12px 0; padding: 8px 10px; border: 1px solid #e6e1d8; border-radius: 10px; background: #fff; font-size: 11.5px; font-weight: 600; color: var(--ink); }
+.tb-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.tb-legend-dot { display: inline-block; width: 12px; height: 12px; border-radius: 4px; border: 1px solid; }
 .tb-foot {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -1546,6 +1555,8 @@ table.traintable {
 .jo-avl { font-weight: 700; font-size: 12px; white-space: nowrap; }
 .jo-avl-ok, .jo-avl-cell.jo-avl-ok { color: var(--green); }
 .jo-avl-warn, .jo-avl-cell.jo-avl-warn { color: var(--amber); }
+.jo-avl-stale, .jo-avl-cell.jo-avl-stale { color: #6b5b3e; background: #f4ecdc; border-radius: 6px; padding: 1px 5px; }
+.jo-avl-wl, .jo-avl-cell.jo-avl-wl { color: #1d4ed8; }
 .jo-avl-bad, .jo-avl-cell.jo-avl-bad { color: var(--red); }
 .jo-avl-muted, .jo-avl-cell.jo-avl-muted { color: var(--muted); font-weight: 500; }
 .jo-fare { font-weight: 700; color: var(--navy); }
@@ -1829,10 +1840,17 @@ table.traintable {
 .jx-seat-main { font-weight: 700; font-size: 12.5px; padding: 3px 9px; border-radius: 8px; white-space: nowrap; }
 .jx-seat-lg .jx-seat-main { font-size: 14px; padding: 5px 11px; }
 .jx-seat-sub { font-size: 10px; color: #6b7280; margin-top: 2px; }
+/* Round-18m-26 colour scheme (user): green = available, tan = purana/stale, blue = WL, red = N-A/Regret. */
 .jx-seat-ok .jx-seat-main { background: #e6f6ec; color: #0d6b3a; }
+.jx-seat-stale .jx-seat-main { background: #f4ecdc; color: #6b5b3e; }
+.jx-seat-wl .jx-seat-main { background: #e7eefc; color: #1d4ed8; }
 .jx-seat-warn .jx-seat-main { background: #fff7d6; color: #8a5a00; }
 .jx-seat-bad .jx-seat-main { background: #fdecec; color: #9b1c1c; }
 .jx-seat-muted .jx-seat-main { background: #eef1f6; color: #4b5563; }
+.jx-seat-sub { color: #6b5b3e; }
+.jx-legend { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-top: 10px; padding: 8px 10px; border: 1px solid #e6e1d8; border-radius: 10px; background: #fff; font-size: 11.5px; color: var(--ink); }
+.jx-legend-item { display: inline-flex; align-items: center; gap: 5px; font-weight: 600; }
+.jx-legend-dot { display: inline-block; width: 12px; height: 12px; border-radius: 4px; border: 1px solid; }
 .jx-strip { display: grid; gap: 0; margin-top: 12px; border: 1px solid #e6e1d8; border-radius: 12px; overflow: hidden; background: #fff; }
 .jx-strip-col { padding: 10px 12px; border-left: 1px solid #e6e1d8; }
 .jx-strip-col:first-child { border-left: 0; }
@@ -1849,13 +1867,11 @@ table.traintable {
 .jx-cchip { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 700; padding: 5px 10px; border-radius: 999px; border: 1px solid; white-space: nowrap; }
 /* Round-18m-19 (user): AVL = green, RAC = yellow, WL/Regret/N-A = red — har jagah same. */
 .jx-cchip-ok { background: #e6f6ec; color: #0d6b3a; border-color: #9fd6b0; }
+.jx-cchip-stale { background: #f4ecdc; color: #6b5b3e; border-color: #d9c9a3; } /* Round-18m-26: tan = purana data */
+.jx-cchip-wl { background: #e7eefc; color: #1d4ed8; border-color: #b7c9f5; } /* Round-18m-26: blue = WL */
 .jx-cchip-warn { background: #fff7d6; color: #8a5a00; border-color: #f3d98a; }
 .jx-cchip-bad { background: #fdecec; color: #9b1c1c; border-color: #f2b8b8; }
 .jx-cchip-muted { background: #eef1f6; color: #4b5563; border-color: #d5dbe5; }
-.jx-cchip-stale { background: #f4f1ea; color: #6b5b3e; border-color: #ddd3bf; }
-/* Round-18m-25: stale row apna asli rang rakhti hai (AVL/RAC green, WL red) — "Not fresh" sirf tag + dashed border se. */
-.jx-cchip-notfresh { border-style: dashed; }
-.jx-cchip-notfresh .jx-cchip-tag { opacity: 0.85; }
 .jx-cchip-tag { font-weight: 500; font-size: 10.5px; opacity: .85; }
 .jx-hero-cta { display: grid; grid-template-columns: 1fr; gap: 8px; margin-top: 12px; }
 @media (min-width: 560px) { .jx-hero-cta { grid-template-columns: 1.4fr 1fr 1fr; align-items: stretch; } }

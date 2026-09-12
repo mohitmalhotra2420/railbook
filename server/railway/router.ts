@@ -307,6 +307,7 @@ async function railyatriAvailability(
       source: "web_railyatri",
       webNote: `web: railyatri.in (IRCTC data${sc.cacheText ? `, ${sc.cacheText.toLowerCase()}` : ""}) — status "${sc.statusText}"${sc.stale ? " — ⚠ STALE (24h+ purana), book se pehle refresh" : ""}`,
       ...(sc.stale ? { stale: true } : {}),
+      ...(sc.lastUpdatedAt ? { updatedAt: String(Date.parse(String(sc.lastUpdatedAt).replace(" +0530", "+05:30").replace(" ", "T")) > 0 ? new Date(Date.parse(String(sc.lastUpdatedAt).replace(" +0530", "+05:30").replace(" ", "T"))).toISOString() : sc.lastUpdatedAt) } : {}),
     };
   } catch {
     return null;

@@ -25,6 +25,8 @@ export type RouteAvailability = {
   source: string;
   /** Round-18m: web cache 24h+ purana — "last known" only. */
   stale?: boolean;
+  /** Round-18m-26: provider timestamp (ISO) — "X din pehle ka data". */
+  asOf?: string;
 };
 
 export type RouteLeg = {

@@ -6,11 +6,14 @@ import { availabilityLabel, formatShortDate } from "../format";
 import type { Recommendation, TrainResult } from "../types";
 import { isBookable } from "../types";
 
-function chipClass(status: string): string {
+/* Round-18m-26 scheme: green = AVL/RAC, tan = purana (stale), blue = WL, red = N/A/Regret, grey = unknown. */
+function chipClass(status: string, stale?: boolean): string {
+  if (stale) return "stale";
   if (status === "AVAILABLE") return "ok";
   if (status === "RAC") return "rac";
   if (status === "WAITLIST") return "wl";
-  return "no";
+  if (status === "NOT_AVAILABLE" || /REGRET/i.test(status)) return "no";
+  return "unk";
 }
 
 function TrainCard({
@@ -56,7 +59,7 @@ function TrainCard({
       </div>
       <div className="classes">
         {train.classes.map((c) => (
-          <span key={c.code} className={`chip ${chipClass(c.status)}`}>
+          <span key={c.code} className={`chip ${chipClass(c.status, c.stale)}`}>
             {c.code} · {isBookable(c.status) ? `₹${c.fare}` : availabilityLabel(c.status)}
           </span>
         ))}

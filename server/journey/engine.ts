@@ -105,7 +105,7 @@ function bestClassRow(classes: ClassAvailability[], travelClass: string | null):
     (travelClass ? known.find((c) => c.code === travelClass) : undefined) ??
     [...known].sort((a, b) => Number(!!a.stale) - Number(!!b.stale) || (AVAIL_RANK[a.status] ?? 5) - (AVAIL_RANK[b.status] ?? 5) || (a.fare || 9e9) - (b.fare || 9e9))[0];
   return {
-    ...(pick.stale ? { stale: true } : {}),
+    ...(pick.stale ? { stale: true } : {}), ...(pick.updatedAt ? { asOf: pick.updatedAt } : {}),
     classCode: pick.code,
     status: pick.status,
     seats: pick.seats ?? null,
@@ -350,7 +350,7 @@ export async function probeConnectionLegs(connections: Connection[], date: strin
 export function bookableRows(classes: ClassAvailability[], opts: { includeStale?: boolean } = {}): RouteAvailability[] {
   return classes
     .filter((c) => (opts.includeStale || !c.stale) && (c.status === "AVAILABLE" || c.status === "RAC"))
-    .map((c) => ({ ...(c.stale ? { stale: true } : {}), classCode: c.code, status: c.status, seats: c.seats ?? null, rac: c.rac ?? null, waitlist: c.waitlist ?? null, fare: c.fare > 0 ? c.fare : null, source: String(c.source ?? "railcore") }))
+    .map((c) => ({ ...(c.stale ? { stale: true } : {}), ...(c.updatedAt ? { asOf: c.updatedAt } : {}), classCode: c.code, status: c.status, seats: c.seats ?? null, rac: c.rac ?? null, waitlist: c.waitlist ?? null, fare: c.fare > 0 ? c.fare : null, source: String(c.source ?? "railcore") }))
     .sort((a, b) => Number(!!a.stale) - Number(!!b.stale) || (AVAIL_RANK[a.status] ?? 5) - (AVAIL_RANK[b.status] ?? 5) || (b.seats ?? 0) - (a.seats ?? 0) || (a.fare ?? 9e9) - (b.fare ?? 9e9));
 }
 
@@ -436,7 +436,7 @@ export async function expandLegPlan(args: { from: string; to: string; hub: strin
       const best = all.find((r) => legBookable(r, args.pax)) ?? bestClassRow(board.classes, args.travelClass);
       if (best) sources.add(best.source);
       /* classOptions = poora board (AVL/RAC/WL/N-A, stale flagged) — UI/AI ko har class dikhe. */
-      const full = board.classes.filter((c) => c.status && c.status !== "UNKNOWN").map((c) => ({ ...(c.stale ? { stale: true } : {}), classCode: c.code, status: c.status, seats: c.seats ?? null, rac: c.rac ?? null, waitlist: c.waitlist ?? null, fare: c.fare > 0 ? c.fare : null, source: String(c.source ?? "railcore") }));
+      const full = board.classes.filter((c) => c.status && c.status !== "UNKNOWN").map((c) => ({ ...(c.stale ? { stale: true } : {}), ...(c.updatedAt ? { asOf: c.updatedAt } : {}), classCode: c.code, status: c.status, seats: c.seats ?? null, rac: c.rac ?? null, waitlist: c.waitlist ?? null, fare: c.fare > 0 ? c.fare : null, source: String(c.source ?? "railcore") }));
       return { ...l, availability: best, classOptions: full.length ? full : all };
     } catch {
       return { ...l, availability: null, classOptions: [] };
@@ -1088,7 +1088,7 @@ export async function planJourney(args: {
    * train (bounded 20) × HAR class, parallel. User class ho to bhi poora board
    * (baaki classes options mein) — best row user-class/pax ke hisaab se. */
   const probeList = [...trains].sort((a, b) => (a.durationMinutes || 9e9) - (b.durationMinutes || 9e9) || a.number.localeCompare(b.number)).slice(0, JOURNEY_CONFIG.availabilityProbeLimit);
-  const toRow = (c: ClassAvailability): RouteAvailability => ({ ...(c.stale ? { stale: true } : {}), classCode: c.code, status: c.status, seats: c.seats ?? null, rac: c.rac ?? null, waitlist: c.waitlist ?? null, fare: c.fare > 0 ? c.fare : null, source: String(c.source ?? "railcore") });
+  const toRow = (c: ClassAvailability): RouteAvailability => ({ ...(c.stale ? { stale: true } : {}), ...(c.updatedAt ? { asOf: c.updatedAt } : {}), classCode: c.code, status: c.status, seats: c.seats ?? null, rac: c.rac ?? null, waitlist: c.waitlist ?? null, fare: c.fare > 0 ? c.fare : null, source: String(c.source ?? "railcore") });
   /* Round-18m-14: RailCore = 20 req/min. 15 trains × 4 classes = 60 calls ek
    * saath → pehli 20 fresh, baaki web-cache (stale). Ab do PASS: pass-1 har
    * train ki PRIORITY class (user class, warna SL/3A jahan seat sabse likely)

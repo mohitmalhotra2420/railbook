@@ -28,22 +28,27 @@ function weekdayLetters(runsOn?: number[] | null): string {
     .join(" ");
 }
 
-function avlText(c: ClassAvailability, loading = false): { text: string; tone: "ok" | "wl" | "rac" | "muted" } {
+/** Round-18m-26: "12 din pehle" — provider timestamp se; na ho to "purana". */
+function ageShort(asOf?: string | null): string {
+  const ms = asOf ? Date.parse(asOf) : NaN;
+  if (!Number.isFinite(ms)) return "purana";
+  const mins = Math.max(1, Math.round((Date.now() - ms) / 60000));
+  if (mins < 60) return `${mins} min pehle`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 48) return `${hrs} ghante pehle`;
+  return `${Math.round(hrs / 24)} din pehle`;
+}
+/* Round-18m-26 colour scheme (user): green = AVL/RAC, tan = purana/stale (+ kitna purana), blue = WL, red = N/A/Regret. */
+function avlText(c: ClassAvailability, loading = false): { text: string; tone: "ok" | "wl" | "rac" | "stale" | "bad" | "muted"; sub?: string } {
   if (loading && (c.status === "UNKNOWN" || (c.status === "AVAILABLE" && c.seats == null && !c.fare))) {
     return { text: "Loading…", tone: "muted" };
   }
-  /* Round-18m: 24h+ purani web-cache = "last known" (⚠), fresh AVL jaisa green nahi. */
-  const st = c.stale ? " ⚠" : "";
-  if (c.status === "AVAILABLE") {
-    return { text: (c.seats != null ? `AVL ${c.seats}` : "AVL") + st, tone: c.stale ? "wl" : "ok" };
-  }
-  if (c.status === "WAITLIST") {
-    return { text: (c.waitlist != null ? `WL ${c.waitlist}` : "WL") + st, tone: "wl" };
-  }
-  if (c.status === "RAC") {
-    return { text: (c.rac != null ? `RAC ${c.rac}` : "RAC") + st, tone: "rac" };
-  }
-  if (c.status === "NOT_AVAILABLE") return { text: "N/A", tone: "muted" };
+  const sub = c.stale ? ageShort(c.updatedAt) : undefined;
+  const tone = (fresh: "ok" | "wl" | "rac" | "bad"): "ok" | "wl" | "rac" | "bad" | "stale" => (c.stale ? "stale" : fresh);
+  if (c.status === "AVAILABLE") return { text: c.seats != null ? `AVL ${c.seats}` : "AVL", tone: tone("ok"), sub };
+  if (c.status === "WAITLIST") return { text: c.waitlist != null ? `WL ${c.waitlist}` : "WL", tone: tone("wl"), sub };
+  if (c.status === "RAC") return { text: c.rac != null ? `RAC ${c.rac}` : "RAC", tone: tone("rac"), sub };
+  if (c.status === "NOT_AVAILABLE" || /REGRET/i.test(String(c.status))) return { text: c.status === "NOT_AVAILABLE" ? "N/A" : "Regret", tone: tone("bad"), sub };
   return { text: "↻ Refresh", tone: "muted" };
 }
 
@@ -502,6 +507,13 @@ export function TrainBoard() {
           </button>
         </div>
       </header>
+      {/* Round-18m-26: colour legend — wahi scheme jo journey card mein. */}
+      <div className="tb-legend" aria-label="Colour legend">
+        <span><i className="tb-legend-dot" style={{ background: "#e6f6ec", borderColor: "#9fd6b0" }} /> Available (AVL/RAC)</span>
+        <span><i className="tb-legend-dot" style={{ background: "#f4ecdc", borderColor: "#d9c9a3" }} /> Purana data (time likha hai)</span>
+        <span><i className="tb-legend-dot" style={{ background: "#e7eefc", borderColor: "#b7c9f5" }} /> Waitlist</span>
+        <span><i className="tb-legend-dot" style={{ background: "#fdecec", borderColor: "#f2b8b8" }} /> Not available / Regret</span>
+      </div>
 
       <div className="tb-body">
         <div className="tb-card tb-tabs">
@@ -690,7 +702,7 @@ export function TrainBoard() {
                       >
                         <div className="tb-cc">{cell.code}</div>
                         <div className="tb-fare">{cell.fare > 0 ? inr(cell.fare) : "—"}</div>
-                        <div className={`tb-avl ${av.tone}`}>{av.text}</div>
+                        <div className={`tb-avl ${av.tone}`}>{av.text}{av.sub ? <div className="tb-avl-age">{av.sub}</div> : null}</div>
                       </button>
                     );
                   })

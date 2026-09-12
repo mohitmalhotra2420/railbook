@@ -43,6 +43,8 @@ export interface ClassAvailability {
   webNote?: string;
   /** Round-18m: web cache SA_MAX_AGE (24h) se purani — "last known", ⚠ stale. */
   stale?: boolean;
+  /** Round-18m-26: provider ne ye row kab update ki (ISO) — UI "X din pehle ka data" dikhata hai. */
+  updatedAt?: string;
 }
 
 export interface TrainResult {

@@ -49,7 +49,7 @@ describe("Round-18m-25", () => {
       expect(r?.waitlist).toBe(45);
     } finally { setScrapeFetch(null); }
   });
-  it("UI: side seat pill shows fare; stale AVL stays GREEN with (Not fresh) tag", () => {
+  it("UI: side seat pill shows fare; stale AVL is TAN with age label (Round-18m-26 scheme)", () => {
     const plan = {
       query: { from: "JAT", to: "NDLS", date: "2030-01-13", travelClass: null, preference: "best_overall", passengers: 1 },
       best: null, connections: [], alternativeDates: [], directUnavailable: false, notes: [], sources: ["web_railyatri"],
@@ -61,12 +61,11 @@ describe("Round-18m-25", () => {
     const { container, getByText } = render(<JourneyOptions plan={plan} />);
     fireEvent.click(getByText("Fastest"));
     const pill = container.querySelector(".jx-lrow .jx-seat");
-    expect(pill?.className).toContain("jx-seat-ok");
+    expect(pill?.className).toContain("jx-seat-stale");
     expect(pill?.textContent).toContain("2A AVL 56");
     expect(pill?.textContent).toContain("1,345");
-    expect(pill?.textContent).toContain("Not fresh");
-    expect(container.querySelector(".jx-cchip-stale")).toBeNull();
+    expect(pill?.textContent).toMatch(/pehle ka data|purana data/);
     const src = readFileSync("src/components/JourneyOptions.tsx", "utf8");
-    expect(src).not.toContain('jx-cchip-${r.stale ? "stale" : av.tone}');
+    expect(src).toContain("function ToneLegend");
   });
 });
