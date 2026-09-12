@@ -1649,7 +1649,7 @@ export async function executeApprovedTool(
           : "";
         return okResult(
           plan.sources[0] ?? null,
-          `${plan.summary ? `JOURNEY SUMMARY (verified, ise Hinglish mein user ko 2-3 line mein do, numbers/trains waise hi): ${plan.summary} ` : ""}Atlas rank (${plan.query.from}→${plan.query.to} ${plan.query.date}, pref=${prefRaw}): ${plan.routeOptions.length} options.${plan.best ? ` BEST: ${line(plan.best)}.` : " Koi option nahi."}${top.length > 1 ? ` Others: ${top.slice(1).map(line).join("; ")}.` : ""}${plan.notes.length ? ` ${plan.notes.join(" ")}` : ""}${rec}${extra} (Sources: ${plan.sources.join(", ") || "none"}.)`,
+          `${plan.decision?.source === "ai" && plan.decision.verdict ? `AI DECISION (journey planner AI ne har train × har class dekh kar chuna — isi ko recommend karo): ${plan.decision.verdict} ` : ""}${plan.summary ? `JOURNEY SUMMARY (verified, ise Hinglish mein user ko 2-3 line mein do, numbers/trains waise hi): ${plan.summary} ` : ""}Atlas rank (${plan.query.from}→${plan.query.to} ${plan.query.date}, pref=${prefRaw}): ${plan.routeOptions.length} options.${plan.best ? ` BEST: ${line(plan.best)}.` : " Koi option nahi."}${top.length > 1 ? ` Others: ${top.slice(1).map(line).join("; ")}.` : ""}${plan.notes.length ? ` ${plan.notes.join(" ")}` : ""}${rec}${extra} (Sources: ${plan.sources.join(", ") || "none"}.)`,
           plan,
         );
       }

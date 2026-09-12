@@ -24,7 +24,7 @@ import { routedClassBoard, routedSchedule, searchTrainsRouted, type ServedProvid
 import { todayYmd } from "../util.js";
 import { MULTI_STATION_CITIES } from "../railway/station-resolve.js";
 import { CONFLICT_MESSAGE, availabilityEquals, freshnessOf, resolveConflict, sourceTypeOf } from "../providers/provenance.js";
-import type { BoardFromEarlierOption } from "./types.js";
+import type { BoardFromEarlierOption, JourneyDecision } from "./types.js";
 import { type LegPlan,
   CLASS_CODES,
   durationLabelOf,
@@ -1257,7 +1257,25 @@ export async function planJourney(args: {
   plan.whySource = "rules";
   /* Round-18m-10: "AI ne ye plan kyun chuna" — model khud sochta hai (grounded
    * facts sheet se), deterministic points sirf fallback. Bounded ~8s. */
+  /* Round-18m-13: FAISLA AI ka — engine ne har train × har class, same-train
+   * earlier-stop aur connecting legs ka data laaya; ab LLM candidates dekh kar
+   * recommend + rank + why karta hai (grounded ids). Rules sirf fallback. */
   if (args.aiWhy !== false) {
+    try {
+      const { decideJourney } = await import("./decide.js");
+      const d = await decideJourney(plan, { timeoutMs: 10000 });
+      plan.decision = d;
+      if (d.source === "ai" && d.recommended) {
+        applyDecision(plan, d);
+        plan.whyPoints = d.whyPoints.length ? d.whyPoints : plan.whyPoints;
+        plan.whySource = "ai";
+        plan.summary = journeySummary(plan);
+        if (d.verdict) plan.summary = `${d.verdict}${plan.summary ? ` ${plan.summary}` : ""}`;
+        return plan;
+      }
+    } catch {
+      /* fall through to legacy why-points */
+    }
     try {
       /* Muse (primary) 12s → gpt-oss (fallback) 8s → rules. Total bounded ~20s. */
       const ai = (await aiWhyPoints(plan, { timeoutMs: 12000 }).catch(() => null)) ?? (env.nluModel !== env.nvidiaModel ? await aiWhyPoints(plan, { timeoutMs: 12000, model: env.nluModel }).catch(() => null) : null);
@@ -1279,6 +1297,42 @@ export async function planJourney(args: {
     }
   }
   return plan;
+}
+
+/* Round-18m-13: AI ke pick ko plan ke existing fields par map karo taaki UI/agent
+ * (best, recovery.boardFromEarlier[0], connections[0]) wahi dikhayein jo AI ne chuna. */
+function applyDecision(plan: JourneyPlan, d: JourneyDecision): void {
+  const rec = d.recommended;
+  if (!rec) return;
+  const order = new Map(d.ranking.map((id, i) => [id, i]));
+  const idOf = (o: RouteOption) => (o.changes === 0 ? `D:${o.trainNumbers[0]}` : null);
+  if (rec.kind === "direct") {
+    const pick = plan.routeOptions.find((o) => idOf(o) === rec.id);
+    if (pick) {
+      plan.routeOptions = [pick, ...plan.routeOptions.filter((o) => o !== pick)].map((o, i) => ({ ...o, rank: i + 1, badges: i === 0 ? Array.from(new Set(["best_overall", ...o.badges.filter((b) => b !== "best_overall")])) : o.badges.filter((b) => b !== "best_overall"), category: i === 0 ? "best_overall" : o.category === "best_overall" ? "direct" : o.category }));
+      plan.best = plan.routeOptions[0];
+      plan.directUnavailable = false;
+      /* AI ne direct chuna → same-train earlier-stop hero mat dikhao (list mein rahe). */
+      if (plan.recovery) plan.recovery = { ...plan.recovery, boardFromEarlier: plan.recovery.boardFromEarlier ?? [] };
+    }
+  } else if (rec.kind === "bfe" && plan.recovery?.boardFromEarlier?.length) {
+    const list = plan.recovery.boardFromEarlier;
+    const pick = list.find((b) => `B:${b.trainNumber}:${b.bookFrom}` === rec.id);
+    if (pick) plan.recovery = { ...plan.recovery, boardFromEarlier: [pick, ...list.filter((b) => b !== pick)] };
+  } else if (rec.kind === "connecting") {
+    const all = [...(plan.legPlans ?? []).map((l) => l.best).filter((c): c is Connection => !!c), ...plan.connections, ...(plan.recovery?.connecting ?? [])];
+    const pick = all.find((c) => `C:${c.station}:${c.legs.map((l) => l.trainNumber).join("+")}` === rec.id);
+    if (pick) {
+      plan.connections = [pick, ...plan.connections.filter((c) => c !== pick)];
+      if (plan.legPlans?.length) {
+        const lp = plan.legPlans.find((l) => l.hub === pick.station);
+        if (lp) { lp.best = pick; plan.legPlans = [lp, ...plan.legPlans.filter((x) => x !== lp)]; }
+      }
+    }
+  }
+  /* Other direct options follow the AI's ranking where given. */
+  plan.routeOptions = [...plan.routeOptions].sort((a, b) => (order.get(idOf(a) ?? "") ?? 99) - (order.get(idOf(b) ?? "") ?? 99) || a.rank - b.rank).map((o, i) => ({ ...o, rank: i + 1 }));
+  plan.best = plan.routeOptions[0] ?? plan.best;
 }
 
 /* ── Round-18m-10: model-written why-points. Facts sheet = sirf plan ka retrieved

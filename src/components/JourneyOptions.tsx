@@ -287,10 +287,15 @@ export function JourneyOptions({
    * book-from-earlier beats a stale (not fresh) or slower-connecting best. */
   const bfeFresh = bfeAll.find((b) => !b.availability.stale) ?? null;
   const bfeBeatsBest = !!bfeFresh && !!best && (!isOk(best.availability) || (best.changes > 0 && (bfeFresh.durationMinutes ?? 9e9) <= (best.durationMinutes ?? 9e9)));
-  const bfeHero: Bfe | null = plan.directUnavailable ? bfeFresh ?? bfeAll[0] ?? null : bfeBeatsBest ? bfeFresh : null;
+  /* Round-18m-13: AI decision wins — hero = jo AI ne chuna (direct / same-train / connecting). */
+  const aiRec = plan.decision?.source === "ai" ? plan.decision.recommended : null;
+  const bfeHero: Bfe | null = aiRec
+    ? aiRec.kind === "bfe" ? bfeAll.find((b) => b.trainNumber === aiRec.trainNumbers[0] && b.bookFrom === aiRec.bookFrom) ?? null : null
+    : plan.directUnavailable ? bfeFresh ?? bfeAll[0] ?? null : bfeBeatsBest ? bfeFresh : null;
   const bfeRest = bfeAll.filter((b) => b !== bfeHero);
   const pickBfe = onPickBoardEarlier ? (b: Bfe) => onPickBoardEarlier({ trainNumber: b.trainNumber, bookFrom: b.bookFrom, boardAt: b.boardAt, destination: b.destination, classCode: b.availability.classCode }) : undefined;
-  const heroDirect = !plan.directUnavailable && !bfeHero ? best : null;
+  const heroDirect = aiRec ? (aiRec.kind === "direct" || aiRec.kind === "connecting" ? best : null) : !plan.directUnavailable && !bfeHero ? best : null;
+  const decidedBy = plan.decision?.source === "ai" ? "AI" : null;
   const asOf = timeLabel(plan.provenance?.retrievedAt);
   const why = plan.whyPoints && plan.whyPoints.length ? plan.whyPoints : plan.summary ? [plan.summary] : [];
 
@@ -322,13 +327,13 @@ export function JourneyOptions({
    * jo train probe nahi hui usko saaf "seat data nahi aayi" — "seat nahi" nahi. */
   const probedDirect = direct.filter((o) => o.probed);
   const unprobedDirect = direct.filter((o) => !o.probed);
-  const [boardOpen, setBoardOpen] = useState(false);
+  const [boardOpen, setBoardOpen] = useState(true);
   const seatBoard = direct.length > 0 && (
-    <Section ic={IC.check} title="Seat check · every train, every class" badge={`${probedDirect.length}/${direct.length} checked`} foot={unprobedDirect.length ? `${unprobedDirect.map((o) => o.trainNumbers[0]).join(", ")}: seat data provider se nahi aayi — inhe "seat nahi" nahi maana; Refresh seats se dobara check karo.` : "Har direct train ki har class ka status upar hai — RAC bhi booking option hai (berth chart ke baad)."}>
-      <button type="button" className="jx-why-head" onClick={() => setBoardOpen((v) => !v)}>{boardOpen ? "Hide" : "Show"} {direct.length} trains <span className={`jx-caret${boardOpen ? " open" : ""}`} /></button>
-      {boardOpen && direct.map((o) => (
+    <Section ic={IC.train} title={`Direct trains ${plan.query.from}→${plan.query.to}`} badge={`${probedDirect.length}/${direct.length} seat-checked`} foot={unprobedDirect.length ? `${unprobedDirect.map((o) => o.trainNumbers[0]).join(", ")}: seat data provider se nahi aayi — inhe "seat nahi" nahi maana; Refresh seats se dobara check karo.` : "Har direct train ki har class ka status upar hai — RAC bhi booking option hai (berth chart ke baad)."}>
+      <button type="button" className="jx-why-head" onClick={() => setBoardOpen((v) => !v)}>{boardOpen ? "Hide" : "Show"} {direct.length} trains · har class ka seat status <span className={`jx-caret${boardOpen ? " open" : ""}`} /></button>
+      {boardOpen && [...direct].sort((a, b) => (a.departure ?? "").localeCompare(b.departure ?? "")).map((o) => (
         <div key={o.trainNumbers[0]} className="jx-sb-row">
-          <button type="button" className="jx-sb-head" onClick={pick ? () => pick(o) : undefined}><span className="jx-no">{o.trainNumbers[0]}</span> <span className="jx-name">{o.trainNames[0]}</span> <span className="jx-sub">{o.departure}→{o.arrival}{dateTag(baseDate, o.arrivalDayOffset)}</span></button>
+          <button type="button" className="jx-sb-head" onClick={pick ? () => pick(o) : undefined}><span className="jx-no">{o.trainNumbers[0]}</span> <span className="jx-name">{o.trainNames[0]}</span> <span className="jx-sub">{o.departure}→{o.arrival}{dateTag(baseDate, o.arrivalDayOffset)} · {o.durationLabel ?? ""}</span>{aiRec?.kind === "direct" && aiRec.trainNumbers[0] === o.trainNumbers[0] && <span className="jx-sb-pick">{IC.star} AI pick</span>}</button>
           {o.classOptions && o.classOptions.length ? <ClassRow label="" rows={o.classOptions} /> : <div className="jx-sub">{o.probed ? "Koi class data nahi" : "Seat data provider se nahi aayi"}</div>}
         </div>
       ))}
@@ -380,12 +385,32 @@ export function JourneyOptions({
         </div>
       )}
 
+      {/* Round-18m-13 (user: "pehle direct trains dikhao, phir alternatives"). */}
+      {seatBoard}
+      {plan.decision?.verdict && (
+        <div className="jx-verdict"><span className="jx-why-ic">{IC.spark}</span><div><strong>AI ka faisla{plan.decision.source === "ai" ? "" : " (rules)"}</strong><div>{plan.decision.verdict}</div></div></div>
+      )}
+      {plan.decision?.verifyFirst && (() => {
+        const v = plan.decision!.verifyFirst!;
+        const o = direct.find((x) => x.trainNumbers[0] === v.trainNumber);
+        return (
+          <div className="jx-verify">
+            <span className="jx-hero-note-ic">{IC.warn}</span>
+            <div>
+              <strong>Pehle ye check karo · {v.trainNumber} {v.label}</strong>
+              <div className="jx-sub">Fastest seat-wali direct train ho sakti hai ({o?.durationLabel ?? ""}) — {v.availability ? availTextOf(v.availability).text.replace(" ⚠ stale", "") : "AVL"} dikh rahi hai lekin data 24h+ purana hai. Fresh AVL nikle to isi ko book karo.</div>
+              {o && pick && <button type="button" className="jx-btn jx-btn-primary jx-btn-sm" onClick={() => pick(o)}>Seat check {v.availability?.classCode ?? ""} {IC.arrow}</button>}
+            </div>
+          </div>
+        );
+      })()}
+
       {/* ── Hero: book-from-earlier ── */}
       {bfeHero && (
         <section className="jx-hero">
           <div className="jx-hero-head">
             <span className="jx-hero-star">{IC.star}</span>
-            <span className="jx-hero-title">Recommended · Same train</span>
+            <span className="jx-hero-title">{decidedBy ? "AI Recommended" : "Recommended"} · Same train</span>
             <button type="button" className="jx-why-btn" onClick={() => setWhyOpen((v) => !v)}>Why this? <span className={`jx-caret${whyOpen ? " open" : ""}`} /></button>
           </div>
           <div className="jx-hero-train">
@@ -428,7 +453,7 @@ export function JourneyOptions({
         <section className="jx-hero">
           <div className="jx-hero-head">
             <span className="jx-hero-star">{IC.star}</span>
-            <span className="jx-hero-title">Recommended · {heroDirect.changes ? `${heroDirect.changes} change` : "Direct"}</span>
+            <span className="jx-hero-title">{decidedBy ? "AI Recommended" : "Recommended"} · {heroDirect.changes ? `${heroDirect.changes} change` : "Direct"}</span>
             <button type="button" className="jx-why-btn" onClick={() => setWhyOpen((v) => !v)}>Why this? <span className={`jx-caret${whyOpen ? " open" : ""}`} /></button>
           </div>
           <div className="jx-hero-train">
@@ -556,8 +581,6 @@ export function JourneyOptions({
           ))}
         </Section>
       )}
-
-      {seatBoard}
 
       {/* ── Explore ── */}
       {tabs.length > 0 && (

@@ -124,6 +124,8 @@ export interface AgentJourneyPlan {
   alternativeDates: { date: string; count: number; fastest: { number: string; durationMinutes: number } | null; seatProof?: string | null }[];
   directUnavailable: boolean;
   directStaleAvailable?: boolean;
+  /** Round-18m-13: AI (LLM) decision — recommendedId/ranking/verdict; source "ai" | "rules". */
+  decision?: { source: "ai" | "rules"; model?: string | null; recommendedId: string | null; ranking: string[]; verdict?: string | null; whyPoints: string[]; verifyFirst?: { id: string; trainNumber: string; label: string; durationMinutes: number | null; availability: AgentRouteOption["availability"] } | null; recommended: { id: string; kind: "direct" | "bfe" | "connecting"; trainNumbers: string[]; label: string; seatTier: "fresh" | "stale" | "none"; bookFrom?: string | null; boardAt?: string | null; hub?: string | null } | null; candidates: { id: string; kind: "direct" | "bfe" | "connecting"; trainNumbers: string[]; seatTier: "fresh" | "stale" | "none" }[] };
   /** Round-18l: server-built plain-language summary (best → fallback → alt date). */
   summary?: string | null;
   /** Round-18m-9: 3–5 deterministic reasons for the recommendation. */

@@ -276,6 +276,10 @@ export type JourneyPlan = {
   whySource?: "ai" | "rules";
   /** Round-18m-10: per-hub leg-1 / leg-2 seat-wale options + joint best. */
   legPlans?: LegPlan[];
+  /** Round-18m-13: AI (LLM) ka faisla — engine sirf data laata hai (har train × har class,
+   *  book-from-earlier, connections); recommend/rank/why AI karta hai, candidate IDs se
+   *  grounded (invalid ID → rules fallback). */
+  decision?: JourneyDecision;
   /** Round-18m-11: kya-kya check hua (UI strip) — sirf real counts. */
   audit?: { passengers: number | null; directTrains: number; directProbed: number; bfeTrains: number; bfeStopsChecked: number; connHubs: string[]; connLeg1Checked: number; connLeg2Checked: number };
   /** Round-18 freshness envelope (dynamic data must not be shown as current when stale). */
@@ -295,3 +299,39 @@ export function durationLabelOf(min: number | null | undefined): string | null {
   if (min == null || !Number.isFinite(min) || min < 0) return null;
   return `${Math.floor(min / 60)}h ${String(min % 60).padStart(2, "0")}m`;
 }
+
+/** Round-18m-13: one candidate the AI may pick. `id` is stable: D:<train> (direct),
+ *  B:<train>:<bookFrom> (same train, ticket from earlier stop), C:<hub>:<t1>+<t2> (connecting). */
+export type JourneyCandidate = {
+  id: string;
+  kind: "direct" | "bfe" | "connecting";
+  trainNumbers: string[];
+  label: string;
+  departure: string | null;
+  arrival: string | null;
+  durationMinutes: number | null;
+  /** best row for the party (fresh first), plus full board */
+  availability: RouteAvailability | null;
+  classOptions: RouteAvailability[];
+  /** seat proof tier: fresh AVL/RAC enough for pax → "fresh"; stale AVL/RAC → "stale"; else "none" */
+  seatTier: "fresh" | "stale" | "none";
+  bookFrom?: string | null;
+  boardAt?: string | null;
+  hub?: string | null;
+  layoverMinutes?: number | null;
+};
+
+export type JourneyDecision = {
+  source: "ai" | "rules";
+  model?: string | null;
+  recommendedId: string | null;
+  recommended: JourneyCandidate | null;
+  /** AI's ordered preference (ids), best first. */
+  ranking: string[];
+  candidates: JourneyCandidate[];
+  whyPoints: string[];
+  /** one-line Hinglish verdict written by the AI (grounded) */
+  verdict?: string | null;
+  /** Faster DIRECT train whose AVL is only in stale cache — "pehle Seat check karo" lead. */
+  verifyFirst?: { id: string; trainNumber: string; label: string; durationMinutes: number | null; availability: RouteAvailability | null } | null;
+};

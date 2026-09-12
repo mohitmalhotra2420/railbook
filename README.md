@@ -218,6 +218,16 @@ only provider-verified alternatives.
 - More candidates: fixed hubs (up to 10 connections) + **route-derived hubs** (`routeDerivedHubs()` — junction/major stops from the direct trains' timetable, e.g. JAT→BDTS tries PTKC/LDH/NDLS/SWM/RTM/BH), all legs probed, then filtered.
 - When nothing passes: card + `plan.notes` say "Connecting routes mile lekin kisi mein dono trains par seat available nahi thi — isliye connecting option nahi dikhaya." Summary's "route via X" line lists per-leg seats.
 
+### Round-18m-13 — AI decides the journey plan (engine = data only)
+
+User: "engine ki jagah AI journey planner handle kare — recommendation, seat availability, leg-1/leg-2 — sab AI samajh ke." Also: direct trains first in the card; explain why 13308-from-PHR beat 14624.
+
+- New `server/journey/decide.ts`: engine builds a **candidate sheet** (every direct train × every class board, same-train earlier-stop options, connecting legs — each with FRESH / STALE / NOT CHECKED tiers) and the **LLM (Muse → gpt-oss fallback) decides**: `recommendedId`, `ranking`, Hinglish `verdict`, 4–5 `why` points. Grounded: ids only, WL/unchecked never "seat hai", ₹ only real fares, ids humanised to train no + name. Model fail → `rulesDecision` (source `"rules"`), never blank.
+- `plan.decision` (+ `verifyFirst`: faster DIRECT train whose AVL is only in 24h+ web cache → "Pehle ye check karo" strip with Seat check button). `applyDecision` re-orders `best`/`boardFromEarlier`/`connections` so hero == AI pick.
+- Card order: header → **Direct trains (all, departure-sorted, full class board, AI pick tag)** → AI ka faisla → Verify-first → AI Recommended hero → alternatives → explore.
+- Why 13308-from-PHR over 14624: 14624's AVL 11 was STALE (railyatri cache 24h+), 13308 PHR→SRE 1A AVL 11 was FRESH provider data. AI now says this explicitly and tells you to Seat-check the faster stale train first.
+- Tests `tests/round18m13-ai-decision.test.ts` (728 total).
+
 ### Round-18m-12 — Every train × every class seat-probe, stale-AVL tier, RAC as option
 
 Bug (user screenshot LDH→SRE "kal"): planner said "direct mein koi seat nahi" while the board showed 12588 1A AVL 2 and 14682 2S AVL 559. **Engine fault, not AI**: `JOURNEY_AVAIL_PROBE` defaulted to 4 → only the 4 fastest trains were seat-checked; the rest were silently counted as "no seat".
