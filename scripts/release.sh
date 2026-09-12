@@ -16,7 +16,7 @@ set -a; [ -f .env ] && . ./.env; set +a
 echo "▶ typecheck"; npx tsc --noEmit -p tsconfig.server.json
 # Round-18f: client gate — undefined names (TS2304/TS2552) are runtime crashes (React render → blank reply). Never ship those.
 if npx tsc --noEmit -p tsconfig.json 2>&1 | grep -E "error TS(2304|2552)" ; then echo "✗ client has undefined names"; exit 1; fi
-echo "▶ tests";     npx vitest run 2>&1 | grep -E "Test Files|Tests " || { echo "tests failed"; exit 1; }
+echo "▶ tests";     npx vitest run 2>&1 | tee /tmp/release-vitest.log | grep -E "Test Files|Tests |FAIL|×" || { echo "tests failed"; exit 1; }
 echo "▶ build";     npm run build 2>&1 | tail -1
 
 echo "▶ commit"
