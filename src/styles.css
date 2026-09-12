@@ -1932,3 +1932,9 @@ table.traintable {
 .jx-strip-sm .jx-strip-sub { font-size: 11.5px; }
 .jx-strip-sm .jx-strip-col { padding: 7px 9px; }
 .jx-bfe-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; font-size: 12px; color: var(--ink); }
+
+/* Round-18m-12: seat-check board (every train × every class) */
+.jx-sb-row{padding:8px 0;border-top:1px solid rgba(15,23,42,.08)}
+.jx-sb-row:first-of-type{border-top:0}
+.jx-sb-head{display:flex;flex-wrap:wrap;gap:6px;align-items:baseline;background:none;border:0;padding:0;text-align:left;font:inherit;color:inherit;cursor:pointer;width:100%}
+.jx-sb-row .jx-classes{margin-top:4px}

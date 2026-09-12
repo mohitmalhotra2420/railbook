@@ -218,6 +218,16 @@ only provider-verified alternatives.
 - More candidates: fixed hubs (up to 10 connections) + **route-derived hubs** (`routeDerivedHubs()` — junction/major stops from the direct trains' timetable, e.g. JAT→BDTS tries PTKC/LDH/NDLS/SWM/RTM/BH), all legs probed, then filtered.
 - When nothing passes: card + `plan.notes` say "Connecting routes mile lekin kisi mein dono trains par seat available nahi thi — isliye connecting option nahi dikhaya." Summary's "route via X" line lists per-leg seats.
 
+### Round-18m-12 — Every train × every class seat-probe, stale-AVL tier, RAC as option
+
+Bug (user screenshot LDH→SRE "kal"): planner said "direct mein koi seat nahi" while the board showed 12588 1A AVL 2 and 14682 2S AVL 559. **Engine fault, not AI**: `JOURNEY_AVAIL_PROBE` defaulted to 4 → only the 4 fastest trains were seat-checked; the rest were silently counted as "no seat".
+
+- `planJourney`: probes **every direct train (bounded 20) × every class** in parallel; `RouteOption.classOptions[]` = full class board (AVL/RAC/WL/N-A, stale flag), `probed` flag per train.
+- `directUnavailable` only when every probed train has no fresh AND no stale bookable row. New `directStaleAvailable`: AVL/RAC seen only in 24h+ web cache → "available (not fresh) — verify" tier (never "seat nahi"). Unprobed trains → explicit note ("seat data nahi aayi — 'seat nahi' nahi maana").
+- Ranking pax-aware: fresh bookable for N pax → stale bookable → rest. `recommendedOf` / summary / UI hero share one rule: fresh same-train book-from-earlier beats a stale or slower best.
+- UI: hero shows "All classes (this train)" (RAC rows included), new **"Seat check · every train, every class"** section listing each direct train's full board + unprobed trains; pills show the stale tier.
+- Tests: `tests/round18m12-probe-all.test.ts` (724 total).
+
 ### Round-18m-11 — Station-safety fix (prayagraj ≠ Agra), alt-row book/board/deboard, audit strip
 
 - **Bug (screenshot):** "ludhiana se prayagraj" → AGC. Root cause: `matchStation()` ka `q.includes(city)` — "pr**agra**j" ke andar "agra" substring. Fix: city sirf **whole-word** match; fuzzy matcher ke liye `DISTINCT_CITIES` guard (raipur→Jaipur jaisi 1-edit galtiyan bhi band). Prayagraj/Allahabad ab `MULTI_STATION_CITIES` group (PRYJ → PCOI → PRRB → PYGS); goods/power-plant sidings aur "PRYJ2" duplicates options se hidden (`isPassengerStation`).

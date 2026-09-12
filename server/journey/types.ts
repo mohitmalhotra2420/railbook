@@ -67,6 +67,10 @@ export type RouteOption = {
   layoverMinutes: number | null;
   classes: string[];
   availability: RouteAvailability | null;
+  /** Round-18m-12: is train ka POORA class board (har class ka status) — provider se jo mila, sab. */
+  classOptions?: RouteAvailability[];
+  /** Round-18m-12: seat probe hua ya nahi (false = provider fail / not checked — "seat nahi" nahi bolna). */
+  probed?: boolean;
   /** Reliability SIRF tab jab provider real data de — abhi koi nahi deta → null. */
   reliability: null;
   source: string;
@@ -244,6 +248,9 @@ export type JourneyPlan = {
   /** Round-18m: `seatProof` = us date par fastest train ka PROVEN seat status (e.g. "12014 EC AVL 3"), warna null — count sirf trains hai. */
   alternativeDates: { date: string; count: number; fastest: { number: string; durationMinutes: number } | null; providerFailed?: boolean; seatProof?: string | null }[];
   directUnavailable: boolean;
+  /** Round-18m-12: fresh seat nahi, par kisi direct train mein STALE (24h+ web-cache) AVL/RAC hai —
+   *  "seat nahi" nahi, "available (not fresh) — verify" tier. */
+  directStaleAvailable?: boolean;
   recovery: {
     reason: string;
     differentTrain: RouteOption[];

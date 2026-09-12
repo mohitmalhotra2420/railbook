@@ -60,6 +60,9 @@ export interface AgentRouteOption {
   layoverMinutes: number | null;
   classes: string[];
   availability: { classCode: string; status: string; seats: number | null; rac: number | null; waitlist: number | null; fare: number | null; source: string; stale?: boolean } | null;
+  /** Round-18m-12: full class board (every class probed) for this train — RAC/WL rows included. */
+  classOptions?: { classCode: string; status: string; seats: number | null; rac: number | null; waitlist: number | null; fare: number | null; source: string; stale?: boolean }[];
+  probed?: boolean;
   reliability: null;
   source: string;
   why: string;
@@ -120,6 +123,7 @@ export interface AgentJourneyPlan {
   connections: AgentConnection[];
   alternativeDates: { date: string; count: number; fastest: { number: string; durationMinutes: number } | null; seatProof?: string | null }[];
   directUnavailable: boolean;
+  directStaleAvailable?: boolean;
   /** Round-18l: server-built plain-language summary (best → fallback → alt date). */
   summary?: string | null;
   /** Round-18m-9: 3–5 deterministic reasons for the recommendation. */

@@ -97,7 +97,7 @@ function ClassRow({ label, rows }: { label: string; rows: AvailLike[] }) {
   if (!rows.length) return null;
   return (
     <div className="jx-classes">
-      <div className="jx-classes-label">{label}</div>
+      {label ? <div className="jx-classes-label">{label}</div> : null}
       <div className="jx-classes-chips">
         {rows.map((r) => {
           const av = availTextOf(r);
@@ -282,11 +282,15 @@ export function JourneyOptions({
   const partial = rec?.partialRoute;
   const partialPlans = partial?.plans.filter((p) => p.fullyAvailable) ?? [];
   const bfeAll = rec?.boardFromEarlier ?? [];
-  const bfeHero: Bfe | null = plan.directUnavailable ? bfeAll.find((b) => !b.availability.stale) ?? bfeAll[0] ?? null : null;
+  const isOk = (a?: AvailLike | null) => !!a && !a.stale && (a.status === "AVAILABLE" || a.status === "RAC");
+  /* Round-18m-12: hero rule == engine recommendedOf/journeySummary — fresh same-train
+   * book-from-earlier beats a stale (not fresh) or slower-connecting best. */
+  const bfeFresh = bfeAll.find((b) => !b.availability.stale) ?? null;
+  const bfeBeatsBest = !!bfeFresh && !!best && (!isOk(best.availability) || (best.changes > 0 && (bfeFresh.durationMinutes ?? 9e9) <= (best.durationMinutes ?? 9e9)));
+  const bfeHero: Bfe | null = plan.directUnavailable ? bfeFresh ?? bfeAll[0] ?? null : bfeBeatsBest ? bfeFresh : null;
   const bfeRest = bfeAll.filter((b) => b !== bfeHero);
   const pickBfe = onPickBoardEarlier ? (b: Bfe) => onPickBoardEarlier({ trainNumber: b.trainNumber, bookFrom: b.bookFrom, boardAt: b.boardAt, destination: b.destination, classCode: b.availability.classCode }) : undefined;
-  const heroDirect = !plan.directUnavailable ? best : null;
-  const isOk = (a?: AvailLike | null) => !!a && !a.stale && (a.status === "AVAILABLE" || a.status === "RAC");
+  const heroDirect = !plan.directUnavailable && !bfeHero ? best : null;
   const asOf = timeLabel(plan.provenance?.retrievedAt);
   const why = plan.whyPoints && plan.whyPoints.length ? plan.whyPoints : plan.summary ? [plan.summary] : [];
 
@@ -311,8 +315,25 @@ export function JourneyOptions({
     o.changes > 0 && o.legs.length > 1 ? (
       <ConnCard key={o.trainNumbers.join("+")} c={{ station: o.legs[0].to, stationName: o.legs[0].toName ?? null, legs: o.legs, layoverMinutes: o.layoverMinutes ?? 0, totalDurationMinutes: o.durationMinutes, valid: true } as unknown as AgentConnection} baseDate={baseDate} onPickLeg={pickLeg} />
     ) : (
-      <ListRow key={o.trainNumbers.join("+")} no={o.trainNumbers[0]} name={o.trainNames[0]} mid={`${o.origin}→${o.destination}`} midSub={`${o.departure} · ${o.arrival}${dateTag(baseDate, o.arrivalDayOffset)}`} dur={o.durationLabel} durSub="Direct" seat={o.availability} onClick={pick ? () => pick(o) : undefined} />
+      <ListRow key={o.trainNumbers.join("+")} no={o.trainNumbers[0]} name={o.trainNames[0]} mid={`${o.origin}→${o.destination}`} midSub={`${o.departure} · ${o.arrival}${dateTag(baseDate, o.arrivalDayOffset)}`} dur={o.durationLabel} durSub="Direct" seat={o.availability} chips={(o.classOptions ?? []).filter((r) => r.classCode !== o.availability?.classCode)} onClick={pick ? () => pick(o) : undefined} />
     );
+  /* Round-18m-12 (user: "har train × har class check ho, RAC bhi dikhe"): seat-check
+   * audit list — HAR direct train ka poora class board (AVL/RAC/WL/N-A, stale ⚠), aur
+   * jo train probe nahi hui usko saaf "seat data nahi aayi" — "seat nahi" nahi. */
+  const probedDirect = direct.filter((o) => o.probed);
+  const unprobedDirect = direct.filter((o) => !o.probed);
+  const [boardOpen, setBoardOpen] = useState(false);
+  const seatBoard = direct.length > 0 && (
+    <Section ic={IC.check} title="Seat check · every train, every class" badge={`${probedDirect.length}/${direct.length} checked`} foot={unprobedDirect.length ? `${unprobedDirect.map((o) => o.trainNumbers[0]).join(", ")}: seat data provider se nahi aayi — inhe "seat nahi" nahi maana; Refresh seats se dobara check karo.` : "Har direct train ki har class ka status upar hai — RAC bhi booking option hai (berth chart ke baad)."}>
+      <button type="button" className="jx-why-head" onClick={() => setBoardOpen((v) => !v)}>{boardOpen ? "Hide" : "Show"} {direct.length} trains <span className={`jx-caret${boardOpen ? " open" : ""}`} /></button>
+      {boardOpen && direct.map((o) => (
+        <div key={o.trainNumbers[0]} className="jx-sb-row">
+          <button type="button" className="jx-sb-head" onClick={pick ? () => pick(o) : undefined}><span className="jx-no">{o.trainNumbers[0]}</span> <span className="jx-name">{o.trainNames[0]}</span> <span className="jx-sub">{o.departure}→{o.arrival}{dateTag(baseDate, o.arrivalDayOffset)}</span></button>
+          {o.classOptions && o.classOptions.length ? <ClassRow label="" rows={o.classOptions} /> : <div className="jx-sub">{o.probed ? "Koi class data nahi" : "Seat data provider se nahi aayi"}</div>}
+        </div>
+      ))}
+    </Section>
+  );
 
   /* status pills */
   const pills: { tone: "bad" | "ok" | "warn" | "muted"; ic: JSX.Element; strong: string; rest?: string }[] = [];
@@ -323,7 +344,8 @@ export function JourneyOptions({
     if (connections.length) pills.push({ tone: "ok", ic: IC.link, strong: "Connecting", rest: "· dono legs seat" });
     else pills.push({ tone: "warn", ic: IC.link, strong: "Connecting", rest: "· no confirmed seat" });
   } else if (best) {
-    pills.push({ tone: isOk(best.availability) ? "ok" : "warn", ic: IC.star, strong: "Recommended", rest: best.changes ? `· via ${best.legs[0]?.to}` : `· direct ${best.trainNumbers[0]}` });
+    if (plan.directStaleAvailable) pills.push({ tone: "warn", ic: IC.warn, strong: "Direct", rest: "· AVL dikh rahi (not fresh) — verify" });
+    pills.push(bfeHero ? { tone: "ok", ic: IC.star, strong: "Recommended", rest: `· ${bfeHero.trainNumber} board ${bfeHero.boardAt}` } : { tone: isOk(best.availability) ? "ok" : "warn", ic: IC.star, strong: "Recommended", rest: best.changes ? `· via ${best.legs[0]?.to}` : `· direct ${best.trainNumbers[0]}` });
     if (pax) pills.push({ tone: "muted", ic: IC.users, strong: `${pax} passenger${pax > 1 ? "s" : ""}` });
   }
 
@@ -430,10 +452,12 @@ export function JourneyOptions({
             { ic: IC.arrow, text: heroDirect.changes ? `${heroDirect.changes} change · ${heroDirect.layoverMinutes != null ? layoverLabel(heroDirect.layoverMinutes) : ""}` : "Direct" },
             { ic: IC.rupee, text: heroDirect.availability?.fare != null ? inr(heroDirect.availability.fare) : "Fare on select" },
           ]} />
+          {/* Round-18m-12: is train ka POORA class board — AVL/RAC/WL sab (RAC bhi option hai). */}
+          <ClassRow label="All classes (this train)" rows={heroDirect.classOptions ?? (heroDirect.availability ? [heroDirect.availability] : [])} />
           <div className="jx-hero-cta">
             <div className="jx-hero-note">
               <span className="jx-hero-note-ic">{isOk(heroDirect.availability) ? IC.shield : IC.warn}</span>
-              <div><strong>{isOk(heroDirect.availability) ? "Seat verified" : "Availability may have changed"}</strong><div className="jx-sub">{asOf ? `Last checked: ${asOf}` : "Seat check se confirm karein"}</div></div>
+              <div><strong>{isOk(heroDirect.availability) ? "Seat verified" : heroDirect.availability?.stale && (heroDirect.availability.status === "AVAILABLE" || heroDirect.availability.status === "RAC") ? "Available (not fresh) — verify" : "Availability may have changed"}</strong><div className="jx-sub">{heroDirect.availability?.stale ? "Data 24h+ purana (web cache) — Seat check se refresh karo, phir book" : asOf ? `Last checked: ${asOf}` : "Seat check se confirm karein"}</div></div>
             </div>
             {pick && <button type="button" className="jx-btn jx-btn-primary" onClick={() => pick(heroDirect)}>Is train ko dekho {IC.arrow}</button>}
             {onOpenBoard && <button type="button" className="jx-btn jx-btn-dark" onClick={onOpenBoard}>Sabhi trains · Book {IC.arrow}</button>}
@@ -532,6 +556,8 @@ export function JourneyOptions({
           ))}
         </Section>
       )}
+
+      {seatBoard}
 
       {/* ── Explore ── */}
       {tabs.length > 0 && (
