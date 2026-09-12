@@ -218,6 +218,11 @@ only provider-verified alternatives.
 - More candidates: fixed hubs (up to 10 connections) + **route-derived hubs** (`routeDerivedHubs()` — junction/major stops from the direct trains' timetable, e.g. JAT→BDTS tries PTKC/LDH/NDLS/SWM/RTM/BH), all legs probed, then filtered.
 - When nothing passes: card + `plan.notes` say "Connecting routes mile lekin kisi mein dono trains par seat available nahi thi — isliye connecting option nahi dikhaya." Summary's "route via X" line lists per-leg seats.
 
+### Round-18m-19 — Readability + seat colours + no client-side "1 passenger" assumption
+- Seat chips everywhere: **AVL = green, RAC = yellow, WL / Regret / N-A = red** (`.jx-cchip-ok/-warn/-bad`, SeatPill warn now yellow). Checked-list chips no longer repeat the class code ("1A 1A WL 1" → "1A WL 1").
+- Headings bolder/larger: "Via <hub>", "Leg 1 · A → B", "Leg 2 …", section titles, class-row labels, and the "N aur trains check ki — seat nahi" button (filled, bold). Nothing else in the layout changed.
+- Passengers: client fallback (`planTurn`, used when the server agent times out) assumed 1 pax when a train list/selection existed or after a station/class prompt → now only when the user actually gave a count. Server already resets pax per new journey (R18m-15).
+
 ### Round-18m-18 — Connecting legs: every train × every class + ConfirmTkt rescue per leg; always show leg-wise card
 - Bug: when no connection had seats on BOTH legs, `legPlans` stayed empty so the leg-wise expansion never ran → user saw nothing under "Connecting" (LDH→INDB). Now the top hub is expanded anyway: leg-1 (origin→hub) and leg-2 (hub→destination) — every train that day × every class (hint = user class + train's full class list).
 - Per-leg rescue (only when that leg has no seat): same train, ticket from the train's ORIGIN (all earlier stops) or upto 1–2 stops beyond the leg's destination — `RouteLeg.ticketFrom/ticketUpto`. Card shows "ticket X→Y" tag; tap runs the fresh check on the ticket segment.

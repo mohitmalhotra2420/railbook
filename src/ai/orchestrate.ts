@@ -191,13 +191,10 @@ export function planTurn(input: TurnInput): AssistantTurn {
     (lastAsked === "date" ? nlu.date : undefined);
   let date = spokenDate ?? (input.booking.dateProvided || userDateKnown ? input.booking.date || undefined : undefined);
   const midJourney = Boolean(input.booking.selectedTrain || input.booking.trains.length);
-  const paxDone =
-    nlu.passengerCount != null ||
-    input.booking.paxProvided ||
-    midJourney ||
-    lastAsked === "train" ||
-    lastAsked === "class" ||
-    lastAsked === "seat";
+  /* Round-18m-19 (user: "AI abhi bhi passenger nahi pooch raha"): client fallback
+   * (server agent timeout/502 par) kabhi 1 pax ASSUME na kare — sirf tab jab user ne
+   * bola ho (paxProvided) ya nlu mein aaya ho. midJourney/lastAsked se nahi. */
+  const paxDone = nlu.passengerCount != null || input.booking.paxProvided;
   const passengerCount = nlu.passengerCount ?? (paxDone ? input.booking.passengerCount || 1 : undefined);
 
   const apply: AssistantTurn["apply"] = {};
