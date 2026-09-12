@@ -68,6 +68,16 @@ export function candidateSheet(plan: JourneyPlan, cands: JourneyCandidate[]): st
     const board = c.classOptions.length ? c.classOptions.map(rowTxt).join("; ") : "NOT CHECKED";
     L.push(`${c.id} | ${kind} | ${c.trainNumbers.join("+")} ${c.label} | dep ${c.departure ?? "?"} arr ${c.arrival ?? "?"} | ${dur(c.durationMinutes)} | tier=${c.seatTier.toUpperCase()} | ${board}`);
   }
+  /* Round-18m-18: leg-wise coverage facts — model ko pata ho ki connecting legs par
+   * HAR train × HAR class (aur train-origin / 1-2 stop aage tak ki ticket) check hui. */
+  for (const lp of plan.legPlans ?? []) {
+    const l2 = lp.leg2All ?? lp.leg2;
+    const l1 = lp.leg1All ?? lp.leg1;
+    L.push("");
+    L.push(`CONNECTING VIA ${lp.hub}: leg-1 ${plan.query.from}->${lp.hub} ${lp.leg1.length}/${lp.checkedLeg1} trains with a seat; leg-2 ${lp.hub}->${plan.query.to} ${lp.leg2.length}/${lp.checkedLeg2} trains with a seat (every class checked; also ticket from each train's origin and 1-2 stops beyond destination).`);
+    if (!lp.leg2.length) L.push(`  leg-2 trains checked (all WL/N-A): ${l2.map((l) => `${l.trainNumber} [${(l.classOptions ?? []).map((r) => `${r.classCode} ${r.status === "WAITLIST" ? `WL${r.waitlist ?? ""}` : r.status}`).join(", ") || "no data"}]`).join("; ")}`);
+    if (!lp.leg1.length) L.push(`  leg-1 trains checked (all WL/N-A): ${l1.map((l) => l.trainNumber).join(", ")}`);
+  }
   return L.join("\n");
 }
 

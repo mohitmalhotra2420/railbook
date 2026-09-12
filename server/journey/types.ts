@@ -47,6 +47,12 @@ export type RouteLeg = {
   classOptions?: RouteAvailability[];
   /** Round-18m-14: train ki classes (search se) — leg probe har class check kare. */
   classes?: string[];
+  /** Round-18m-18 (user: connecting leg par seat na mile to train ke ORIGIN se / destination
+   * ke 1-2 stop AAGE tak ticket) — ticket segment jab passenger segment se alag ho. */
+  ticketFrom?: string | null;
+  ticketFromName?: string | null;
+  ticketUpto?: string | null;
+  ticketUptoName?: string | null;
 };
 
 export type RouteOption = {
@@ -108,6 +114,9 @@ export type LegPlan = {
   checkedLeg1: number;
   checkedLeg2: number;
   best: Connection | null;
+  /** Round-18m-18: har probe hui train ka poora board (WL/N-A bhi) — user ko dikhe ki kya check hua. */
+  leg1All?: RouteLeg[];
+  leg2All?: RouteLeg[];
 };
 
 export type VacantSeatRow = {

@@ -41,6 +41,11 @@ export interface AgentRouteLeg {
   availability?: { classCode: string; status: string; seats: number | null; rac: number | null; waitlist: number | null; fare: number | null; source: string; stale?: boolean } | null;
   /** Round-18m-7: is leg par har class jisme seat hai (AVL/RAC). */
   classOptions?: { classCode: string; status: string; seats: number | null; rac: number | null; waitlist: number | null; fare: number | null; source: string; stale?: boolean }[];
+  /** Round-18m-18: ConfirmTkt-trick on a connecting leg — ticket from train origin / upto 1-2 stops beyond. */
+  ticketFrom?: string | null;
+  ticketFromName?: string | null;
+  ticketUpto?: string | null;
+  ticketUptoName?: string | null;
 }
 export interface AgentRouteOption {
   rank: number;
@@ -138,7 +143,7 @@ export interface AgentJourneyPlan {
   whySource?: "ai" | "rules";
   audit?: { passengers: number | null; directTrains: number; directProbed: number; bfeTrains: number; bfeStopsChecked: number; connHubs: string[]; connLeg1Checked: number; connLeg2Checked: number };
   /** Round-18m-10: per-hub leg-1/leg-2 seat-wale trains + joint best. */
-  legPlans?: { hub: string; hubName: string | null; leg1: AgentRouteLeg[]; leg2: AgentRouteLeg[]; checkedLeg1: number; checkedLeg2: number; best: AgentConnection | null }[];
+  legPlans?: { hub: string; hubName: string | null; leg1: AgentRouteLeg[]; leg2: AgentRouteLeg[]; checkedLeg1: number; checkedLeg2: number; best: AgentConnection | null; leg1All?: AgentRouteLeg[]; leg2All?: AgentRouteLeg[] }[];
   recovery: {
     reason: string;
     differentTrain: AgentRouteOption[];

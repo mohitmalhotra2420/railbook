@@ -1599,7 +1599,7 @@ function BlockView({
         plan={block.plan}
         onPickTrain={(n) => onChip(`${n} ki seat availability ${block.plan.query.travelClass ? block.plan.query.travelClass + " " : ""}${block.plan.query.date} ko ${block.plan.query.from} se ${block.plan.query.to}`)}
         /* Round-18m-3: connecting leg → SIRF us leg ka segment + us leg ki date. */
-        onPickLeg={(l) => onChip(`${l.trainNumber} ki seat availability ${block.plan.query.travelClass ? block.plan.query.travelClass + " " : ""}${l.date} ko ${l.from} se ${l.to}`)}
+        onPickLeg={(l) => onChip(`${l.trainNumber} ki seat availability ${l.classCode ? l.classCode + " " : block.plan.query.travelClass ? block.plan.query.travelClass + " " : ""}${l.date} ko ${l.ticketFrom ?? l.from} se ${l.ticketUpto ?? l.to}${l.ticketFrom && l.ticketFrom !== l.from ? ` (boarding ${l.from} se)` : ""}`)}
         /* Round-18m-6: ticket bookFrom→destination (boarding origin par) — query usi segment ki. */
         onPickBoardEarlier={(o) => onChip(`${o.trainNumber} ki seat availability ${o.classCode} ${block.plan.query.date} ko ${o.bookFrom} se ${o.destination} (boarding ${o.boardAt} se)`)}
         onPickClass={(q) => onChip(`${q.trainNumber} ki fresh seat availability${q.classCode ? ` ${q.classCode}` : ""} ${q.date ?? block.plan.query.date} ko ${q.from} se ${q.to}${q.boardAt && q.boardAt !== q.from ? ` (boarding ${q.boardAt} se)` : ""}`)}

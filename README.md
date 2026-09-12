@@ -218,6 +218,12 @@ only provider-verified alternatives.
 - More candidates: fixed hubs (up to 10 connections) + **route-derived hubs** (`routeDerivedHubs()` — junction/major stops from the direct trains' timetable, e.g. JAT→BDTS tries PTKC/LDH/NDLS/SWM/RTM/BH), all legs probed, then filtered.
 - When nothing passes: card + `plan.notes` say "Connecting routes mile lekin kisi mein dono trains par seat available nahi thi — isliye connecting option nahi dikhaya." Summary's "route via X" line lists per-leg seats.
 
+### Round-18m-18 — Connecting legs: every train × every class + ConfirmTkt rescue per leg; always show leg-wise card
+- Bug: when no connection had seats on BOTH legs, `legPlans` stayed empty so the leg-wise expansion never ran → user saw nothing under "Connecting" (LDH→INDB). Now the top hub is expanded anyway: leg-1 (origin→hub) and leg-2 (hub→destination) — every train that day × every class (hint = user class + train's full class list).
+- Per-leg rescue (only when that leg has no seat): same train, ticket from the train's ORIGIN (all earlier stops) or upto 1–2 stops beyond the leg's destination — `RouteLeg.ticketFrom/ticketUpto`. Card shows "ticket X→Y" tag; tap runs the fresh check on the ticket segment.
+- LegPlan carries `leg1All/leg2All` (full boards incl. WL/N-A). Card lists "N aur trains check ki — seat nahi (dekho)" with tappable class chips so the user can see every train × class that was checked. AI candidate sheet gets the same coverage facts.
+- `probeConnectionLegs` now probes every class of each leg train (was user-class only). Bounded: 1 hub, 20+20 trains, rescue 4 trains/leg → ~85s worst case.
+
 ### Round-18m-17 — LIVE IRCTC seat data via RailYatri refresh + "GNWL/AVAILABLE" parse fix (real seat found)
 - RailYatri SA API with `refresh=true` pulls LIVE from IRCTC (`data_from:"IRCTC"`, timestamp now) instead of a days-old cache — fresh seat data even when RailCore/RailKit/RailRadar quotas are exhausted. Scraped rows carry `live:true`.
 - Parser: IRCTC live text `GNWL/AVAILABLE` (quota GNWL, current status AVAILABLE) was mis-read as WAITLIST → now AVAILABLE; `GNWL/RAC n` → RAC. Regression tests.

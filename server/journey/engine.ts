@@ -321,8 +321,11 @@ export async function probeConnectionLegs(connections: Connection[], date: strin
     if (!p) {
       /* Round-18m-7: poora class board (user class na ho to SAB classes) — leg par
        * har seat-wali class dikhegi, best row ranking ke liye. */
-      p = routedClassBoard(leg.trainNumber, date, leg.from, leg.to, "GN", travelClass ? [travelClass] : [])
-        .then((b) => ({ best: bestClassRow(b.classes, travelClass), all: bookableRows(b.classes) }))
+      /* Round-18m-18 (user: "leg-1 aur leg-2 par HAR train ki HAR class check ho"):
+       * hint = user class + leg train ki saari classes → poora board, sirf user class nahi. */
+      const hint = Array.from(new Set([...(travelClass ? [travelClass] : []), ...(leg.classes ?? [])]));
+      p = routedClassBoard(leg.trainNumber, date, leg.from, leg.to, "GN", hint)
+        .then((b) => ({ best: bestClassRow(b.classes, travelClass), all: bookableRows(b.classes, { includeStale: true }) }))
         .catch(() => null);
       cache.set(key, p);
     }
@@ -438,8 +441,31 @@ export async function expandLegPlan(args: { from: string; to: string; hub: strin
   };
   const dateB = addDays(args.date, args.leg2DayOffset ?? 0);
   const [pa, pb] = await Promise.all([Promise.all(legA.map((l) => probe(l, args.date))), Promise.all(legB.map((l) => probe(l, dateB)))]);
-  const okA = pa.filter((l) => legBookable(l.availability, args.pax));
-  const okB = pb.filter((l) => legBookable(l.availability, args.pax)).map((l) => ({ ...l, departureDayOffset: args.leg2DayOffset ?? 0 }));
+  /* Round-18m-18 (user ConfirmTkt case): leg par seat na mile to ConfirmTkt-trick —
+   * usi train mein TRAIN KE ORIGIN tak pichhle stops se, ya destination ke 1-2 stop
+   * AAGE tak ticket (passenger apne segment par hi chadhta/utarta hai). Sirf tab jab
+   * us leg par kisi train mein seat nahi (user: "tab hi karna jab connecting mein seat na ho"). */
+  const rescueLeg = async (probed: RouteLeg[], date: string, legFrom: string, legTo: string, stopsAhead: number): Promise<RouteLeg[]> => {
+    if (probed.some((l) => legBookable(l.availability, args.pax))) return probed;
+    const wl = probed.filter((l) => !legBookable(l.availability, args.pax)).slice(0, 8).map((l) => ({ number: l.trainNumber, name: l.trainName, classes: l.classes ?? [], directStatus: l.availability?.status ?? null, durationMinutes: l.durationMinutes ?? null }));
+    if (!wl.length) return probed;
+    const out = [...probed];
+    /* Dono modes parallel (time budget) — "earlier" (train origin tak) pehle apply, phir "upto". */
+    const rs = await Promise.all((["earlier", "upto"] as const).map((mode) => findBoardFromEarlier({ trains: wl, origin: legFrom, destination: legTo, date, travelClass: args.travelClass ?? null, limitTrains: 4, passengers: args.pax, mode, stopsAhead }).catch(() => null)));
+    for (const r of rs) {
+      if (!r) continue;
+      r.sources.forEach((x) => sources.add(x));
+      for (const o of r.options) {
+        const i = out.findIndex((l) => l.trainNumber === o.trainNumber);
+        if (i < 0 || legBookable(out[i].availability, args.pax)) continue;
+        out[i] = { ...out[i], availability: o.availability, classOptions: o.classOptions ?? [o.availability], ticketFrom: o.bookFrom !== legFrom ? o.bookFrom : null, ticketFromName: o.bookFrom !== legFrom ? o.bookFromName ?? null : null, ticketUpto: o.bookUpto ?? null, ticketUptoName: o.bookUptoName ?? null };
+      }
+    }
+    return out;
+  };
+  const [ra, rb] = await Promise.all([rescueLeg(pa, args.date, args.from, args.hub, 2), rescueLeg(pb, dateB, args.hub, args.to, 2)]);
+  const okA = ra.filter((l) => legBookable(l.availability, args.pax));
+  const okB = rb.filter((l) => legBookable(l.availability, args.pax)).map((l) => ({ ...l, departureDayOffset: args.leg2DayOffset ?? 0 }));
   const combos: Connection[] = [];
   for (const la of okA) for (const lb of okB) {
     if (la.trainNumber === lb.trainNumber) continue;
@@ -450,7 +476,7 @@ export async function expandLegPlan(args: { from: string; to: string; hub: strin
   }
   const best = bookableConnections(combos, args.pax)[0] ?? null;
   if (!okA.length && !okB.length) return { plan: null, sources };
-  return { plan: { hub: args.hub, hubName: args.hubName ?? null, leg1: okA, leg2: okB, checkedLeg1: pa.length, checkedLeg2: pb.length, best }, sources };
+  return { plan: { hub: args.hub, hubName: args.hubName ?? null, leg1: okA, leg2: okB, checkedLeg1: pa.length, checkedLeg2: pb.length, best, leg1All: ra, leg2All: rb.map((l) => ({ ...l, departureDayOffset: args.leg2DayOffset ?? 0 })) }, sources };
 }
 export const CONNECTION_NO_SEAT_NOTE = "Connecting routes mile lekin kisi mein dono trains par seat available nahi thi (WL/N-A) — isliye connecting option nahi dikhaya.";
 
@@ -1333,6 +1359,40 @@ export async function planJourney(args: {
       }
     } catch {
       /* expanded plan optional */
+    }
+  } else if (plan.directUnavailable && !plan.legPlans.length && args.expandLegs !== false && trains.length > 0) {
+    /* Round-18m-18 (user LDH→INDB: "connecting mein kuch nahi dikha"): pehle koi connection
+     * dono legs par bookable nahi thi → legPlans khaali → leg-wise expand kabhi chala hi nahi.
+     * Ab: probed connections ke hubs (sabse zyada candidates wala pehle) par leg-1/leg-2 ki
+     * HAR train × HAR class + per-leg ConfirmTkt rescue (train origin se / 1-2 stop aage tak). */
+    try {
+      const hubCount = new Map<string, { n: number; name: string | null; off: number }>();
+      for (const c of probedConnections) {
+        if (!c.valid || c.legs.length !== 2) continue;
+        const g = hubCount.get(c.station) ?? { n: 0, name: c.stationName ?? c.legs[0]?.toName ?? null, off: c.legs[0]?.arrivalDayOffset ?? 0 };
+        g.n++;
+        hubCount.set(c.station, g);
+      }
+      /* Ek hub (sabse zyada candidates wala) — time budget: prod agent turn 180s. */
+      const hubs = [...hubCount.entries()].sort((a, b) => b[1].n - a[1].n).slice(0, 1);
+      for (const [hub, g] of hubs) {
+        const ex = await expandLegPlan({ from, to, hub, hubName: g.name, date: args.date, travelClass: args.travelClass ?? null, pax, leg2DayOffset: g.off });
+        ex.sources.forEach((x) => sources.add(x));
+        /* Ek leg par bhi seat ho to card dikhao — doosri leg ki checked (WL) list ke saath;
+         * user ko pata chale ki leg-2 ki HAR train × HAR class check hui aur kya mila. */
+        if (ex.plan && (ex.plan.leg1.length || ex.plan.leg2.length)) {
+          plan.legPlans.push(ex.plan);
+          if (ex.plan.best) {
+            plan.connections = [ex.plan.best, ...plan.connections.filter((c) => c !== ex.plan!.best)];
+            const i = plan.notes.indexOf(CONNECTION_NO_SEAT_NOTE);
+            if (i >= 0) plan.notes.splice(i, 1);
+          }
+          plan.sources = [...sources];
+          if (ex.plan.leg1.length && ex.plan.leg2.length) break;
+        }
+      }
+    } catch {
+      /* optional */
     }
   }
   plan.audit = {
