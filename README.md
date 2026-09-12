@@ -218,6 +218,11 @@ only provider-verified alternatives.
 - More candidates: fixed hubs (up to 10 connections) + **route-derived hubs** (`routeDerivedHubs()` — junction/major stops from the direct trains' timetable, e.g. JAT→BDTS tries PTKC/LDH/NDLS/SWM/RTM/BH), all legs probed, then filtered.
 - When nothing passes: card + `plan.notes` say "Connecting routes mile lekin kisi mein dono trains par seat available nahi thi — isliye connecting option nahi dikhaya." Summary's "route via X" line lists per-leg seats.
 
+### Round-18m-28 — Route-level seat ask ≠ pichhli selected train
+- **Bug (user screenshot 02:09):** pichhli chat mein 12426 select thi; "Muje jammu se ndls jaana hai aaj seats dikhao" par app ne SIRF 12426 ka CHECK_AVAILABILITY chalaya (3A/2A/1A WL) — SL nahi, baaki trains nahi, leg-1/leg-2/book-from-earlier/book-upto kuch nahi, passengers bhi nahi poochhe.
+- **Fix (`mergeAgentContext`, server + client):** user ne ROUTE (from+to) bola aur koi train number/naam nahi → stale selected train clear → pax gate → poora planner (har train × har class, origin→boarding, boarding→destination, +2–3 stations book-upto, connections leg-1/leg-2). Exceptions: text mein train number/naam; ya pichhla turn train-specific slot-ask tha (`12426 seats?` → `route+date?`).
+- Tests: `tests/round18m28-route-ask-not-stale-train.test.ts` (5, incl. runAgent end-to-end: pax gate fires, no getAvailability on 12426) — total 767.
+
 ### Round-18m-27 — RAC current position + IRCTC ticket fare (railyatri parity)
 - **Bug (user screenshot 12426 JAT→NDLS 3A):** railyatri site "8 RAC ₹1520", app "RAC 63 ₹1,705". Data live hi tha (data_from IRCTC, fresh), parse galat tha.
 - IRCTC text `"RAC  63/RAC   8"` = booking-time RAC 63 / **current RAC 8**; `"GNWL2/RAC26"` = current RAC 26 (app pehle "WL 2" dikhata tha). Ab "/" ke baad wala CURRENT status hi liya jata hai — WL ke liye ye pehle se tha, RAC ke liye fix.

@@ -522,6 +522,13 @@ export function mergeAgentContext(
     next.selectedTrainNumber = null;
     next.selectedTrainName = null;
   }
+  /* Round-18m-28: route (from+to) bola, train nahi → journey-level sawaal; stale selected train hatao. */
+  const slotResumeForTrain = INFO_INTENTS_ON_SELECTED_TRAIN.has(String(prev.intent ?? "")) && prev.lastToolOk === false;
+  const routeLevelSeatAsk = Boolean(nlu.from && nlu.to) && !explicitTrainSpoken && !slotResumeForTrain && !mentionsTrainName(text, next.lastTrains ?? []);
+  if (routeLevelSeatAsk && next.selectedTrainNumber && !extra?.selectedTrainNumber) {
+    next.selectedTrainNumber = null;
+    next.selectedTrainName = null;
+  }
   if (extra?.lastTrainNumbers?.length) next.lastTrainNumbers = extra.lastTrainNumbers;
   if (extra?.bookingStage) next.bookingStage = extra.bookingStage;
   else if (next.origin || next.destination || next.dateProvided) {

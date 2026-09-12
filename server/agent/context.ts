@@ -443,6 +443,17 @@ export function mergeAgentContext(
     next.selectedTrainNumber = null;
     next.selectedTrainName = null;
   }
+  /* Round-18m-28 (user screenshot: "jammu se ndls jaana hai aaj seats dikhao" → sirf pichhli 12426 ka
+   * CHECK_AVAILABILITY chala, SL/har train/har class/leg-1-leg-2 kuch nahi): user ne ROUTE bola (from+to
+   * dono) aur koi train number/naam nahi → ye journey-level seat sawaal hai, pichhli selected train par
+   * nahi. Stale train hatao taaki poora planner (pax gate → har train × har class → BFE → connections →
+   * book-upto) chale. */
+  const slotResumeForTrain = INFO_INTENTS_ON_SELECTED_TRAIN.has(String(prev.intent ?? "")) && prev.lastToolOk === false; // "12426 seats?" → "route+date?" → user answers
+  const routeLevelSeatAsk = Boolean(nlu.from && nlu.to) && !explicitTrainSpoken && !slotResumeForTrain && !mentionsTrainName(text, next.lastTrains ?? []);
+  if (routeLevelSeatAsk && next.selectedTrainNumber && !extra?.selectedTrainNumber) {
+    next.selectedTrainNumber = null;
+    next.selectedTrainName = null;
+  }
   if (extra?.lastTrainNumbers?.length) next.lastTrainNumbers = extra.lastTrainNumbers;
   if (extra?.bookingStage) next.bookingStage = extra.bookingStage;
   else if (next.origin || next.destination || next.dateProvided) {
