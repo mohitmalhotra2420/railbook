@@ -29,9 +29,11 @@ type AvailLike = NonNullable<AgentRouteLeg["availability"]>;
 function availTextOf(a: AvailLike | null | undefined): { text: string; tone: "ok" | "warn" | "bad" | "muted" } {
   if (!a) return { text: "Seat data nahi", tone: "muted" };
   const st = a.stale ? " ⚠ stale" : "";
-  if (a.status === "AVAILABLE") return { text: `${a.classCode} AVL${a.seats != null ? ` ${a.seats}` : ""}${st}`, tone: a.stale ? "warn" : "ok" };
+  /* Round-18m-25 (user: "seat available hai to green kyun nahi"): AVL/RAC HAMESHA green — stale ho to bhi;
+   * stale ka sach "⚠ stale" / "(Not fresh)" tag se dikhta hai, rang se nahi. */
+  if (a.status === "AVAILABLE") return { text: `${a.classCode} AVL${a.seats != null ? ` ${a.seats}` : ""}${st}`, tone: "ok" };
   /* Round-18m-22 (user): RAC = available ki tarah (chart ke baad confirm) → green; label RAC N hi rehta hai. */
-  if (a.status === "RAC") return { text: `${a.classCode} RAC${a.rac != null ? ` ${a.rac}` : ""}${st}`, tone: a.stale ? "warn" : "ok" };
+  if (a.status === "RAC") return { text: `${a.classCode} RAC${a.rac != null ? ` ${a.rac}` : ""}${st}`, tone: "ok" };
   if (a.status === "WAITLIST") return { text: `${a.classCode} WL${a.waitlist != null ? ` ${a.waitlist}` : ""}${st}`, tone: "bad" };
   if (a.status === "NOT_AVAILABLE") return { text: `${a.classCode} Not available`, tone: "bad" };
   return { text: `${a.classCode} ${a.status}`, tone: "muted" };
@@ -86,7 +88,8 @@ function timeLabel(iso?: string | null): string | null {
 /** Seat pill: "2A AVL 36" + fresh/stale tag (never shows stale as current). */
 function SeatPill({ a, size }: { a?: AvailLike | null; size?: "lg" }) {
   const av = availTextOf(a);
-  const text = av.text.replace(" ⚠ stale", "");
+  /* Round-18m-25 (user: "side chip mein sirf AVL aata hai, fare nahi"): fare bhi — jaise class chips mein. */
+  const text = av.text.replace(" ⚠ stale", "") + (a?.fare != null && a.fare > 0 ? ` · ${inr(a.fare)}` : "");
   return (
     <span className={`jx-seat jx-seat-${av.tone}${size === "lg" ? " jx-seat-lg" : ""}`}>
       <span className="jx-seat-main">{text}</span>
@@ -107,9 +110,9 @@ function ClassRow({ label, rows, onPick }: { label: string; rows: AvailLike[]; o
           const av = availTextOf(r);
           const inner = <>{av.text.replace(" ⚠ stale", "")}{r.fare != null ? ` · ${inr(r.fare)}` : ""}{r.stale ? <span className="jx-cchip-tag">{onPick ? "↻ Refresh" : "(Not fresh)"}</span> : null}</>;
           return onPick ? (
-            <button key={r.classCode} type="button" className={`jx-cchip jx-cchip-btn jx-cchip-${r.stale ? "stale" : av.tone}`} onClick={(e) => { e.stopPropagation(); onPick(r); }} title={`${r.classCode} ki fresh seat check`}>{inner}</button>
+            <button key={r.classCode} type="button" className={`jx-cchip jx-cchip-btn jx-cchip-${av.tone}${r.stale ? " jx-cchip-notfresh" : ""}`} onClick={(e) => { e.stopPropagation(); onPick(r); }} title={`${r.classCode} ki fresh seat check`}>{inner}</button>
           ) : (
-            <span key={r.classCode} className={`jx-cchip jx-cchip-${r.stale ? "stale" : av.tone}`}>{inner}</span>
+            <span key={r.classCode} className={`jx-cchip jx-cchip-${av.tone}${r.stale ? " jx-cchip-notfresh" : ""}`}>{inner}</span>
           );
         })}
       </div>
@@ -162,7 +165,7 @@ function ListRow({ no, name, mid, midSub, dur, durSub, seat, chips, onClick }: {
         <div className="jx-lrow-train"><span className="jx-no">{no}</span> <span className="jx-name">{name}</span></div>
         {chips && chips.length > 0 && (
           <div className="jx-classes-chips jx-lrow-chips">
-            {chips.slice(0, 3).map((r) => { const av = availTextOf(r); return <span key={r.classCode} className={`jx-cchip jx-cchip-${r.stale ? "stale" : av.tone}`}>{av.text.replace(" ⚠ stale", "")}{r.fare != null ? ` · ${inr(r.fare)}` : ""}</span>; })}
+            {chips.slice(0, 3).map((r) => { const av = availTextOf(r); return <span key={r.classCode} className={`jx-cchip jx-cchip-${av.tone}${r.stale ? " jx-cchip-notfresh" : ""}`}>{av.text.replace(" ⚠ stale", "")}{r.fare != null ? ` · ${inr(r.fare)}` : ""}</span>; })}
           </div>
         )}
       </div>
@@ -189,7 +192,7 @@ function ConnCard({ c, baseDate, onPickLeg }: { c: AgentConnection; baseDate?: s
                 <div className="jx-lrow-train"><span className="jx-no">{l.trainNumber}</span> <span className="jx-name">{l.trainName}</span><SeatPill a={l.availability} /></div>
                 <div className="jx-leg-line"><strong>{l.departure}</strong> {l.fromName ?? l.from} ({l.from}){baseDate ? ` · ${legDateLabel(baseDate, depDay)}` : ""} <span className="jx-leg-arr">→</span> <strong>{l.arrival}</strong> {l.toName ?? l.to} ({l.to}){baseDate ? ` · ${legDateLabel(baseDate, arrDay)}` : ""}</div>
                 {(l.classOptions ?? []).filter((r) => r.classCode !== l.availability?.classCode).length > 0 && (
-                  <div className="jx-classes-chips">{(l.classOptions ?? []).filter((r) => r.classCode !== l.availability?.classCode).slice(0, 4).map((r) => { const av = availTextOf(r); return <span key={r.classCode} className={`jx-cchip jx-cchip-${r.stale ? "stale" : av.tone}`}>{av.text.replace(" ⚠ stale", "")}{r.fare != null ? ` · ${inr(r.fare)}` : ""}</span>; })}</div>
+                  <div className="jx-classes-chips">{(l.classOptions ?? []).filter((r) => r.classCode !== l.availability?.classCode).slice(0, 4).map((r) => { const av = availTextOf(r); return <span key={r.classCode} className={`jx-cchip jx-cchip-${av.tone}${r.stale ? " jx-cchip-notfresh" : ""}`}>{av.text.replace(" ⚠ stale", "")}{r.fare != null ? ` · ${inr(r.fare)}` : ""}</span>; })}</div>
                 )}
               </div>
             </button>
@@ -576,7 +579,7 @@ export function JourneyOptions({
               <div className="jx-bfe-foot">
                 <span className="jx-stat"><span className="jx-stat-ic">{IC.clock}</span>{durLabel(b.durationMinutes) ?? "—"} · Direct · board {b.boardAt}</span>
                 {(b.classOptions ?? []).filter((r) => r.classCode !== b.availability.classCode).length > 0 && (
-                  <span className="jx-classes-chips">{(b.classOptions ?? []).filter((r) => r.classCode !== b.availability.classCode).slice(0, 3).map((r) => { const av = availTextOf(r); return <span key={r.classCode} className={`jx-cchip jx-cchip-${r.stale ? "stale" : av.tone}`}>{av.text.replace(" ⚠ stale", "")}{r.fare != null ? ` · ${inr(r.fare)}` : ""}</span>; })}</span>
+                  <span className="jx-classes-chips">{(b.classOptions ?? []).filter((r) => r.classCode !== b.availability.classCode).slice(0, 3).map((r) => { const av = availTextOf(r); return <span key={r.classCode} className={`jx-cchip jx-cchip-${av.tone}${r.stale ? " jx-cchip-notfresh" : ""}`}>{av.text.replace(" ⚠ stale", "")}{r.fare != null ? ` · ${inr(r.fare)}` : ""}</span>; })}</span>
                 )}
               </div>
             </div>

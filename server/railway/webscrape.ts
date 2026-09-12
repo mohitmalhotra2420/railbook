@@ -743,7 +743,7 @@ export async function scrapeSeatAvailabilityWeb(
   to: string,
   classCode: string,
   quota = "GN",
-  opts?: { noCachedRetry?: boolean },
+  opts?: { noCachedRetry?: boolean; noLiveRetry?: boolean },
 ): Promise<ScrapedSeatAvailability | null> {
   const num = String(trainNumber).trim();
   if (!/^\d{5}$/.test(num) || !/^\d{4}-\d{2}-\d{2}$/.test(dateYmd)) return null;
@@ -765,7 +765,7 @@ export async function scrapeSeatAvailabilityWeb(
       signal: AbortSignal.timeout(SCRAPE_TIMEOUT_MS),
     });
     if (!res.ok) return null;
-    let j = (await res.json()) as {
+    type RyJson = {
       success?: boolean;
       error?: string | null;
       seat_availibility?: {
@@ -779,7 +779,31 @@ export async function scrapeSeatAvailabilityWeb(
       }[];
       data_from?: string | null;
     } | null;
+    let j = (await res.json()) as RyJson;
     let rows = j?.seat_availibility ?? [];
+    /* Round-18m-25 (user: "ye data 12 din purana hai, railyatri se fresh lao"): IRCTC live pull
+     * kabhi-kabhi transient "Unable to perform Transaction, Please try later" deta hai — 2–3 sec baad
+     * wahi call fresh data de deta hai (verified 01:03 IST: 12920/12426/19804 sab live). Pehle hum
+     * turant 12-din purani cache par gir jaate the. Ab maintenance-window ke alawa har live fail par
+     * 2 retry (1.5s gap), phir hi cache. */
+    const isMaintenance = (e: string | null | undefined) => /maintenance|resume at/i.test(String(e ?? ""));
+    for (let attempt = 0; attempt < 2 && (!j?.success || !rows.length) && !isMaintenance(j?.error) && !opts?.noLiveRetry; attempt++) {
+      await new Promise((r) => setTimeout(r, 1500));
+      try {
+        const rr = await (scrapeFetchImpl ?? globalThis.fetch.bind(globalThis))(url, {
+          headers: { "User-Agent": UA, Accept: "application/json", Referer: "https://www.railyatri.in/" },
+          signal: AbortSignal.timeout(SCRAPE_TIMEOUT_MS),
+        });
+        if (!rr.ok) continue;
+        const jj = (await rr.json()) as RyJson;
+        if (jj?.success && (jj.seat_availibility ?? []).length) {
+          j = jj;
+          rows = jj.seat_availibility ?? [];
+        } else if (jj?.error) j = { ...(j ?? {}), error: jj.error };
+      } catch {
+        /* retry exhausted → cache below */
+      }
+    }
     /* Round-18m-23 (user 23:54 IST screenshot: "seat data nahi aayi"): IRCTC ka daily maintenance
      * window (~23:45–00:20) mein refresh=true `success:false, "services will resume at 00:20"` deta
      * hai — tab RailYatri ka CACHED endpoint (bina refresh) try karo; wahi asli IRCTC data hai,
@@ -792,7 +816,7 @@ export async function scrapeSeatAvailabilityWeb(
             signal: AbortSignal.timeout(SCRAPE_TIMEOUT_MS),
           });
           if (!r2.ok) return null;
-          return (await r2.json()) as typeof j;
+          return (await r2.json()) as RyJson;
         } catch {
           return null;
         }

@@ -1853,6 +1853,9 @@ table.traintable {
 .jx-cchip-bad { background: #fdecec; color: #9b1c1c; border-color: #f2b8b8; }
 .jx-cchip-muted { background: #eef1f6; color: #4b5563; border-color: #d5dbe5; }
 .jx-cchip-stale { background: #f4f1ea; color: #6b5b3e; border-color: #ddd3bf; }
+/* Round-18m-25: stale row apna asli rang rakhti hai (AVL/RAC green, WL red) — "Not fresh" sirf tag + dashed border se. */
+.jx-cchip-notfresh { border-style: dashed; }
+.jx-cchip-notfresh .jx-cchip-tag { opacity: 0.85; }
 .jx-cchip-tag { font-weight: 500; font-size: 10.5px; opacity: .85; }
 .jx-hero-cta { display: grid; grid-template-columns: 1fr; gap: 8px; margin-top: 12px; }
 @media (min-width: 560px) { .jx-hero-cta { grid-template-columns: 1.4fr 1fr 1fr; align-items: stretch; } }

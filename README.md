@@ -218,6 +218,17 @@ only provider-verified alternatives.
 - More candidates: fixed hubs (up to 10 connections) + **route-derived hubs** (`routeDerivedHubs()` — junction/major stops from the direct trains' timetable, e.g. JAT→BDTS tries PTKC/LDH/NDLS/SWM/RTM/BH), all legs probed, then filtered.
 - When nothing passes: card + `plan.notes` say "Connecting routes mile lekin kisi mein dono trains par seat available nahi thi — isliye connecting option nahi dikhaya." Summary's "route via X" line lists per-leg seats.
 
+### Round-18m-25 — Fresh RailYatri data (live retry), green AVL always, fare in seat pill
+
+User (JAT→NDLS, 12:57 IST): side pill "2A AVL 56" had no fare; stale AVL looked tan/yellow; data was
+12 days old. Findings: RailYatri `refresh=true` (live IRCTC) intermittently returns "Unable to perform
+Transaction, Please try later" and we immediately fell back to the 12-day cache (which said AVL 56;
+live said WL 4). Fixes: (1) `scrapeSeatAvailabilityWeb` retries the live call twice (1.5 s apart)
+before touching the cache — maintenance-window errors skip the retry; (2) `SeatPill` shows
+`· ₹fare`; (3) AVL/RAC chips and pills are green even when stale — freshness is conveyed by the
+"(Not fresh)" / "↻ Refresh" tag and a dashed border (`.jx-cchip-notfresh`), never by colour.
+Test: `tests/round18m25-live-retry-green-fare.test.tsx`.
+
 ### Round-18m-24 — No phantom "2S" column
 
 User screenshot (LDH→CNB board): 22432 / 18310 showed a "2S — Refresh" column although those trains
