@@ -148,7 +148,7 @@ function writePersistedMemory(msgs: ChatMessage[], agentCtx: import("../api").Ag
 
 export function Concierge() {
   const booking = useBooking();
-  const { state, wallet, go, setFrom, setTo, setDate, setPassengerCount, resetJourney, searchRoute, selectTrain, selectClass, selectSeat, updatePassenger, goReview, confirm, retrieve } = booking;
+  const { state, wallet, go, setFrom, setTo, setDate, setPassengerCount, clearPassengerCount, resetJourney, searchRoute, selectTrain, selectClass, selectSeat, updatePassenger, goReview, confirm, retrieve } = booking;
   const [prefs, setPrefs] = useState<Prefs>({});
   const [lastAsked, setLastAsked] = useState<DialogSlot>(null);
   /* Round-8: refresh ke baad bhi conversation + agent-context yaad —
@@ -857,6 +857,9 @@ export function Concierge() {
           if (c?.destination && c.destination.code !== state.to?.code) setTo(c.destination);
           if (c?.date && c.dateProvided && c.date !== state.date) setDate(c.date);
           if (c?.passengers && c.paxProvided && c.passengers !== state.passengerCount) setPassengerCount(c.passengers);
+          /* Round-18m-15: agent ne nayi journey par pax reset kiya → client bhi
+           * "provided" bhoole, warna known.passengerCount se phir 1 assume hota. */
+          if (c && !c.paxProvided && state.paxProvided) clearPassengerCount();
           const trace = agentRes.toolTrace ?? [];
           const sources = [...new Set(trace.map((t) => t.source).filter(Boolean))].join("+");
           const engineLabel = agentRes.engine === "agentic_tool_calling" ? "AI tool-calling" : "Agent fallback";

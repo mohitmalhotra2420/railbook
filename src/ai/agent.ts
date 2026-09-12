@@ -483,6 +483,13 @@ export function mergeAgentContext(
     next.date = null;
     next.dateProvided = false;
   }
+  /* Round-18m-15 (user: "AI passenger nahi poochta, seedha 1 assume karta hai"):
+   * NAYI journey = purani journey ka passenger count bhi STALE — reset, taaki
+   * search se pehle dobara poochha jaye aur seats usi hisaab se match hon. */
+  if (routeChanged && !nlu.passengerCount && (nlu.from || nlu.to || nlu.unresolvedFrom || nlu.unresolvedTo)) {
+    next.passengers = null;
+    next.paxProvided = false;
+  }
   if (nlu.date) {
     next.date = nlu.date;
     next.dateProvided = true;

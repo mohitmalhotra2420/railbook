@@ -51,6 +51,7 @@ export type BookingAction =
   | { type: "SWAP_ENDS" }
   | { type: "SET_DATE"; date: string }
   | { type: "SET_PASSENGER_COUNT"; count: number }
+  | { type: "CLEAR_PASSENGER_COUNT" }
   /* Round-8: "nayi baat/reset" — poora journey context clear (session/wallet
    * context ke bahar hain, waise bhi preserve hote hain). */
   | { type: "RESET_JOURNEY" }
@@ -200,6 +201,10 @@ export function bookingReducer(
       if (passengers.length > count) passengers = passengers.slice(0, count);
       return { ...state, passengerCount: count, passengers, paxProvided: true };
     }
+    /* Round-18m-15: nayi journey par agent ne pax reset kiya → yahan bhi
+     * "provided" flag hatao (count 1 default rehta hai, par poochha jayega). */
+    case "CLEAR_PASSENGER_COUNT":
+      return state.paxProvided ? { ...state, paxProvided: false } : state;
     case "SEARCH_START":
       return {
         ...state,
