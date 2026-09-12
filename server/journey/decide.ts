@@ -77,6 +77,7 @@ export function candidateSheet(plan: JourneyPlan, cands: JourneyCandidate[]): st
     L.push(`CONNECTING VIA ${lp.hub}: leg-1 ${plan.query.from}->${lp.hub} ${lp.leg1.length}/${lp.checkedLeg1} trains with a seat; leg-2 ${lp.hub}->${plan.query.to} ${lp.leg2.length}/${lp.checkedLeg2} trains with a seat (every class checked; also ticket from each train's origin and 1-2 stops beyond destination).`);
     if (!lp.leg2.length) L.push(`  leg-2 trains checked (all WL/N-A): ${l2.map((l) => `${l.trainNumber} [${(l.classOptions ?? []).map((r) => `${r.classCode} ${r.status === "WAITLIST" ? `WL${r.waitlist ?? ""}` : r.status}`).join(", ") || "no data"}]`).join("; ")}`);
     if (!lp.leg1.length) L.push(`  leg-1 trains checked (all WL/N-A): ${l1.map((l) => l.trainNumber).join(", ")}`);
+    if (!lp.leg1.length || !lp.leg2.length) L.push(`  => via ${lp.hub} is NOT a usable route (one leg has zero seated trains). Do NOT present the other leg's seated trains as an option.`);
   }
   return L.join("\n");
 }

@@ -1513,6 +1513,8 @@ export function whyFactsSheet(plan: JourneyPlan): string {
   }
   for (const lp of plan.legPlans ?? []) {
     L.push(`Connecting via ${lp.hubName ?? lp.hub} (${lp.hub}): leg-1 ${lp.leg1.length}/${lp.checkedLeg1} trains with seats, leg-2 ${lp.leg2.length}/${lp.checkedLeg2} trains with seats.`);
+    /* Round-18m-21: ek leg bhi dead → route NOT usable; seated leg ko option ki tarah mat gino. */
+    if (lp.leg1.length === 0 || lp.leg2.length === 0) L.push(`- via ${lp.hub} is NOT usable: leg-${lp.leg1.length === 0 ? 1 : 2} has no train with a seat, so the seated trains on the other leg are irrelevant — do not recommend or mention them as an option.`);
     if (lp.best) L.push(`- best combo: ${lp.best.legs.map((l) => `${l.trainNumber} ${l.from} ${l.departure}→${l.to} ${l.arrival} ${av(l.availability)}`).join(" | ")} layover ${lp.best.layoverMinutes} min total ${durationLabelOf(lp.best.totalDurationMinutes)}`);
   }
   if (!plan.legPlans?.length && plan.notes.some((n) => /Connecting routes mile lekin/.test(n))) L.push("Connecting routes were checked but no route had seats on both legs.");

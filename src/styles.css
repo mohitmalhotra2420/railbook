@@ -1922,6 +1922,9 @@ table.traintable {
 .jx-leglist .jx-lrow { margin-top: 0; background: #fff; }
 .jx-more { font: inherit; font-size: 13px; font-weight: 800; color: var(--navy); background: #f6f8fc; border: 1px dashed #9db4d8; border-radius: 10px; padding: 9px 12px; cursor: pointer; }
 .jx-legplan-foot { padding-top: 6px; font-style: italic; }
+.jx-legplan-dead { background: #fdf7f5; border-color: #f0d4cf; }
+.jx-legplan-verdict { display: flex; gap: 6px; align-items: flex-start; font-size: 13px; line-height: 1.4; color: #7a1f1f; background: #fdecec; border: 1px solid #f5c6c6; border-radius: 10px; padding: 8px 10px; }
+.jx-legplan-verdict svg { flex: none; margin-top: 2px; }
 .jx-why-tag { font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #1d4ed8; background: #dbe4ff; padding: 2px 7px; border-radius: 999px; margin-left: 6px; }
 .jx-audit { display: flex; flex-wrap: wrap; gap: 4px 6px; margin: 0 14px 10px; font-size: 11.5px; color: #4b5563; line-height: 1.4; }
 .jx-audit-k { display: inline-flex; align-items: center; gap: 4px; font-weight: 700; color: #0d6b3a; }

@@ -218,6 +218,17 @@ only provider-verified alternatives.
 - More candidates: fixed hubs (up to 10 connections) + **route-derived hubs** (`routeDerivedHubs()` — junction/major stops from the direct trains' timetable, e.g. JAT→BDTS tries PTKC/LDH/NDLS/SWM/RTM/BH), all legs probed, then filtered.
 - When nothing passes: card + `plan.notes` say "Connecting routes mile lekin kisi mein dono trains par seat available nahi thi — isliye connecting option nahi dikhaya." Summary's "route via X" line lists per-leg seats.
 
+### Round-18m-21 — Dead leg → don't show the other leg
+
+User rule: in a connecting plan, if EITHER leg has zero trains with seats, the whole hub route is
+unusable — listing the other leg's seated trains (e.g. "Leg 1 · LDH → UMB · 15 of 20 with seats")
+is misleading. `LegPlanCard` now short-circuits: red verdict card ("Leg 2 · UMB → INDB mein kisi
+train mein seat nahi — isliye ye connecting route possible nahi") + only the failing leg's checked
+list (transparency: every train × class). Section title flips to "Connecting · koi route possible
+nahi" when no hub has both legs seated. AI facts (`engine.ts` summary + `decide.ts` candidate
+sheet) mark such hubs "NOT usable" so the LLM never recommends the seated leg. Tests:
+`tests/round18m21-dead-leg-hides-other-leg.test.ts(x)` (source + jsdom render).
+
 ### Round-18m-20 — Direct-train rule: origin→boarding ALL stops + destination+2–3 stops, ALWAYS
 
 User rule (binding): when a DIRECT train has no seat on the user's segment, the engine must (a) check

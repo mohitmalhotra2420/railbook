@@ -252,6 +252,24 @@ function LegList({ title, legs, checked, baseDate, dayOffset, onPickLeg, all }: 
 
 function LegPlanCard({ lp, baseDate, pax, onPickLeg }: { lp: NonNullable<AgentJourneyPlan["legPlans"]>[number]; baseDate?: string | null; pax?: number | null; onPickLeg?: (leg: AgentRouteLeg) => void }) {
   const bestA = lp.best?.legs[0];
+  const from = lp.leg1[0]?.from ?? lp.leg1All?.[0]?.from ?? "";
+  const to = lp.leg2[0]?.to ?? lp.leg2All?.[0]?.to ?? "";
+  /* Round-18m-21 (user): agar kisi EK leg par bhi seat nahi → poora hub plan bekaar. Doosre leg ki
+   * seat-wali trains dikhane ka matlab nahi (user LDH→UMB pahunch kar aage nahi ja sakta). Sirf
+   * failing leg ka verdict + uski checked list (transparency) dikhao. */
+  const deadLeg = lp.leg1.length === 0 ? 1 : lp.leg2.length === 0 ? 2 : 0;
+  if (deadLeg) {
+    const legTitle = deadLeg === 1 ? `Leg 1 · ${from} → ${lp.hub}` : `Leg 2 · ${lp.hub} → ${to}`;
+    const otherTitle = deadLeg === 1 ? `Leg 2 · ${lp.hub} → ${to}` : `Leg 1 · ${from} → ${lp.hub}`;
+    const otherSeated = deadLeg === 1 ? lp.leg2.length : lp.leg1.length;
+    return (
+      <div className="jx-legplan jx-legplan-dead">
+        <div className="jx-legplan-head">{IC.link} <strong>Via {lp.hubName ?? lp.hub}</strong> <span className="jx-sub">({lp.hub}) · ye route kaam nahi karega</span></div>
+        <div className="jx-legplan-verdict">{IC.warn} <strong>{legTitle}</strong> mein kisi train mein seat nahi{pax ? ` (${pax} pax)` : ""} — isliye ye connecting route possible nahi hai.{otherSeated > 0 ? ` ${otherTitle} ki ${otherSeated} seat-wali train${otherSeated > 1 ? "s" : ""} dikhane ka matlab nahi, kyunki aage nikal hi nahi paoge.` : ""}</div>
+        <LegList title={legTitle} legs={[]} checked={deadLeg === 1 ? lp.checkedLeg1 : lp.checkedLeg2} baseDate={baseDate} dayOffset={deadLeg === 1 ? 0 : lp.leg2All?.[0]?.departureDayOffset ?? 0} onPickLeg={onPickLeg} all={deadLeg === 1 ? lp.leg1All : lp.leg2All} />
+      </div>
+    );
+  }
   return (
     <div className="jx-legplan">
       <div className="jx-legplan-head">{IC.link} <strong>Via {lp.hubName ?? lp.hub}</strong> <span className="jx-sub">({lp.hub}) · {lp.leg1.length + lp.leg2.length} trains with seats{pax ? ` for ${pax} pax` : ""}</span></div>
@@ -261,8 +279,8 @@ function LegPlanCard({ lp, baseDate, pax, onPickLeg }: { lp: NonNullable<AgentJo
           <ConnCard c={lp.best} baseDate={baseDate} onPickLeg={onPickLeg} />
         </>
       )}
-      <LegList title={`Leg 1 · ${lp.leg1[0]?.from ?? lp.leg1All?.[0]?.from ?? ""} → ${lp.hub}`} legs={lp.leg1} checked={lp.checkedLeg1} baseDate={baseDate} dayOffset={0} onPickLeg={onPickLeg} all={lp.leg1All} />
-      <LegList title={`Leg 2 · ${lp.hub} → ${lp.leg2[0]?.to ?? lp.leg2All?.[0]?.to ?? ""}`} legs={lp.leg2} checked={lp.checkedLeg2} baseDate={baseDate} dayOffset={bestA?.arrivalDayOffset ?? lp.leg2All?.[0]?.departureDayOffset ?? 0} onPickLeg={onPickLeg} all={lp.leg2All} />
+      <LegList title={`Leg 1 · ${from} → ${lp.hub}`} legs={lp.leg1} checked={lp.checkedLeg1} baseDate={baseDate} dayOffset={0} onPickLeg={onPickLeg} all={lp.leg1All} />
+      <LegList title={`Leg 2 · ${lp.hub} → ${to}`} legs={lp.leg2} checked={lp.checkedLeg2} baseDate={baseDate} dayOffset={bestA?.arrivalDayOffset ?? lp.leg2All?.[0]?.departureDayOffset ?? 0} onPickLeg={onPickLeg} all={lp.leg2All} />
       <div className="jx-sub jx-legplan-foot">Leg 1 aur Leg 2 ki koi bhi seat-wali train mila kar apna combo bana sakte ho — bas Leg 2 ka departure Leg 1 ke arrival ke baad ho.</div>
     </div>
   );
@@ -588,7 +606,7 @@ export function JourneyOptions({
         </Section>
       )}
       {plan.directUnavailable && (plan.legPlans?.length ?? 0) > 0 && (
-        <Section ic={IC.link} title="Connecting · leg-wise seat options" badge={`${plan.legPlans!.length} hub${plan.legPlans!.length > 1 ? "s" : ""}`} foot={pax ? `Har train par ${pax} passengers ke liye seat verify hui hai — dono tickets alag book hongi.` : "Har train provider-verified — tickets alag-alag book hongi."}>
+        <Section ic={IC.link} title={plan.legPlans!.some((lp) => lp.leg1.length > 0 && lp.leg2.length > 0) ? "Connecting · leg-wise seat options" : "Connecting · koi route possible nahi"} badge={`${plan.legPlans!.length} hub${plan.legPlans!.length > 1 ? "s" : ""}`} foot={plan.legPlans!.some((lp) => lp.leg1.length > 0 && lp.leg2.length > 0) ? (pax ? `Har train par ${pax} passengers ke liye seat verify hui hai — dono tickets alag book hongi.` : "Har train provider-verified — tickets alag-alag book hongi.") : "Har hub par dono legs × saari trains × har class check hui — ek leg par bhi seat na ho to route nahi banta."}>
           {plan.legPlans!.map((lp) => <LegPlanCard key={lp.hub} lp={lp} baseDate={baseDate} pax={pax} onPickLeg={pickLeg} />)}
         </Section>
       )}
