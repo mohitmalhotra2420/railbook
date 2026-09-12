@@ -360,7 +360,7 @@ describe("Round-18 §5/§16: proactive alternatives via /api/agent, endpoints, n
     const app = createApp();
     const r = await request(app).post("/api/agent").send({ text: "Shatabdi wali train dikhao", now: new Date().toISOString() });
     expect(r.body.trainPicker?.matches?.length).toBe(3);
-  });
+  }, 20000); // Round-18m-18: release.sh loads .env → picker may hit real fallbacks; 5s was flaky under load
   it("POST /api/journey/alternatives + GET /api/capabilities", async () => {
     railcoreMock((train, _f, _t, cls) => (train === "12138" && cls === "SL" ? { status: "WAITLIST", wl: 2 } : train === "12904" && cls === "SL" ? { status: "AVAILABLE", count: 9 } : null));
     const app = createApp();
