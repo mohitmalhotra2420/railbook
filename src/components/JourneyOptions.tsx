@@ -386,8 +386,9 @@ export function JourneyOptions({
         <div className="jx-audit">
           <span className="jx-audit-k">{IC.check} Checked{plan.audit.passengers ? ` for ${plan.audit.passengers} pax` : ""}:</span>
           <span>{plan.audit.directProbed}/{plan.audit.directTrains} direct trains</span>
-          {plan.audit.bfeStopsChecked > 0 && <span>· {plan.audit.bfeTrains} trains × {plan.audit.bfeStopsChecked} earlier-stop segments (leg-1, every class)</span>}
-          {plan.audit.connLeg1Checked > 0 && <span>· via {plan.audit.connHubs.join("/")}: {plan.audit.connLeg1Checked} + {plan.audit.connLeg2Checked} trains (leg-1 + leg-2)</span>}
+          <span>· {direct.reduce((n, o) => n + (o.classOptions?.length ?? 0), 0)} class rows</span>
+          {plan.audit.bfeStopsChecked > 0 && <span>· Leg-1 (train origin → {plan.query.from}): {plan.audit.bfeTrains} trains × {plan.audit.bfeStopsChecked} earlier-stop segments, every class</span>}
+          {plan.audit.connLeg1Checked > 0 && <span>· via {plan.audit.connHubs.join("/")}: leg-1 {plan.audit.connLeg1Checked} trains + leg-2 {plan.audit.connLeg2Checked} trains, every class (specials incl.)</span>}
         </div>
       )}
 

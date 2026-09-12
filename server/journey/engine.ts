@@ -59,7 +59,7 @@ export const JOURNEY_CONFIG = {
   partialSplitLimit: Number(process.env.PARTIAL_SPLIT_LIMIT ?? 3) || 3,
   /** Round-18m-6: how many stops BEFORE origin to try for "book from earlier station". */
   boardEarlierStops: Number(process.env.BOARD_EARLIER_STOPS ?? 15) || 15, // Round-18m-11: train origin tak (bounded)
-  boardEarlierTrains: Number(process.env.BOARD_EARLIER_TRAINS ?? 10) || 10,
+  boardEarlierTrains: Number(process.env.BOARD_EARLIER_TRAINS ?? 20) || 20, // Round-18m-15: route ki SAARI trains (origin tak har stop × har class)
 };
 
 const AVAIL_RANK: Record<string, number> = { AVAILABLE: 0, RAC: 1, WAITLIST: 2, UNKNOWN: 3, NOT_AVAILABLE: 4 };
@@ -704,7 +704,7 @@ export async function findPartialRouteSeats(args: {
  * provider-proven: timetable → up to `stopsBack` earlier stops → probe
  * bookFrom→destination → keep AVL/RAC only. Never invented. */
 export async function findBoardFromEarlier(args: {
-  trains: { number: string; name: string; directStatus?: string | null; durationMinutes?: number | null }[];
+  trains: { number: string; name: string; classes?: string[]; directStatus?: string | null; durationMinutes?: number | null }[];
   origin: string;
   destination: string;
   date: string;
@@ -734,7 +734,9 @@ export async function findBoardFromEarlier(args: {
         for (let k = 0; k < earlier.length; k++) {
           const s = earlier[k];
           stopsChecked++;
-          const board = await routedClassBoard(t.number, args.date, s.code, to, "GN", args.travelClass ? [args.travelClass] : []);
+          /* Round-18m-15: hint = user class + train ki saari classes → har class ka board (sirf user class nahi). */
+          const tcls = (t as { classes?: string[] }).classes ?? [];
+          const board = await routedClassBoard(t.number, args.date, s.code, to, "GN", Array.from(new Set([...(args.travelClass ? [args.travelClass] : []), ...tcls])));
           /* Round-18m-7: SAB classes check — jis class mein bhi seat mile, sab dikhao. */
           /* Stale (24h+ web-cache) AVL/RAC bhi option hai — ⚠ "last known" ke saath; fresh pehle. */
           const all = bookableRows(board.classes, { includeStale: true }).filter((r) => enoughSeats(r, args.passengers));
@@ -1182,7 +1184,7 @@ export async function planJourney(args: {
       const wlDirect = [...trains]
         .sort((a, b) => (a.durationMinutes || 9e9) - (b.durationMinutes || 9e9) || a.number.localeCompare(b.number))
         .filter((t) => !legBookable(availability.get(t.number), pax))
-        .map((t) => ({ number: t.number, name: t.name, directStatus: (() => { const a = availability.get(t.number); return a ? `${a.status}${a.stale ? " (not fresh)" : ""}` : null; })(), durationMinutes: t.durationMinutes ?? null }));
+        .map((t) => ({ number: t.number, name: t.name, classes: t.classes.map((c) => c.code), directStatus: (() => { const a = availability.get(t.number); return a ? `${a.status}${a.stale ? " (not fresh)" : ""}` : null; })(), durationMinutes: t.durationMinutes ?? null }));
       if (wlDirect.length) {
         /* Round-18m-7: ConfirmTkt jaisa — SAARI direct trains (bounded 10) × pichhle stops × har class. */
         const r = await findBoardFromEarlier({ trains: wlDirect, origin: from, destination: to, date: args.date, travelClass: args.travelClass ?? null, limitTrains: JOURNEY_CONFIG.boardEarlierTrains, passengers: pax });
