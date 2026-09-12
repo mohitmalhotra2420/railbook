@@ -60,23 +60,27 @@ describe("Round-18m-12: every train × every class probed; never lie 'no direct 
   });
 
   it("unprobed train gets an honest note, never counted as 'seat nahi'", async () => {
-    const p = await plan(3); // 3 pax → 1A AVL 2 kaafi nahi, RAC bhi nahi (>2)
+    const p = await plan(3); // 3 pax → 1A AVL 2 kaafi nahi; 12588 SL RAC 4 bookable (Round-18m-22)
     const o = p.routeOptions.find((x) => x.trainNumbers[0] === "04566")!;
     expect(o.probed).toBeFalsy();
-    expect(p.notes.some((n) => n.includes("04566") && /seat nahi.*nahi maana/.test(n))).toBe(true);
+    // Note sirf tab jab koi bookable train na ho; yahan RAC bookable hai → note nahi, lekin 04566 kabhi "seat nahi" nahi gina jaata.
+    expect(o.availability).toBeFalsy();
+    expect(p.notes.some((n) => n.includes("04566") && /seat nahi.*nahi maana/.test(n))).toBe(false);
   });
 
   it("stale AVL (web cache) is an 'available, not fresh — verify' tier, NOT directUnavailable", async () => {
     const p = await plan(3);
-    // 3 pax: fresh rows — 1A AVL 2 (kam), RAC (pax>2 nahi), baaki WL; stale 14682 2S AVL 559 → stale tier
+    // 3 pax: fresh rows — 1A AVL 2 (kam), 12588 SL RAC 4 (Round-18m-22: RAC = available, kisi bhi pax ke liye) → fresh best;
+    // stale 14682 2S AVL 559 phir bhi stale tier mein option rehta hai.
     expect(p.directUnavailable).toBe(false);
-    expect(p.directStaleAvailable).toBe(true);
-    expect(p.best?.trainNumbers[0]).toBe("14682");
-    expect(p.best?.availability?.stale).toBe(true);
-    expect(p.notes.some((n) => /24h\+ purana/.test(n))).toBe(true);
+    expect(p.best?.trainNumbers[0]).toBe("12588");
+    expect(p.best?.availability?.status).toBe("RAC");
+    expect(p.best?.availability?.stale).toBeFalsy();
+    const stale = p.routeOptions.find((o) => o.trainNumbers[0] === "14682");
+    expect(stale?.availability?.stale).toBe(true);
   });
 
-  it("RAC counts as bookable for <=2 pax (SL RAC in 12588 is an option)", async () => {
+  it("RAC counts as bookable (SL RAC in 12588 is an option; AVL preferred when enough)", async () => {
     const p = await plan(2);
     const o = p.routeOptions.find((x) => x.trainNumbers[0] === "12588")!;
     expect(o.availability?.classCode).toBe("1A"); // AVL 2 for 2 pax first

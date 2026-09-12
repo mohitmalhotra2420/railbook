@@ -312,7 +312,8 @@ export function TrainBoard() {
       await loadTrain(train, true);
       return;
     }
-    const weak = cell.status === "WAITLIST" || cell.status === "RAC" || cell.status === "NOT_AVAILABLE" || (cell.status === "AVAILABLE" && cell.seats != null && cell.seats < LOW_SEATS);
+    /* Round-18m-22 (user): RAC = available ki tarah (chart ke baad confirm) — alternatives sheet mat kholo. */
+    const weak = cell.status === "WAITLIST" || cell.status === "NOT_AVAILABLE" || (cell.status === "AVAILABLE" && cell.seats != null && cell.seats < LOW_SEATS);
     if (weak) {
       /* §6: proactively show real alternatives; user can still continue with this class. */
       setAltSheet({ train, cell, alt: null, loading: true, error: null });

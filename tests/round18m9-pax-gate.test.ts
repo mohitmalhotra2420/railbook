@@ -3,12 +3,12 @@ import { readFileSync } from "node:fs";
 import { enoughSeats } from "../server/journey/engine.js";
 
 describe("Round-18m-9: passenger-aware seats + journey card v3", () => {
-  it("enoughSeats: AVAILABLE rows must cover the passenger count; RAC only for ≤2 pax", () => {
+  it("enoughSeats: AVAILABLE rows must cover the passenger count; RAC = available for any pax (Round-18m-22)", () => {
     expect(enoughSeats({ status: "AVAILABLE", seats: 36 } as never, 2)).toBe(true);
     expect(enoughSeats({ status: "AVAILABLE", seats: 1 } as never, 2)).toBe(false);
     expect(enoughSeats({ status: "AVAILABLE", seats: null } as never, 4)).toBe(true);
     expect(enoughSeats({ status: "RAC", seats: 20 } as never, 2)).toBe(true);
-    expect(enoughSeats({ status: "RAC", seats: 20 } as never, 3)).toBe(false);
+    expect(enoughSeats({ status: "RAC", seats: 20 } as never, 3)).toBe(true); // Round-18m-22: RAC confirm ho jaati hai chart ke baad
     expect(enoughSeats({ status: "WAITLIST", seats: 5 } as never, 1)).toBe(false);
   });
   it("run.ts: passenger gate fires before search and resumes with the answer", () => {

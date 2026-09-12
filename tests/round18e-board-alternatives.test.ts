@@ -32,10 +32,10 @@ describe("Round-18e UI guard (source-level)", () => {
     const jo = readFileSync("src/components/JourneyOptions.tsx", "utf8");
     expect(jo).toContain("Sabhi trains · Book");
   });
-  it("TrainBoard opens YOU MAY ALSO CONSIDER on WL/RAC/low class tap", () => {
+  it("TrainBoard opens YOU MAY ALSO CONSIDER on WL/low class tap (Round-18m-22: RAC = available, no sheet)", () => {
     const tb = readFileSync("src/views/TrainBoard.tsx", "utf8");
     expect(tb).toContain("journeyAlternativesApi");
-    expect(tb).toMatch(/cell\.status === "WAITLIST" \|\| cell\.status === "RAC"/);
+    expect(tb).toMatch(/const weak = cell\.status === "WAITLIST" \|\| cell\.status === "NOT_AVAILABLE"/);
   });
 });
 

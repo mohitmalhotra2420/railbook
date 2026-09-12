@@ -60,7 +60,7 @@ export function candidateSheet(plan: JourneyPlan, cands: JourneyCandidate[]): st
   const pax = plan.query.passengers ?? 1;
   const L: string[] = [];
   L.push(`ROUTE ${plan.query.from} -> ${plan.query.to} on ${plan.query.date}, ${pax} passenger(s)${plan.query.travelClass ? `, preferred class ${plan.query.travelClass}` : ""}.`);
-  L.push("DATA RULES: FRESH = live provider data now. STALE = 24h+ old web cache (may have changed; must be re-verified before booking). WL = waitlisted, not a seat. RAC = confirmed travel, berth after chart (fine for 1-2 pax). A train with no rows was NOT checked (unknown, not 'no seat').");
+  L.push("DATA RULES: FRESH = live provider data now. STALE = 24h+ old web cache (may have changed; must be re-verified before booking). WL = waitlisted, not a seat. RAC = treated as an AVAILABLE seat for ANY party size (travel confirmed, berth confirms after chart preparation); prefer AVL over RAC only when both exist. A train with no rows was NOT checked (unknown, not 'no seat').");
   L.push("");
   L.push("CANDIDATES (id | kind | trains | timing | duration | seat board):");
   for (const c of cands) {
@@ -84,7 +84,7 @@ export function candidateSheet(plan: JourneyPlan, cands: JourneyCandidate[]): st
 
 const SYSTEM = `You are RailBook's AI journey planner for Indian Railways. You DECIDE which option the traveller should book — the engine only fetched data. Think like a smart, honest friend.
 Decision principles (apply judgement, not a formula):
-1. Seat certainty for the WHOLE party first: FRESH AVL/RAC (enough for pax) beats everything; RAC is acceptable for 1-2 pax.
+1. Seat certainty for the WHOLE party first: FRESH AVL/RAC (enough for pax) beats everything; RAC counts as a seat for any party size (AVL preferred when both exist).
 2. A DIRECT train from the user's origin with a FRESH seat is preferred over a same-train earlier-stop ticket or a connection. A same-train earlier-stop ticket (kind bfe) is a smart trick when the direct segment is WL — the traveller still boards at origin, only pays a little extra. Likewise a "book upto" ticket (bfe with ticket beyond destination) is valid: the traveller boards at origin, deboards at their destination, pays fare upto the farther station — recommend it when direct/earlier/connecting have no seat.
 3. STALE AVL is a real lead but NOT proof — you may recommend it only if nothing FRESH exists, and you must say it needs a Seat check first. Never present STALE as confirmed.
 4. Then speed (shorter duration), sensible departure time, fewer changes, then cost/class.

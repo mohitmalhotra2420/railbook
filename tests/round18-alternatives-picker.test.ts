@@ -238,7 +238,8 @@ describe("Round-18 §6: FIND_ALTERNATIVE_TRAINS — real alternatives only", () 
     expect(alt.note).toMatch(/koi verified alternative nahi mila/);
   });
   it("tool: FIND_ALTERNATIVE_TRAINS summary lists only verified options + 'YOU MAY ALSO CONSIDER' instruction", async () => {
-    railcoreMock((train, _f, _t, cls) => (train === "12138" && cls === "SL" ? { status: "RAC", rac: 5 } : train === "12904" && cls === "SL" ? { status: "AVAILABLE", count: 21 } : null));
+    /* Round-18m-22: RAC = available (alternatives ki zaroorat nahi) → scenario WL par. */
+    railcoreMock((train, _f, _t, cls) => (train === "12138" && cls === "SL" ? { status: "WAITLIST", wl: 12 } : train === "12904" && cls === "SL" ? { status: "AVAILABLE", count: 21 } : null));
     const r = await executeApprovedTool("FIND_ALTERNATIVE_TRAINS", { train_number: "12138", origin: "LDH", destination: "CSMT", date: FUTURE, travel_class: "SL" });
     expect(r.ok).toBe(true);
     expect(r.summary).toMatch(/DOOSRI TRAINS: 12904 GOLDEN TEMPLE MAIL .* SL AVAILABLE 21/);

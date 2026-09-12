@@ -2536,7 +2536,8 @@ export async function runAgenticTurn(input: {
           const d = result.data as { status?: string; seats?: number | null; code?: string; train_number?: string; classes?: { code: string; status: string; seats?: number | null }[]; resolvedRoute?: { origin: string; destination: string; date?: string }; date?: string } | null;
           const rows = d?.classes ?? (d?.status ? [{ code: String(d.code ?? ""), status: String(d.status), seats: d.seats ?? null }] : []);
           const known = rows.filter((r) => r.status && r.status !== "UNKNOWN");
-          const poor = known.length > 0 && !known.some((r) => r.status === "AVAILABLE" && (r.seats == null || r.seats >= 10));
+          /* Round-18m-22 (user): RAC = available ki tarah (chart ke baad confirm) → poor nahi. */
+          const poor = known.length > 0 && !known.some((r) => (r.status === "AVAILABLE" && (r.seats == null || r.seats >= 10)) || r.status === "RAC");
           const tn = String(args.train_number ?? d?.train_number ?? "");
           const route = d?.resolvedRoute;
           const dte = String(d?.date ?? route?.date ?? args.date ?? "");

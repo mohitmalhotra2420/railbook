@@ -357,7 +357,7 @@ h2 { font-size: 17px; }
   color: var(--ink);
 }
 .chip.ok { background: var(--green-soft); color: var(--green); }
-.chip.rac { background: var(--amber-soft); color: var(--amber); }
+.chip.rac { background: var(--green-soft); color: var(--green); } /* Round-18m-22: RAC = available (green) */
 .chip.wl { background: var(--violet-soft); color: var(--violet); }
 .chip.no { background: #f3f1ed; color: #9aa1a9; text-decoration: line-through; }
 
@@ -1019,7 +1019,7 @@ h2 { font-size: 17px; }
 .tb-avl { font-size: 12px; font-weight: 700; }
 .tb-avl.ok { color: var(--green); }
 .tb-avl.wl { color: #7c3aed; }
-.tb-avl.rac { color: var(--amber); }
+.tb-avl.rac { color: var(--green); } /* Round-18m-22: RAC = available (green) */
 .tb-avl.muted { color: var(--muted); font-weight: 600; }
 .tb-foot {
   display: grid;

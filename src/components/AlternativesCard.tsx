@@ -34,7 +34,7 @@ function reasonLine(a: AgentAlternatives): string {
 
 function AltCard({ o, onPick }: { o: AgentRouteOption; onPick?: (n: string) => void }) {
   const a = o.availability;
-  const tone = a?.status === "AVAILABLE" ? "ok" : a?.status === "RAC" ? "warn" : "muted";
+  const tone = a?.status === "AVAILABLE" || a?.status === "RAC" ? "ok" : "muted";
   return (
     <button type="button" className="alt-card" title={`Source: ${o.source}${a ? ` · availability: ${a.source}` : ""}`} onClick={onPick ? () => onPick(o.trainNumbers[0]) : undefined}>
       <div className="alt-card-top">

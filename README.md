@@ -218,6 +218,18 @@ only provider-verified alternatives.
 - More candidates: fixed hubs (up to 10 connections) + **route-derived hubs** (`routeDerivedHubs()` — junction/major stops from the direct trains' timetable, e.g. JAT→BDTS tries PTKC/LDH/NDLS/SWM/RTM/BH), all legs probed, then filtered.
 - When nothing passes: card + `plan.notes` say "Connecting routes mile lekin kisi mein dono trains par seat available nahi thi — isliye connecting option nahi dikhaya." Summary's "route via X" line lists per-leg seats.
 
+### Round-18m-22 — RAC treated as an available seat (green)
+
+User rule: RAC berths confirm after chart preparation, so RAC must be treated like AVAILABLE —
+bookable for any party size, green everywhere — while the provider's label/data stay untouched
+(`SL RAC 7` remains `SL RAC 7`; nothing is rewritten to AVL). AVL still ranks above RAC when both
+exist (`AVAIL_RANK`), so RAC is used when no AVL is found. Changes: `enoughSeats` accepts RAC for
+any pax (was ≤2); `findAlternativeTrains` reason `rac` → no alternatives pushed; agentic
+CHECK_AVAILABILITY auto-alternatives no longer treat RAC as poor; TrainBoard RAC tap no longer opens
+the alternatives sheet; JourneyOptions / AlternativesCard / `.chip.rac` / `.tb-avl.rac` are green;
+LLM facts (decide.ts) updated. Tests: `tests/round18m22-rac-is-available.test.ts` (+ updated
+R18m-9/12/18/18e expectations).
+
 ### Round-18m-21 — Dead leg → don't show the other leg
 
 User rule: in a connecting plan, if EITHER leg has zero trains with seats, the whole hub route is

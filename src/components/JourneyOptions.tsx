@@ -30,7 +30,8 @@ function availTextOf(a: AvailLike | null | undefined): { text: string; tone: "ok
   if (!a) return { text: "Seat data nahi", tone: "muted" };
   const st = a.stale ? " ⚠ stale" : "";
   if (a.status === "AVAILABLE") return { text: `${a.classCode} AVL${a.seats != null ? ` ${a.seats}` : ""}${st}`, tone: a.stale ? "warn" : "ok" };
-  if (a.status === "RAC") return { text: `${a.classCode} RAC${a.rac != null ? ` ${a.rac}` : ""}${st}`, tone: "warn" };
+  /* Round-18m-22 (user): RAC = available ki tarah (chart ke baad confirm) → green; label RAC N hi rehta hai. */
+  if (a.status === "RAC") return { text: `${a.classCode} RAC${a.rac != null ? ` ${a.rac}` : ""}${st}`, tone: a.stale ? "warn" : "ok" };
   if (a.status === "WAITLIST") return { text: `${a.classCode} WL${a.waitlist != null ? ` ${a.waitlist}` : ""}${st}`, tone: "bad" };
   if (a.status === "NOT_AVAILABLE") return { text: `${a.classCode} Not available`, tone: "bad" };
   return { text: `${a.classCode} ${a.status}`, tone: "muted" };

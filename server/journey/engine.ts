@@ -355,12 +355,15 @@ export function bookableRows(classes: ClassAvailability[], opts: { includeStale?
 }
 
 /* Round-18m-9 (user: "kitni seats chahiye tabhi train dhoondho"): AVAILABLE row must
- * have >= pax seats (null seats = count unknown → accept), RAC accepted only for 1–2 pax. */
+ * have >= pax seats (null seats = count unknown → accept).
+ * Round-18m-22 (user): RAC = AVAILABLE ki tarah treat (chart ke baad confirm ho jaati hai) — har
+ * party size ke liye bookable. Label/data provider ka hi rehta hai (RAC N), sirf treatment badli.
+ * AVL phir bhi RAC se upar rank hota hai (AVAIL_RANK), RAC tab kaam aata hai jab AVL na ho. */
 export function enoughSeats(a: RouteAvailability | null | undefined, pax: number | null | undefined): boolean {
   if (!a) return false;
   const n = pax && pax > 0 ? pax : 1;
   if (a.status === "AVAILABLE") return a.seats == null || a.seats >= n;
-  if (a.status === "RAC") return n <= 2;
+  if (a.status === "RAC") return true;
   return false;
 }
 export function legBookable(a: RouteAvailability | null | undefined, pax?: number | null): boolean {
@@ -919,6 +922,10 @@ export async function findAlternativeTrains(args: {
   if (reason === "fine") {
     return { ...base, alternatives: [], partialRoute: null, connecting: [], alternativeDates: [], sources: [...sources], note: `${args.trainNumber} ${cls ?? ""} AVAILABLE (${selRow?.seats ?? "?"} seats) — alternatives ki zaroorat nahi.`, provenance: prov() };
   }
+  /* Round-18m-22 (user): RAC = available ki tarah — chart ke baad confirm. Alternatives push mat karo. */
+  if (reason === "rac") {
+    return { ...base, alternatives: [], partialRoute: null, connecting: [], alternativeDates: [], sources: [...sources], note: `${args.trainNumber} ${cls ?? ""} RAC${selRow?.rac != null ? ` ${selRow.rac}` : ""} — seat pakki, berth chart preparation ke baad confirm; alternatives ki zaroorat nahi.`, provenance: prov() };
+  }
 
   /* Alternatives: full plan on same route/date, excluding this train; keep only provider-verified AVAILABLE/RAC. */
   const plan = await planJourney({ from, to, date: args.date, travelClass: cls, preference: "best_availability", includeConnections: false, includeAlternativeDates: true, includePartial: false, includeAlternateStations: false });
@@ -944,7 +951,7 @@ export async function findAlternativeTrains(args: {
     connecting = bookableConnections(c.connections).slice(0, 2);
   }
   const why =
-    reason === "waitlist" ? `${args.trainNumber} ${cls ?? ""} WL${selRow?.waitlist ?? ""}` : reason === "rac" ? `${args.trainNumber} ${cls ?? ""} RAC` : reason === "low_availability" ? `${args.trainNumber} ${cls ?? ""} mein sirf ${selRow?.seats} seats` : reason === "not_available" ? `${args.trainNumber} ${cls ?? ""} not available` : reason === "class_unavailable" ? `${args.trainNumber} mein ${cls} class ka data/seat nahi` : `${args.trainNumber} ki availability provider se nahi aayi`;
+    reason === "waitlist" ? `${args.trainNumber} ${cls ?? ""} WL${selRow?.waitlist ?? ""}` : reason === "low_availability" ? `${args.trainNumber} ${cls ?? ""} mein sirf ${selRow?.seats} seats` : reason === "not_available" ? `${args.trainNumber} ${cls ?? ""} not available` : reason === "class_unavailable" ? `${args.trainNumber} mein ${cls} class ka data/seat nahi` : `${args.trainNumber} ki availability provider se nahi aayi`;
   const found = alternatives.length + otherClasses.length + (partialRoute?.plans.filter((p) => p.fullyAvailable).length ?? 0) + connecting.length;
   return {
     ...base,
@@ -1054,7 +1061,7 @@ export async function planJourney(args: {
   aiWhy?: boolean;
   /** Round-18m-10: false → top-hub full-route leg expansion skip. */
   expandLegs?: boolean;
-  /** Round-18m-9: seats needed — bookable = AVL >= pax (RAC only for <=2). */
+  /** Round-18m-9/22: seats needed — bookable = AVL >= pax, ya RAC (kisi bhi pax ke liye; chart ke baad confirm). */
   passengers?: number | null;
 }): Promise<JourneyPlan> {
   const notes: string[] = [];
@@ -1671,7 +1678,7 @@ export function journeyWhyPoints(plan: JourneyPlan): string[] {
     else pts.push(`Direct trains mein${paxTxt ? ` ${paxTxt} ke liye` : ""} seat nahi — is route par dono legs verified seat ke saath (${best.legs.map((l) => `${l.trainNumber}${l.availability ? ` ${seatTxt(l.availability)}` : ""}`).join(" → ")}), layover ${best.layoverMinutes ?? "-"} min.`);
     if (best.availability) pts.push(legBookable(best.availability, pax) ? `${seatTxt(best.availability)}${best.availability.fare != null ? ` @ ₹${best.availability.fare}` : ""} — provider-verified${paxTxt ? `, ${paxTxt} ke liye kaafi` : ""}.` : best.availability.stale && enoughSeats(best.availability, pax) ? `${seatTxt(best.availability)} dikh rahi hai lekin data 24h+ purana (web cache) hai — Seat check se refresh karke confirm karo, phir book.` : `Seat status ${seatTxt(best.availability)} — confirmed nahi; ye sabse kam WL/fastest option hai.`);
     const racRows = (best.classOptions ?? []).filter((r) => r.status === "RAC" && r.classCode !== best.availability?.classCode && !r.stale);
-    if (racRows.length && (pax ?? 1) <= 2) pts.push(`Isi train mein ${racRows.map(seatTxt).join(", ")} bhi option hai — RAC = seat pakki, berth chart ke baad.`);
+    if (racRows.length) pts.push(`Isi train mein ${racRows.map(seatTxt).join(", ")} bhi option hai — RAC = seat pakki, berth chart ke baad.`);
     if (fastestDirect && best.trainNumbers[0] === fastestDirect.trainNumbers[0]) pts.push(`${direct.length} direct trains mein sabse fast.`);
     else if (fastestDirect?.durationLabel) pts.push(`Fastest direct ${fastestDirect.trainNumbers[0]} (${fastestDirect.durationLabel}) mein seat nahi/kam thi, isliye ye upar.`);
     const cheaper = plan.routeOptions.filter((o) => o !== best && o.availability?.fare != null && best.availability?.fare != null && o.availability!.fare! < best.availability!.fare! && legBookable(o.availability, pax))[0];
