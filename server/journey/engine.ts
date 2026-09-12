@@ -19,7 +19,7 @@
  * provider real reliability data nahi deta).
  */
 import { env } from "../env.js";
-import type { ClassAvailability, TrainResult } from "../providers/types.js";
+import type { ClassAvailability, ClassCode, TrainResult } from "../providers/types.js";
 import { routedClassBoard, routedSchedule, searchTrainsRouted, type ServedProvider } from "../railway/router.js";
 import { todayYmd } from "../util.js";
 import { MULTI_STATION_CITIES } from "../railway/station-resolve.js";
@@ -91,6 +91,7 @@ function toLeg(t: TrainResult): RouteLeg {
     arrival: t.arrival,
     arrivalDayOffset: t.arrivalDayOffset || 0,
     durationMinutes: t.durationMinutes ?? null,
+    classes: t.classes.map((c) => c.code),
   };
 }
 
@@ -409,7 +410,10 @@ export function buildLegPlans(probed: Connection[], pax?: number | null, opts: {
  * pax-aware seat probe; phir joint best = seat-wale pairs mein valid + fastest. */
 export async function expandLegPlan(args: { from: string; to: string; hub: string; hubName?: string | null; date: string; travelClass: string | null; pax: number | null; perLeg?: number; leg2DayOffset?: number }): Promise<{ plan: LegPlan | null; sources: Set<string> }> {
   const sources = new Set<string>();
-  const perLeg = args.perLeg ?? 10;
+  /* Round-18m-14 (user): leg-1 origin→boarding aur leg-2 boarding→destination
+   * par us din chalne wali HAR train (special/weekly bhi — search date-filtered
+   * hai) × HAR class. Bounded 20 per leg, parallel. */
+  const perLeg = args.perLeg ?? 20;
   const [a, b] = await Promise.all([searchTrainsRouted({ from: args.from, to: args.hub, date: args.date }), searchTrainsRouted({ from: args.hub, to: args.to, date: addDays(args.date, args.leg2DayOffset ?? 0) })]);
   if (a.provider !== "none") sources.add(a.provider);
   if (b.provider !== "none") sources.add(b.provider);
@@ -417,11 +421,15 @@ export async function expandLegPlan(args: { from: string; to: string; hub: strin
   const legB = [...b.trains].sort((x, y) => x.departure.localeCompare(y.departure)).slice(0, perLeg).map(toLeg);
   const probe = async (l: RouteLeg, date: string): Promise<RouteLeg> => {
     try {
-      const board = await routedClassBoard(l.trainNumber, date, l.from, l.to, "GN", args.travelClass ? [args.travelClass] : []);
-      const all = bookableRows(board.classes);
+      /* Hint = user class PEHLE + train ki saari classes → poora board (sirf user class nahi). */
+      const hint = Array.from(new Set([...(args.travelClass ? [args.travelClass] : []), ...(l.classes ?? [])]));
+      const board = await routedClassBoard(l.trainNumber, date, l.from, l.to, "GN", hint);
+      const all = bookableRows(board.classes, { includeStale: true });
       const best = all.find((r) => legBookable(r, args.pax)) ?? bestClassRow(board.classes, args.travelClass);
       if (best) sources.add(best.source);
-      return { ...l, availability: best, classOptions: all };
+      /* classOptions = poora board (AVL/RAC/WL/N-A, stale flagged) — UI/AI ko har class dikhe. */
+      const full = board.classes.filter((c) => c.status && c.status !== "UNKNOWN").map((c) => ({ ...(c.stale ? { stale: true } : {}), classCode: c.code, status: c.status, seats: c.seats ?? null, rac: c.rac ?? null, waitlist: c.waitlist ?? null, fare: c.fare > 0 ? c.fare : null, source: String(c.source ?? "railcore") }));
+      return { ...l, availability: best, classOptions: full.length ? full : all };
     } catch {
       return { ...l, availability: null, classOptions: [] };
     }
@@ -1013,11 +1021,38 @@ export async function planJourney(args: {
    * (baaki classes options mein) — best row user-class/pax ke hisaab se. */
   const probeList = [...trains].sort((a, b) => (a.durationMinutes || 9e9) - (b.durationMinutes || 9e9) || a.number.localeCompare(b.number)).slice(0, JOURNEY_CONFIG.availabilityProbeLimit);
   const toRow = (c: ClassAvailability): RouteAvailability => ({ ...(c.stale ? { stale: true } : {}), classCode: c.code, status: c.status, seats: c.seats ?? null, rac: c.rac ?? null, waitlist: c.waitlist ?? null, fare: c.fare > 0 ? c.fare : null, source: String(c.source ?? "railcore") });
+  /* Round-18m-14: RailCore = 20 req/min. 15 trains × 4 classes = 60 calls ek
+   * saath → pehli 20 fresh, baaki web-cache (stale). Ab do PASS: pass-1 har
+   * train ki PRIORITY class (user class, warna SL/3A jahan seat sabse likely)
+   * = ≤20 fresh calls; pass-2 baaki classes (fresh jo mile, warna web). Aise
+   * har train ko kam-se-kam ek FRESH row zaroor milti hai. */
+  const priorityClass = (t: TrainResult): ClassCode | null => {
+    const codes = t.classes.map((c) => c.code);
+    if (args.travelClass && codes.includes(args.travelClass as ClassCode)) return args.travelClass as ClassCode;
+    for (const c of ["SL", "3A", "CC", "2S", "3E", "2A", "EC", "1A"] as ClassCode[]) if (codes.includes(c)) return c;
+    return codes[0] ?? null;
+  };
+  const pass1 = new Map<string, ClassAvailability[]>();
+  await Promise.all(
+    probeList.map(async (t) => {
+      const pc = priorityClass(t);
+      if (!pc) return;
+      try {
+        const b = await routedClassBoard(t.number, args.date, from, to, "GN", [pc]);
+        pass1.set(t.number, b.classes);
+      } catch {
+        /* pass-2 covers it */
+      }
+    }),
+  );
   await Promise.all(
     probeList.map(async (t) => {
       try {
-        const hint = Array.from(new Set([...(args.travelClass ? [args.travelClass] : []), ...t.classes.map((c) => c.code)]));
-        const board = await routedClassBoard(t.number, args.date, from, to, "GN", hint);
+        const done = new Set<string>((pass1.get(t.number) ?? []).filter((c) => c.status && c.status !== "UNKNOWN").map((c) => c.code));
+        const hint = Array.from(new Set<string>([...(args.travelClass ? [args.travelClass] : []), ...t.classes.map((c) => c.code)])).filter((c) => !done.has(c));
+        const rest = hint.length || !done.size ? await routedClassBoard(t.number, args.date, from, to, "GN", hint) : { classes: [] as ClassAvailability[], provider: "none" as ServedProvider };
+        const merged = [...(pass1.get(t.number) ?? []).filter((c) => done.has(c.code)), ...rest.classes.filter((c) => !done.has(c.code))];
+        const board = { classes: merged, provider: rest.provider };
         const c = detectBoardConflict(board.classes);
         if (c) {
           conflicts.push({ trainNumber: t.number, message: CONFLICT_MESSAGE, sources: c });

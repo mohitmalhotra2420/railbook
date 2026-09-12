@@ -93,7 +93,10 @@ function SeatPill({ a, size }: { a?: AvailLike | null; size?: "lg" }) {
     </span>
   );
 }
-function ClassRow({ label, rows }: { label: string; rows: AvailLike[] }) {
+/* Round-18m-14 (user: "AVL/RAC chip tap nahi hota — purana data reload ho sake"):
+ * har class chip tappable → us class ki FRESH seat check (chat mein message
+ * auto-type + scroll). Stale chip par "↻ Refresh" hint. */
+function ClassRow({ label, rows, onPick }: { label: string; rows: AvailLike[]; onPick?: (r: AvailLike) => void }) {
   if (!rows.length) return null;
   return (
     <div className="jx-classes">
@@ -101,10 +104,11 @@ function ClassRow({ label, rows }: { label: string; rows: AvailLike[] }) {
       <div className="jx-classes-chips">
         {rows.map((r) => {
           const av = availTextOf(r);
-          return (
-            <span key={r.classCode} className={`jx-cchip jx-cchip-${r.stale ? "stale" : av.tone}`}>
-              {av.text.replace(" ⚠ stale", "")}{r.fare != null ? ` · ${inr(r.fare)}` : ""}{r.stale ? <span className="jx-cchip-tag">(Not fresh)</span> : null}
-            </span>
+          const inner = <>{av.text.replace(" ⚠ stale", "")}{r.fare != null ? ` · ${inr(r.fare)}` : ""}{r.stale ? <span className="jx-cchip-tag">{onPick ? "↻ Refresh" : "(Not fresh)"}</span> : null}</>;
+          return onPick ? (
+            <button key={r.classCode} type="button" className={`jx-cchip jx-cchip-btn jx-cchip-${r.stale ? "stale" : av.tone}`} onClick={(e) => { e.stopPropagation(); onPick(r); }} title={`${r.classCode} ki fresh seat check`}>{inner}</button>
+          ) : (
+            <span key={r.classCode} className={`jx-cchip jx-cchip-${r.stale ? "stale" : av.tone}`}>{inner}</span>
           );
         })}
       </div>
@@ -249,7 +253,7 @@ function LegPlanCard({ lp, baseDate, pax, onPickLeg }: { lp: NonNullable<AgentJo
 export function JourneyOptions({
   plan,
   onPickTrain,
-  onPickLeg,
+  onPickClass, onPickLeg,
   onPickBoardEarlier,
   onPickDate,
   onPickStations,
@@ -257,6 +261,8 @@ export function JourneyOptions({
 }: {
   plan: AgentJourneyPlan;
   onPickTrain?: (trainNumber: string) => void;
+  /** Round-18m-14: class chip tap → fresh seat check for that train/class/segment. */
+  onPickClass?: (q: { trainNumber: string; classCode: string; from: string; to: string; date?: string | null; boardAt?: string | null }) => void;
   /** Round-18m-3: connecting leg tap → us leg ke segment+date ki seat query. */
   onPickLeg?: (leg: { trainNumber: string; from: string; to: string; date: string }) => void;
   /** Round-18m-6: book-from-earlier tap → seat check for bookFrom→destination. */
@@ -334,7 +340,7 @@ export function JourneyOptions({
       {boardOpen && [...direct].sort((a, b) => (a.departure ?? "").localeCompare(b.departure ?? "")).map((o) => (
         <div key={o.trainNumbers[0]} className="jx-sb-row">
           <button type="button" className="jx-sb-head" onClick={pick ? () => pick(o) : undefined}><span className="jx-no">{o.trainNumbers[0]}</span> <span className="jx-name">{o.trainNames[0]}</span> <span className="jx-sub">{o.departure}→{o.arrival}{dateTag(baseDate, o.arrivalDayOffset)} · {o.durationLabel ?? ""}</span>{aiRec?.kind === "direct" && aiRec.trainNumbers[0] === o.trainNumbers[0] && <span className="jx-sb-pick">{IC.star} AI pick</span>}</button>
-          {o.classOptions && o.classOptions.length ? <ClassRow label="" rows={o.classOptions} /> : <div className="jx-sub">{o.probed ? "Koi class data nahi" : "Seat data provider se nahi aayi"}</div>}
+          {o.classOptions && o.classOptions.length ? <ClassRow label="" rows={o.classOptions} onPick={onPickClass ? (r) => onPickClass({ trainNumber: o.trainNumbers[0], classCode: r.classCode, from: o.origin, to: o.destination }) : undefined} /> : <button type="button" className="jx-sub jx-linkbtn" onClick={onPickClass ? () => onPickClass({ trainNumber: o.trainNumbers[0], classCode: "", from: o.origin, to: o.destination }) : undefined}>{o.probed ? "Koi class data nahi" : "Seat data provider se nahi aayi"} · ↻ check karo</button>}
         </div>
       ))}
     </Section>
@@ -429,7 +435,7 @@ export function JourneyOptions({
             { ic: IC.arrow, text: `Direct · board ${bfeHero.boardAt}` },
             { ic: IC.rupee, text: bfeHero.availability.fare != null ? inr(bfeHero.availability.fare) : "Fare on select" },
           ]} />
-          <ClassRow label="Available classes" rows={(bfeHero.classOptions ?? [bfeHero.availability]).filter((r) => !r.stale)} />
+          <ClassRow label="Available classes · tap = fresh check" rows={bfeHero.classOptions ?? [bfeHero.availability]} onPick={onPickClass ? (r) => onPickClass({ trainNumber: bfeHero.trainNumber, classCode: r.classCode, from: bfeHero.bookFrom, to: bfeHero.destination, boardAt: bfeHero.boardAt }) : undefined} />
           <ClassRow label="Other classes (not fresh)" rows={(bfeHero.classOptions ?? []).filter((r) => r.stale)} />
           <div className="jx-hero-cta">
             <div className="jx-hero-note">
@@ -478,7 +484,7 @@ export function JourneyOptions({
             { ic: IC.rupee, text: heroDirect.availability?.fare != null ? inr(heroDirect.availability.fare) : "Fare on select" },
           ]} />
           {/* Round-18m-12: is train ka POORA class board — AVL/RAC/WL sab (RAC bhi option hai). */}
-          <ClassRow label="All classes (this train)" rows={heroDirect.classOptions ?? (heroDirect.availability ? [heroDirect.availability] : [])} />
+          <ClassRow label="All classes (this train) · tap = fresh check" rows={heroDirect.classOptions ?? (heroDirect.availability ? [heroDirect.availability] : [])} onPick={onPickClass ? (r) => onPickClass({ trainNumber: heroDirect.trainNumbers[0], classCode: r.classCode, from: heroDirect.origin, to: heroDirect.destination }) : undefined} />
           <div className="jx-hero-cta">
             <div className="jx-hero-note">
               <span className="jx-hero-note-ic">{isOk(heroDirect.availability) ? IC.shield : IC.warn}</span>
@@ -507,7 +513,7 @@ export function JourneyOptions({
       {bfeRest.length > 0 && (
         <Section ic={IC.refresh} title="Same-train alternatives" badge={`+${bfeRest.length} option${bfeRest.length > 1 ? "s" : ""}`}>
           {bfeRest.slice(0, 7).map((b) => (
-            <button key={`${b.trainNumber}-${b.bookFrom}`} type="button" className="jx-bfe-row" onClick={pickBfe ? () => pickBfe(b) : undefined}>
+            <div key={`${b.trainNumber}-${b.bookFrom}`} role="button" tabIndex={0} className="jx-bfe-row" onClick={pickBfe ? () => pickBfe(b) : undefined} onKeyDown={pickBfe ? (e) => { if (e.key === "Enter") pickBfe(b); } : undefined}>
               <div className="jx-bfe-top">
                 <div className="jx-lrow-train"><span className="jx-no">{b.trainNumber}</span> <span className="jx-name">{b.trainName}</span></div>
                 <SeatPill a={b.availability} />
@@ -520,13 +526,15 @@ export function JourneyOptions({
                 <div className="jx-strip-col"><div className="jx-strip-name">{b.destinationName ?? b.destination}</div><div className="jx-strip-sub">{b.destination}, {b.arrival ?? "—"}{b.arrivalDayOffset ? ` (+${b.arrivalDayOffset}d)` : ""}</div></div>
               </div>
               <div className="jx-strip-labels"><span>Book from</span><span>Boarding</span><span>Deboarding</span></div>
+              {/* Round-18m-14: alternative row ki classes bhi tappable (stale → refresh). */}
+              <ClassRow label="" rows={(b.classOptions ?? [b.availability]).filter((r) => r.classCode !== b.availability.classCode || r.stale)} onPick={onPickClass ? (r) => onPickClass({ trainNumber: b.trainNumber, classCode: r.classCode, from: b.bookFrom, to: b.destination, boardAt: b.boardAt }) : undefined} />
               <div className="jx-bfe-foot">
                 <span className="jx-stat"><span className="jx-stat-ic">{IC.clock}</span>{durLabel(b.durationMinutes) ?? "—"} · Direct · board {b.boardAt}</span>
                 {(b.classOptions ?? []).filter((r) => r.classCode !== b.availability.classCode).length > 0 && (
                   <span className="jx-classes-chips">{(b.classOptions ?? []).filter((r) => r.classCode !== b.availability.classCode).slice(0, 3).map((r) => { const av = availTextOf(r); return <span key={r.classCode} className={`jx-cchip jx-cchip-${r.stale ? "stale" : av.tone}`}>{av.text.replace(" ⚠ stale", "")}{r.fare != null ? ` · ${inr(r.fare)}` : ""}</span>; })}</span>
                 )}
               </div>
-            </button>
+            </div>
           ))}
         </Section>
       )}

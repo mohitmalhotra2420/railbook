@@ -218,6 +218,12 @@ only provider-verified alternatives.
 - More candidates: fixed hubs (up to 10 connections) + **route-derived hubs** (`routeDerivedHubs()` — junction/major stops from the direct trains' timetable, e.g. JAT→BDTS tries PTKC/LDH/NDLS/SWM/RTM/BH), all legs probed, then filtered.
 - When nothing passes: card + `plan.notes` say "Connecting routes mile lekin kisi mein dono trains par seat available nahi thi — isliye connecting option nahi dikhaya." Summary's "route via X" line lists per-leg seats.
 
+### Round-18m-14 — RailCore key rotated, leg-1/leg-2 full coverage, tappable class chips (refresh)
+
+- RailCore key rotated (local `.env` + Render env). Search + seats back on `railcore` (fresh); 20 req/min → direct probe now **two-pass**: pass-1 one priority class per train (user class → SL/3A/CC/2S…) = guaranteed fresh row per train; pass-2 remaining classes (fresh if budget, else verified web cache flagged stale).
+- Connecting legs: `expandLegPlan` probes **every train running that day** on leg-1 (origin→hub) and leg-2 (hub→destination), bounded 20/leg (specials included — search is date-filtered), **every class** (hint = user class + train's class list), `classOptions` = full board incl. WL/stale.
+- UI: every class chip (direct board, hero, same-train alternatives) is a **button** → taps auto-type "NNNNN ki fresh seat availability CLS DATE ko FROM se TO" in chat, sends it, thread scrolls to the reply (fresh provider check, YOU MAY ALSO CONSIDER card). Stale chips read "↻ Refresh". Unprobed train row → "↻ check karo".
+
 ### Round-18m-13 — AI decides the journey plan (engine = data only)
 
 User: "engine ki jagah AI journey planner handle kare — recommendation, seat availability, leg-1/leg-2 — sab AI samajh ke." Also: direct trains first in the card; explain why 13308-from-PHR beat 14624.

@@ -45,6 +45,8 @@ export type RouteLeg = {
   availability?: RouteAvailability | null;
   /** Round-18m-7: is leg par HAR class jisme seat (AVL/RAC, fresh) — user kisi bhi class mein book kar sake. */
   classOptions?: RouteAvailability[];
+  /** Round-18m-14: train ki classes (search se) — leg probe har class check kare. */
+  classes?: string[];
 };
 
 export type RouteOption = {
