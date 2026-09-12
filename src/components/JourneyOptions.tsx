@@ -299,7 +299,8 @@ export function JourneyOptions({
     ? aiRec.kind === "bfe" ? bfeAll.find((b) => b.trainNumber === aiRec.trainNumbers[0] && b.bookFrom === aiRec.bookFrom) ?? null : null
     : plan.directUnavailable ? bfeFresh ?? bfeAll[0] ?? null : bfeBeatsBest ? bfeFresh : null;
   const bfeRest = bfeAll.filter((b) => b !== bfeHero);
-  const pickBfe = onPickBoardEarlier ? (b: Bfe) => onPickBoardEarlier({ trainNumber: b.trainNumber, bookFrom: b.bookFrom, boardAt: b.boardAt, destination: b.destination, classCode: b.availability.classCode }) : undefined;
+  /* Round-18m-16: ticket segment = bookFrom → (bookUpto ?? destination); fresh check usi par. */
+  const pickBfe = onPickBoardEarlier ? (b: Bfe) => onPickBoardEarlier({ trainNumber: b.trainNumber, bookFrom: b.bookFrom, boardAt: b.boardAt, destination: b.bookUpto ?? b.destination, classCode: b.availability.classCode }) : undefined;
   const heroDirect = aiRec ? (aiRec.kind === "direct" || aiRec.kind === "connecting" ? best : null) : !plan.directUnavailable && !bfeHero ? best : null;
   const decidedBy = plan.decision?.source === "ai" ? "AI" : null;
   const asOf = timeLabel(plan.provenance?.retrievedAt);
@@ -429,14 +430,19 @@ export function JourneyOptions({
             { name: bfeHero.bookFromName ?? bfeHero.bookFrom, sub: `${bfeHero.bookFrom}, ${bfeHero.bookFromDeparture ?? "—"}` },
             { name: bfeHero.boardAtName ?? bfeHero.boardAt, sub: `${bfeHero.boardAt}, ${bfeHero.boardAtDeparture ?? "—"}` },
             { name: bfeHero.destinationName ?? bfeHero.destination, sub: `${bfeHero.destination}, ${bfeHero.arrival ?? "—"}${bfeHero.arrivalDayOffset ? ` · ${formatShortDate(addDays(baseDate, bfeHero.arrivalDayOffset))}` : ""}` },
+            /* Round-18m-16: ConfirmTkt "Book Upto" — ticket destination ke aage tak. */
+            ...(bfeHero.bookUpto ? [{ name: bfeHero.bookUptoName ?? bfeHero.bookUpto, sub: `${bfeHero.bookUpto}, ${bfeHero.bookUptoArrival ?? "—"}` }] : []),
           ]} />
-          <div className="jx-strip-labels"><span>Book from</span><span>Boarding</span><span>Deboarding</span></div>
+          <div className="jx-strip-labels" style={bfeHero.bookUpto ? { gridTemplateColumns: "repeat(4, 1fr)" } : undefined}><span>Book from</span><span>Boarding</span><span>Deboarding</span>{bfeHero.bookUpto && <span>Book upto</span>}</div>
+          {bfeHero.bookUpto && (
+            <div className="jx-sub jx-upto-note">{IC.check} Ticket {bfeHero.bookFrom}→{bfeHero.bookUpto} tak book hogi, aap {bfeHero.destination} par utar jaayenge — {bfeHero.bookUpto} tak ka fare lagega, seat confirm.</div>
+          )}
           <StatRow items={[
             { ic: IC.clock, text: durLabel(bfeHero.durationMinutes) ?? "—" },
             { ic: IC.arrow, text: `Direct · board ${bfeHero.boardAt}` },
             { ic: IC.rupee, text: bfeHero.availability.fare != null ? inr(bfeHero.availability.fare) : "Fare on select" },
           ]} />
-          <ClassRow label="Available classes · tap = fresh check" rows={bfeHero.classOptions ?? [bfeHero.availability]} onPick={onPickClass ? (r) => onPickClass({ trainNumber: bfeHero.trainNumber, classCode: r.classCode, from: bfeHero.bookFrom, to: bfeHero.destination, boardAt: bfeHero.boardAt }) : undefined} />
+          <ClassRow label="Available classes · tap = fresh check" rows={bfeHero.classOptions ?? [bfeHero.availability]} onPick={onPickClass ? (r) => onPickClass({ trainNumber: bfeHero.trainNumber, classCode: r.classCode, from: bfeHero.bookFrom, to: bfeHero.bookUpto ?? bfeHero.destination, boardAt: bfeHero.boardAt }) : undefined} />
           <ClassRow label="Other classes (not fresh)" rows={(bfeHero.classOptions ?? []).filter((r) => r.stale)} />
           <div className="jx-hero-cta">
             <div className="jx-hero-note">
@@ -521,14 +527,15 @@ export function JourneyOptions({
                 <span className="jx-lrow-chev">{IC.chev}</span>
               </div>
               {/* Round-18m-11 (user: "proper do — kahan se book, kahan board, kahan tak") */}
-              <div className="jx-strip jx-strip-sm" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
+              <div className="jx-strip jx-strip-sm" style={{ gridTemplateColumns: `repeat(${b.bookUpto ? 4 : 3}, 1fr)` }}>
                 <div className="jx-strip-col"><div className="jx-strip-name">{b.bookFromName ?? b.bookFrom}</div><div className="jx-strip-sub">{b.bookFrom}, {b.bookFromDeparture ?? "—"}</div></div>
                 <div className="jx-strip-col"><div className="jx-strip-name">{b.boardAtName ?? b.boardAt}</div><div className="jx-strip-sub">{b.boardAt}, {b.boardAtDeparture ?? "—"}</div></div>
                 <div className="jx-strip-col"><div className="jx-strip-name">{b.destinationName ?? b.destination}</div><div className="jx-strip-sub">{b.destination}, {b.arrival ?? "—"}{b.arrivalDayOffset ? ` (+${b.arrivalDayOffset}d)` : ""}</div></div>
+                {b.bookUpto && <div className="jx-strip-col"><div className="jx-strip-name">{b.bookUptoName ?? b.bookUpto}</div><div className="jx-strip-sub">{b.bookUpto}, {b.bookUptoArrival ?? "—"}</div></div>}
               </div>
-              <div className="jx-strip-labels"><span>Book from</span><span>Boarding</span><span>Deboarding</span></div>
+              <div className="jx-strip-labels" style={b.bookUpto ? { gridTemplateColumns: "repeat(4, 1fr)" } : undefined}><span>Book from</span><span>Boarding</span><span>Deboarding</span>{b.bookUpto && <span>Book upto</span>}</div>
               {/* Round-18m-14: alternative row ki classes bhi tappable (stale → refresh). */}
-              <ClassRow label="" rows={(b.classOptions ?? [b.availability]).filter((r) => r.classCode !== b.availability.classCode || r.stale)} onPick={onPickClass ? (r) => onPickClass({ trainNumber: b.trainNumber, classCode: r.classCode, from: b.bookFrom, to: b.destination, boardAt: b.boardAt }) : undefined} />
+              <ClassRow label="" rows={(b.classOptions ?? [b.availability]).filter((r) => r.classCode !== b.availability.classCode || r.stale)} onPick={onPickClass ? (r) => onPickClass({ trainNumber: b.trainNumber, classCode: r.classCode, from: b.bookFrom, to: b.bookUpto ?? b.destination, boardAt: b.boardAt }) : undefined} />
               <div className="jx-bfe-foot">
                 <span className="jx-stat"><span className="jx-stat-ic">{IC.clock}</span>{durLabel(b.durationMinutes) ?? "—"} · Direct · board {b.boardAt}</span>
                 {(b.classOptions ?? []).filter((r) => r.classCode !== b.availability.classCode).length > 0 && (

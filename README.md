@@ -218,6 +218,16 @@ only provider-verified alternatives.
 - More candidates: fixed hubs (up to 10 connections) + **route-derived hubs** (`routeDerivedHubs()` — junction/major stops from the direct trains' timetable, e.g. JAT→BDTS tries PTKC/LDH/NDLS/SWM/RTM/BH), all legs probed, then filtered.
 - When nothing passes: card + `plan.notes` say "Connecting routes mile lekin kisi mein dono trains par seat available nahi thi — isliye connecting option nahi dikhaya." Summary's "route via X" line lists per-leg seats.
 
+### Round-18m-16 — ConfirmTkt-style "Book Upto" seat finder (ticket beyond destination)
+- User screenshot (LDH→INDB, 12920 Malwa Exp): direct WL, but ConfirmTkt found **Book From JAT · Boarding LDH · Deboarding INDB · Book Upto DADN → 1A AVL**.
+- `findBoardFromEarlier` now has `mode: "upto"`: for every WL direct train it probes origin→(stops after destination, up to `BOOK_UPTO_STOPS`=6) and earlier×later combos (3×3), **every class**, provider-proven rows only.
+- Runs ONLY when direct ✗, book-from-earlier ✗ and connecting ✗ (user rule). Options carry `bookUpto/bookUptoName/bookUptoArrival/stopsAfter`; candidate id `B:<train>:<from>><upto>`; AI decision sheet + why-points explain "ticket upto X, deboard at destination, pay fare upto X".
+- UI: 4-column strip (Book from · Boarding · Deboarding · Book upto) + green note; class chips / row taps run the fresh check on the ticket segment (bookFrom→bookUpto).
+
+### Round-18m-15 — Passenger count re-asked per journey; leg-1 scan all trains × every class
+- New route (from/to changed) without pax in the same message → `passengers/paxProvided` reset on server + client (`CLEAR_PASSENGER_COUNT`) — no more silent "1 passenger".
+- Book-from-earlier scan: 10 → 20 trains, hint = user class + train's full class list; audit strip shows leg-1/leg-2 coverage.
+
 ### Round-18m-14 — RailCore key rotated, leg-1/leg-2 full coverage, tappable class chips (refresh)
 
 - RailCore key rotated (local `.env` + Render env). Search + seats back on `railcore` (fresh); 20 req/min → direct probe now **two-pass**: pass-1 one priority class per train (user class → SL/3A/CC/2S…) = guaranteed fresh row per train; pass-2 remaining classes (fresh if budget, else verified web cache flagged stale).

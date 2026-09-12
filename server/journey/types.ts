@@ -165,6 +165,13 @@ export type BoardFromEarlierOption = {
   directStatus: string | null;
   stopsBefore: number;
   source: string;
+  /** Round-18m-16 (ConfirmTkt "Book Upto"): ticket booked UPTO a station AFTER the
+   * user's destination (passenger deboards at `destination`). null/undefined = ticket ends at destination. */
+  bookUpto?: string | null;
+  bookUptoName?: string | null;
+  bookUptoArrival?: string | null;
+  /** How many stops after the user's destination the ticket runs (0 = none). */
+  stopsAfter?: number;
 };
 
 export type PartialSegment = {
@@ -318,6 +325,8 @@ export type JourneyCandidate = {
   /** seat proof tier: fresh AVL/RAC enough for pax → "fresh"; stale AVL/RAC → "stale"; else "none" */
   seatTier: "fresh" | "stale" | "none";
   bookFrom?: string | null;
+  /** Round-18m-16: ticket booked upto a station after destination (ConfirmTkt "Book Upto"). */
+  bookUpto?: string | null;
   boardAt?: string | null;
   hub?: string | null;
   layoverMinutes?: number | null;

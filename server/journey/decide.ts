@@ -37,7 +37,7 @@ export function buildCandidates(plan: JourneyPlan): JourneyCandidate[] {
   for (const b of plan.recovery?.boardFromEarlier ?? []) {
     const rows = b.classOptions?.length ? b.classOptions : [b.availability];
     const a = bestRow(rows, pax) ?? b.availability;
-    out.push({ id: `B:${b.trainNumber}:${b.bookFrom}`, kind: "bfe", trainNumbers: [b.trainNumber], label: b.trainName, departure: b.boardAtDeparture, arrival: b.arrival, durationMinutes: b.durationMinutes ?? null, availability: a, classOptions: rows, seatTier: tierOf(a, pax), bookFrom: b.bookFrom, boardAt: b.boardAt });
+    out.push({ id: `B:${b.trainNumber}:${b.bookFrom}${b.bookUpto ? `>${b.bookUpto}` : ""}`, kind: "bfe", trainNumbers: [b.trainNumber], label: b.trainName, departure: b.boardAtDeparture, arrival: b.arrival, durationMinutes: b.durationMinutes ?? null, availability: a, classOptions: rows, seatTier: tierOf(a, pax), bookFrom: b.bookFrom, boardAt: b.boardAt, bookUpto: b.bookUpto ?? null });
   }
   const conns = [...(plan.legPlans ?? []).map((l) => l.best).filter(Boolean), ...plan.connections, ...(plan.recovery?.connecting ?? [])];
   const seen = new Set<string>();
@@ -64,7 +64,7 @@ export function candidateSheet(plan: JourneyPlan, cands: JourneyCandidate[]): st
   L.push("");
   L.push("CANDIDATES (id | kind | trains | timing | duration | seat board):");
   for (const c of cands) {
-    const kind = c.kind === "direct" ? `DIRECT from ${c.boardAt}` : c.kind === "bfe" ? `SAME TRAIN, ticket from ${c.bookFrom} (earlier stop), board at ${c.boardAt}` : `CONNECTING via ${c.hub}, layover ${c.layoverMinutes ?? "?"} min`;
+    const kind = c.kind === "direct" ? `DIRECT from ${c.boardAt}` : c.kind === "bfe" ? (c.bookUpto ? `SAME TRAIN, ticket ${c.bookFrom}->${c.bookUpto} (${c.bookFrom !== c.boardAt ? "earlier stop, " : ""}beyond destination; traveller boards ${c.boardAt} and DEBOARDS at destination, pays fare upto ${c.bookUpto})` : `SAME TRAIN, ticket from ${c.bookFrom} (earlier stop), board at ${c.boardAt}`) : `CONNECTING via ${c.hub}, layover ${c.layoverMinutes ?? "?"} min`;
     const board = c.classOptions.length ? c.classOptions.map(rowTxt).join("; ") : "NOT CHECKED";
     L.push(`${c.id} | ${kind} | ${c.trainNumbers.join("+")} ${c.label} | dep ${c.departure ?? "?"} arr ${c.arrival ?? "?"} | ${dur(c.durationMinutes)} | tier=${c.seatTier.toUpperCase()} | ${board}`);
   }
@@ -74,7 +74,7 @@ export function candidateSheet(plan: JourneyPlan, cands: JourneyCandidate[]): st
 const SYSTEM = `You are RailBook's AI journey planner for Indian Railways. You DECIDE which option the traveller should book — the engine only fetched data. Think like a smart, honest friend.
 Decision principles (apply judgement, not a formula):
 1. Seat certainty for the WHOLE party first: FRESH AVL/RAC (enough for pax) beats everything; RAC is acceptable for 1-2 pax.
-2. A DIRECT train from the user's origin with a FRESH seat is preferred over a same-train earlier-stop ticket or a connection. A same-train earlier-stop ticket (kind bfe) is a smart trick when the direct segment is WL — the traveller still boards at origin, only pays a little extra.
+2. A DIRECT train from the user's origin with a FRESH seat is preferred over a same-train earlier-stop ticket or a connection. A same-train earlier-stop ticket (kind bfe) is a smart trick when the direct segment is WL — the traveller still boards at origin, only pays a little extra. Likewise a "book upto" ticket (bfe with ticket beyond destination) is valid: the traveller boards at origin, deboards at their destination, pays fare upto the farther station — recommend it when direct/earlier/connecting have no seat.
 3. STALE AVL is a real lead but NOT proof — you may recommend it only if nothing FRESH exists, and you must say it needs a Seat check first. Never present STALE as confirmed.
 4. Then speed (shorter duration), sensible departure time, fewer changes, then cost/class.
 5. Never invent trains, seats, fares or times. Only use candidate ids from the sheet. WL/NOT CHECKED candidates must never be described as having a seat.

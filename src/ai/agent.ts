@@ -87,6 +87,11 @@ export interface AgentBoardFromEarlier {
   directStatus: string | null;
   stopsBefore: number;
   source: string;
+  /** Round-18m-16: ConfirmTkt "Book Upto" — ticket destination ke aage tak, utro destination par. */
+  bookUpto?: string | null;
+  bookUptoName?: string | null;
+  bookUptoArrival?: string | null;
+  stopsAfter?: number;
 }
 export interface AgentConnection {
   station: string;

@@ -59,7 +59,9 @@ export const JOURNEY_CONFIG = {
   partialSplitLimit: Number(process.env.PARTIAL_SPLIT_LIMIT ?? 3) || 3,
   /** Round-18m-6: how many stops BEFORE origin to try for "book from earlier station". */
   boardEarlierStops: Number(process.env.BOARD_EARLIER_STOPS ?? 15) || 15, // Round-18m-11: train origin tak (bounded)
-  boardEarlierTrains: Number(process.env.BOARD_EARLIER_TRAINS ?? 20) || 20, // Round-18m-15: route ki SAARI trains (origin tak har stop × har class)
+  boardEarlierTrains: Number(process.env.BOARD_EARLIER_TRAINS ?? 20) || 20,
+  /** Round-18m-16: ConfirmTkt "Book Upto" — destination ke aage kitne stops tak ticket try karein. */
+  bookUptoStops: Number(process.env.BOOK_UPTO_STOPS ?? 6) || 6, // Round-18m-15: route ki SAARI trains (origin tak har stop × har class)
 };
 
 const AVAIL_RANK: Record<string, number> = { AVAILABLE: 0, RAC: 1, WAITLIST: 2, UNKNOWN: 3, NOT_AVAILABLE: 4 };
@@ -710,12 +712,18 @@ export async function findBoardFromEarlier(args: {
   date: string;
   travelClass?: string | null;
   stopsBack?: number;
+  /** Round-18m-16: ConfirmTkt "Book Upto" — destination ke AAGE ke stops bhi (ticket aage tak, utro destination par). */
+  stopsAhead?: number;
+  /** "earlier" (default) = sirf pichhle stops; "upto" = sirf aage ke stops + earlier×aage combo (tab jab earlier + connecting fail). */
+  mode?: "earlier" | "upto";
   limitTrains?: number;
   passengers?: number | null;
 }): Promise<{ options: BoardFromEarlierOption[]; sources: Set<string>; stopsChecked: number; trainsChecked: number }> {
   const from = args.origin.toUpperCase();
   const to = args.destination.toUpperCase();
   const stopsBack = args.stopsBack ?? JOURNEY_CONFIG.boardEarlierStops;
+  const mode = args.mode ?? "earlier";
+  const stopsAhead = mode === "upto" ? args.stopsAhead ?? JOURNEY_CONFIG.bookUptoStops : 0;
   const sources = new Set<string>();
   const options: BoardFromEarlierOption[] = [];
   let stopsChecked = 0;
@@ -731,48 +739,69 @@ export async function findBoardFromEarlier(args: {
         if (iFrom <= 0 || iTo < 0 || iTo <= iFrom) return;
         trainsChecked++;
         const earlier = stops.slice(Math.max(0, iFrom - stopsBack), iFrom).reverse(); // nearest first … train origin tak
-        for (let k = 0; k < earlier.length; k++) {
-          const s = earlier[k];
+        const later = stops.slice(iTo + 1, iTo + 1 + stopsAhead); // Round-18m-16: destination ke aage, nearest first
+        const tcls = (t as { classes?: string[] }).classes ?? [];
+        const hint = Array.from(new Set([...(args.travelClass ? [args.travelClass] : []), ...tcls]));
+        const dest = stops[iTo];
+        const dayOf = (st: Stop) => (typeof st.day === "number" ? st.day : 1);
+        /* Ek ticket-segment (bookFrom → bookUpto) probe karo — passenger phir bhi from→to hi travel karta hai. */
+        const tryOneSegment = async (bf: Stop, bu: Stop | null, stopsBefore: number, stopsAfterN: number): Promise<boolean> => {
           stopsChecked++;
-          /* Round-18m-15: hint = user class + train ki saari classes → har class ka board (sirf user class nahi). */
-          const tcls = (t as { classes?: string[] }).classes ?? [];
-          const board = await routedClassBoard(t.number, args.date, s.code, to, "GN", Array.from(new Set([...(args.travelClass ? [args.travelClass] : []), ...tcls])));
-          /* Round-18m-7: SAB classes check — jis class mein bhi seat mile, sab dikhao. */
-          /* Stale (24h+ web-cache) AVL/RAC bhi option hai — ⚠ "last known" ke saath; fresh pehle. */
+          const segTo = bu ? String(bu.code).toUpperCase() : to;
+          const board = await routedClassBoard(t.number, args.date, String(bf.code).toUpperCase(), segTo, "GN", hint);
+          /* Round-18m-7: SAB classes check — jis class mein bhi seat mile, sab dikhao. Stale AVL/RAC bhi option (⚠), fresh pehle. */
           const all = bookableRows(board.classes, { includeStale: true }).filter((r) => enoughSeats(r, args.passengers));
           const row = (args.travelClass ? all.find((r) => r.classCode === args.travelClass) : undefined) ?? all[0] ?? null;
-          if (row) {
-            sources.add(row.source);
-            const dest = stops[iTo];
-            const dayOf = (st: Stop) => (typeof st.day === "number" ? st.day : 1);
-            const depM = minutesOf(stops[iFrom].departure ?? stops[iFrom].arrival ?? "");
-            const arrM = minutesOf(dest.arrival ?? dest.departure ?? "");
-            const dayDiff = Math.max(0, dayOf(dest) - dayOf(stops[iFrom]));
-            /* Search result ka duration (boardAt→destination) sabse reliable; schedule se sirf fallback. */
-            let durationMinutes: number | null = t.durationMinutes && t.durationMinutes > 0 ? t.durationMinutes : depM != null && arrM != null ? arrM - depM + dayDiff * 1440 : null;
-            if (durationMinutes != null && durationMinutes <= 0) durationMinutes += 1440; // schedule bina day → overnight
-
-            options.push({
-              classOptions: all,
-              durationMinutes,
-              trainNumber: t.number,
-              trainName: t.name,
-              bookFrom: s.code,
-              bookFromName: s.name ?? null,
-              bookFromDeparture: s.departure ?? s.arrival ?? null,
-              boardAt: from,
-              boardAtName: stops[iFrom].name ?? null,
-              boardAtDeparture: stops[iFrom].departure ?? stops[iFrom].arrival ?? null,
-              destination: to,
-              destinationName: dest.name ?? null,
-              arrival: dest.arrival ?? dest.departure ?? null,
-              arrivalDayOffset: Math.max(0, dayOf(dest) - dayOf(stops[iFrom])),
-              availability: row,
-              directStatus: t.directStatus ?? null,
-              stopsBefore: k + 1,
-              source: row.source,
-            });
-            return; // nearest earlier stop with a seat is enough for this train
+          if (!row) return false;
+          sources.add(row.source);
+          const depM = minutesOf(stops[iFrom].departure ?? stops[iFrom].arrival ?? "");
+          const arrM = minutesOf(dest.arrival ?? dest.departure ?? "");
+          const dayDiff = Math.max(0, dayOf(dest) - dayOf(stops[iFrom]));
+          /* Search result ka duration (boardAt→destination) sabse reliable; schedule se sirf fallback. */
+          let durationMinutes: number | null = t.durationMinutes && t.durationMinutes > 0 ? t.durationMinutes : depM != null && arrM != null ? arrM - depM + dayDiff * 1440 : null;
+          if (durationMinutes != null && durationMinutes <= 0) durationMinutes += 1440; // schedule bina day → overnight
+          options.push({
+            classOptions: all,
+            durationMinutes,
+            trainNumber: t.number,
+            trainName: t.name,
+            bookFrom: String(bf.code).toUpperCase(),
+            bookFromName: bf.name ?? null,
+            bookFromDeparture: bf.departure ?? bf.arrival ?? null,
+            boardAt: from,
+            boardAtName: stops[iFrom].name ?? null,
+            boardAtDeparture: stops[iFrom].departure ?? stops[iFrom].arrival ?? null,
+            destination: to,
+            destinationName: dest.name ?? null,
+            arrival: dest.arrival ?? dest.departure ?? null,
+            arrivalDayOffset: Math.max(0, dayOf(dest) - dayOf(stops[iFrom])),
+            availability: row,
+            directStatus: t.directStatus ?? null,
+            stopsBefore,
+            source: row.source,
+            bookUpto: bu ? String(bu.code).toUpperCase() : null,
+            bookUptoName: bu ? bu.name ?? null : null,
+            bookUptoArrival: bu ? bu.arrival ?? bu.departure ?? null : null,
+            stopsAfter: stopsAfterN,
+          });
+          return true;
+        };
+        /* Phase 1 (Round-18m-6): earlier stop → destination. */
+        if (mode === "earlier") {
+          for (let k = 0; k < earlier.length; k++) {
+            if (await tryOneSegment(earlier[k], null, k + 1, 0)) return; // nearest earlier stop with a seat is enough for this train
+          }
+          return;
+        }
+        /* Phase 2 (Round-18m-16, user ConfirmTkt screenshot LDH→INDB: "Book Upto DADN"):
+         * origin → destination ke AAGE ka stop. */
+        for (let j = 0; j < later.length; j++) {
+          if (await tryOneSegment(stops[iFrom], later[j], 0, j + 1)) return;
+        }
+        /* Phase 3: earlier × later combo (bounded — nazdeek ke 3×3). */
+        for (let k = 0; k < Math.min(3, earlier.length); k++) {
+          for (let j = 0; j < Math.min(3, later.length); j++) {
+            if (await tryOneSegment(earlier[k], later[j], k + 1, j + 1)) return;
           }
         }
       } catch {
@@ -781,7 +810,7 @@ export async function findBoardFromEarlier(args: {
     }),
   );
   /* Round-18m-7: seat pehle (AVL > RAC), phir SABSE KAM travel time, phir nazdeek ka stop. */
-  options.sort((a, b) => Number(!!a.availability.stale) - Number(!!b.availability.stale) || (AVAIL_RANK[a.availability.status] ?? 5) - (AVAIL_RANK[b.availability.status] ?? 5) || (a.durationMinutes ?? 9e9) - (b.durationMinutes ?? 9e9) || a.stopsBefore - b.stopsBefore || a.trainNumber.localeCompare(b.trainNumber));
+  options.sort((a, b) => Number(!!a.availability.stale) - Number(!!b.availability.stale) || (AVAIL_RANK[a.availability.status] ?? 5) - (AVAIL_RANK[b.availability.status] ?? 5) || (a.durationMinutes ?? 9e9) - (b.durationMinutes ?? 9e9) || (a.stopsBefore + (a.stopsAfter ?? 0)) - (b.stopsBefore + (b.stopsAfter ?? 0)) || a.trainNumber.localeCompare(b.trainNumber));
   return { options, sources, stopsChecked, trainsChecked };
 }
 
@@ -988,6 +1017,8 @@ export async function planJourney(args: {
   includeConnections?: boolean;
   includeAlternativeDates?: boolean;
   includePartial?: boolean;
+  /** Round-18m-16: ConfirmTkt "Book Upto" scan (default on) — sirf tab jab earlier + connecting fail. */
+  includeBookUpto?: boolean;
   includeAlternateStations?: boolean;
   trains?: TrainResult[];
   searchProvider?: ServedProvider;
@@ -1214,6 +1245,29 @@ export async function planJourney(args: {
       }
       if (!connections.length && !notes.includes(CONNECTION_NO_SEAT_NOTE)) notes.push(CONNECTION_NO_SEAT_NOTE);
     }
+    /* Round-18m-16 (user ConfirmTkt screenshot LDH→INDB, 12920 "Book Upto DADN" → 1A AVL):
+     * direct ✗, book-from-earlier ✗, connecting ✗ — TAB destination ke AAGE ke stops tak
+     * ticket try karo (utro apne destination par), saari trains × har class, earlier×aage combo bhi.
+     * Sirf provider-proven rows; kabhi invent nahi. */
+    if (!boardFromEarlier.some((b) => !b.availability.stale) && !connections.length && args.includeBookUpto !== false) {
+      try {
+        const wl2 = [...trains]
+          .sort((a, b) => (a.durationMinutes || 9e9) - (b.durationMinutes || 9e9) || a.number.localeCompare(b.number))
+          .filter((t) => !legBookable(availability.get(t.number), pax))
+          .map((t) => ({ number: t.number, name: t.name, classes: t.classes.map((c) => c.code), directStatus: (() => { const a = availability.get(t.number); return a ? `${a.status}${a.stale ? " (not fresh)" : ""}` : null; })(), durationMinutes: t.durationMinutes ?? null }));
+        if (wl2.length) {
+          const r2 = await findBoardFromEarlier({ trains: wl2, origin: from, destination: to, date: args.date, travelClass: args.travelClass ?? null, limitTrains: JOURNEY_CONFIG.boardEarlierTrains, passengers: pax, mode: "upto" });
+          if (r2.options.length) {
+            boardFromEarlier = [...boardFromEarlier, ...r2.options];
+            notes.push(`Book-upto scan: ${r2.trainsChecked} trains × destination ke aage ${JOURNEY_CONFIG.bookUptoStops} stops tak (${r2.stopsChecked} segments, har class) — ticket aage tak, utro ${to} par.`);
+          }
+          bfeAudit = { trains: Math.max(bfeAudit.trains, r2.trainsChecked), stops: bfeAudit.stops + r2.stopsChecked };
+          r2.sources.forEach((s) => sources.add(s));
+        }
+      } catch {
+        /* skip — never invent */
+      }
+    }
     /* §8 alternate boarding/destination station (same city) — suggestion only. */
     let alternateStations: AlternateStationOption[] = [];
     if (args.includeAlternateStations !== false) {
@@ -1354,7 +1408,7 @@ function applyDecision(plan: JourneyPlan, d: JourneyDecision): void {
     }
   } else if (rec.kind === "bfe" && plan.recovery?.boardFromEarlier?.length) {
     const list = plan.recovery.boardFromEarlier;
-    const pick = list.find((b) => `B:${b.trainNumber}:${b.bookFrom}` === rec.id);
+    const pick = list.find((b) => `B:${b.trainNumber}:${b.bookFrom}${b.bookUpto ? `>${b.bookUpto}` : ""}` === rec.id);
     if (pick) plan.recovery = { ...plan.recovery, boardFromEarlier: [pick, ...list.filter((b) => b !== pick)] };
   } else if (rec.kind === "connecting") {
     const all = [...(plan.legPlans ?? []).map((l) => l.best).filter((c): c is Connection => !!c), ...plan.connections, ...(plan.recovery?.connecting ?? [])];
@@ -1389,7 +1443,7 @@ export function whyFactsSheet(plan: JourneyPlan): string {
   const bfe = plan.recovery?.boardFromEarlier ?? [];
   if (bfe.length) {
     L.push(`Book-from-earlier (same train, ticket from an earlier stop, user still boards at ${plan.query.from}):`);
-    for (const b of bfe.slice(0, 4)) L.push(`- ${b.trainNumber} ${b.trainName ?? ""} ticket from ${b.bookFrom} (${b.stopsBefore} stops before) board ${b.boardAt} ${b.boardAtDeparture ?? ""} → ${plan.query.to} ${b.arrival ?? ""} ${durationLabelOf(b.durationMinutes)} seat: ${av(b.availability)}${(b.classOptions ?? []).length > 1 ? `; other classes: ${(b.classOptions ?? []).filter((r) => r.classCode !== b.availability.classCode).map(av).join(", ")}` : ""}`);
+    for (const b of bfe.slice(0, 4)) L.push(`- ${b.trainNumber} ${b.trainName ?? ""} ticket from ${b.bookFrom} (${b.stopsBefore} stops before)${b.bookUpto ? ` upto ${b.bookUpto} (${b.stopsAfter ?? 0} stops AFTER destination, deboard at ${plan.query.to})` : ""} board ${b.boardAt} ${b.boardAtDeparture ?? ""} → ${plan.query.to} ${b.arrival ?? ""} ${durationLabelOf(b.durationMinutes)} seat: ${av(b.availability)}${(b.classOptions ?? []).length > 1 ? `; other classes: ${(b.classOptions ?? []).filter((r) => r.classCode !== b.availability.classCode).map(av).join(", ")}` : ""}`);
   }
   for (const lp of plan.legPlans ?? []) {
     L.push(`Connecting via ${lp.hubName ?? lp.hub} (${lp.hub}): leg-1 ${lp.leg1.length}/${lp.checkedLeg1} trains with seats, leg-2 ${lp.leg2.length}/${lp.checkedLeg2} trains with seats.`);
@@ -1533,7 +1587,8 @@ export function journeyWhyPoints(plan: JourneyPlan): string[] {
     const wlCount = direct.filter((o) => o.availability && !legBookable(o.availability, pax)).length;
     const staleAvl = direct.filter((o) => o.availability?.stale && enoughSeats(o.availability, pax)).map((o) => o.trainNumbers[0]);
     pts.push(`${plan.query.from}→${plan.query.to} par ${wlCount || direct.length} direct train${(wlCount || direct.length) > 1 ? "s" : ""} ki har class check ki — kisi mein${paxTxt ? ` ${paxTxt} ke liye` : ""} FRESH confirmed seat nahi${staleAvl.length ? ` (${staleAvl.slice(0, 3).join(", ")} mein AVL sirf 24h+ purane web-cache mein — Seat check se verify karo)` : " (WL/N-A)"}.`);
-    pts.push(`${bfe.trainNumber} mein ${bfe.bookFrom} (${bfe.stopsBefore} stop pehle) se ticket lene par ${seatTxt(bfe.availability)}${bfe.availability.fare != null ? ` @ ₹${bfe.availability.fare}` : ""} — provider-verified, fresh data.`);
+    if (bfe.bookUpto) pts.push(`${bfe.trainNumber} mein ticket ${bfe.bookFrom}→${bfe.bookUpto} tak (${bfe.stopsAfter ?? 0} stop aage) lene par ${seatTxt(bfe.availability)}${bfe.availability.fare != null ? ` @ ₹${bfe.availability.fare}` : ""} — aap ${plan.query.to} par utar jaayenge; ${plan.query.from}→${plan.query.to} segment par seat nahi thi. Provider-verified.`);
+    else pts.push(`${bfe.trainNumber} mein ${bfe.bookFrom} (${bfe.stopsBefore} stop pehle) se ticket lene par ${seatTxt(bfe.availability)}${bfe.availability.fare != null ? ` @ ₹${bfe.availability.fare}` : ""} — provider-verified, fresh data.`);
     if (bfe.durationMinutes && fastestDirect?.durationMinutes) {
       pts.push(bfe.durationMinutes <= fastestDirect.durationMinutes + 30 ? `Travel time ${durationLabelOf(bfe.durationMinutes)} — direct trains mein sabse kam ke barabar, train badalni nahi padti.` : `Travel time ${durationLabelOf(bfe.durationMinutes)}; fastest direct (${fastestDirect.trainNumbers[0]}, ${fastestDirect.durationLabel}) mein seat nahi thi, isliye seat-proven option upar rakha.`);
     }
