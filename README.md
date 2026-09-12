@@ -218,6 +218,17 @@ only provider-verified alternatives.
 - More candidates: fixed hubs (up to 10 connections) + **route-derived hubs** (`routeDerivedHubs()` — junction/major stops from the direct trains' timetable, e.g. JAT→BDTS tries PTKC/LDH/NDLS/SWM/RTM/BH), all legs probed, then filtered.
 - When nothing passes: card + `plan.notes` say "Connecting routes mile lekin kisi mein dono trains par seat available nahi thi — isliye connecting option nahi dikhaya." Summary's "route via X" line lists per-leg seats.
 
+### Round-18m-20 — Direct-train rule: origin→boarding ALL stops + destination+2–3 stops, ALWAYS
+
+User rule (binding): when a DIRECT train has no seat on the user's segment, the engine must (a) check
+every earlier stop from the train's ORIGIN up to boarding × every class (book-from-earlier, already
+bounded to 15 stops / 20 trains), and (b) check the 2–3 stops AFTER the destination × every class
+("Book Upto" — ticket beyond, deboard at destination). Previously (b) ran only when both
+book-from-earlier AND connecting routes failed. Now `planJourney` runs the book-upto scan for every
+WL direct train that has no fresh earlier-stop seat, regardless of connecting results.
+`JOURNEY_CONFIG.bookUptoStops` 6 → 3 (env `BOOK_UPTO_STOPS`) to match the 2–3 stop rule and keep the
+turn inside the 180 s budget. Test: `tests/round18m20-direct-always-upto.test.ts`.
+
 ### Round-18m-19 — Readability + seat colours + no client-side "1 passenger" assumption
 - Seat chips everywhere: **AVL = green, RAC = yellow, WL / Regret / N-A = red** (`.jx-cchip-ok/-warn/-bad`, SeatPill warn now yellow). Checked-list chips no longer repeat the class code ("1A 1A WL 1" → "1A WL 1").
 - Headings bolder/larger: "Via <hub>", "Leg 1 · A → B", "Leg 2 …", section titles, class-row labels, and the "N aur trains check ki — seat nahi" button (filled, bold). Nothing else in the layout changed.

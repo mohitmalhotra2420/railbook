@@ -61,7 +61,7 @@ export const JOURNEY_CONFIG = {
   boardEarlierStops: Number(process.env.BOARD_EARLIER_STOPS ?? 15) || 15, // Round-18m-11: train origin tak (bounded)
   boardEarlierTrains: Number(process.env.BOARD_EARLIER_TRAINS ?? 20) || 20,
   /** Round-18m-16: ConfirmTkt "Book Upto" — destination ke aage kitne stops tak ticket try karein. */
-  bookUptoStops: Number(process.env.BOOK_UPTO_STOPS ?? 6) || 6, // Round-18m-15: route ki SAARI trains (origin tak har stop × har class)
+  bookUptoStops: Number(process.env.BOOK_UPTO_STOPS ?? 3) || 3, // Round-18m-20: destination ke aage 2–3 stops (user rule), har WL direct train × har class
 };
 
 const AVAIL_RANK: Record<string, number> = { AVAILABLE: 0, RAC: 1, WAITLIST: 2, UNKNOWN: 3, NOT_AVAILABLE: 4 };
@@ -1045,7 +1045,7 @@ export async function planJourney(args: {
   includeConnections?: boolean;
   includeAlternativeDates?: boolean;
   includePartial?: boolean;
-  /** Round-18m-16: ConfirmTkt "Book Upto" scan (default on) — sirf tab jab earlier + connecting fail. */
+  /** Round-18m-16/20: ConfirmTkt "Book Upto" scan (default on) — har WL direct train ke liye destination ke aage 2–3 stops (connecting mile ya na mile). */
   includeBookUpto?: boolean;
   includeAlternateStations?: boolean;
   trains?: TrainResult[];
@@ -1277,11 +1277,15 @@ export async function planJourney(args: {
      * direct ✗, book-from-earlier ✗, connecting ✗ — TAB destination ke AAGE ke stops tak
      * ticket try karo (utro apne destination par), saari trains × har class, earlier×aage combo bhi.
      * Sirf provider-proven rows; kabhi invent nahi. */
-    if (!boardFromEarlier.some((b) => !b.availability.stale) && !connections.length && args.includeBookUpto !== false) {
+    /* Round-18m-20 (user rule): direct train mein seat nahi → origin→boarding ke SAARE stops (upar) AUR
+     * destination ke aage 2–3 stops HAMESHA check — connecting mila ya nahi, isse farak nahi padta.
+     * Sirf un trains ke liye jinme na user-segment par seat hai, na earlier-stop se fresh seat mili. */
+    const earlierSeated = new Set(boardFromEarlier.filter((b) => !b.availability.stale).map((b) => b.trainNumber));
+    if (args.includeBookUpto !== false) {
       try {
         const wl2 = [...trains]
           .sort((a, b) => (a.durationMinutes || 9e9) - (b.durationMinutes || 9e9) || a.number.localeCompare(b.number))
-          .filter((t) => !legBookable(availability.get(t.number), pax))
+          .filter((t) => !legBookable(availability.get(t.number), pax) && !earlierSeated.has(t.number))
           .map((t) => ({ number: t.number, name: t.name, classes: t.classes.map((c) => c.code), directStatus: (() => { const a = availability.get(t.number); return a ? `${a.status}${a.stale ? " (not fresh)" : ""}` : null; })(), durationMinutes: t.durationMinutes ?? null }));
         if (wl2.length) {
           const r2 = await findBoardFromEarlier({ trains: wl2, origin: from, destination: to, date: args.date, travelClass: args.travelClass ?? null, limitTrains: JOURNEY_CONFIG.boardEarlierTrains, passengers: pax, mode: "upto" });
