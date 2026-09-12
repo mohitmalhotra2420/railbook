@@ -209,9 +209,13 @@ async function erailFareForClass(
   trainNumber: string,
   classCode: string,
   quotaCode: string,
+  from?: string | null,
+  to?: string | null,
 ): Promise<number | null> {
   try {
-    const scraped = await scrapeTrainFareWeb(trainNumber);
+    /* Round-18m-23: from/to diye ho to SIRF segment fare (erail ?from&to, page-verified); poore route ka
+     * fare segment ke naam par kabhi nahi — user ko "reference" ke naam par galat number nahi. */
+    const scraped = await scrapeTrainFareWeb(trainNumber, from, to);
     if (!scraped) return null;
     const row = scraped.classes.find((c) => c.code === String(classCode).toUpperCase());
     if (!row) return null;
@@ -230,8 +234,10 @@ async function erailFareBreakdown(
   date: string,
   classCode: ClassCode,
   passengerCount: number,
+  from?: string | null,
+  to?: string | null,
 ): Promise<FareBreakdown | null> {
-  const perPax = await erailFareForClass(trainNumber, classCode, "GN");
+  const perPax = await erailFareForClass(trainNumber, classCode, "GN", from, to);
   if (perPax == null) return null;
   const pax = Math.max(1, passengerCount || 1);
   return {
@@ -401,7 +407,7 @@ async function withFareFilled(
     /* fall through */
   }
   try {
-    const web = await erailFareForClass(trainNumber, classCode, quotaCode);
+    const web = await erailFareForClass(trainNumber, classCode, quotaCode, from, to);
     if (web != null && web > 0) return { ...row, fare: web, fareSource: "web_erail" };
   } catch {
     /* fall through */
@@ -1353,7 +1359,7 @@ export class FallbackRailwayProvider implements RailwayProvider {
         return ry;
       }
       /* Round-7: erail.in se fare to nikaal lo. */
-      const webFareNoKit = await erailFareForClass(trainNumber, classCode, quotaCode);
+      const webFareNoKit = await erailFareForClass(trainNumber, classCode, quotaCode, from, to);
       if (webFareNoKit != null) {
         logServed("web_erail", "availability", started, false, "fare_only_no_seats");
         return { ...unknown, fare: webFareNoKit, source: "web_erail" };
@@ -1380,7 +1386,7 @@ export class FallbackRailwayProvider implements RailwayProvider {
       return ry;
     }
     /* Round-7: erail.in se class-ka fare to nikaal lo — fare-only row. */
-    const webFare = await erailFareForClass(trainNumber, classCode, quotaCode);
+    const webFare = await erailFareForClass(trainNumber, classCode, quotaCode, from, to);
     if (webFare != null) {
       logServed("web_erail", "availability", started, false, "fare_only_no_seats");
       return { ...fb, fare: webFare, source: "web_erail" };
@@ -1415,7 +1421,7 @@ export class FallbackRailwayProvider implements RailwayProvider {
       /* Round-16: railyatri (segment fare) → Round-7: erail.in (route fare). */
       const web =
         (await railyatriFareBreakdown(trainNumber, date, from, to, classCode, passengerCount)) ??
-        (await erailFareBreakdown(trainNumber, date, classCode, passengerCount));
+        (await erailFareBreakdown(trainNumber, date, classCode, passengerCount, from, to));
       if (web) {
         logServed(web.source === "web_railyatri" ? "web_railyatri" : "web_erail", "fare", started, true, "both_unavailable");
         return web;
@@ -1438,7 +1444,7 @@ export class FallbackRailwayProvider implements RailwayProvider {
     /* Round-16/7: railkit bhi fail — railyatri (segment) → erail.in fare-scrape. */
     const web =
       (await railyatriFareBreakdown(trainNumber, date, from, to, classCode, passengerCount)) ??
-      (await erailFareBreakdown(trainNumber, date, classCode, passengerCount));
+      (await erailFareBreakdown(trainNumber, date, classCode, passengerCount, from, to));
     if (web) {
       logServed(web.source === "web_railyatri" ? "web_railyatri" : "web_erail", "fare", started, true, "railcore_unusable");
       return web;

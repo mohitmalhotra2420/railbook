@@ -218,6 +218,23 @@ only provider-verified alternatives.
 - More candidates: fixed hubs (up to 10 connections) + **route-derived hubs** (`routeDerivedHubs()` — junction/major stops from the direct trains' timetable, e.g. JAT→BDTS tries PTKC/LDH/NDLS/SWM/RTM/BH), all legs probed, then filtered.
 - When nothing passes: card + `plan.notes` say "Connecting routes mile lekin kisi mein dono trains par seat available nahi thi — isliye connecting option nahi dikhaya." Summary's "route via X" line lists per-leg seats.
 
+### Round-18m-23 — No invented "reference fare"; segment-only web fare; IRCTC maintenance fallback
+
+User screenshot (LDH→BSB, 23:54 IST): every direct train "Seat data provider se nahi aayi", and the
+agent replied "Fare reference: 2A ₹3000, 3A ₹2090, SL ₹815" — those were 13152's WHOLE-ROUTE
+(JAT→Kolkata) fares from erail, not LDH→BSB (real segment: 2A ₹1960 / SL ₹530). Fixes:
+1. `scrapeTrainFareWeb(train, from, to)` → erail `?from=&to=` segment page; the page's selected
+   from/to selects are verified (`erailPageIsForSegment`) — mismatch → null. Router passes from/to on
+   every erail fare path (availability fare-fill, fare-only rows, `getFare` breakdown). Whole-route
+   fare is never presented as a segment fare.
+2. Agentic CHECK_AVAILABILITY (class board): all classes UNKNOWN → FAIL result (no ok+fares), fare
+   fields zeroed unless segment-verified; system prompt forbids "reference/approx/route" fares when
+   seat status is unknown.
+3. RailYatri SA: IRCTC daily maintenance (~23:45–00:20 IST) makes `refresh=true` return
+   `success:false` — now falls back to RailYatri's cached endpoint (real IRCTC data with
+   `cache_text`, same 24h stale guard) instead of "seat data nahi aayi".
+Tests: `tests/round18m23-segment-fare-no-invent.test.ts`; `router.test.ts` erail mock now a segment page.
+
 ### Round-18m-22 — RAC treated as an available seat (green)
 
 User rule: RAC berths confirm after chart preparation, so RAC must be treated like AVAILABLE —

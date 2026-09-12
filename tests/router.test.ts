@@ -653,7 +653,11 @@ describe("17–18. date behaviour unchanged", () => {
 /* Round-7 (2026-09-06): fare + station-lookup web fallback            */
 /* ------------------------------------------------------------------ */
 
+/* Round-18m-23: erail segment page (?from&to) — selected from/to selects zaroori, warna router
+ * route-fare ko segment-fare nahi maanta (null). */
 const ERail_FARE_HTML = `<html><body>
+<select name='from'><option value='ASR' selected='selected'>Amritsar Jn</option></select>
+<select name='to'><option value='HW' selected='selected'>Haridwar Jn</option></select>
 <table class="fare"><tr><th></th><th>CC</th><th>2S</th><th>GN</th></tr>
 <tr><td>General</td><td>650</td><td>205</td><td>140</td></tr>
 <tr><td>Tatkal</td><td>825</td><td>220</td><td>-</td></tr></table>

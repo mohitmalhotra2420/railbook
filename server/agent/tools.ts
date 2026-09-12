@@ -254,7 +254,7 @@ export async function executeTool(
           return {
             ok: true,
             tool,
-            summary: `${args.trainNumber} ${args.classCode}: live seat availability nahi mili (API down), par fare ₹${row.fare} (web: erail.in)`,
+            summary: `${args.trainNumber} ${args.classCode}: live seat availability nahi mili (API down); ${args.origin}→${args.destination} segment ka fare ₹${row.fare} (web: erail.in) — ye seat status nahi hai`,
             data: row,
             provider: providerOf(),
           };

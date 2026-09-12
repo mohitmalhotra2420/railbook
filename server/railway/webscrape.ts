@@ -529,6 +529,9 @@ export type ScrapedFare = {
   classes: ScrapedFareClass[];
   provider: "web_erail";
   sourceUrl: string;
+  /** Round-18m-23: set hone par ye SEGMENT (from→to) ka fare hai; absent = poore route ka. */
+  from?: string;
+  to?: string;
 };
 
 const KNOWN_IR_CLASSES = new Set(["1A", "2A", "3A", "3E", "SL", "CC", "EC", "2S", "EA"]);
@@ -591,13 +594,34 @@ export function parseErailFare(html: string, trainNumber: string, sourceUrl: str
   return null;
 }
 
-export async function scrapeTrainFareWeb(trainNumber: string): Promise<ScrapedFare | null> {
+/* Round-18m-23 (user LDH→BSB screenshot: "2A ₹3000, SL ₹815" = 13152 ka JAT→Kolkata POORA route fare,
+ * segment ka nahi — effectively fake). erail `?from=X&to=Y` segment-specific fare deta hai (page title
+ * "13152 ... Ludhiana Jn to Varanasi Jn Fare"; verified 2026-09-13: LDH→BSB 2A 1960 / SL 530 vs route
+ * 3000 / 815). from/to diye ho to SIRF segment page, aur page ka selected from/to verify — mismatch
+ * (erail ne station na pehchana → default route) par null, kabhi route-fare ko segment-fare mat batao. */
+export async function scrapeTrainFareWeb(trainNumber: string, from?: string | null, to?: string | null): Promise<ScrapedFare | null> {
   const num = String(trainNumber ?? "").trim();
   if (!/^\d{4,6}$/.test(num)) return null;
-  const sourceUrl = `https://erail.in/train-fare/${num}`;
+  const f = String(from ?? "").trim().toUpperCase();
+  const t = String(to ?? "").trim().toUpperCase();
+  const segment = /^[A-Z]{2,5}$/.test(f) && /^[A-Z]{2,5}$/.test(t);
+  const sourceUrl = segment ? `https://erail.in/train-fare/${num}?from=${f}&to=${t}` : `https://erail.in/train-fare/${num}`;
   const html = await fetchHtml(sourceUrl);
   if (!html) return null;
-  return parseErailFare(html, num, sourceUrl);
+  if (segment && !erailPageIsForSegment(html, f, t)) return null;
+  const parsed = parseErailFare(html, num, sourceUrl);
+  return parsed ? { ...parsed, ...(segment ? { from: f, to: t } : {}) } : null;
+}
+
+/** erail fare page ke from/to selects mein wahi station selected hain jo maange the? */
+export function erailPageIsForSegment(html: string, from: string, to: string): boolean {
+  const sel = (name: string): string | null => {
+    const m = html.match(new RegExp(`<select[^>]*name=['"]${name}['"][\\s\\S]*?</select>`, "i"));
+    if (!m) return null;
+    const o = m[0].match(/<option[^>]*value=['"]([A-Za-z]{2,5})['"][^>]*selected/i) ?? m[0].match(/<option[^>]*selected[^>]*value=['"]([A-Za-z]{2,5})['"]/i);
+    return o ? o[1].toUpperCase() : null;
+  };
+  return sel("from") === from.toUpperCase() && sel("to") === to.toUpperCase();
 }
 
 /* ------------------------------------------------------------------ */
@@ -719,6 +743,7 @@ export async function scrapeSeatAvailabilityWeb(
   to: string,
   classCode: string,
   quota = "GN",
+  opts?: { noCachedRetry?: boolean },
 ): Promise<ScrapedSeatAvailability | null> {
   const num = String(trainNumber).trim();
   if (!/^\d{5}$/.test(num) || !/^\d{4}-\d{2}-\d{2}$/.test(dateYmd)) return null;
@@ -740,7 +765,7 @@ export async function scrapeSeatAvailabilityWeb(
       signal: AbortSignal.timeout(SCRAPE_TIMEOUT_MS),
     });
     if (!res.ok) return null;
-    const j = (await res.json()) as {
+    let j = (await res.json()) as {
       success?: boolean;
       error?: string | null;
       seat_availibility?: {
@@ -754,7 +779,29 @@ export async function scrapeSeatAvailabilityWeb(
       }[];
       data_from?: string | null;
     } | null;
-    const rows = j?.seat_availibility ?? [];
+    let rows = j?.seat_availibility ?? [];
+    /* Round-18m-23 (user 23:54 IST screenshot: "seat data nahi aayi"): IRCTC ka daily maintenance
+     * window (~23:45–00:20) mein refresh=true `success:false, "services will resume at 00:20"` deta
+     * hai — tab RailYatri ka CACHED endpoint (bina refresh) try karo; wahi asli IRCTC data hai,
+     * bas kuch der purana (cache_text "As of 1 hour ago" ke saath, stale-guard yahi neeche). */
+    if ((!j?.success || !rows.length) && !opts?.noCachedRetry) {
+      const cached = await (async () => {
+        try {
+          const r2 = await (scrapeFetchImpl ?? globalThis.fetch.bind(globalThis))(url.replace("&refresh=true", ""), {
+            headers: { "User-Agent": UA, Accept: "application/json", Referer: "https://www.railyatri.in/" },
+            signal: AbortSignal.timeout(SCRAPE_TIMEOUT_MS),
+          });
+          if (!r2.ok) return null;
+          return (await r2.json()) as typeof j;
+        } catch {
+          return null;
+        }
+      })();
+      if (cached?.success && (cached.seat_availibility ?? []).length) {
+        j = cached;
+        rows = cached.seat_availibility ?? [];
+      }
+    }
     if (!j?.success || !rows.length) return null;
     const want = ryDateKey(dateYmd);
     const row = rows.find((r) => String(r.availablity_date ?? "").trim() === want) ?? null;
