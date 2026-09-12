@@ -218,6 +218,15 @@ only provider-verified alternatives.
 - More candidates: fixed hubs (up to 10 connections) + **route-derived hubs** (`routeDerivedHubs()` — junction/major stops from the direct trains' timetable, e.g. JAT→BDTS tries PTKC/LDH/NDLS/SWM/RTM/BH), all legs probed, then filtered.
 - When nothing passes: card + `plan.notes` say "Connecting routes mile lekin kisi mein dono trains par seat available nahi thi — isliye connecting option nahi dikhaya." Summary's "route via X" line lists per-leg seats.
 
+### Round-18m-24 — No phantom "2S" column
+
+User screenshot (LDH→CNB board): 22432 / 18310 showed a "2S — Refresh" column although those trains
+have no 2S coach. Cause: erail's trains-between list writes `2S` for unreserved/GN too. Fix in
+`parseErailTrainList`: the same row's rake composition (`…:S,S1,SL:B,B1,3A:…`) is parsed and the
+class list is pruned to reserved classes actually present in the rake (never adds, only removes;
+rows without rake data are left untouched). Verified live: 22432 → 1A 2A 3A 3E SL; 12057 Janshatabdi
+keeps 2S. Test: `tests/round18m24-no-phantom-2s.test.ts`.
+
 ### Round-18m-23 — No invented "reference fare"; segment-only web fare; IRCTC maintenance fallback
 
 User screenshot (LDH→BSB, 23:54 IST): every direct train "Seat data provider se nahi aayi", and the

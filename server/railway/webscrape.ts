@@ -973,7 +973,22 @@ export function parseErailTrainList(text: string): ScrapedTrainRow[] {
     const dur = erailDuration(f[12]);
     if (!dep || !arr || dur == null) continue;
     const classField = f.find((x) => /^(?:[A-Z0-9]{2}:[^|]*\|)+$/.test(x)) ?? "";
-    const classes = [...classField.matchAll(/(?:^|\|)([A-Z0-9]{2}):/g)].map((m) => m[1]);
+    let classes = [...classField.matchAll(/(?:^|\|)([A-Z0-9]{2}):/g)].map((m) => m[1]);
+    /* Round-18m-24 (user LDH→CNB screenshot: 22432/18310 mein "2S — Refresh" column, jabki in trains
+     * mein 2S coach hai hi nahi): erail ki class-list mein IRCTC "2S" ko unreserved/GN ke liye bhi
+     * likh deta hai. Usi row ka RAKE composition (",,En:SLRD,SLRD,SLRD:GN,GN,GN:S,S1,SL:B,B1,3A:…")
+     * sach batata hai — coach-class tokens nikaal kar reserved classes wahi rakho jo rake mein hain.
+     * Rake na ho (14670 jaisi) to list waise hi. Kabhi class ADD nahi karte — sirf jhoothi hataate hain. */
+    const rakeField = f.find((x) => /(?:^|:)[A-Z0-9+]+,[A-Z0-9+]*,[A-Z0-9+]+(?::|$)/.test(x) && /:[A-Z0-9]+,[A-Z0-9]*,(?:SL|3A|2A|1A|3E|CC|EC|2S|EA)(?::|$)/.test(x)) ?? "";
+    if (rakeField) {
+      const rakeClasses = new Set<string>();
+      for (const seg of rakeField.split(":")) {
+        const parts = seg.split(",");
+        if (parts.length < 3) continue;
+        for (const tok of parts[2].split("+")) if (/^(SL|3A|2A|1A|3E|CC|EC|2S|EA)$/.test(tok)) rakeClasses.add(tok);
+      }
+      if (rakeClasses.size) classes = classes.filter((c) => !/^(SL|3A|2A|1A|3E|CC|EC|2S|EA)$/.test(c) || rakeClasses.has(c));
+    }
     const type = f.find((x) => /^(SUPERFAST|MAIL_EXPRESS|SHATABDI|RAJDHANI|COMPOSITE|RAIL_MOTOR|DURONTO|GARIB_RATH|VANDE_BHARAT|PASSENGER|MEMU|DEMU)$/.test(x)) ?? "Express";
     out.push({
       number,
