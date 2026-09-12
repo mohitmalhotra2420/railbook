@@ -301,11 +301,13 @@ async function railyatriAvailability(
       seats: sc.seats ?? undefined,
       rac: sc.rac ?? undefined,
       waitlist: sc.waitlist ?? undefined,
-      fare: sc.totalFare ?? sc.ticketFare ?? 0,
+      /* Round-18m-27: ticket_fare = IRCTC fare (railyatri site bhi yahi dikhati hai); total_fare mein RailYatri ki
+       * apni convenience fee judi hoti hai (1520 vs 1705) — user ko railway fare hi dikhana hai. */
+      fare: sc.ticketFare ?? sc.totalFare ?? 0,
       quota: sc.quota,
       date,
       source: "web_railyatri",
-      webNote: `web: railyatri.in (IRCTC data${sc.cacheText ? `, ${sc.cacheText.toLowerCase()}` : ""}) — status "${sc.statusText}"${sc.stale ? " — ⚠ STALE (24h+ purana), book se pehle refresh" : ""}`,
+      webNote: `web: railyatri.in (IRCTC data${sc.cacheText ? `, ${sc.cacheText.toLowerCase()}` : ""}) — status "${sc.statusText}"${sc.cateringCharge ? ` — fare ₹${sc.ticketFare} + optional catering ₹${sc.cateringCharge}` : ""}${sc.stale ? " — ⚠ STALE (24h+ purana), book se pehle refresh" : ""}`,
       ...(sc.stale ? { stale: true } : {}),
       ...(sc.lastUpdatedAt ? { updatedAt: String(Date.parse(String(sc.lastUpdatedAt).replace(" +0530", "+05:30").replace(" ", "T")) > 0 ? new Date(Date.parse(String(sc.lastUpdatedAt).replace(" +0530", "+05:30").replace(" ", "T"))).toISOString() : sc.lastUpdatedAt) } : {}),
     };
@@ -326,7 +328,7 @@ async function railyatriFareBreakdown(
 ): Promise<FareBreakdown | null> {
   try {
     const sc = await scrapeSeatAvailabilityWeb(trainNumber, date, from, to, classCode, "GN");
-    const perPax = sc?.totalFare ?? sc?.ticketFare ?? null;
+    const perPax = sc?.ticketFare ?? sc?.totalFare ?? null;
     if (perPax == null || perPax <= 0) return null;
     const pax = Math.max(1, passengerCount || 1);
     return {

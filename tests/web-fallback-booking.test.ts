@@ -128,7 +128,8 @@ describe("ROUND-16: booking-critical web fallback (API fail → verified sites)"
     const row = await getFallbackProvider().getAvailability("12014", D1, "ASR", "NDLS", "CC", "GN");
     expect(row.status).toBe("AVAILABLE");
     expect(row.seats).toBe(288);
-    expect(row.fare).toBe(1125);
+    expect(row.fare).toBe(1000); // Round-18m-27: ticket_fare (IRCTC fare), not total_fare (with catering)
+    expect(row.webNote).toContain("optional catering ₹125");
     expect(row.source).toBe("web_railyatri");
     expect(row.webNote).toMatch(/railyatri\.in/);
   });
@@ -136,8 +137,8 @@ describe("ROUND-16: booking-critical web fallback (API fail → verified sites)"
   it("provider.getFare: RailCore 402 → railyatri segment fare × passengers", async () => {
     const fare = await getFallbackProvider().getFare("12014", D1, "ASR", "NDLS", "CC", 2);
     expect(fare.railwayAvailable).toBe(true);
-    expect(fare.baseFare).toBe(1125);
-    expect(fare.total).toBe(2250);
+    expect(fare.baseFare).toBe(1000);
+    expect(fare.total).toBe(2000);
     expect(fare.source).toBe("web_railyatri");
   });
 
@@ -167,7 +168,7 @@ describe("ROUND-16: booking-critical web fallback (API fail → verified sites)"
   it("GET_FARE tool: web fare par source label", async () => {
     const r = await executeApprovedTool("GET_FARE", { train_number: "12014", date: D1, origin: "ASR", destination: "NDLS", class_code: "CC", passengers: 2 });
     expect(r.ok).toBe(true);
-    expect(r.summary).toMatch(/total ₹2250/);
+    expect(r.summary).toMatch(/total ₹2000/);
     expect(r.summary).toMatch(/Source: railyatri\.in — IRCTC fare/);
   });
 

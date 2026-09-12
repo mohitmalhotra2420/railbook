@@ -218,6 +218,12 @@ only provider-verified alternatives.
 - More candidates: fixed hubs (up to 10 connections) + **route-derived hubs** (`routeDerivedHubs()` — junction/major stops from the direct trains' timetable, e.g. JAT→BDTS tries PTKC/LDH/NDLS/SWM/RTM/BH), all legs probed, then filtered.
 - When nothing passes: card + `plan.notes` say "Connecting routes mile lekin kisi mein dono trains par seat available nahi thi — isliye connecting option nahi dikhaya." Summary's "route via X" line lists per-leg seats.
 
+### Round-18m-27 — RAC current position + IRCTC ticket fare (railyatri parity)
+- **Bug (user screenshot 12426 JAT→NDLS 3A):** railyatri site "8 RAC ₹1520", app "RAC 63 ₹1,705". Data live hi tha (data_from IRCTC, fresh), parse galat tha.
+- IRCTC text `"RAC  63/RAC   8"` = booking-time RAC 63 / **current RAC 8**; `"GNWL2/RAC26"` = current RAC 26 (app pehle "WL 2" dikhata tha). Ab "/" ke baad wala CURRENT status hi liya jata hai — WL ke liye ye pehle se tha, RAC ke liye fix.
+- Fare: `ticket_fare` (IRCTC fare, jo site dikhati hai) — `total_fare` mein RailYatri catering (₹185) judi thi. Catering ho to webNote mein "fare ₹1520 + optional catering ₹185".
+- Tests: `tests/round18m27-rac-current-position.test.ts` — total 762.
+
 ### Round-18m-26 — Ek colour scheme har jagah + "kitna purana data"
 - **Legend** (journey card ke header + Train Board ke upar): 🟩 green = Available (AVL/RAC) · 🟫 tan = Purana/stale data · 🟦 blue = Waitlist · 🟥 red = Not available / Regret.
 - **Stale rows tan rehte hain**, par label ke saath **"12 din pehle ka data"** (min/ghante/din — provider ke `last_updated_at` se; timestamp na ho to "purana data"). Label khud (AVL 56 / WL 4) provider ka hi rehta hai — kabhi rewrite nahi.

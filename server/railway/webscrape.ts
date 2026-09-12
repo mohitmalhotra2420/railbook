@@ -690,6 +690,8 @@ export type ScrapedSeatAvailability = {
   waitlist: number | null;
   ticketFare: number | null;
   totalFare: number | null;
+  /** Round-18m-27: Rajdhani/Shatabdi optional catering (total_fare - ticket_fare). */
+  cateringCharge: number | null;
   lastUpdatedAt: string | null;
   cacheText: string | null;
   /** Round-18m: RailYatri ki cached entry SA_MAX_AGE se purani thi — status
@@ -713,7 +715,9 @@ export function parseIrctcAvailabilityText(raw: string): Pick<ScrapedSeatAvailab
    * nahi hai) — ye seat hai, waitlist nahi. Isi tarah "GNWL/RAC 3" = RAC. */
   const slash = t.match(/^(?:GNWL|RLWL|PQWL|TQWL|RSWL|RQWL|CKWL)\s*\/\s*(AVAILABLE|AVL|CURR_AVBL)\s*-?\s*(\d+)?/);
   if (slash) return { status: "AVAILABLE", seats: slash[2] ? Number(slash[2]) : null, rac: null, waitlist: null };
-  const slashRac = t.match(/^(?:GNWL|RLWL|PQWL|TQWL|RSWL|RQWL|CKWL)\s*\/\s*RAC\s*-?\s*(\d+)?/);
+  /* Round-18m-27 (user: railyatri site RAC 8, app RAC 63): IRCTC "RAC  63/RAC   8" = booking-time position 63,
+   * CURRENT status RAC 8; "GNWL2/RAC26" = quota GNWL, current RAC 26. "/" ke BAAD wala current hai — wahi lo. */
+  const slashRac = t.match(/^(?:GNWL|RLWL|PQWL|TQWL|RSWL|RQWL|CKWL|RAC)\s*-?\s*\d*\s*\/\s*RAC\s*-?\s*(\d+)?/);
   if (slashRac) return { status: "RAC", seats: null, rac: slashRac[1] ? Number(slashRac[1]) : null, waitlist: null };
   if (/^RAC/.test(t)) return { status: "RAC", seats: null, rac: num(/RAC\s*-?\s*(\d+)/), waitlist: null };
   if (/WL\s*-?\s*\d+/.test(t) || /^(GNWL|RLWL|PQWL|TQWL|RSWL|RQWL|CKWL)/.test(t)) {
@@ -773,6 +777,7 @@ export async function scrapeSeatAvailabilityWeb(
         availablity_status?: string;
         seat_avl?: number | null;
         ticket_fare?: number | null;
+        catering_charge?: number | null;
         total_fare?: number | null;
         last_updated_at?: string | null;
         cache_text?: string | null;
@@ -860,6 +865,7 @@ export async function scrapeSeatAvailabilityWeb(
       waitlist: parsed.waitlist,
       ticketFare: typeof row.ticket_fare === "number" ? row.ticket_fare : null,
       totalFare: typeof row.total_fare === "number" ? row.total_fare : null,
+      cateringCharge: typeof row.catering_charge === "number" && row.catering_charge > 0 ? row.catering_charge : null,
       lastUpdatedAt: row.last_updated_at ?? null,
       cacheText: row.cache_text ?? null,
       live: String(j.data_from ?? "").toUpperCase() === "IRCTC",
