@@ -1541,7 +1541,10 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
      * date+station ek saath, kabhi alag poochhta tha). Deterministic: PEHLE
      * station options; station lock hone ke baad date guard apne aap date
      * poochhega. */
-    if (!trainNo && !stationPick) {
+    /* Round-18m-30r (user: "AI pehle message se sab handle kare"): station-options bhi ab AI ka turn — system
+     * prompt use SEARCH_STATIONS + options format deta hai, needs_choice relay tool-data se hota hai. Ye
+     * deterministic ask sirf safety-net (AI_OWNS_FLOW=0) ya lookup-empty case ke liye. */
+    if (!trainNo && !stationPick && process.env.AI_OWNS_FLOW === "0") {
       const ask = await askStationChoiceFirst(ctx, det);
       if (ask) {
         const codes = (ask.reply.match(/\b\d\.\s*([A-Z]{2,5})\b/g) ?? []).map((m) => m.replace(/^\d\.\s*/, ""));
@@ -1744,6 +1747,21 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
         turn.steps.every((st) => !st.ok) &&
         /provider se nahi mil|gadh ke nahi bataunga|unavailable/i.test(String(turn.reply ?? ""));
       if (unhelpfulNoData) agenticFailureReason = "unhelpful_summary_with_pending_choice";
+      /* Round-18m-30r (user rule: STATION pehle, date baad): city ambiguous hai, model ne SEARCH_STATIONS/
+       * options diye bina date/pax poochh liya ya kuch aur bol diya → model ka reply discard; deterministic
+       * station-options (tool-data) chalenge. AI flow ka malik hai, par ye order nahi tod sakta. */
+      const pendingCity = (!ctx.destination ? ctx.pendingDestinationChoice ?? det.unresolvedTo : null) ?? (!ctx.origin ? ctx.pendingOriginChoice ?? det.unresolvedFrom : null) ?? null;
+      let skippedStationStep = false;
+      if (pendingCity && !trainNo && !stationPick && !turn.steps.some((st) => st.tool === "SEARCH_STATIONS" || st.tool === "SEARCH_TRAINS" || st.tool === "JOURNEY_ANALYZE" || st.tool === "RANK_JOURNEY_OPTIONS") && !mentionsStationOptions(String(turn.reply ?? ""))) {
+        /* Sirf ASLI multi-station city par override (lookup 2+ stations de) — NLU ka garbage ("Ko Ldh") nahi. */
+        try {
+          const chk = await routedStationSearch(String(pendingCity));
+          skippedStationStep = chk.stations.length >= 2;
+        } catch {
+          skippedStationStep = false;
+        }
+      }
+      if (skippedStationStep) agenticFailureReason = "station_step_skipped_by_model";
       /* Round-16o: agentic ne bina kisi successful tool ke "provider se nahi
        * mil pa rahi" de diya, par sawaal general/knowledge type hai → reply
        * discard; neeche UNIVERSAL WEB FALLBACK (KB/Wikipedia/scrape) jawab
@@ -1754,7 +1772,7 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
         /provider se nahi mil|gadh ke nahi bataunga/i.test(String(turn.reply ?? "")) &&
         webRescueEligible(String(req.text ?? ""), turn.steps);
       if (unhelpfulGeneral) agenticFailureReason = "unhelpful_summary_general_question";
-      if (turn.reply && !pickReasked && !unhelpfulNoData && !unhelpfulGeneral) {
+      if (turn.reply && !pickReasked && !unhelpfulNoData && !unhelpfulGeneral && !skippedStationStep) {
         // Memory (2026-09-05): search hui to trains ctx mein yaad rakho.
         rememberSearch(ctx, capture.table);
         // User instruction (2026-09-05): "waise hum continue kar sakte hain"

@@ -666,17 +666,19 @@ describe("agent integration: agentic path + deterministic fallback", () => {
     expect(result.confirmBook).toBe(false);
   });
 
-  it("Round-16k: ambiguous city (Delhi) → deterministic station options FIRST, no model, no date in question", async () => {
+  it("Round-16k/30r: ambiguous city (Delhi) → STATION options first; model that skips the station step is overridden (no date question)", async () => {
     railcoreMock();
     let modelCalls = 0;
     setAgenticNvidiaFetch(async () => {
       modelCalls += 1;
-      return chatResponse({ content: "Kis date ko jaana hai?" });
+      return chatResponse({ content: "Kis date ko jaana hai?" }); // model tries to jump to the date — not allowed before the station
     });
     const result = await runAgent({ text: "Mujhe Amritsar se Delhi jaana hai", now: NOW });
+    /* Round-18m-30r: AI flow ka malik hai (pehle model ko mauka), par station-before-date order code guarantee karta hai. */
+    expect(modelCalls).toBeGreaterThan(0);
     expect(result.engine).toBe("deterministic");
-    expect(modelCalls).toBe(0);
-    expect(result.reply).toMatch(/Delhi mein kaunsa station chahiye\? Options: 1\. /);
+    expect(result.agenticFailureReason).toBe("station_step_skipped_by_model");
+    expect(result.reply).toMatch(/Delhi mein kaun ?sa station chahiye\? Options: 1\. /);
     expect(result.reply).not.toMatch(/kis date/i);
     expect(result.context.pendingDestinationChoice).toBeTruthy();
     expect(result.context.dateProvided).toBeFalsy();
