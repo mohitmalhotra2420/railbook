@@ -1567,10 +1567,26 @@ function applyDecision(plan: JourneyPlan, d: JourneyDecision): void {
         const lp = plan.legPlans.find((l) => l.hub === pick.station);
         if (lp) { lp.best = pick; plan.legPlans = [lp, ...plan.legPlans.filter((x) => x !== lp)]; }
       }
+      /* Round-18m-30e (user screenshot ASR→BSB: AI ka faisla "via NDLS 11058+22582 3E AVL 29" tha, par hero
+       * "AI RECOMMENDED · DIRECT 12358 SL WL 74" dikha): legPlans/expand se mila connecting route
+       * routeOptions mein tha hi nahi → best = WL direct. AI ka pick ab routeOptions ke TOP par
+       * (as a changes>0 option) → hero/best/summary sab wahi dikhate hain jo AI ne chuna. */
+      const key = pick.legs.map((l) => l.trainNumber).join("+");
+      let opt = plan.routeOptions.find((o) => o.changes > 0 && o.trainNumbers.join("+") === key) ?? null;
+      if (!opt) {
+        const built = rankRouteOptions({ origin: plan.query.from, destination: plan.query.to, trains: [], availability: new Map(), connections: [pick], source: pick.source, travelClass: plan.query.travelClass ?? null, passengers: plan.query.passengers ?? null });
+        opt = built[0] ?? null;
+      }
+      if (opt) {
+        const rest = plan.routeOptions.filter((o) => o !== opt);
+        plan.routeOptions = [{ ...opt, rank: 1, badges: Array.from(new Set(["best_overall", ...opt.badges.filter((b) => b !== "best_overall")])) }, ...rest.map((o, i) => ({ ...o, rank: i + 2, badges: o.badges.filter((b) => b !== "best_overall") }))];
+        plan.best = plan.routeOptions[0];
+      }
     }
   }
   /* Other direct options follow the AI's ranking where given. */
-  plan.routeOptions = [...plan.routeOptions].sort((a, b) => (order.get(idOf(a) ?? "") ?? 99) - (order.get(idOf(b) ?? "") ?? 99) || a.rank - b.rank).map((o, i) => ({ ...o, rank: i + 1 }));
+  const idOfAny = (o: RouteOption) => (o.changes === 0 ? `D:${o.trainNumbers[0]}` : o.legs.length > 1 ? `C:${o.legs[0].to}:${o.trainNumbers.join("+")}` : null);
+  plan.routeOptions = [...plan.routeOptions].sort((a, b) => (order.get(idOfAny(a) ?? "") ?? 99) - (order.get(idOfAny(b) ?? "") ?? 99) || a.rank - b.rank).map((o, i) => ({ ...o, rank: i + 1 }));
   plan.best = plan.routeOptions[0] ?? plan.best;
 }
 

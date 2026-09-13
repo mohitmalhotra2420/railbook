@@ -365,7 +365,12 @@ export function JourneyOptions({
   const bfeRest = bfeAll.filter((b) => b !== bfeHero);
   /* Round-18m-16: ticket segment = bookFrom → (bookUpto ?? destination); fresh check usi par. */
   const pickBfe = onPickBoardEarlier ? (b: Bfe) => onPickBoardEarlier({ trainNumber: b.trainNumber, bookFrom: b.bookFrom, boardAt: b.boardAt, destination: b.bookUpto ?? b.destination, classCode: b.availability.classCode }) : undefined;
-  const heroDirect = aiRec ? (aiRec.kind === "direct" || aiRec.kind === "connecting" ? best : null) : !plan.directUnavailable && !bfeHero ? best : null;
+  /* Round-18m-30e: hero SIRF tab jab `best` wahi option ho jo AI ne chuna (same trains) — warna AI verdict
+   * "via NDLS" aur hero "DIRECT WL 74" jaisa mismatch ho jaata hai. Connecting pick → hero = wahi connecting option. */
+  const sameTrains = (a: string[] | undefined, b: string[] | undefined) => !!a && !!b && a.join("+") === b.join("+");
+  const heroDirect = aiRec
+    ? ((aiRec.kind === "direct" || aiRec.kind === "connecting") && best && sameTrains(best.trainNumbers, aiRec.trainNumbers) ? best : null)
+    : !plan.directUnavailable && !bfeHero ? best : null;
   const decidedBy = plan.decision?.source === "ai" ? "AI" : null;
   const asOf = timeLabel(plan.provenance?.retrievedAt);
   const why = plan.whyPoints && plan.whyPoints.length ? plan.whyPoints : plan.summary ? [plan.summary] : [];
