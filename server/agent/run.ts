@@ -1808,8 +1808,10 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
       ...(req.known ?? {}),
       from: req.known?.from ?? seeded2.origin ?? null,
       to: req.known?.to ?? seeded2.destination ?? null,
-      date: req.known?.date ?? (seeded2.dateProvided ? seeded2.date : null) ?? null,
-      passengerCount: req.known?.passengerCount ?? (seeded2.paxProvided ? seeded2.passengers : null) ?? null,
+      /* Round-18m-30o: seedContext ne stale client date/pax ko reject kiya ho to NLU ko bhi wahi sach mile —
+       * warna NLU known.date se date bhar deta tha aur plan bina poochhe ban jaata tha (prod screenshot). */
+      date: (seeded2.dateProvided ? seeded2.date : null) ?? null,
+      passengerCount: (seeded2.paxProvided ? seeded2.passengers : null) ?? null,
     },
     now: req.now,
   });

@@ -76,8 +76,11 @@ describe("Round-18m-30n: stale client known.date/passengerCount never overrides 
     const res = await runAgent({ text: "1", now: "2026-09-13T15:50:00.000Z", context: ctx, lastAsked: "destination", known: { date: "2026-09-14", passengerCount: 2 }, history: [{ role: "assistant", content: "Lucknow ke liye 2 stations hain:\n1. LKO – Lucknow NR\n2. LJN – Lucknow Junction NER Number ya code batao." }] } as never);
     expect(res.context.destination?.code).toBe("LKO");
     expect(res.context.dateProvided).toBe(false);
+    expect(res.context.date ?? null).toBeNull();
+    expect(res.context.passengers ?? null).toBeNull();
     expect(res.journey ?? null).toBeNull();
     expect(res.reply).toMatch(/date/i);
+    expect(res.reply).not.toMatch(/2026-09-14|trains mili/);
   }, 30000);
   it("fresh session (no server ctx) still seeds client known slots", async () => {
     const { runAgent } = await import("../server/agent/run");
