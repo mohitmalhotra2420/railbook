@@ -88,6 +88,14 @@ export function getStation(code: string): Station | undefined {
 export function searchStations(q: string): Station[] {
   const needle = q.trim().toLowerCase();
   if (!needle) return STATIONS;
+  /* Round-18m-30h (prod: "AY" → Vijayawada, kyunki "ay" vijAYawada ke andar hai): 2–4 letter query =
+   * station CODE — exact code match, ya naam/city ka WORD-START match; kabhi bhi naam ke beech ka substring nahi. */
+  if (/^[a-z]{2,4}$/.test(needle)) {
+    const exact = STATIONS.filter((s) => s.code.toLowerCase() === needle);
+    if (exact.length) return exact;
+    const re = new RegExp(`(^|\\s)${needle}`, "i");
+    return STATIONS.filter((s) => re.test(s.name) || re.test(s.city));
+  }
   return STATIONS.filter(
     (s) =>
       s.code.toLowerCase().includes(needle) ||

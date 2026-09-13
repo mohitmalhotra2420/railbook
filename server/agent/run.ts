@@ -1,4 +1,5 @@
 import type { Station } from "../providers/types.js";
+import { aiPhraseGate } from "./agentic.js";
 import { runUnderstand } from "../understand/index.js";
 import { generalRailwayAnswer } from "../understand/llm.js";
 import { understand as deterministicUnderstand, type DialogSlot, type KnownSlots, type NluResult } from "../understand/legacy-nlu.js";
@@ -487,7 +488,8 @@ function parseNumberedOptions(content: string): { n: number; code: string; label
     const rest = content.slice(start);
     const next = rest.search(/\d{1,2}[.)]\s*[A-Za-z]{2,5}\s*[–—-]/);
     const label = (next >= 0 ? rest.slice(0, next) : rest.slice(0, 60)).replace(/[\n\r].*$/s, "").trim();
-    items.push({ n: Number(m[1]), code: m[2].toUpperCase(), label: label.slice(0, 40) });
+    /* Round-18m-30h: label = sirf station naam ("Ayodhya", "Ayodhya Cantt"), trailing ", " / "." / baaki sentence hataao. */
+    items.push({ n: Number(m[1]), code: m[2].toUpperCase(), label: label.split(/[,.](?=\s|$)/)[0].trim().slice(0, 40) });
   }
   return items;
 }
@@ -525,20 +527,30 @@ async function verifyStationCode(code: string, label: string, side: "to" | "from
     // "none" = koi provider jawab nahi de paya; railcore/railkit/kb = real jawab mila.
     apiAnswered = res.provider !== "none";
     const st = res.stations?.[0];
-    if (st && st.code.toUpperCase() === code.toUpperCase()) {
-      return { code: st.code, name: st.name, city: st.city ?? st.name, side };
+    /* Round-18m-30h (prod screenshot: options "1. AY – Ayodhya" → user "1" → "LDH → BZA"!): local fuzzy
+     * search "AY" ko Vijayawada (BZA) de raha tha aur "single result" branch ne use accept kar liya.
+     * Rule: user ne jo CODE chuna, EXACT wahi code match ho — kisi bhi doosre code ko kabhi accept nahi. */
+    const exact = (res.stations ?? []).find((x) => x.code.toUpperCase() === code.toUpperCase());
+    if (exact) {
+      const placeholder = !exact.name || exact.name.toUpperCase() === exact.code.toUpperCase();
+      const name = placeholder && label && label.toUpperCase() !== code.toUpperCase() ? label : exact.name;
+      return { code: exact.code, name, city: placeholder ? name : exact.city ?? name, side };
     }
-    if (st && res.stations.length === 1 && res.needChoice === false) {
-      return { code: st.code, name: st.name, city: st.city ?? st.name, side };
+    if (st && st.code.toUpperCase() !== code.toUpperCase()) {
+      /* Provider ne koi AUR station diya — ye confirm nahi, mismatch hai. History (server ne khud options
+       * diye the) hi asli proof hai → history label ke saath user ka code lo. */
+      if (fromHistory && /^[A-Za-z]{2,5}$/.test(code)) return { code: code.toUpperCase(), name: label && label !== code.toUpperCase() ? label : code.toUpperCase(), city: label || code.toUpperCase(), side };
+      return null;
     }
   } catch {
     /* network fail — history evidence fallback (neeche) */
   }
   // API UP hai aur code confirm NAHI hua → model ka invented/garbage code reject.
-  // History fallback SIRF tab jab API hi answer na de sake (provider none / throw).
-  if (!apiAnswered && fromHistory && /^[A-Za-z]{2,5}$/.test(code)) {
+  // History fallback: server ne khud ye options diye the (fromHistory) — code lo, label ke saath.
+  if (fromHistory && /^[A-Za-z]{2,5}$/.test(code)) {
     return { code: code.toUpperCase(), name: label && label !== code.toUpperCase() ? label : code.toUpperCase(), city: label || code.toUpperCase(), side };
   }
+  void apiAnswered;
   return null;
 }
 
@@ -1473,13 +1485,15 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
     if (!trainNo && !stationPick) {
       const ask = await askStationChoiceFirst(ctx, det);
       if (ask) {
+        const codes = (ask.reply.match(/\b\d\.\s*([A-Z]{2,5})\b/g) ?? []).map((m) => m.replace(/^\d\.\s*/, ""));
+        const phrasedAsk = await aiPhraseGate("station", { fallback: ask.reply, mustContain: codes, context: `user ne "${ask.side === "to" ? ctx.pendingDestinationChoice : ctx.pendingOriginChoice}" bola; options tool se aaye hain` });
         return {
           nlu: det,
           source: "nlu",
           context: ctx,
           tool: "searchStations",
           toolOk: true,
-          reply: ask.reply,
+          reply: phrasedAsk.text,
           interrupt: false,
           resumeAsk: null,
           resumeText: null,
@@ -1501,13 +1515,14 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
       const paxAsk = passengerGateAsk(ctx, det, req.text, { trainNo, stationPick });
       if (paxAsk) {
         ctx.bookingStage = "collecting";
+        const phrased = await aiPhraseGate("passengers", { fallback: paxAsk, mustContain: [ctx.origin!.code, ctx.destination!.code], context: `route ${ctx.origin!.code} (${ctx.origin!.name ?? ""}) → ${ctx.destination!.code} (${ctx.destination!.name ?? ""}), date ${ctx.date}` });
         return {
           nlu: det,
           source: "nlu",
           context: ctx,
           tool: null,
           toolOk: null,
-          reply: paxAsk,
+          reply: phrased.text,
           interrupt: false,
           resumeAsk: "passengers",
           resumeText: null,
@@ -1940,7 +1955,7 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
         reply = `Theek hai — ${other.code} → ${stationPick.code} (${ctx.date}). Trains check kar raha hoon — list turant aa rahi hai.`;
       }
     } else if (other) {
-      reply = `Theek hai — ${other.code} → ${stationPick.code}. Kis date ko jaana hai?`;
+      reply = (await aiPhraseGate("date", { fallback: `Theek hai — ${other.code} → ${stationPick.code}. Kis date ko jaana hai?`, mustContain: [other.code, stationPick.code], context: `route ${other.code} → ${stationPick.code} (${stationPick.name}) lock ho gaya; ab date chahiye` })).text;
     } else {
       reply = `Theek hai — ${stationPick.code} (${stationPick.name}). Kahan se jaana hai?`;
     }

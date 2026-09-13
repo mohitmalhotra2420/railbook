@@ -2127,6 +2127,53 @@ function agenticTransport(): AgenticTransport | null {
   };
 }
 
+/* ── Round-18m-30h (user: "NLU khud se kuch na kare, AI handle kare") ─────────────────
+ * Gate-questions (passengers / date / station-choice) ka RULE code ka hai (facts, kab poochna),
+ * par WORDING ab AI (Muse primary) likhta hai. Bounded (≤ 6 s), facts prompt mein LOCKED —
+ * model naya station/date/number invent nahi kar sakta (validator check karta hai);
+ * fail/timeout → deterministic text (pehle jaisa). */
+export async function aiPhraseGate(kind: "passengers" | "date" | "station", facts: { fallback: string; mustContain: string[]; context: string }): Promise<{ text: string; model: string | null }> {
+  const transport = agenticTransport();
+  if (!transport || process.env.VITEST) return { text: facts.fallback, model: null };
+  const model = transport.primaryModel;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), Math.max(2000, Number(process.env.AI_GATE_TIMEOUT_MS ?? 6000)));
+  try {
+    const res = await fetchImpl()(transport.url, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${transport.apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model,
+        temperature: 0.3,
+        max_tokens: 160,
+        messages: [
+          { role: "system", content: "Tum RailBook ho — Indian Railways ka dost jaisa Hinglish assistant. Tumhe user se EK cheez poochhni hai. Sirf 1-2 chhoti Hinglish lines likho, warm aur natural. Jo facts diye hain (station codes/naam, date, route) unhe EXACTLY waise hi rakho — koi naya station, code, date, train ya number mat jodo; koi option mat ghatao. Options ho to unhe numbered list mein 'N. CODE – Naam' format mein hi rakho. Markdown headings nahi." },
+          { role: "user", content: `Poochhna hai: ${kind === "passengers" ? "kitne passengers (1-6) — seats usi hisaab se check hongi" : kind === "date" ? "kis date ko jaana hai (aaj/kal/tareekh)" : "diye gaye station options mein se kaunsa station"}.
+Context: ${facts.context}
+Reference (facts yahi hain): ${facts.fallback}` },
+        ],
+      }),
+      signal: controller.signal,
+    });
+    if (!res.ok) return { text: facts.fallback, model: null };
+    const j = (await res.json()) as NvidiaChatJson;
+    const raw = String(j.choices?.[0]?.message?.content ?? "").trim();
+    const text = raw.replace(/<think>[\s\S]*?<\/think>/g, "").replace(/\*\*/g, "").trim();
+    if (!text || text.length > 420) return { text: facts.fallback, model: null };
+    /* Validator: har must-have fact present; koi extra 5-digit train ya nayi station-code list nahi. */
+    if (!facts.mustContain.every((m) => text.toUpperCase().includes(m.toUpperCase()))) return { text: facts.fallback, model: null };
+    if (/\b\d{5}\b/.test(text) && !/\b\d{5}\b/.test(facts.fallback)) return { text: facts.fallback, model: null };
+    const codesIn = (t: string) => new Set((t.match(/\b[A-Z]{2,5}\b/g) ?? []).filter((c) => !["AVL","RAC","WL","AAJ","KAL","PNR","IST","OK"].includes(c)));
+    const allowed = codesIn(facts.fallback.toUpperCase());
+    for (const c of codesIn(text)) if (!allowed.has(c) && facts.mustContain.length) return { text: facts.fallback, model: null };
+    return { text, model: j.model ?? model };
+  } catch {
+    return { text: facts.fallback, model: null };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 type NvidiaChatJson = {
   model?: string;
   choices?: { message?: { content?: string | null; reasoning_content?: string | null; tool_calls?: ChatMsg["tool_calls"] } }[];
@@ -2247,7 +2294,7 @@ export async function runAgenticTurn(input: {
     const started = Date.now();
     // Agentic loop ke paas multi-step reasoning + bada context hota hai — NLU se zyada time do,
     // par ek single call poora budget kha nahi sakti.
-    const agenticBaseMs = Math.max(3000, Number(process.env.AI_AGENTIC_TIMEOUT_MS ?? 40000));
+    const agenticBaseMs = Math.max(3000, Number(process.env.AI_AGENTIC_TIMEOUT_MS ?? 60000));
     let json: NvidiaChatJson | null = null;
     let msg: { content?: string | null; reasoning_content?: string | null; tool_calls?: ChatMsg["tool_calls"] } | undefined;
     let lastFailure: string | null = null;
@@ -2274,7 +2321,7 @@ export async function runAgenticTurn(input: {
        * ab kam-se-kam AI_PRIMARY_MIN_MS (default 20s) milta hai jab tak budget
        * bacha ho; fallbacks ke liye reserve 8s → 6s. */
       const isPrimary = modelChain.indexOf(model) === 0;
-      const primaryMinMs = Math.max(4000, Number(process.env.AI_PRIMARY_MIN_MS ?? 20000));
+      const primaryMinMs = Math.max(4000, Number(process.env.AI_PRIMARY_MIN_MS ?? 40000));
       const reservePerFallback = 6000;
       const naturalCap = Math.max(4000, timeLeft() - modelsAfterThis * reservePerFallback - 1500);
       const agenticTimeoutMs = Math.max(
