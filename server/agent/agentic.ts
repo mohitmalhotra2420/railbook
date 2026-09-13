@@ -2145,7 +2145,9 @@ export async function aiPhraseGate(kind: "passengers" | "date" | "station", fact
       body: JSON.stringify({
         model,
         temperature: 0.3,
-        max_tokens: 160,
+        /* Muse pehle reasoning_content mein sochta hai (150-400 tokens) phir content likhta hai — chhota cap
+         * = khaali content. Gate ke liye 900 kaafi (main agentic Muse config untouched). */
+        max_tokens: 900,
         messages: [
           { role: "system", content: "Tum RailBook ho — Indian Railways ka dost jaisa Hinglish assistant. Tumhe user se EK cheez poochhni hai. Sirf 1-2 chhoti Hinglish lines likho, warm aur natural. Jo facts diye hain (station codes/naam, date, route) unhe EXACTLY waise hi rakho — koi naya station, code, date, train ya number mat jodo; koi option mat ghatao. Options ho to unhe numbered list mein 'N. CODE – Naam' format mein hi rakho. Markdown headings nahi." },
           { role: "user", content: `Poochhna hai: ${kind === "passengers" ? "kitne passengers (1-6) — seats usi hisaab se check hongi" : kind === "date" ? "kis date ko jaana hai (aaj/kal/tareekh)" : "diye gaye station options mein se kaunsa station"}.
@@ -2156,9 +2158,13 @@ Reference (facts yahi hain): ${facts.fallback}` },
       signal: controller.signal,
     });
     if (!res.ok) return { text: facts.fallback, model: null };
-    const j = (await res.json()) as NvidiaChatJson;
+    const j = (await res.json()) as NvidiaChatJson & { choices?: { finish_reason?: string }[] };
+    /* Truncation guard (measured: Muse reasoning ne 900 tokens kha liye → "Kis date ko ja") → fallback. */
+    if (j.choices?.[0]?.finish_reason === "length") return { text: facts.fallback, model: null };
     const raw = String(j.choices?.[0]?.message?.content ?? "").trim();
     const text = raw.replace(/<think>[\s\S]*?<\/think>/g, "").replace(/\*\*/g, "").trim();
+    if (text && !/[.?!।)]$/.test(text) && !/\d\.\s*[A-Z]{2,5}\s*[–—-]\s*[A-Za-z .]+$/.test(text)) return { text: facts.fallback, model: null };
+    /* Reasoning leak guard: content khaali (sirf reasoning aaya) → fallback; reasoning kabhi user ko nahi. */
     if (!text || text.length > 420) return { text: facts.fallback, model: null };
     /* Validator: har must-have fact present; koi extra 5-digit train ya nayi station-code list nahi. */
     if (!facts.mustContain.every((m) => text.toUpperCase().includes(m.toUpperCase()))) return { text: facts.fallback, model: null };
