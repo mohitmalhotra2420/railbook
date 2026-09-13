@@ -386,7 +386,7 @@ describe("fix: deterministic Atlas fallback — SELECT_CHEAPEST kabhi empty repl
       return jsonResponse(200, { success: true, data: {} });
     });
     const res = await runAgent({
-      text: "Amritsar se NDLS 2026-09-05 ko sabse sasti train kaunsi hai? options compare karo",
+      text: "Amritsar se NDLS 2026-09-05 ko 1 passenger ke liye sabse sasti train kaunsi hai? options compare karo", // Round-18m-30t: pax mandatory everywhere
       now: NOW,
     });
     expect(res.engine).toBe("deterministic");

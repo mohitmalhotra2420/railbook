@@ -243,10 +243,15 @@ async function atlasFallback(
           ? /* Round-18l: "is weekend" → real Sat/Sun options, user chune (date kabhi assume nahi). */
             `${ctx.origin.code} → ${ctx.destination.code} — weekend mein kaunsa din? ${nlu.dateAmbiguous.map((d) => `${d.label} (${d.date})`).join(" ya ")}?`
           : `${ctx.origin.code} → ${ctx.destination.code} — kis date ko jaana hai? (aaj/kal/parso ya tareekh)`
-        : null;
+        : !(ctx.paxProvided && ctx.passengers) && !(nlu.passengerCount && nlu.passengerCount >= 1)
+          /* Round-18m-30t: deterministic planner bhi passengers ke bina kabhi nahi (same rule as tools). */
+          ? `${ctx.origin.code} → ${ctx.destination.code}, ${ctx.date} — kitne passengers hain? (1–6) Seats usi hisaab se check karunga.`
+          : null;
   if (missingAsk) {
+    if (/kitne passengers/.test(missingAsk)) ctx.bookingStage = "collecting";
     return { reply: missingAsk, ok: false, trace: trace(false, null, "slot missing — clarification"), grounded: true, trains: null };
   }
+  if (!(ctx.paxProvided && ctx.passengers) && nlu.passengerCount) { ctx.passengers = nlu.passengerCount; ctx.paxProvided = true; }
 
   /* 3) REAL search + bounded fare probe — numbers sirf provider evidence se. */
   const search = await searchTrainsRouted({ from: ctx.origin!.code, to: ctx.destination!.code, date: ctx.date! });
