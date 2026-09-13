@@ -1947,6 +1947,10 @@ const SAFE_UPPER_TOKENS = new Set([
   "CC", "SL", "EC", "EA", "FC", "GN", "PQ", "PT", "TQ", "SS", "DP", "AC",
   "PNR", "RAC", "IR", "UTC", "IST", "INR", "API", "OK", "NO", "PM", "AM",
   "EX", "EXP", "IRCTC", "URL", "ID", "SMS", "TAT",
+  /* Round-18m-30j (prod screenshot LDH→LKO, station "1" → "provider se nahi mil pa rahi"): model ne date
+   * poochhte hue format hint "YYYY-MM-DD" / "DD/MM" likha → YYYY/MM/DD "invented station code" maan kar
+   * poora jawab reject. Format placeholders/common words station codes nahi hain. */
+  "YYYY", "MM", "DD", "HH", "YY", "DDMM", "MMYY", "AAJ", "KAL", "WL", "AVL", "NA", "TBD", "ETA", "ETD", "DEP", "ARR", "GMT", "KM", "KMPH", "HRS", "MIN", "MINS", "AND", "OR", "THE", "TO", "FROM", "VIA", "JN", "NR", "NER", "NWR", "NCR", "ECR", "WCR", "SCR", "SER", "SECR", "SWR", "WR", "CR", "ER", "NFR", "KR", "SR", "NE",
 ]);
 
 function groundingCheck(content: string, steps: ToolTraceStep[], evidenceParts: string[]): { grounded: boolean; evidence: string } {
@@ -1965,6 +1969,10 @@ function groundingCheck(content: string, steps: ToolTraceStep[], evidenceParts: 
   // invented code ko exact token ki tarah check karo.
   // (Round-15: "CCTV" vs evidence "CCTVs" — plural-tolerant.)
   const badTokens = tokens.filter((t) => !SAFE_UPPER_TOKENS.has(t) && !new RegExp(`\\b${t}s?\\b`).test(evidence));
+  /* Round-18m-30j: pure clarifying question (koi 5-digit train, ₹, seat count nahi; sirf date/pax/station poochh
+   * raha hai) mein hallucination ka risk nahi — format tokens ke chakkar mein user ka flow mat todo. */
+  const isPureAsk = /\?/.test(content) && !/\b\d{5}\b|₹|\b(AVL|RAC|WL)\s*\d/i.test(content) && /\b(date|tareekh|kab|kis din|passengers?|kitne|kaunsa station|konsa station)\b/i.test(content) && content.length < 400;
+  if (isPureAsk && bad.length === 0) return { grounded: true, evidence: "" };
   // Train-type proper names (Rajdhani/Shatabdi/Vande Bharat…): data fail hone par
   // model kabhi khud se naam guess karta hai (12014 ko "Rajdhani" bolna — Shatabdi
   // hai). User ne bola ho ya provider data mein ho to theek; warna ungrounded.

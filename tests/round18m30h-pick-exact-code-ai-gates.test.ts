@@ -35,3 +35,16 @@ describe("Round-18m-30h (C): AI-phrased gate questions keep facts locked", () =>
     expect(r.model).toBeNull();
   });
 });
+
+describe("Round-18m-30j: date-format hint in a clarifying question is not a hallucinated station code", () => {
+  afterEach(() => { setAgenticNvidiaFetch(null); process.env.NVIDIA_API_KEY = ""; });
+  it("'Kis date ko jaana hai? (YYYY-MM-DD)' after a station pick → grounded, no 'provider se nahi mil' reply", async () => {
+    process.env.NVIDIA_API_KEY = "nvapi-test";
+    const { runAgenticTurn } = await import("../server/agent/agentic");
+    setAgenticNvidiaFetch(async () => new Response(JSON.stringify({ choices: [{ message: { content: "Theek hai — LDH → LKO. Kis date ko jaana hai? (jaise 2026-09-15 ya YYYY-MM-DD, DD/MM bhi chalega)" } }] }), { status: 200, headers: { "content-type": "application/json" } }));
+    const turn = await runAgenticTurn({ text: "1", now: "2026-09-13T14:05:00.000Z", history: [{ role: "assistant", content: "LDH se Lucknow: 1. LKO – Lucknow NR, 2. LJN – Lucknow Junction NER." }], known: { origin: "LDH", destination: "LKO", stationPicked: "destination", dateProvided: false } } as never);
+    expect(turn.grounded).toBe(true);
+    expect(turn.reply).toMatch(/Kis date/);
+    expect(turn.reply).not.toMatch(/provider se nahi mil/);
+  }, 30000);
+});
