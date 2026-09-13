@@ -409,7 +409,8 @@ export function JourneyOptions({
   const probedDirect = direct.filter((o) => o.probed);
   const unprobedDirect = direct.filter((o) => !o.probed);
   /* Round-18m-30f: AI ne direct nahi chuna (sab WL) → board default collapsed, ek-line summary; tap = poora board. */
-  const [boardOpen, setBoardOpen] = useState<boolean>(() => !aiRec || aiRec.kind === "direct");
+  const recKind = plan.decision?.recommended?.kind ?? (bfeHero ? "bfe" : best && best.changes > 0 ? "connecting" : "direct");
+  const [boardOpen, setBoardOpen] = useState<boolean>(() => recKind === "direct" && !plan.directUnavailable);
   const seatBoard = direct.length > 0 && (
     <Section ic={IC.train} title={`Direct trains ${plan.query.from}→${plan.query.to}`} badge={`${probedDirect.length}/${direct.length} seat-checked`} foot={unprobedDirect.length ? `${unprobedDirect.map((o) => o.trainNumbers[0]).join(", ")}: seat data provider se nahi aayi — inhe "seat nahi" nahi maana; Refresh seats se dobara check karo.` : "Har direct train ki har class ka status upar hai — RAC bhi booking option hai (berth chart ke baad)."}>
       <button type="button" className="jx-why-head" onClick={() => setBoardOpen((v) => !v)}>{boardOpen ? "Hide" : "Show"} {direct.length} trains · har class ka seat status{!boardOpen && plan.directUnavailable ? " · sab WL/N-A" : ""} <span className={`jx-caret${boardOpen ? " open" : ""}`} /></button>
@@ -478,7 +479,7 @@ export function JourneyOptions({
       )}
 
       {plan.decision?.verdict && (
-        <div className="jx-verdict"><span className="jx-why-ic">{IC.spark}</span><div><strong>AI ka faisla{plan.decision.source === "ai" ? "" : " (rules)"}</strong><div>{plan.decision.verdict}</div><div className="jx-basis">Basis: pehle {plan.query.from} se poori party ke liye FRESH seat (AVL &gt; RAC), phir travel time, phir fare/class — same-train earlier-stop ticket bhi isi mein compare.</div></div></div>
+        <div className="jx-verdict"><span className="jx-why-ic">{IC.spark}</span><div><strong>{plan.decision.source === "ai" ? "AI ka faisla" : "RailBook ka faisla"}</strong><div>{plan.decision.verdict}</div><div className="jx-basis">Basis: pehle {plan.query.from} se poori party ke liye FRESH seat (AVL &gt; RAC), phir travel time, phir fare/class — same-train earlier-stop ticket bhi isi mein compare.</div></div></div>
       )}
       {plan.decision?.verifyFirst && (() => {
         const v = plan.decision!.verifyFirst!;

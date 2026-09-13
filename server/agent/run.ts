@@ -335,7 +335,7 @@ async function atlasFallback(
    * CONSIDER plan deta hai (searched trains reuse — extra search nahi). */
   let journey: JourneyPlan | null = null;
   try {
-    journey = await planJourney({ from: ctx.origin!.code, to: ctx.destination!.code, date: ctx.date!, travelClass: ctx.classCode ?? null, preference: pref === "cheapest" ? "cheapest" : pref === "fastest" ? "fastest" : "best_overall", includeConnections: false, includeAlternativeDates: false, trains, searchProvider: search.provider, passengers: ctx.paxProvided ? ctx.passengers : null });
+    journey = await planJourney({ from: ctx.origin!.code, to: ctx.destination!.code, date: ctx.date!, travelClass: ctx.classCode ?? null, preference: pref === "cheapest" ? "cheapest" : pref === "fastest" ? "fastest" : "best_overall", includeConnections: true /* Round-18m-30g: leg-1/leg-2 HAMESHA (user rule) */, includeAlternativeDates: false, trains, searchProvider: search.provider, passengers: ctx.paxProvided ? ctx.passengers : null });
   } catch {
     journey = null;
   }
@@ -1245,6 +1245,13 @@ async function askStationChoiceFirst(
   if (!place) return null;
   try {
     const res = await routedStationSearch(place);
+    if (res.stations.length === 0 && /^[A-Za-z][A-Za-z .]{2,28}$/.test(place)) {
+      /* Round-18m-30g: lookup (API + web) se kuch nahi mila — model ko mat bhejo (wo purani chat ka shehar
+       * guess kar leta hai, jaise Ayodhya → Varanasi). Seedha user se station code/naam poochho. */
+      if (side === "to") ctx.pendingDestinationChoice = place;
+      else ctx.pendingOriginChoice = place;
+      return { side, reply: `"${place}" ka station lookup abhi nahi ho paya (provider/web se jawab nahi aaya). ${place} ka station code ya poora station naam bata do (jaise "AYC" ya "Ayodhya Cantt") — main us par hi search karunga, khud se koi station assume nahi karunga.` };
+    }
     if (res.stations.length < 2) return null;
     if (side === "to") ctx.pendingDestinationChoice = place;
     else ctx.pendingOriginChoice = place;
@@ -1914,7 +1921,7 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
          * YOU / summary / seat-wale connections) — plain table nahi. */
         if (search.trains.length) {
           try {
-            detJourney = await planJourney({ from: ctx.origin!.code, to: ctx.destination!.code, date: ctx.date!, travelClass: ctx.classCode ?? null, preference: "best_overall", includeConnections: false, includeAlternativeDates: false, trains: search.trains, searchProvider: search.provider, passengers: ctx.paxProvided ? ctx.passengers : null });
+            detJourney = await planJourney({ from: ctx.origin!.code, to: ctx.destination!.code, date: ctx.date!, travelClass: ctx.classCode ?? null, preference: "best_overall", includeConnections: true /* Round-18m-30g: leg-1/leg-2 HAMESHA (user rule) */, includeAlternativeDates: false, trains: search.trains, searchProvider: search.provider, passengers: ctx.paxProvided ? ctx.passengers : null });
           } catch {
             detJourney = null;
           }

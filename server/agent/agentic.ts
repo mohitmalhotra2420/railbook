@@ -2464,6 +2464,31 @@ export async function runAgenticTurn(input: {
           if (!args.origin && input.known?.origin) args = { ...args, origin: input.known.origin };
           if (!args.destination && input.known?.destination) args = { ...args, destination: input.known.destination };
         }
+        /* Round-18m-30g (prod screenshot: user "ludhiana se AYODHYA", model ne history se "Varanasi" utha kar
+         * SEARCH_TRAINS/SEARCH_STATIONS chala diya → "Varanasi ke liye kaunsa station? BSB/BCY"): user ne jo
+         * shehar is turn mein bola (originAmbiguous/destinationAmbiguous) wahi tool ko jaayega — model ki
+         * guess (purani chat ka shehar) HARD override. Station kabhi galat identify nahi hona chahiye. */
+        {
+          const normCity = (x: unknown) => String(x ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+          const amb = { origin: input.known?.originAmbiguous ?? null, destination: input.known?.destinationAmbiguous ?? null };
+          const routeTools = new Set(["SEARCH_TRAINS", "JOURNEY_ANALYZE", "RANK_JOURNEY_OPTIONS", "FIND_CONNECTIONS", "FIND_ALTERNATIVE_TRAINS", "FIND_PARTIAL_ROUTE_SEATS", "FIND_VACANT_SEATS"]);
+          if (routeTools.has(toolName)) {
+            for (const side of ["origin", "destination"] as const) {
+              const want = amb[side];
+              if (!want) continue;
+              const got = normCity(args[side]);
+              const okCode = lastNeedsChoice && normCity(lastNeedsChoice.city) === normCity(want) && lastNeedsChoice.stations.some((st) => st.code.toLowerCase() === got);
+              if (got && got !== normCity(want) && !okCode && !normCity(want).startsWith(got) && !got.startsWith(normCity(want))) {
+                args = { ...args, [side]: want };
+              }
+            }
+          }
+          if (toolName === "SEARCH_STATIONS") {
+            const want = amb.destination ?? amb.origin;
+            const got = normCity(args.query);
+            if (want && got && got !== normCity(want) && !normCity(want).startsWith(got) && !got.startsWith(normCity(want))) args = { ...args, query: want };
+          }
+        }
         /* Screenshot fix (2026-09-06 #3): "12054 ki top speed btana" par
          * model ne GET_TIMETABLE chala diya — user ko timetable dikha, speed
          * ka jawab nahi. System-note soft guidance se model nahi ruka, isliye
@@ -2583,7 +2608,7 @@ export async function runAgenticTurn(input: {
           const d = result.data as { from?: string; to?: string; date?: string; trains?: unknown[]; provider?: string } | null;
           if (d?.from && d?.to && d?.date && Array.isArray(d.trains) && d.trains.length) {
             try {
-              const plan = await planJourney({ from: String(d.from), to: String(d.to), date: String(d.date), travelClass: (args.travel_class as string | undefined)?.toUpperCase() ?? null, preference: "best_overall", includeConnections: false, includeAlternativeDates: false, passengers: input.known?.passengers ?? null, deferDecision: true });
+              const plan = await planJourney({ from: String(d.from), to: String(d.to), date: String(d.date), travelClass: (args.travel_class as string | undefined)?.toUpperCase() ?? null, preference: "best_overall", includeConnections: true /* Round-18m-30g: leg-1/leg-2 HAMESHA (user rule) */, includeAlternativeDates: false, passengers: input.known?.passengers ?? null, deferDecision: true });
               if (plan.routeOptions.length) {
                 input.capture.plan = plan;
                 /* Round-18l: user-visible text (verbatim when every model times out) — no model instructions. */
