@@ -1754,6 +1754,30 @@ export function journeyWhyPoints(plan: JourneyPlan): string[] {
     if (best.availability) pts.push(legBookable(best.availability, pax) ? `${seatTxt(best.availability)}${best.availability.fare != null ? ` @ ₹${best.availability.fare}` : ""} — provider-verified${paxTxt ? `, ${paxTxt} ke liye kaafi` : ""}.` : best.availability.stale && enoughSeats(best.availability, pax) ? `${seatTxt(best.availability)} dikh rahi hai lekin data 24h+ purana (web cache) hai — Seat check se refresh karke confirm karo, phir book.` : `Seat status ${seatTxt(best.availability)} — confirmed nahi; ye sabse kam WL/fastest option hai.`);
     const racRows = (best.classOptions ?? []).filter((r) => r.status === "RAC" && r.classCode !== best.availability?.classCode && !r.stale);
     if (racRows.length) pts.push(`Isi train mein ${racRows.map(seatTxt).join(", ")} bhi option hai — RAC = seat pakki, berth chart ke baad.`);
+    /* Round-18m-30 (user: "kis basis pe pick — fare, time ya seat?"): 1A/2A "AVAILABLE" bina count ke
+     * (provider ne number nahi diya) → 2+ pax ke liye saaf bolo. */
+    if (best.availability && best.availability.status === "AVAILABLE" && best.availability.seats == null && (pax ?? 1) > 1) pts.push(`${best.availability.classCode} AVAILABLE dikh rahi hai par seat count provider ne nahi diya — ${pax} pax ke liye booking se pehle Seat check.`);
+    /* Runner-up: koi doosra FRESH-seat option (direct ya same-train earlier-stop) jo fast ya sasta ho —
+     * user ko trade-off dikhe (seat → time → fare), kuch chhupe nahi. */
+    const bestFare = best.availability?.fare ?? null;
+    const bestDur = best.durationMinutes ?? null;
+    const rivals: { txt: string; dur: number | null; fare: number | null }[] = [];
+    for (const o of direct) {
+      if (o === best || o.trainNumbers[0] === best.trainNumbers[0]) continue;
+      const r = (o.classOptions ?? []).filter((x) => legBookable(x, pax)).sort((a, b) => (a.fare ?? 9e9) - (b.fare ?? 9e9))[0];
+      if (r) rivals.push({ txt: `${o.trainNumbers[0]} ${o.trainNames[0] ?? ""} (${o.durationLabel ?? "?"}, ${seatTxt(r)}${r.fare != null ? ` @ ₹${r.fare}` : ""} ${plan.query.from} se)`, dur: o.durationMinutes ?? null, fare: r.fare ?? null });
+    }
+    for (const b of rec?.boardFromEarlier ?? []) {
+      if (b.trainNumber === best.trainNumbers[0]) continue;
+      const r = (b.classOptions ?? [b.availability]).filter((x) => legBookable(x, pax)).sort((a, b2) => (a.fare ?? 9e9) - (b2.fare ?? 9e9))[0];
+      if (r) rivals.push({ txt: `${b.trainNumber} ${b.trainName} (${b.durationMinutes != null ? durationLabelOf(b.durationMinutes) : "?"}, ${plan.query.from} se WL par ticket ${b.bookFrom}→${b.bookUpto ?? b.destination} lene par ${seatTxt(r)}${r.fare != null ? ` @ ₹${r.fare}` : ""})`, dur: b.durationMinutes ?? null, fare: r.fare ?? null });
+    }
+    const better = rivals.filter((r) => (bestDur != null && r.dur != null && r.dur < bestDur) || (bestFare != null && r.fare != null && r.fare < bestFare)).sort((a, b) => (a.dur ?? 9e9) - (b.dur ?? 9e9))[0];
+    if (better) {
+      const faster = bestDur != null && better.dur != null && better.dur < bestDur ? `${bestDur - better.dur} min fast` : null;
+      const cheaper = bestFare != null && better.fare != null && better.fare < bestFare ? `₹${bestFare - better.fare}/pax sasta` : null;
+      pts.push(`Runner-up: ${better.txt} — ${[faster, cheaper].filter(Boolean).join(", ")}. Basis: pehle ${plan.query.from} se hi confirmed seat, phir time, phir fare — trade-off aapka.`);
+    }
     if (fastestDirect && best.trainNumbers[0] === fastestDirect.trainNumbers[0]) pts.push(`${direct.length} direct trains mein sabse fast.`);
     else if (fastestDirect?.durationLabel) pts.push(`Fastest direct ${fastestDirect.trainNumbers[0]} (${fastestDirect.durationLabel}) mein seat nahi/kam thi, isliye ye upar.`);
     const cheaper = plan.routeOptions.filter((o) => o !== best && o.availability?.fare != null && best.availability?.fare != null && o.availability!.fare! < best.availability!.fare! && legBookable(o.availability, pax))[0];

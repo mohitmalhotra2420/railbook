@@ -1651,7 +1651,9 @@ export async function executeApprovedTool(
           date: a.date as string,
           travelClass: (a.travel_class as string | undefined)?.toUpperCase() ?? null,
           preference: pref,
-          includeConnections: Boolean(a.include_connections) || prefRaw === "alternative" || prefRaw === "fewest_changes",
+          /* Round-18m-30 (user: "leg-1 / leg-2 kyun nahi dikhe?"): connecting leg-1/leg-2 HAMESHA check
+           * hote hain (R18m-20/28 rule) — model ke include_connections flag par depend nahi. */
+          includeConnections: true,
           includeAlternativeDates: Boolean(a.include_alternative_dates) || prefRaw === "alternative",
           passengers: ctx.passengers ?? (a.passengers as number | undefined) ?? null,
           deferDecision: ctx.deferDecision === true,

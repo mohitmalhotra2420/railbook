@@ -469,7 +469,7 @@ export function JourneyOptions({
       {/* Round-18m-13 (user: "pehle direct trains dikhao, phir alternatives"). */}
       {seatBoard}
       {plan.decision?.verdict && (
-        <div className="jx-verdict"><span className="jx-why-ic">{IC.spark}</span><div><strong>AI ka faisla{plan.decision.source === "ai" ? "" : " (rules)"}</strong><div>{plan.decision.verdict}</div></div></div>
+        <div className="jx-verdict"><span className="jx-why-ic">{IC.spark}</span><div><strong>AI ka faisla{plan.decision.source === "ai" ? "" : " (rules)"}</strong><div>{plan.decision.verdict}</div><div className="jx-basis">Basis: pehle {plan.query.from} se poori party ke liye FRESH seat (AVL &gt; RAC), phir travel time, phir fare/class — same-train earlier-stop ticket bhi isi mein compare.</div></div></div>
       )}
       {plan.decision?.verifyFirst && (() => {
         const v = plan.decision!.verifyFirst!;
@@ -642,12 +642,12 @@ export function JourneyOptions({
           )}
         </Section>
       )}
-      {plan.directUnavailable && (plan.legPlans?.length ?? 0) > 0 && (
-        <Section ic={IC.link} title={plan.legPlans!.some((lp) => lp.leg1.length > 0 && lp.leg2.length > 0) ? "Connecting · leg-wise seat options" : "Connecting · koi route possible nahi"} badge={`${plan.legPlans!.length} hub${plan.legPlans!.length > 1 ? "s" : ""}`} foot={plan.legPlans!.some((lp) => lp.leg1.length > 0 && lp.leg2.length > 0) ? (pax ? `Har train par ${pax} passengers ke liye seat verify hui hai — dono tickets alag book hongi.` : "Har train provider-verified — tickets alag-alag book hongi.") : "Har hub par dono legs × saari trains × har class check hui — ek leg par bhi seat na ho to route nahi banta."}>
+      {(plan.legPlans?.length ?? 0) > 0 && (
+        <Section ic={IC.link} title={plan.legPlans!.some((lp) => lp.leg1.length > 0 && lp.leg2.length > 0) ? (plan.directUnavailable ? "Connecting · leg-wise seat options" : "Connecting · leg-wise (comparison — direct mein seat hai)") : "Connecting · koi route possible nahi"} badge={`${plan.legPlans!.length} hub${plan.legPlans!.length > 1 ? "s" : ""}`} foot={plan.legPlans!.some((lp) => lp.leg1.length > 0 && lp.leg2.length > 0) ? (pax ? `Har train par ${pax} passengers ke liye seat verify hui hai — dono tickets alag book hongi.` : "Har train provider-verified — tickets alag-alag book hongi.") : "Har hub par dono legs × saari trains × har class check hui — ek leg par bhi seat na ho to route nahi banta."}>
           {plan.legPlans!.map((lp) => <LegPlanCard key={lp.hub} lp={lp} baseDate={baseDate} pax={pax} onPickLeg={pickLeg} />)}
         </Section>
       )}
-      {plan.directUnavailable && !(plan.legPlans?.length) && connections.length > 0 && (
+      {!(plan.legPlans?.length) && connections.length > 0 && (
         <Section ic={IC.link} title="Connecting · dono trains mein seat" badge={`${connections.length}`} foot={pax ? `Har leg par ${pax} passengers ke liye seat verify hui hai — dono tickets alag book hongi.` : "Dono legs provider-verified — tickets alag-alag book hongi."}>
           {connections.slice(0, 2).map((c, i) => <ConnCard key={i} c={c} baseDate={baseDate} onPickLeg={pickLeg} />)}
         </Section>
