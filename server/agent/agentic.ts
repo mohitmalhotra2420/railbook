@@ -2065,6 +2065,25 @@ async function webRescueAnswer(userText: string, steps: ToolTraceStep[], stepNo:
   return null;
 }
 
+/* Round-18m-30s (prod: model ne SEARCH_TRAINS mein passengers=1 khud bhar diya → plan bina poochhe): model ka
+ * `passengers` arg sirf tab maana jaata hai jab USER ne isi message mein wo number/shabd bola ho. */
+const PAX_WORDS: Record<string, number> = { ek: 1, one: 1, akela: 1, akele: 1, do: 2, two: 2, dono: 2, teen: 3, three: 3, char: 4, chaar: 4, four: 4, paanch: 5, panch: 5, five: 5, chhe: 6, che: 6, six: 6 };
+export function userStatedPax(text: string | undefined, n: number, opts: { bareDigitIsPax?: boolean } = {}): boolean {
+  const t = String(text ?? "").toLowerCase();
+  if (!t) return false;
+  /* Akela "1"/"2" station-pick ya train-pick bhi ho sakta hai — sirf tab pax jab pichhla sawaal passengers ka tha. */
+  if (/^\s*\d\s*$/.test(t)) return opts.bareDigitIsPax === true && Number(t.trim()) === n;
+  if (new RegExp(`(^|[^\\d])${n}([^\\d]|$)`).test(t) && !/\b\d{4,}\b/.test(String(n))) {
+    /* "2 passengers", "hum 2", "2 log", ya akela "2" (gate ka jawab) — par date/train-number ka hissa nahi */
+    const bare = false;
+    const paxCtx = /\b(passenger|passengers|log|logon|bande|banda|jan|jane|adult|adults|seat|seats|ticket|tickets|pax|people|persons?|hum|hain|ke liye)\b/.test(t);
+    const dateOrTrain = new RegExp(`\\b\\d{4,5}\\b|\\b${n}\\s*(sept|sep|oct|nov|dec|jan|feb|mar|apr|may|jun|jul|aug|tareekh|tarikh|ko\\b)`).test(t);
+    if (bare) return true;
+    if (paxCtx && !dateOrTrain) return true;
+  }
+  return Object.entries(PAX_WORDS).some(([w, v]) => v === n && new RegExp(`\\b${w}\\b`).test(t) && /\b(passenger|passengers|log|logon|bande|banda|jan|jane|adult|seat|seats|ticket|pax|people|person|hum|akel)/.test(t + (w.startsWith("akel") ? " akel" : "")));
+}
+
 function deterministicSummary(steps: ToolTraceStep[]): string {
   const okSteps = steps.filter((s) => s.ok);
   if (!okSteps.length) return "Ye jaankari abhi provider se nahi mil pa rahi. Main gadh ke nahi bataunga.";
@@ -2261,6 +2280,9 @@ export async function runAgenticTurn(input: {
   // Deterministic date resolver (IST) — arbitrary dates bhi; model sirf follow karta hai.
   const nowDate = input.now && Date.parse(input.now) ? new Date(input.now) : new Date();
   const dateHint = deterministicDateHint(String(input.text ?? ""), nowDate);
+  /* Round-18m-30s: pichhla assistant message passengers poochh raha tha → akela "2" = pax. */
+  const lastAssistantMsg = [...(input.history ?? [])].reverse().find((h) => h.role === "assistant")?.content ?? "";
+  const lastAskedPax = /\b(kitne|how many)\b[^\n]{0,40}\b(passenger|passengers|log|logon|bande|jan|pax|people|persons?)\b|\b(passenger|passengers|log)\b[^\n]{0,20}\b(kitne|how many)\b/i.test(String(lastAssistantMsg));
   /* Round-16p: live/history sawaal → "kal/parson/<date> wali" = PICHHLA run. */
   const LIVE_OR_HISTORY_RE = /\b(kahan|kaha|kahaan|live|running|status|late|delay|pahunch|pohonch|pahuch|reach|arriv|chali|chal rahi|position|track)\b|कहाँ|कहां|लेट|स्टेटस|पहुँच|पहुंच/i;
   const statusDate = LIVE_OR_HISTORY_RE.test(String(input.text ?? "")) ? parseStatusDate(String(input.text ?? ""), nowDate) : undefined;
@@ -2648,7 +2670,7 @@ export async function runAgenticTurn(input: {
         } else if (
           (toolName === "SEARCH_TRAINS" || toolName === "JOURNEY_ANALYZE" || toolName === "RANK_JOURNEY_OPTIONS" || toolName === "FIND_CONNECTIONS" || toolName === "CHECK_AVAILABILITY" || toolName === "FIND_VACANT_SEATS" || toolName === "FIND_PARTIAL_ROUTE_SEATS" || toolName === "FIND_ALTERNATIVE_TRAINS") &&
           !(input.known?.passengers && input.known.passengers >= 1) &&
-          !(typeof args.passengers === "number" && args.passengers >= 1) &&
+          !(typeof args.passengers === "number" && args.passengers >= 1 && userStatedPax(input.text, args.passengers, { bareDigitIsPax: lastAskedPax })) &&
           !(input.known?.dateProvided === false && dateHint?.kind !== "date") /* date pehle poochhegi (upar/neeche wala guard) */
         ) {
           /* Round-18m-30q (user: "AI ko khud samajhna chahiye ki station ke baad passengers poochne hain, tabhi
@@ -2679,7 +2701,7 @@ export async function runAgenticTurn(input: {
             rejected: "date_required",
           };
         } else {
-          result = await executeApprovedTool(toolName, args, { userText: input.text, passengers: input.known?.passengers ?? (typeof args.passengers === "number" && args.passengers >= 1 && args.passengers <= 6 ? args.passengers : null), deferDecision: true });
+          result = await executeApprovedTool(toolName, args, { userText: input.text, passengers: input.known?.passengers ?? (typeof args.passengers === "number" && args.passengers >= 1 && args.passengers <= 6 && userStatedPax(input.text, args.passengers, { bareDigitIsPax: lastAskedPax }) ? args.passengers : null), deferDecision: true });
         }
         // Structured table capture (user feedback 2026-09-05): SEARCH/JOURNEY
         // success par rows nikalo — client proper <table> render karega, aur

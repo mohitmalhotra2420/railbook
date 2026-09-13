@@ -121,3 +121,17 @@ describe("Round-18m-30s: deterministic station-pick path (AI reply rejected) als
     process.env.NVIDIA_API_KEY = "";
   }, 30000);
 });
+
+describe("Round-18m-30s(b): model-invented passengers arg is ignored — tool still rejects", () => {
+  it("SEARCH_TRAINS with passengers=1 the user never said → PASSENGERS MISSING", async () => {
+    process.env.NVIDIA_API_KEY = "nvapi-test"; process.env.RAILWAY_PROVIDER = "mock";
+    const { runAgenticTurn } = await import("../server/agent/agentic");
+    let n = 0;
+    setAgenticNvidiaFetch(async () => { n++; return new Response(JSON.stringify({ choices: [{ message: n === 1 ? { content: null, tool_calls: [{ id: "a", type: "function", function: { name: "SEARCH_TRAINS", arguments: JSON.stringify({ origin: "LDH", destination: "MTJ", date: "2026-09-14", passengers: 1 }) } }] } : { content: "Kitne passengers?" } }] }), { status: 200, headers: { "content-type": "application/json" } }); });
+    const turn = await runAgenticTurn({ text: "1", now: "2026-09-13T18:00:00.000Z", known: { origin: "LDH", destination: "MTJ", date: "2026-09-14", dateProvided: true, stationPicked: "destination" } } as never);
+    const st = turn.steps.find((s) => s.tool === "SEARCH_TRAINS");
+    expect(st?.ok).toBe(false);
+    expect(st?.summary).toMatch(/PASSENGERS MISSING/);
+    process.env.NVIDIA_API_KEY = "";
+  }, 30000);
+});
