@@ -10,7 +10,8 @@ for (const line of readFileSync(new URL("../.env", import.meta.url), "utf8").spl
   const m = line.match(/^([A-Z0-9_]+)=(.*)$/);
   if (m && !process.env[m[1]]) process.env[m[1]] = m[2];
 }
-const LEG = (process.env.BENCH_MODEL ?? "ling") as "ling" | "muse" | "gptoss" | "nano" | "nano-nothink";
+const LEG = (process.env.BENCH_MODEL ?? "ling") as "ling" | "muse" | "gptoss" | "nano" | "nano-nothink" | "dgemma";
+const DGEMMA = "google/diffusiongemma-26b-a4b-it";
 const NANO = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning";
 const LING = "inclusionai/ling-3.0-flash-vl:free";
 let MODEL_NAME = "";
@@ -27,6 +28,11 @@ if (LEG === "ling") {
   if (process.env.BENCH_NVIDIA_KEY) process.env.NVIDIA_API_KEY = process.env.BENCH_NVIDIA_KEY;
   process.env.NEMOTRON_THINKING = LEG === "nano-nothink" ? "off" : "on"; // agentic.ts: nvidia/nemotron* + off → enable_thinking:false
   MODEL_NAME = NANO + (LEG === "nano-nothink" ? " (thinking=off)" : " (thinking=on)");
+} else if (LEG === "dgemma") {
+  process.env.AGENTIC_PROVIDER = "nvidia";
+  process.env.AGENTIC_MODEL = DGEMMA;
+  if (process.env.BENCH_NVIDIA_KEY) process.env.NVIDIA_API_KEY = process.env.BENCH_NVIDIA_KEY;
+  MODEL_NAME = DGEMMA;
 } else {
   process.env.AGENTIC_PROVIDER = "nvidia";
   process.env.AGENTIC_MODEL = LEG === "muse" ? "meta/muse-glimmer-30b" : "openai/gpt-oss-20b";
@@ -84,5 +90,5 @@ const summary = {
   totalModelCalls: CALLS.ai, results: RESULTS,
 };
 mkdirSync("/home/user/.railbook-private/bench", { recursive: true });
-writeFileSync(`/home/user/.railbook-private/bench/LING_BENCH_${LEG}.json`, JSON.stringify(summary, null, 2));
+writeFileSync(`/home/user/.railbook-private/bench/LING_BENCH_${LEG}${process.env.BENCH_TAG ?? ""}.json`, JSON.stringify(summary, null, 2));
 console.log("\nSUMMARY", JSON.stringify({ ...summary, results: undefined }));
