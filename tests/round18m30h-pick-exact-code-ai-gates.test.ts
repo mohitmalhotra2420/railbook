@@ -105,3 +105,19 @@ describe("Round-18m-30n(b): first turn of a NEW route ignores stale client date/
     expect(res.context.passengers).toBe(3);
   }, 30000);
 });
+
+describe("Round-18m-30s: deterministic station-pick path (AI reply rejected) also never plans without passengers", () => {
+  it("station pick + date known + pax unknown → asks passengers, no search/plan", async () => {
+    process.env.RAILWAY_PROVIDER = "mock"; process.env.NVIDIA_API_KEY = "nvapi-test";
+    const { runAgent } = await import("../server/agent/run");
+    setAgenticNvidiaFetch(async () => new Response(JSON.stringify({ choices: [{ message: { content: "Mathura mein kaunsa station? 1. MTJ 2. MRT" } }] }), { status: 200, headers: { "content-type": "application/json" } })); // model re-asks → rejected → deterministic path
+    const ctx = { ...emptyAgentContext(), origin: { code: "LDH", name: "Ludhiana Junction", city: "Ludhiana" }, pendingDestinationChoice: "Mathura", date: "2026-09-14", dateProvided: true, passengers: null, paxProvided: false };
+    const res = await runAgent({ text: "1", now: "2026-09-13T17:30:00.000Z", context: ctx, lastAsked: "destination", history: [{ role: "assistant", content: "Mathura ke liye ye stations mile: 1. MTJ – Mathura Jn\n2. MRT – Mathura Cant\nNumber ya code batao." }] } as never);
+    expect(res.context.destination?.code).toBe("MTJ");
+    expect(res.journey ?? null).toBeNull();
+    expect(res.trains ?? null).toBeNull();
+    expect(res.reply).toMatch(/passengers/i);
+    expect(res.context.paxProvided).toBe(false);
+    process.env.NVIDIA_API_KEY = "";
+  }, 30000);
+});

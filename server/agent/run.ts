@@ -1995,8 +1995,17 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
    * honest agla sawaal. Kabhi khali nahi. */
   if (!tool && !reply && stationPick) {
     const other = stationPick.side === "to" ? ctx.origin : ctx.destination;
-    /* Round-16h: date user ne di ho tabhi search — warna neeche resume-line date poochegi. */
-    if (other && ctx.date && ctx.dateProvided) {
+    /* Round-16h: date user ne di ho tabhi search — warna neeche resume-line date poochegi.
+     * Round-18m-30s (prod screenshot LDH→MTJ: "1" ke baad seedha plan, pax nahi poochha): ye DETERMINISTIC
+     * fallback path (AI ka reply reject hua) bhi wahi rule maane jo tools maante hain — passengers ke bina
+     * koi seat search/plan nahi. Station lock + date hai, pax nahi → pax poochho (AI wording, fallback text). */
+    if (other && ctx.date && ctx.dateProvided && !(ctx.paxProvided && ctx.passengers)) {
+      ctx.bookingStage = "collecting";
+      const from = stationPick.side === "to" ? other.code : stationPick.code;
+      const to = stationPick.side === "to" ? stationPick.code : other.code;
+      const fb = `Theek hai — ${from} → ${to}, ${ctx.date}. Kitne passengers hain? (1–6) Seats usi hisaab se check karunga.`;
+      reply = (await aiPhraseGate("passengers", { fallback: fb, mustContain: [from, to], context: `route ${from} → ${to} lock ho gaya, date ${ctx.date}; ab party size chahiye tabhi seats sahi milengi` })).text;
+    } else if (other && ctx.date && ctx.dateProvided) {
       try {
         const search = await searchTrainsRouted({ from: ctx.origin!.code, to: ctx.destination!.code, date: ctx.date });
         const top = search.trains
