@@ -10,7 +10,8 @@ for (const line of readFileSync(new URL("../.env", import.meta.url), "utf8").spl
   const m = line.match(/^([A-Z0-9_]+)=(.*)$/);
   if (m && !process.env[m[1]]) process.env[m[1]] = m[2];
 }
-const LEG = (process.env.BENCH_MODEL ?? "ling") as "ling" | "muse" | "gptoss";
+const LEG = (process.env.BENCH_MODEL ?? "ling") as "ling" | "muse" | "gptoss" | "nano" | "nano-nothink";
+const NANO = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning";
 const LING = "inclusionai/ling-3.0-flash-vl:free";
 let MODEL_NAME = "";
 if (LEG === "ling") {
@@ -20,6 +21,12 @@ if (LEG === "ling") {
   process.env.HF_MODEL = LING;
   delete process.env.AGENTIC_MODEL;
   MODEL_NAME = LING;
+} else if (LEG === "nano" || LEG === "nano-nothink") {
+  process.env.AGENTIC_PROVIDER = "nvidia";
+  process.env.AGENTIC_MODEL = NANO;
+  if (process.env.BENCH_NVIDIA_KEY) process.env.NVIDIA_API_KEY = process.env.BENCH_NVIDIA_KEY;
+  process.env.NEMOTRON_THINKING = LEG === "nano-nothink" ? "off" : "on"; // agentic.ts: nvidia/nemotron* + off → enable_thinking:false
+  MODEL_NAME = NANO + (LEG === "nano-nothink" ? " (thinking=off)" : " (thinking=on)");
 } else {
   process.env.AGENTIC_PROVIDER = "nvidia";
   process.env.AGENTIC_MODEL = LEG === "muse" ? "meta/muse-glimmer-30b" : "openai/gpt-oss-20b";
