@@ -34,3 +34,21 @@ describe("Round-18m-30f: passenger gate on every route-level seat/journey intent
     expect(res.context.passengers).toBe(3);
   }, 30000);
 });
+
+describe("Round-18m-30k: city name re-spoken → station options again (never assume last station)", () => {
+  beforeEach(() => { process.env.RAILWAY_PROVIDER = "mock"; process.env.NVIDIA_API_KEY = "nvapi-test"; setProvider(null); setAgenticNvidiaFetch(async () => new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }] }), { status: 200, headers: { "content-type": "application/json" } })); });
+  afterEach(() => { setProvider(null); setAgenticNvidiaFetch(null); process.env.NVIDIA_API_KEY = ""; });
+  it("'ludhiana se lucknow' with previous destination LKO → LKO dropped, Lucknow options asked", async () => {
+    const prev = { ...emptyAgentContext(), origin: { code: "LDH", name: "Ludhiana Junction", city: "Ludhiana" }, destination: { code: "LKO", name: "Lucknow NR", city: "Lucknow" }, date: "2026-09-14", dateProvided: true, passengers: 2, paxProvided: true };
+    const res = await runAgent({ text: "Mujhe ludhiana se lucknow jaana hai kal", now: "2026-09-13T14:40:00.000Z", context: prev });
+    expect(res.context.destination ?? null).toBeNull();
+    expect(res.context.pendingDestinationChoice ?? "").toMatch(/lucknow/i);
+    expect(res.resumeAsk).not.toBe("passengers");
+  }, 30000);
+  it("code re-spoken ('ASR se BSB') still keeps the station + pax", async () => {
+    const prev = { ...emptyAgentContext(), origin: ASR, destination: BSB, date: "2026-09-14", dateProvided: true, passengers: 3, paxProvided: true };
+    const res = await runAgent({ text: "ASR se BSB 14 sept fastest train konsi hai", now: "2026-09-13T11:00:00.000Z", context: prev });
+    expect(res.context.destination?.code).toBe("BSB");
+    expect(res.context.passengers).toBe(3);
+  }, 30000);
+});
