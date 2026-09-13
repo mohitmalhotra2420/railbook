@@ -458,7 +458,7 @@ describe("TEST 7: malformed model output is rejected at the gate", () => {
       }
       return chatResponse({ content: "12014 CC: AVAILABLE 47 seats (2026-09-05)." });
     });
-    const turn = await runAgenticTurn({ text: "availability", now: NOW });
+    const turn = await runAgenticTurn({ text: "availability", now: NOW, known: { passengers: 1 } }); // Round-18m-30q: pax precondition (test supplies)
     expect(turn.steps[0].ok).toBe(false);
     expect(turn.steps[0].summary).toMatch(/Invalid arguments/i);
     expect(turn.steps[1].ok).toBe(true);
@@ -504,7 +504,7 @@ describe("TEST 7: malformed model output is rejected at the gate", () => {
       }
       return chatResponse({ content: "12014 CC AVAILABLE 47 seats on 2026-09-05." });
     });
-    const turn = await runAgenticTurn({ text: "availability", now: NOW });
+    const turn = await runAgenticTurn({ text: "availability", now: NOW, known: { passengers: 1 } }); // Round-18m-30q: pax precondition (test supplies)
     expect(turn.steps[0].ok).toBe(true);
     expect(turn.steps[0].args).not.toHaveProperty("zzz_injected");
     expect(turn.steps[0].args).not.toHaveProperty("callback_url");
@@ -535,7 +535,7 @@ describe("TEST 8: provider secrets never leak", () => {
         return chatResponse({ content: "2 trains mili 2026-09-05 ko." });
       });
       const app = createApp();
-      const res = await request(app).post("/api/agent").send({ text: "ASR se NDLS trains dikhao", now: NOW });
+      const res = await request(app).post("/api/agent").send({ text: "ASR se NDLS 1 passenger ke liye trains dikhao", now: NOW });
       expect(res.status).toBe(200);
 
       const clientBlob = JSON.stringify(res.body);

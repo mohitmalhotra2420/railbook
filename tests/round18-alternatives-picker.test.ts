@@ -339,7 +339,7 @@ describe("Round-18 §5/§16: proactive alternatives via /api/agent, endpoints, n
       return jsonResponse(200, { choices: [{ message: msg, finish_reason: call === 1 ? "tool_calls" : "stop" }], model: "test" });
     });
     const app = createApp();
-    const r = await request(app).post("/api/agent").send({ text: `12138 mein SL ${FUTURE} ko LDH se CSMT seat hai?`, now: new Date().toISOString() });
+    const r = await request(app).post("/api/agent").send({ text: `12138 mein SL ${FUTURE} ko LDH se CSMT 1 passenger ke liye seat hai?`, now: new Date().toISOString() }); // Round-18m-30q: pax precondition (route message → pax text mein)
     expect(r.status).toBe(200);
     expect(r.body.alternatives?.reason).toBe("waitlist");
     expect(r.body.alternatives?.alternatives?.[0]?.trainNumbers).toEqual(["12904"]);

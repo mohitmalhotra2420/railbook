@@ -196,6 +196,7 @@ const ArgSchemas = {
     date: Ymd,
   }),
   SEARCH_TRAINS: z.object({
+    passengers: z.coerce.number().int().min(1).max(6).optional(),
     origin: StationRef,
     destination: StationRef,
     date: Ymd,
@@ -208,6 +209,7 @@ const ArgSchemas = {
   }),
   TRACK_TRAIN: z.object({ train_number: TrainNo, date: Ymd.nullish() }),
   CHECK_AVAILABILITY: z.object({
+    passengers: z.coerce.number().int().min(1).max(6).optional(),
     train_number: TrainNo,
     date: Ymd.nullish(),
     origin: StationRef.nullish(),
@@ -241,6 +243,7 @@ const ArgSchemas = {
     ]),
   }),
   JOURNEY_ANALYZE: z.object({
+    passengers: z.coerce.number().int().min(1).max(6).optional(),
     origin: StationRef,
     destination: StationRef,
     date: Ymd,
@@ -254,6 +257,7 @@ const ArgSchemas = {
   }),
   /* Round-17: journey intelligence tools (deterministic engine, model sirf explain karta hai). */
   RANK_JOURNEY_OPTIONS: z.object({
+    passengers: z.coerce.number().int().min(1).max(6).optional(),
     origin: StationRef,
     destination: StationRef,
     date: Ymd,
@@ -263,6 +267,7 @@ const ArgSchemas = {
     include_alternative_dates: z.boolean().nullish(),
   }),
   FIND_VACANT_SEATS: z.object({
+    passengers: z.coerce.number().int().min(1).max(6).optional(),
     train_number: TrainNo,
     origin: StationRef,
     destination: StationRef,
@@ -277,6 +282,7 @@ const ArgSchemas = {
     travel_class: z.string().regex(/^[A-Z0-9]{1,3}$/),
   }),
   FIND_CONNECTIONS: z.object({
+    passengers: z.coerce.number().int().min(1).max(6).optional(),
     origin: StationRef,
     destination: StationRef,
     date: Ymd,
@@ -284,6 +290,7 @@ const ArgSchemas = {
   }),
   /* Round-18 */
   FIND_ALTERNATIVE_TRAINS: z.object({
+    passengers: z.coerce.number().int().min(1).max(6).optional(),
     train_number: TrainNo,
     origin: StationRef,
     destination: StationRef,
@@ -388,6 +395,7 @@ export const AGENTIC_TOOLS = [
       parameters: {
         type: "object",
         properties: {
+          passengers: { type: "number", description: "Kitne log (1-6). ZAROORI — seat/journey tools bina iske reject ho jaate hain; user ne na bataya ho to pehle poochho, 1 assume mat karo." },
           origin: { type: "string", description: "Origin station code (ASR) ya naam (Amritsar). Code sirf known context ya pichle tool result se lo — guess mat karo." },
           destination: { type: "string", description: "Destination: city NAAM (jaise Delhi) best hai ya known rail code (NDLS). Airport-style codes galat hain — DEL DENDULURU hai, Delhi nahi." },
           date: { type: "string", description: "Journey date YYYY-MM-DD" },
@@ -444,6 +452,7 @@ export const AGENTIC_TOOLS = [
       parameters: {
         type: "object",
         properties: {
+          passengers: { type: "number", description: "Kitne log (1-6). ZAROORI — seat/journey tools bina iske reject ho jaate hain; user ne na bataya ho to pehle poochho, 1 assume mat karo." },
           train_number: { type: "string" },
           date: { type: "string" },
           origin: { type: "string" },
@@ -520,6 +529,7 @@ export const AGENTIC_TOOLS = [
       parameters: {
         type: "object",
         properties: {
+          passengers: { type: "number", description: "Kitne log (1-6). ZAROORI — seat/journey tools bina iske reject ho jaate hain; user ne na bataya ho to pehle poochho, 1 assume mat karo." },
           origin: { type: "string" },
           destination: { type: "string" },
           date: { type: "string" },
@@ -544,6 +554,7 @@ export const AGENTIC_TOOLS = [
       parameters: {
         type: "object",
         properties: {
+          passengers: { type: "number", description: "Kitne log (1-6). ZAROORI — seat/journey tools bina iske reject ho jaate hain; user ne na bataya ho to pehle poochho, 1 assume mat karo." },
           origin: { type: "string", description: "City naam ya station code" },
           destination: { type: "string" },
           date: { type: "string", description: "YYYY-MM-DD — user se aayi date; assume mat karo" },
@@ -565,6 +576,7 @@ export const AGENTIC_TOOLS = [
       parameters: {
         type: "object",
         properties: {
+          passengers: { type: "number", description: "Kitne log (1-6). ZAROORI — seat/journey tools bina iske reject ho jaate hain; user ne na bataya ho to pehle poochho, 1 assume mat karo." },
           train_number: { type: "string" },
           origin: { type: "string" },
           destination: { type: "string" },
@@ -584,6 +596,7 @@ export const AGENTIC_TOOLS = [
       parameters: {
         type: "object",
         properties: {
+          passengers: { type: "number", description: "Kitne log (1-6). ZAROORI — seat/journey tools bina iske reject ho jaate hain; user ne na bataya ho to pehle poochho, 1 assume mat karo." },
           train_number: { type: "string" },
           origin: { type: "string" },
           destination: { type: "string" },
@@ -602,7 +615,8 @@ export const AGENTIC_TOOLS = [
         "Connecting-train options (1 change) real search legs se: layover = departureB − arrivalA, configurable minimum buffer; invalid/unsafe connections reject. 'via <station>' de sakte ho.",
       parameters: {
         type: "object",
-        properties: { origin: { type: "string" }, destination: { type: "string" }, date: { type: "string" }, via: { type: "string" } },
+        properties: {
+          passengers: { type: "number", description: "Kitne log (1-6). ZAROORI — seat/journey tools bina iske reject ho jaate hain; user ne na bataya ho to pehle poochho, 1 assume mat karo." }, origin: { type: "string" }, destination: { type: "string" }, date: { type: "string" }, via: { type: "string" } },
         required: ["origin", "destination", "date"],
       },
     },
@@ -615,7 +629,8 @@ export const AGENTIC_TOOLS = [
         "Ek chuni hui train mein seat kam/WL/RAC/not-available ya class hi na ho to REAL alternatives: doosri trains (same route/date, AVAILABLE/RAC verified), usi train ki doosri class, split booking, connecting, alternative dates (suggestion only). 'is train mein seat nahi, aur kya option?' ya availability poor dikhe to khud bhi call karo. Sirf provider data — koi andaza nahi.",
       parameters: {
         type: "object",
-        properties: { train_number: { type: "string" }, origin: { type: "string" }, destination: { type: "string" }, date: { type: "string" }, travel_class: { type: "string" } },
+        properties: {
+          passengers: { type: "number", description: "Kitne log (1-6). ZAROORI — seat/journey tools bina iske reject ho jaate hain; user ne na bataya ho to pehle poochho, 1 assume mat karo." }, train_number: { type: "string" }, origin: { type: "string" }, destination: { type: "string" }, date: { type: "string" }, travel_class: { type: "string" } },
         required: ["train_number", "origin", "destination", "date"],
       },
     },
@@ -1858,6 +1873,7 @@ function systemPrompt(
     "2. 'best/sabse achhi/fastest/easiest/least changes/comfortable/reliable/best overall/alternative route' jaise RANKING sawaalon ke liye RANK_JOURNEY_OPTIONS use karo (deterministic Atlas engine — backend rank karta hai, tum sirf BEST option + 1-2 alternatives 2-4 line mein explain karo; app khud card dikhata hai). Cheapest-with-fare-cap/depart-window filters ke liye JOURNEY_ANALYZE. Reliability ka data koi provider nahi deta — 'reliable' poochhe to saaf bolo ki punctuality data available nahi, aur direct/fastest ke basis par option do. Direct seat na ho (recovery block) to bolo 'Direct seat nahi mili. Ye alternatives mile:' aur SIRF tool ke verified alternatives do — user ki date khud kabhi mat badlo, alternative date sirf suggest karo.",
     `2b. TRAIN ENTITY: user sirf number bole ('12014', '12014 ka status') → pehle SEARCH_TRAIN_BY_NUMBER (validate), phir zaroori tool. Naam bole ('Shatabdi', 'Amritsar Shatabdi ka time') → SEARCH_TRAIN_BY_NAME; ek se zyada match → user ko SELECT TRAIN list se chunne do (khud mat chuno). Seat WL/RAC/kam/not-available dikhe → FIND_ALTERNATIVE_TRAINS (ya server auto-karega) aur 'Is train mein availability kam hai. YOU MAY ALSO CONSIDER:' ke saath SIRF verified options. Coach/berth-level vacancy (B4·32LB) ${capabilityAvailable("FIND_VACANT_SEATS_BERTH_LEVEL") ? "available hai" : `kisi provider mein NAHI — bolo: "${UNAVAILABLE_MESSAGES.FIND_VACANT_SEATS_BERTH_LEVEL}"`}. Do sources ka data alag ho to tool "conflict" batayega → user ko bolo: "Data sources are conflicting right now. Please retry." — values kabhi jodo/average mat karo. Stale/old live data ko current mat bolo — 'as of' time saath do. Seat status UNKNOWN/unavailable aaye to SIRF itna bolo ki data nahi mila (aur agar tool ne segment fare diya ho to wahi, source ke saath) — koi 'reference fare', 'approx', 'usually' ya poore route ka fare KABHI mat likho; jo tool result mein nahi hai woh exist nahi karta.`,
     "3. Multi-step tool calling allowed + encouraged hai: pehle SEARCH_TRAINS, phir results dekh kar zaroorat ke hisaab se GET_TIMETABLE / GET_FARE / CHECK_AVAILABILITY / GET_TRAIN_INFO call karo. Ek tool call mein sab na mile to agla tool call karo.",
+    "3a. FLOW TUMHARA hai (user rule: 'AI pehle message se booking tak sab khud handle kare'): journey ke liye 3 cheezein chahiye — (i) exact stations (ambiguous city → SEARCH_STATIONS options), (ii) date, (iii) passengers. Jo missing ho wo EK-EK karke natural tareeke se poochho (pehle station, phir date, phir passengers) — tools bina inke reject ho jaate hain (DATE MISSING / PASSENGERS MISSING) to us sawaal ka jawab poochho, kabhi assume mat karo. Sab mil jaaye to seedha RANK_JOURNEY_OPTIONS (poora planner: har train × har class, same-train earlier-stop, leg-1/leg-2) chalao — user se 'search karun?' mat poochho.",
     "3b. User sirf train number + class poochhe (route na de) to bhi GET_FARE / CHECK_AVAILABILITY bulao — route optional hai, server timetable se route khud lagata hai. Par DATE zaroori hai: Known context mein date=- ho aur user ne is message mein date na di ho to tool call MAT karo (server reject karega) — sirf date poochho (class bhi missing ho to saath mein). Aaj ki date kabhi assume mat karo.",
     "4. Sirf tool results ke facts bolo. Train number, naam, time, fare, seats, delay, STATION CODE — kuch bhi invent mat karo. Station codes/options sirf tool results se; apni knowledge se station code mat banao.",
     "4b. User ne khud UPPERCASE station code diya ho (jaise FZR, CSMT, NDLS, ASR — 2-5 letters) to use SEEDHA tool mein origin/destination ki tarah use karo — 'FZR ka matlab X, kya aap wahin se jaana chahte hain?' jaisa confirmation KABHI mat poochho. Code galat hoga to tool khud bata dega.",
@@ -2063,6 +2079,21 @@ function deterministicSummary(steps: ToolTraceStep[]): string {
         ? `${webAns.summary}\n(General railway rules — live data nahi; official/IRCTC se verify karein.)`
         : `${webAns.summary}\n(Ye railway API ka data nahi, web-scrape ka jawab hai.)`;
     return others.length ? `${head}\n${others.map((s) => `• ${s.summary}`).join("\n")}` : head;
+  }
+  /* Round-18m-30q: planner tool ok par model final-answer time-out → user ko MODEL-INSTRUCTION text
+   * ("JOURNEY SUMMARY (verified, ise Hinglish mein…)", "Atlas rank…") kabhi nahi — sirf saaf verdict/summary.
+   * Card (journey plan) client par alag render hota hai. */
+  const clean = (t: string) =>
+    t
+      .replace(/AI DECISION \(journey planner AI ne[^)]*\):\s*/g, "")
+      .replace(/JOURNEY SUMMARY \(verified,[^)]*\):\s*/g, "")
+      .replace(/\s*Atlas rank \([^)]*\):[\s\S]*$/g, "")
+      .replace(/\s*\(Sources?:[^)]*\)\s*$/g, "")
+      .trim();
+  const planStep = okSteps.find((s) => s.tool === "RANK_JOURNEY_OPTIONS" || s.tool === "JOURNEY_ANALYZE");
+  if (planStep) {
+    const c = clean(planStep.summary);
+    if (c) return `${c}\n(AI ka final jawab time par nahi aaya — upar verified plan hai, neeche card mein poora detail.)`;
   }
   /* Ek hi step — bullet ki zaroorat nahi; duplicate summaries collapse. */
   const uniq = [...new Set(okSteps.map((s) => s.summary))];
@@ -2615,6 +2646,24 @@ export async function runAgenticTurn(input: {
             rejected: "date_required",
           };
         } else if (
+          (toolName === "SEARCH_TRAINS" || toolName === "JOURNEY_ANALYZE" || toolName === "RANK_JOURNEY_OPTIONS" || toolName === "FIND_CONNECTIONS" || toolName === "CHECK_AVAILABILITY" || toolName === "FIND_VACANT_SEATS" || toolName === "FIND_PARTIAL_ROUTE_SEATS" || toolName === "FIND_ALTERNATIVE_TRAINS") &&
+          !(input.known?.passengers && input.known.passengers >= 1) &&
+          !(typeof args.passengers === "number" && args.passengers >= 1) &&
+          !(input.known?.dateProvided === false && dateHint?.kind !== "date") /* date pehle poochhegi (upar/neeche wala guard) */
+        ) {
+          /* Round-18m-30q (user: "AI ko khud samajhna chahiye ki station ke baad passengers poochne hain, tabhi
+           * seats us hisaab se milengi — code gate nahi, AI ka brain"): passenger count ab deterministic gate
+           * nahi, TOOL PRECONDITION hai — seat/journey tools bina party-size ke chalte hi nahi. Model ko wajah
+           * milti hai, sawaal wo apne shabdon mein poochhta hai. Kabhi 1 assume nahi. */
+          result = {
+            ok: false,
+            source: null,
+            summary:
+              "PASSENGERS MISSING — kitne log travel kar rahe hain ye pata nahi. Seat availability / journey plan party-size par depend karta hai (2 logon ke liye AVL 1 kaafi nahi), isliye ye tool bina passengers ke nahi chalega. 1 ASSUME MAT KARO. Reply mein sirf poochho: kitne passengers (1–6)? (route/date jo pata hai wo confirm karte hue). User number de to isi tool ko `passengers` arg ke saath dobara call karo.",
+            data: null,
+            rejected: "passengers_required",
+          };
+        } else if (
           (toolName === "SEARCH_TRAINS" || toolName === "JOURNEY_ANALYZE" || toolName === "RANK_JOURNEY_OPTIONS" || toolName === "FIND_CONNECTIONS") &&
           input.known?.dateProvided === false &&
           dateHint?.kind !== "date"
@@ -2630,7 +2679,7 @@ export async function runAgenticTurn(input: {
             rejected: "date_required",
           };
         } else {
-          result = await executeApprovedTool(toolName, args, { userText: input.text, passengers: input.known?.passengers ?? null, deferDecision: true });
+          result = await executeApprovedTool(toolName, args, { userText: input.text, passengers: input.known?.passengers ?? (typeof args.passengers === "number" && args.passengers >= 1 && args.passengers <= 6 ? args.passengers : null), deferDecision: true });
         }
         // Structured table capture (user feedback 2026-09-05): SEARCH/JOURNEY
         // success par rows nikalo — client proper <table> render karega, aur

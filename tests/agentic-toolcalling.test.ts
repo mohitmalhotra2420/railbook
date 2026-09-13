@@ -311,6 +311,7 @@ describe("agentic tool-calling layer", () => {
     const turn = await runAgenticTurn({
       text: "Amritsar se Delhi Saturday ko sabse fast train kaunsi hai aur CC ka fare aur availability kya hai?",
       now: NOW,
+      known: { passengers: 1 }, // Round-18m-30q: party size is a tool precondition
     });
 
     expect(turn.ok).toBe(true);
@@ -358,7 +359,7 @@ describe("agentic tool-calling layer", () => {
       throw new Error("unexpected extra model call");
     });
 
-    const turn = await runAgenticTurn({ text: "google se train data nikalo", now: NOW });
+    const turn = await runAgenticTurn({ text: "google se train data nikalo", now: NOW, known: { passengers: 1 } });
     expect(turn.steps[0].tool).toBe("SEARCH_WEB");
     expect(turn.steps[0].ok).toBe(false);
     expect(turn.steps[0].summary).toMatch(/approved list/i);
@@ -387,7 +388,7 @@ describe("agentic tool-calling layer", () => {
     });
 
     const fee = Number(process.env.SERVICE_FEE_INR ?? 25);
-    const turn = await runAgenticTurn({ text: "12014 CC ka fare batao", now: NOW });
+    const turn = await runAgenticTurn({ text: "12014 CC ka fare batao", now: NOW, known: { passengers: 1 } });
     expect(turn.steps[0].ok).toBe(false);
     expect(turn.steps[0].summary).toMatch(/Invalid arguments/i);
     expect(turn.steps[1].ok).toBe(true);
@@ -435,7 +436,7 @@ describe("agentic tool-calling layer", () => {
       return chatResponse({ content: "12014 CC mein 2026-09-05 ko AVAILABLE hai — 47 seats." });
     });
 
-    const turn = await runAgenticTurn({ text: "availability batao", now: NOW });
+    const turn = await runAgenticTurn({ text: "availability batao", now: NOW, known: { passengers: 1 } });
     expect(turn.steps[0].tool).toBe("CHECK_AVAILABILITY");
     expect(turn.steps[0].ok).toBe(true);
     expect(turn.steps[0].source).toBe("railcore");
@@ -464,7 +465,7 @@ describe("agentic tool-calling layer", () => {
     });
 
     const total = 1210 + Number(process.env.SERVICE_FEE_INR ?? 25);
-    const turn = await runAgenticTurn({ text: "12014 ka cc fare btao", now: NOW });
+    const turn = await runAgenticTurn({ text: "12014 ka cc fare btao", now: NOW, known: { passengers: 1 } });
     expect(modelCalls).toBe(3); // tool-call turn + dumb reply + repaired reply
     expect(turn.reply).toContain(String(total));
     expect(turn.grounded).toBe(true);
@@ -482,7 +483,7 @@ describe("agentic tool-calling layer", () => {
       return chatResponse({ content: "Sabse fast 12014 hai aur CC fare sirf ₹999 hai." });
     });
 
-    const turn = await runAgenticTurn({ text: "ASR se NDLS trains", now: NOW });
+    const turn = await runAgenticTurn({ text: "ASR se NDLS trains", now: NOW, known: { passengers: 1 } });
     expect(turn.grounded).toBe(false);
     expect(turn.failureReason || "").toMatch(/^ungrounded_numbers/);
     expect(turn.reply).not.toContain("999");
@@ -578,7 +579,7 @@ describe("agentic tool-calling layer", () => {
       if (toolMsgs === 0) return chatResponse({ tool_calls: [toolCall("SEARCH_TRAINS", { origin: "ASR", destination: "NDLS", date: "2026-09-05" })] });
       return chatResponse({ content: "2 trains mili ASR se NDLS ko 2026-09-05 par." });
     });
-    const turn = await runAgenticTurn({ text: "trains dikhao", now: NOW });
+    const turn = await runAgenticTurn({ text: "trains dikhao", now: NOW, known: { passengers: 1 } });
     expect(turn.ok).toBe(true);
   });
 
@@ -622,12 +623,12 @@ describe("agent integration: agentic path + deterministic fallback", () => {
     /* ROUND-13d: unambiguous "number + kaha hai" ab INSTANT deterministic
      * fast-path se (getLiveStatus tool) — LLM round-trip skip. Station-token
      * ("ambala") wali query fast-path skip karti hai -> agentic trace. */
-    const fast = await request(app).post("/api/agent").send({ text: "12014 abhi kaha hai?", now: NOW });
+    const fast = await request(app).post("/api/agent").send({ known: { passengerCount: 1 }, text: "12014 abhi kaha hai?", now: NOW });
     expect(fast.status).toBe(200);
     expect(fast.body.engine).toBe("deterministic");
     expect(fast.body.tool).toBe("getLiveStatus");
     expect(fast.body.grounded).toBe(true);
-    const res = await request(app).post("/api/agent").send({ text: "12014 ambala kahan hai?", now: NOW });
+    const res = await request(app).post("/api/agent").send({ known: { passengerCount: 1 }, text: "12014 ambala kahan hai?", now: NOW });
     expect(res.status).toBe(200);
     expect(res.body.engine).toBe("agentic_tool_calling");
     expect(res.body.grounded).toBe(true);
@@ -644,7 +645,7 @@ describe("agent integration: agentic path + deterministic fallback", () => {
       throw new Error("nvidia unreachable");
     });
     const app = createApp();
-    const res = await request(app).post("/api/agent").send({ text: "12014 abhi kaha hai?", now: NOW });
+    const res = await request(app).post("/api/agent").send({ known: { passengerCount: 1 }, text: "12014 abhi kaha hai?", now: NOW });
     expect(res.status).toBe(200);
     expect(res.body.engine ?? "deterministic").toBe("deterministic");
     expect(res.body.reply).toBeTruthy();
@@ -736,12 +737,12 @@ describe("agent integration: agentic path + deterministic fallback", () => {
         { role: "assistant", content: "Kis date ko jaana hai?" },
       ],
     });
-    expect(gated.engine).toBe("deterministic");
-    expect(gated.resumeAsk).toBe("passengers");
-    expect(gated.missingFields).toEqual(["passengers"]);
-    expect(gated.reply).toMatch(/kitne passengers/i);
+    /* Round-18m-30q (user: "AI khud samjhe ki passengers poochne hain"): gate ab deterministic nahi —
+     * SEARCH_TRAINS tool PASSENGERS MISSING par reject hota hai (koi search nahi chalti), model poochhta hai. */
     expect(gated.context.date).toBe("2026-09-05");
     expect(gated.trains).toBeNull();
+    expect((gated.toolTrace ?? []).some((t) => t.tool === "SEARCH_TRAINS" && t.ok)).toBe(false);
+    searches.length = 0;
     const result = await runAgent({
       text: "Saturday",
       now: NOW,
@@ -781,7 +782,7 @@ describe("agent integration: agentic path + deterministic fallback", () => {
     });
     const res = await request(createApp())
       .post("/api/agent")
-      .send({
+      .send({ known: { passengerCount: 1 },
         // No "fastest/sabse tez/compare" keyword the old gate looked for — the model decides.
         text: "Amritsar se Delhi subah wali sabse achhi train kaunsi hai 5 tareek ko?",
         now: NOW,
@@ -829,7 +830,7 @@ describe("agent integration: agentic path + deterministic fallback", () => {
          * nayi journey = date + passengers dobara) — isliye pax TEXT mein. */
         text: "Amritsar se Delhi Saturday ko 2 passengers ke liye sabse fast train kaunsi hai aur CC ka fare aur availability kya hai?",
         now: NOW,
-        known: { from: { code: "ASR", name: "Amritsar Junction" }, to: { code: "NDLS", name: "New Delhi" } },
+        known: { passengerCount: 1,  from: { code: "ASR", name: "Amritsar Junction" }, to: { code: "NDLS", name: "New Delhi" } },
       });
     expect(res.status).toBe(200);
     expect(res.body.engine).toBe("agentic_tool_calling");
@@ -850,7 +851,7 @@ describe("agent integration: agentic path + deterministic fallback", () => {
     });
     const res = await request(createApp())
       .post("/api/agent")
-      .send({ text: "12014 abhi kaha hai?", now: NOW, history: [{ role: "user", content: "12014 ki live status" }] });
+      .send({ known: { passengerCount: 1 }, text: "12014 abhi kaha hai?", now: NOW, history: [{ role: "user", content: "12014 ki live status" }] });
     expect(res.status).toBe(200);
     expect(res.body.engine ?? "deterministic").toBe("deterministic");
     expect(res.body.reply).toBeTruthy();
@@ -890,7 +891,7 @@ describe("agent integration: agentic path + deterministic fallback", () => {
       if (toolMsgs === 0) return chatResponse({ tool_calls: [toolCall("SEARCH_TRAINS", { origin: "ASR", destination: "NDLS", date: "2026-09-05" })] });
       return chatResponse({ content: "ASR → NDLS 2026-09-05: 2 trains — 12014 AMRITSAR SHATABDI sabse fast." });
     });
-    const turn = await runAgenticTurn({ text: "amritsar se delhi kal jaana hai", now: NOW, known: { origin: "ASR", destination: "NDLS", date: null, dateProvided: false } });
+    const turn = await runAgenticTurn({ text: "amritsar se delhi kal jaana hai", now: NOW, known: { passengers: 1,  origin: "ASR", destination: "NDLS", date: null, dateProvided: false } });
     expect(turn.steps.find((s) => s.tool === "SEARCH_TRAINS")?.ok).toBe(true);
   });
 
@@ -911,7 +912,7 @@ describe("agent integration: agentic path + deterministic fallback", () => {
       }
       return chatResponse({ content: "12014 CC ka availability kis date ka chahiye? (aaj/kal/parso ya tareekh)" });
     });
-    const turn = await runAgenticTurn({ text: "12014 CC ki seat batao", now: NOW, known: { trainNumber: "12014", classCode: "CC", date: null, dateProvided: false } });
+    const turn = await runAgenticTurn({ text: "12014 CC ki seat batao", now: NOW, known: { passengers: 1,  trainNumber: "12014", classCode: "CC", date: null, dateProvided: false } });
     for (const name of ["CHECK_AVAILABILITY", "GET_FARE"]) {
       const st = turn.steps.find((s) => s.tool === name);
       expect(st?.ok).toBe(false);
@@ -930,7 +931,7 @@ describe("agent integration: agentic path + deterministic fallback", () => {
       if (toolMsgs === 0) return chatResponse({ tool_calls: [toolCall("CHECK_AVAILABILITY", { train_number: "12014", date: "2026-09-05", origin: "ASR", destination: "NDLS", class_code: "CC" })] });
       return chatResponse({ content: "12014 CC ASR→NDLS 2026-09-05: AVAILABLE, 47 seats." });
     });
-    const turn = await runAgenticTurn({ text: "12014 CC kal ki seat batao", now: NOW, known: { trainNumber: "12014", classCode: "CC", date: null, dateProvided: false } });
+    const turn = await runAgenticTurn({ text: "12014 CC kal ki seat batao", now: NOW, known: { passengers: 1,  trainNumber: "12014", classCode: "CC", date: null, dateProvided: false } });
     expect(turn.steps.find((s) => s.tool === "CHECK_AVAILABILITY")?.ok).toBe(true);
   });
 });

@@ -1569,8 +1569,11 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
       }
     }
 
-    /* Round-18m-9: passenger-count gate — search se pehle. */
-    {
+    /* Round-18m-9: passenger-count gate — search se pehle.
+     * Round-18m-30q (user: "AI khud samjhe ki passengers poochne hain"): agentic path mein ye gate ab sirf
+     * SAFETY-NET hai — model ko pehle mauka: seat/journey tools PASSENGERS MISSING par reject hote hain, model
+     * apne shabdon mein poochhta hai. Gate tab lagta hai jab AI configured na ho ya AI_OWNS_FLOW=0. */
+    if (process.env.AI_OWNS_FLOW === "0") {
       const paxAsk = passengerGateAsk(ctx, det, req.text, { trainNo, stationPick });
       if (paxAsk) {
         ctx.bookingStage = "collecting";
@@ -1719,7 +1722,8 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
           dateProvided: Boolean(ctx.dateProvided || det.date),
           trainNumber: trainNo ?? null,
           classCode: ctx.classCode ?? det.classCodes?.[0] ?? null,
-          passengers: ctx.passengers ?? det.passengerCount ?? null,
+          /* Round-18m-30q: pax sirf tab jab user ne bataye (paxProvided) — warna tool precondition model se poochhwayegi. */
+          passengers: (ctx.paxProvided ? ctx.passengers : null) ?? det.passengerCount ?? null,
           stationPicked: stationPick ? (stationPick.side === "to" ? "destination" : "origin") : null,
           /* Round-9 (Agra-bug): pending cluster-city context se — turn-1 ka
            * unresolved "Agra" turn-2 tak yaad rahe. */

@@ -47,8 +47,9 @@ describe("Round-18m-28: runAgent — screenshot turn now asks passengers (planne
     const res = await runAgent({ text: "Muje jammu se ndls jaana hai aaj seats dikhao", now: "2026-09-12T20:39:00.000Z", context: prevCtx });
     expect(res.tool).not.toBe("getAvailability");
     expect(res.context.selectedTrainNumber ?? null).toBeNull();
-    expect(res.resumeAsk).toBe("passengers");
-    expect(res.reply).toMatch(/kitne passengers/i);
-    expect(res.reply).toContain("JAT → NDLS");
+    /* Round-18m-30q: pax sawaal AI ka; invariant — pax assume nahi, koi 12426-only availability/plan nahi. */
+    expect(res.context.paxProvided).toBe(false);
+    expect(res.journey ?? null).toBeNull();
+    expect((res.toolTrace ?? []).some((t) => t.tool === "CHECK_AVAILABILITY" && t.ok)).toBe(false);
   }, 30000);
 });
