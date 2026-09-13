@@ -778,7 +778,10 @@ export async function findBoardFromEarlier(args: {
         const tryOneSegment = async (bf: Stop, bu: Stop | null, stopsBefore: number, stopsAfterN: number): Promise<boolean> => {
           stopsChecked++;
           const segTo = bu ? String(bu.code).toUpperCase() : to;
-          const board = await routedClassBoard(t.number, args.date, String(bf.code).toUpperCase(), segTo, "GN", hint);
+          /* Round-18m-30: earlier stop agar train ke PICHHLE din padta ho (user ka boarding day-2 par) to
+           * provider ko us stop ki asli departure date chahiye — warna galat din ka board aata hai. */
+          const segDate = addDays(args.date, Math.min(0, dayOf(bf) - dayOf(stops[iFrom])));
+          const board = await routedClassBoard(t.number, segDate, String(bf.code).toUpperCase(), segTo, "GN", hint);
           /* Round-18m-7: SAB classes check — jis class mein bhi seat mile, sab dikhao. Stale AVL/RAC bhi option (⚠), fresh pehle. */
           const all = bookableRows(board.classes, { includeStale: true }).filter((r) => enoughSeats(r, args.passengers) && (!need.length || need.includes(r.classCode)));
           const row = (args.travelClass ? all.find((r) => r.classCode === args.travelClass) : undefined) ?? all[0] ?? null;
