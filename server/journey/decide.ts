@@ -57,9 +57,9 @@ const rowTxt = (r: RouteAvailability) => `${r.classCode} ${r.status === "AVAILAB
 const dur = (m: number | null) => (m == null ? "?" : `${Math.floor(m / 60)}h${String(m % 60).padStart(2, "0")}m`);
 
 export function candidateSheet(plan: JourneyPlan, cands: JourneyCandidate[]): string {
-  const pax = plan.query.passengers ?? 1;
+  const pax = plan.query.passengers ?? null;
   const L: string[] = [];
-  L.push(`ROUTE ${plan.query.from} -> ${plan.query.to} on ${plan.query.date}, ${pax} passenger(s)${plan.query.travelClass ? `, preferred class ${plan.query.travelClass}` : ""}.`);
+  L.push(`ROUTE ${plan.query.from} -> ${plan.query.to} on ${plan.query.date}, ${pax ? `${pax} passenger(s)` : "passenger count NOT given (do not state a number of passengers)"}${plan.query.travelClass ? `, preferred class ${plan.query.travelClass}` : ""}.`);
   L.push("DATA RULES: FRESH = live provider data now. STALE = 24h+ old web cache (may have changed; must be re-verified before booking). WL = waitlisted, not a seat. RAC = treated as an AVAILABLE seat for ANY party size (travel confirmed, berth confirms after chart preparation); prefer AVL over RAC only when both exist. A train with no rows was NOT checked (unknown, not 'no seat').");
   L.push("");
   L.push("CANDIDATES (id | kind | trains | timing | duration | seat board):");

@@ -278,7 +278,7 @@ function LegList({ title, legs, checked, baseDate, dayOffset, onPickLeg, all }: 
   );
 }
 
-function LegPlanCard({ lp, baseDate, pax, onPickLeg }: { lp: NonNullable<AgentJourneyPlan["legPlans"]>[number]; baseDate?: string | null; pax?: number | null; onPickLeg?: (leg: AgentRouteLeg) => void }) {
+function LegPlanCard({ lp, baseDate, pax, onPickLeg, heroKey }: { heroKey?: string | null; lp: NonNullable<AgentJourneyPlan["legPlans"]>[number]; baseDate?: string | null; pax?: number | null; onPickLeg?: (leg: AgentRouteLeg) => void }) {
   const bestA = lp.best?.legs[0];
   const from = lp.leg1[0]?.from ?? lp.leg1All?.[0]?.from ?? "";
   const to = lp.leg2[0]?.to ?? lp.leg2All?.[0]?.to ?? "";
@@ -301,7 +301,12 @@ function LegPlanCard({ lp, baseDate, pax, onPickLeg }: { lp: NonNullable<AgentJo
   return (
     <div className="jx-legplan">
       <div className="jx-legplan-head">{IC.link} <strong>Via {lp.hubName ?? lp.hub}</strong> <span className="jx-sub">({lp.hub}) · {lp.leg1.length + lp.leg2.length} trains with seats{pax ? ` for ${pax} pax` : ""}</span></div>
-      {lp.best && (
+      {/* Round-18m-30f (user: "layout confusing"): jo combo upar hero mein already dikh raha hai, use yahan
+          dobara mat dikhao — sirf ek line. */}
+      {lp.best && heroKey && lp.best.legs.map((l) => l.trainNumber).join("+") === heroKey && (
+        <div className="jx-sub jx-legplan-same">{IC.check} Upar wala AI-recommended combo ({heroKey.replace("+", " + ")}) isi hub se hai — neeche Leg 1 / Leg 2 ki baaki seat-wali trains, apna combo bhi bana sakte ho.</div>
+      )}
+      {lp.best && !(heroKey && lp.best.legs.map((l) => l.trainNumber).join("+") === heroKey) && (
         <>
           <div className="jx-legplan-best">{IC.star} AI ka joint best combo{lp.best.totalDurationMinutes != null ? ` · ${layoverLabel(lp.best.totalDurationMinutes)} total` : ""} · layover {layoverLabel(lp.best.layoverMinutes)}</div>
           <ConnCard c={lp.best} baseDate={baseDate} onPickLeg={onPickLeg} />
@@ -403,10 +408,11 @@ export function JourneyOptions({
    * jo train probe nahi hui usko saaf "seat data nahi aayi" — "seat nahi" nahi. */
   const probedDirect = direct.filter((o) => o.probed);
   const unprobedDirect = direct.filter((o) => !o.probed);
-  const [boardOpen, setBoardOpen] = useState(true);
+  /* Round-18m-30f: AI ne direct nahi chuna (sab WL) → board default collapsed, ek-line summary; tap = poora board. */
+  const [boardOpen, setBoardOpen] = useState<boolean>(() => !aiRec || aiRec.kind === "direct");
   const seatBoard = direct.length > 0 && (
     <Section ic={IC.train} title={`Direct trains ${plan.query.from}→${plan.query.to}`} badge={`${probedDirect.length}/${direct.length} seat-checked`} foot={unprobedDirect.length ? `${unprobedDirect.map((o) => o.trainNumbers[0]).join(", ")}: seat data provider se nahi aayi — inhe "seat nahi" nahi maana; Refresh seats se dobara check karo.` : "Har direct train ki har class ka status upar hai — RAC bhi booking option hai (berth chart ke baad)."}>
-      <button type="button" className="jx-why-head" onClick={() => setBoardOpen((v) => !v)}>{boardOpen ? "Hide" : "Show"} {direct.length} trains · har class ka seat status <span className={`jx-caret${boardOpen ? " open" : ""}`} /></button>
+      <button type="button" className="jx-why-head" onClick={() => setBoardOpen((v) => !v)}>{boardOpen ? "Hide" : "Show"} {direct.length} trains · har class ka seat status{!boardOpen && plan.directUnavailable ? " · sab WL/N-A" : ""} <span className={`jx-caret${boardOpen ? " open" : ""}`} /></button>
       {boardOpen && [...direct].sort((a, b) => (a.departure ?? "").localeCompare(b.departure ?? "")).map((o) => (
         <div key={o.trainNumbers[0]} className="jx-sb-row">
           <button type="button" className="jx-sb-head" onClick={pick ? () => pick(o) : undefined}><span className="jx-no">{o.trainNumbers[0]}</span> <span className="jx-name">{o.trainNames[0]}</span> <span className="jx-sub">{o.departure}→{o.arrival}{dateTag(baseDate, o.arrivalDayOffset)} · {o.durationLabel ?? ""}</span>{aiRec?.kind === "direct" && aiRec.trainNumbers[0] === o.trainNumbers[0] && <span className="jx-sb-pick">{IC.star} AI pick</span>}</button>
@@ -446,9 +452,9 @@ export function JourneyOptions({
         <div className="jx-route"><span>{plan.query.from}</span><span className="jx-route-arrow">{IC.arrow}</span><span>{plan.query.to}</span></div>
         <div className="jx-meta">
           <span className="jx-pill">{IC.cal} {formatShortDate(plan.query.date)}</span>
-          <span className="jx-pill">{IC.users} {pax ? `${pax} passenger${pax > 1 ? "s" : ""}` : `${plan.routeOptions.length} trains`}</span>
+          {pax ? <span className="jx-pill">{IC.users} {pax} passenger{pax > 1 ? "s" : ""}</span> : <span className="jx-pill jx-pill-warn">{IC.users} passengers? — batao, seats usi hisaab se</span>}
           {plan.query.travelClass && <span className="jx-pill">{plan.query.travelClass}</span>}
-          {pax && <span className="jx-pill">{IC.train} {plan.routeOptions.length} trains</span>}
+          <span className="jx-pill">{IC.train} {direct.length} direct</span>
         </div>
         <ToneLegend />
       </header>
@@ -471,8 +477,6 @@ export function JourneyOptions({
         </div>
       )}
 
-      {/* Round-18m-13 (user: "pehle direct trains dikhao, phir alternatives"). */}
-      {seatBoard}
       {plan.decision?.verdict && (
         <div className="jx-verdict"><span className="jx-why-ic">{IC.spark}</span><div><strong>AI ka faisla{plan.decision.source === "ai" ? "" : " (rules)"}</strong><div>{plan.decision.verdict}</div><div className="jx-basis">Basis: pehle {plan.query.from} se poori party ke liye FRESH seat (AVL &gt; RAC), phir travel time, phir fare/class — same-train earlier-stop ticket bhi isi mein compare.</div></div></div>
       )}
@@ -549,8 +553,8 @@ export function JourneyOptions({
           </div>
           <div className="jx-hero-train">
             <span className="jx-no jx-no-lg">{heroDirect.trainNumbers.join(" + ")}</span>
-            <span className="jx-name jx-name-lg">{heroDirect.trainNames[0]}</span>
-            <SeatPill a={heroDirect.availability} size="lg" />
+            <span className="jx-name jx-name-lg">{heroDirect.changes > 0 ? `via ${heroDirect.legs[0]?.toName ?? heroDirect.legs[0]?.to ?? ""}` : heroDirect.trainNames[0]}</span>
+            {heroDirect.changes > 0 ? <span className="jx-cchip jx-cchip-ok jx-cchip-lg">Dono legs seat ✓</span> : <SeatPill a={heroDirect.availability} size="lg" />}
           </div>
           {heroDirect.changes > 0 && heroDirect.legs.length > 1 ? (
             <ConnCard c={{ station: heroDirect.legs[0].to, stationName: heroDirect.legs[0].toName ?? null, legs: heroDirect.legs, layoverMinutes: heroDirect.layoverMinutes ?? 0, totalDurationMinutes: heroDirect.durationMinutes, valid: true } as unknown as AgentConnection} baseDate={baseDate} onPickLeg={pickLeg} />
@@ -569,7 +573,7 @@ export function JourneyOptions({
             { ic: IC.rupee, text: heroDirect.availability?.fare != null ? inr(heroDirect.availability.fare) : "Fare on select" },
           ]} />
           {/* Round-18m-12: is train ka POORA class board — AVL/RAC/WL sab (RAC bhi option hai). */}
-          <ClassRow label="All classes (this train) · tap = fresh check" rows={heroDirect.classOptions ?? (heroDirect.availability ? [heroDirect.availability] : [])} onPick={onPickClass ? (r) => onPickClass({ trainNumber: heroDirect.trainNumbers[0], classCode: r.classCode, from: heroDirect.origin, to: heroDirect.destination }) : undefined} />
+          {heroDirect.changes === 0 && <ClassRow label="All classes (this train) · tap = fresh check" rows={heroDirect.classOptions ?? (heroDirect.availability ? [heroDirect.availability] : [])} onPick={onPickClass ? (r) => onPickClass({ trainNumber: heroDirect.trainNumbers[0], classCode: r.classCode, from: heroDirect.origin, to: heroDirect.destination }) : undefined} />}
           <div className="jx-hero-cta">
             <div className="jx-hero-note">
               <span className="jx-hero-note-ic">{isOk(heroDirect.availability) ? IC.shield : IC.warn}</span>
@@ -587,6 +591,9 @@ export function JourneyOptions({
         </section>
       )}
 
+      {/* Round-18m-30f (user: "layout confusing"): pehle AI ka faisla + recommended plan (jawab), uske baad
+          direct board (AI ne direct nahi chuna to collapsed), phir connecting leg-wise, phir dates. */}
+      {seatBoard}
       {plan.directUnavailable && !bfeHero && !rec?.differentTrain.length && !connections.length && (
         <div className="jx-alert">Direct trains mein {pax ? `${pax} passengers ke liye ` : ""}confirmed seat nahi mili aur koi verified alternative provider se nahi aaya — invent nahi karte.{onOpenBoard ? " Neeche se sabhi trains dekh sakte ho." : ""}</div>
       )}
@@ -649,7 +656,7 @@ export function JourneyOptions({
       )}
       {(plan.legPlans?.length ?? 0) > 0 && (
         <Section ic={IC.link} title={plan.legPlans!.some((lp) => lp.leg1.length > 0 && lp.leg2.length > 0) ? (plan.directUnavailable ? "Connecting · leg-wise seat options" : "Connecting · leg-wise (comparison — direct mein seat hai)") : "Connecting · koi route possible nahi"} badge={`${plan.legPlans!.length} hub${plan.legPlans!.length > 1 ? "s" : ""}`} foot={plan.legPlans!.some((lp) => lp.leg1.length > 0 && lp.leg2.length > 0) ? (pax ? `Har train par ${pax} passengers ke liye seat verify hui hai — dono tickets alag book hongi.` : "Har train provider-verified — tickets alag-alag book hongi.") : "Har hub par dono legs × saari trains × har class check hui — ek leg par bhi seat na ho to route nahi banta."}>
-          {plan.legPlans!.map((lp) => <LegPlanCard key={lp.hub} lp={lp} baseDate={baseDate} pax={pax} onPickLeg={pickLeg} />)}
+          {plan.legPlans!.map((lp) => <LegPlanCard key={lp.hub} lp={lp} baseDate={baseDate} pax={pax} onPickLeg={pickLeg} heroKey={heroDirect && heroDirect.changes > 0 ? heroDirect.trainNumbers.join("+") : null} />)}
         </Section>
       )}
       {!(plan.legPlans?.length) && connections.length > 0 && (

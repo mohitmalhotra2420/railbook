@@ -827,6 +827,8 @@ describe("agent integration: agentic path + deterministic fallback", () => {
       .send({
         text: "Amritsar se Delhi Saturday ko sabse fast train kaunsi hai aur CC ka fare aur availability kya hai?",
         now: NOW,
+        /* Round-18m-30f: availability/fare = party-size sawaal → pax gate pehle; yahan pax known (user rule: kabhi 1 assume nahi). */
+        known: { from: { code: "ASR", name: "Amritsar Junction" }, to: { code: "NDLS", name: "New Delhi" }, passengerCount: 2 },
       });
     expect(res.status).toBe(200);
     expect(res.body.engine).toBe("agentic_tool_calling");

@@ -937,13 +937,21 @@ async function answerFromWebScrape(questionText: string): Promise<string | null>
 /* Round-18m-9 (user: "kitni seats chahiye ye pata ho tabhi train dhoondho"):
  * journey search se PEHLE passenger count — origin+destination+date lock hone ke
  * baad, train-specific (number) sawaal par nahi, info-only follow-ups par nahi. */
-const PAX_GATE_INTENTS = new Set(["SEARCH_TRAIN", "BOOK_TRAIN", "NONE"]);
+/* Round-18m-30f (user: "passenger khud assume kar raha, har baar nahi poochta"): pehle allow-list thi
+ * (SEARCH/BOOK/NONE) — station-pick "1" (SELECT_TRAIN), "seat availability", "fastest", "compare",
+ * "alternate" jaise turns gate se bach jaate the → pax null → planner 1 assume. Ab EXCLUDE-list: sirf
+ * non-journey intents (live/PNR/wallet/schedule/knowledge…) gate skip karte hain; baaki sab route-level
+ * journey sawaal (route+date lock, pax unknown, train number nahi) → pehle "kitne passengers?". */
+const PAX_GATE_SKIP_INTENTS = new Set(["LIVE_TRAIN_STATUS", "CHECK_PNR", "VIEW_BOOKINGS", "CANCEL_BOOKING", "VIEW_WALLET", "ADD_MONEY", "HELP", "COACH_POSITION", "TRAIN_SCHEDULE", "LIST_CITIES", "RAIL_POLICY", "ABOUT_ASSISTANT", "CANCELLED_TRAINS", "GENERAL_RAILWAY_KNOWLEDGE", "TRAIN_HISTORY", "OUT_OF_DOMAIN", "CONFIRM_YES", "CONFIRM_NO"]);
 function passengerGateAsk(ctx: AgentContext, det: { intent?: string | null; trainNumber?: string | null }, text: string, opts: { trainNo?: string | null; stationPick?: unknown } = {}): string | null {
   if (opts.trainNo || det.trainNumber) return null;
   if (!ctx.origin || !ctx.destination || !ctx.date || !ctx.dateProvided) return null;
   if (ctx.paxProvided && ctx.passengers) return null;
-  if (!PAX_GATE_INTENTS.has(String(det.intent ?? "NONE"))) return null;
-  if (/\b(live|status|kahan hai|platform|timetable|schedule|time table|route|stops?|pnr|coach|fare|kiraya|cancel)\b/i.test(text) && !opts.stationPick) return null;
+  if (PAX_GATE_SKIP_INTENTS.has(String(det.intent ?? "NONE"))) return null;
+  /* Round-18m-30f: "alternate route", "connecting route", "route par seat" = journey sawaal (gate lagta hai);
+   * sirf "train ka route/stops" (schedule) info-ask skip. "fare/kiraya" bhi party-size par depend karta hai → gate. */
+  if (/\b(live|status|kahan hai|platform|timetable|schedule|time table|pnr|coach|cancel)\b/i.test(text) && !opts.stationPick) return null;
+  if (/\b(route|stops?)\b/i.test(text) && !/\b(alternate|alternative|connecting|doosra|dusra|via|seat|seats|jaana|jana|ticket|book)\b/i.test(text) && !opts.stationPick) return null;
   const when = ctx.date ? ` ${ctx.date} ko` : "";
   return `${ctx.origin.code} → ${ctx.destination.code}${when} — kitne passengers hain? (1–6) Seats usi hisaab se check karunga.`;
 }

@@ -346,6 +346,18 @@ export function mergeAgentContext(
     lastTrainNumbers: [...prev.lastTrainNumbers],
     lastTrains: [...(prev.lastTrains ?? [])],
   };
+  /* Round-18m-30f (user: "passenger khud assume kar raha"): user ne WAHI route dobara bola ("ASR se BSB
+   * fastest?") — NLU ne "Bsb" ko unresolved city maana → destination null + pax/date reset → phir se
+   * "kitne passengers?" ya seedha 1 assume. Agar unresolved text pichhle known station ka code/naam/
+   * city hi hai → wahi station, koi change nahi. */
+  const sameAs = (raw: string | null | undefined, st: { code: string; name?: string | null; city?: string | null } | null | undefined) => {
+    if (!raw || !st) return false;
+    const t = raw.trim().toLowerCase().replace(/\s+(jn|junction|station|stn|central|cantt|city)$/i, "");
+    const cands = [st.code, st.name ?? "", st.city ?? ""].map((x) => String(x).toLowerCase().replace(/\s+(jn|junction|station|stn|central|cantt|city)$/i, ""));
+    return cands.some((c) => c && (c === t || c.startsWith(t + " ") || t.startsWith(c + " ")));
+  };
+  if (!nlu.from && nlu.unresolvedFrom && sameAs(nlu.unresolvedFrom, prev.origin)) nlu = { ...nlu, from: prev.origin!, unresolvedFrom: undefined };
+  if (!nlu.to && nlu.unresolvedTo && sameAs(nlu.unresolvedTo, prev.destination)) nlu = { ...nlu, to: prev.destination!, unresolvedTo: undefined };
   /* Round-9 (Agra-bug): unresolved cluster-city context mein yaad rakho —
    * station choose hote hi clear. */
   if (nlu.from) next.pendingOriginChoice = null;
