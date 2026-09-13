@@ -11,6 +11,43 @@ import type {
   WalletState,
 } from "./types";
 
+export type AgentProgress = { phase: string; done?: number; total?: number; detail?: string; at: number };
+export type AgentResponse = {
+      nlu: NluResult;
+      source: "ai" | "nlu";
+      context: AgentContextClient | null;
+      tool: string | null;
+      toolOk: boolean | null;
+      reply: string | null;
+      interrupt: boolean;
+      resumeAsk: DialogSlot | null;
+      resumeText: string | null;
+      confirmBook: false;
+      missingFields: string[];
+      modelUsed?: string | null;
+      latencyMs?: number;
+      failureReason?: string | null;
+      engine?: "agentic_tool_calling" | "deterministic" | null;
+      trains?: import("./ai/agent").AgentTrainTable | null;
+      journey?: import("./ai/agent").AgentJourneyPlan | null;
+      alternatives?: import("./ai/agent").AgentAlternatives | null;
+      trainPicker?: import("./ai/agent").AgentTrainPicker | null;
+      /** Round-18m: live-status date chooser (only dates with real provider data). */
+      liveDates?: { trainNumber: string; trainName: string | null; options: { date: string; label: string; runState: string; provider: string }[] } | null;
+      toolTrace?: {
+        step: number;
+        tool: string;
+        args: Record<string, unknown>;
+        ok: boolean;
+        source: string | null;
+        summary: string;
+        latencyMs: number;
+        dataPreview?: string;
+      }[] | null;
+      grounded?: boolean | null;
+      agenticFailureReason?: string | null;
+    };
+
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
     ...init,
@@ -159,42 +196,47 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  /* Round-18m-29: same payload as /api/agent, delivered over SSE with REAL backend progress
+   * (phase names + completed/total provider checks). Falls back to plain POST if the stream
+   * is unavailable (older server / proxy buffering). */
+  agentStream: async (body: unknown, onProgress: (e: AgentProgress) => void): Promise<AgentResponse> => {
+    const plain = (): Promise<AgentResponse> => request<AgentResponse>("/api/agent", { method: "POST", body: JSON.stringify(body) });
+    let res: Response;
+    try {
+      res = await fetch("/api/agent/stream", { method: "POST", headers: { "Content-Type": "application/json", Accept: "text/event-stream" }, body: JSON.stringify(body) });
+    } catch {
+      return plain();
+    }
+    if (!res.ok || !res.body || !/text\/event-stream/.test(res.headers.get("content-type") ?? "")) return plain();
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    let result: AgentResponse | null = null;
+    let error: string | null = null;
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let idx: number;
+      while ((idx = buf.indexOf("\n\n")) >= 0) {
+        const chunk = buf.slice(0, idx);
+        buf = buf.slice(idx + 2);
+        const ev = /^event: (.+)$/m.exec(chunk)?.[1]?.trim();
+        const data = chunk.split("\n").filter((l) => l.startsWith("data: ")).map((l) => l.slice(6)).join("\n");
+        if (!ev || !data) continue;
+        try {
+          if (ev === "progress") onProgress(JSON.parse(data) as AgentProgress);
+          else if (ev === "result") result = JSON.parse(data) as AgentResponse;
+          else if (ev === "error") error = String((JSON.parse(data) as { error?: string }).error ?? "stream error");
+        } catch { /* partial/invalid frame ignored */ }
+      }
+    }
+    if (result) return result;
+    if (error) throw new Error(error);
+    return plain();
+  },
   agent: (body: unknown) =>
-    request<{
-      nlu: NluResult;
-      source: "ai" | "nlu";
-      context: AgentContextClient | null;
-      tool: string | null;
-      toolOk: boolean | null;
-      reply: string | null;
-      interrupt: boolean;
-      resumeAsk: DialogSlot | null;
-      resumeText: string | null;
-      confirmBook: false;
-      missingFields: string[];
-      modelUsed?: string | null;
-      latencyMs?: number;
-      failureReason?: string | null;
-      engine?: "agentic_tool_calling" | "deterministic" | null;
-      trains?: import("./ai/agent").AgentTrainTable | null;
-      journey?: import("./ai/agent").AgentJourneyPlan | null;
-      alternatives?: import("./ai/agent").AgentAlternatives | null;
-      trainPicker?: import("./ai/agent").AgentTrainPicker | null;
-      /** Round-18m: live-status date chooser (only dates with real provider data). */
-      liveDates?: { trainNumber: string; trainName: string | null; options: { date: string; label: string; runState: string; provider: string }[] } | null;
-      toolTrace?: {
-        step: number;
-        tool: string;
-        args: Record<string, unknown>;
-        ok: boolean;
-        source: string | null;
-        summary: string;
-        latencyMs: number;
-        dataPreview?: string;
-      }[] | null;
-      grounded?: boolean | null;
-      agenticFailureReason?: string | null;
-    }>("/api/agent", {
+    request<AgentResponse>("/api/agent", {
       method: "POST",
       body: JSON.stringify(body),
     }),

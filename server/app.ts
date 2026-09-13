@@ -1,4 +1,5 @@
 import express from "express";
+import { installFetchMetrics, progress, runTurnScope, summarize, type ProgressEvent } from "./perf/turnScope.js";
 import cors from "cors";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -52,6 +53,8 @@ const passengerSchema = z.object({
 });
 
 const SERVER_STARTED_AT = new Date().toISOString();
+
+installFetchMetrics();
 
 export function createApp() {
   const app = express();
@@ -202,22 +205,21 @@ export function createApp() {
     }
   });
 
-  app.post("/api/agent", async (req, res, next) => {
-    try {
-      const text = String(req.body?.text ?? "").trim();
-      if (!text) {
-        res.status(400).json({ error: "text is required." });
-        return;
-      }
+  /* Round-18m-29: shared runner — wraps runAgent in a per-turn perf scope (same-turn dedup +
+   * limiter + metrics + real progress). Freshness: scope dies with the turn; nothing is reused
+   * across enquiries. */
+  const runAgentTurn = (body: Record<string, unknown>, onProgress?: (e: ProgressEvent) => void) =>
+    runTurnScope(async (scope) => {
+      progress("Understanding your request");
       const result = await runAgent({
-        text,
-        lastAsked: req.body?.lastAsked ?? null,
-        known: req.body?.known ?? {},
-        context: req.body?.context,
-        now: req.body?.now,
-        bookingFlow: req.body?.bookingFlow,
-        history: Array.isArray(req.body?.history)
-          ? (req.body.history as { role?: unknown; content?: unknown }[])
+        text: String(body?.text ?? "").trim(),
+        lastAsked: (body?.lastAsked as never) ?? null,
+        known: (body?.known as never) ?? {},
+        context: body?.context as never,
+        now: body?.now as never,
+        bookingFlow: body?.bookingFlow as never,
+        history: Array.isArray(body?.history)
+          ? (body.history as { role?: unknown; content?: unknown }[])
               .filter(
                 (h): h is { role: "user" | "assistant"; content: string } =>
                   (h?.role === "user" || h?.role === "assistant") &&
@@ -227,7 +229,8 @@ export function createApp() {
               .slice(-10)
           : undefined,
       });
-      res.json({
+      progress("Preparing results");
+      return {
         nlu: result.nlu,
         source: result.source,
         context: result.context,
@@ -252,9 +255,50 @@ export function createApp() {
         liveDates: result.liveDates ?? null,
         grounded: result.grounded ?? null,
         agenticFailureReason: (result as { agenticFailureReason?: string | null }).agenticFailureReason ?? null,
-      });
+        perf: summarize(scope),
+      };
+    }, onProgress);
+
+  app.post("/api/agent", async (req, res, next) => {
+    try {
+      const text = String(req.body?.text ?? "").trim();
+      if (!text) {
+        res.status(400).json({ error: "text is required." });
+        return;
+      }
+      res.json(await runAgentTurn(req.body ?? {}));
     } catch (err) {
       next(err);
+    }
+  });
+
+  /* Round-18m-29: same turn over SSE — `progress` events are REAL backend milestones
+   * (phase names + completed/total provider checks), then one `result` event with the exact
+   * payload /api/agent would have returned. */
+  app.post("/api/agent/stream", async (req, res) => {
+    const text = String(req.body?.text ?? "").trim();
+    if (!text) {
+      res.status(400).json({ error: "text is required." });
+      return;
+    }
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders?.();
+    const send = (event: string, data: unknown) => {
+      if (res.writableEnded) return;
+      res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    };
+    const keepAlive = setInterval(() => { if (!res.writableEnded) res.write(": ping\n\n"); }, 15000);
+    try {
+      const result = await runAgentTurn(req.body ?? {}, (e) => send("progress", e));
+      send("result", result);
+    } catch (err) {
+      send("error", { error: err instanceof Error ? err.message : String(err) });
+    } finally {
+      clearInterval(keepAlive);
+      res.end();
     }
   });
 

@@ -38,7 +38,9 @@ import {
   GENERAL_FACT_RE, isQuestionPhraseNotTrainName, segmentOfStops } from "./context.js";
 import { routedTrainNameSearch, routedTrainHistory } from "../railway/router.js";
 import { JOURNEY_CONFIG, findConnections, findPartialRouteSeats, findVacantSeats, planJourney } from "../journey/engine.js";
-import { durationLabelOf, type JourneyPlan, type AlternativeTrainsResult } from "../journey/types.js";
+import { durationLabelOf, type JourneyPlan, type AlternativeTrainsResult, type JourneyCandidate } from "../journey/types.js";
+import { DECISION_PRINCIPLES, buildCandidates, candidateSheet, parseDecisionJson, validateDecision } from "../journey/decide.js";
+import { finalizeAiDecision } from "../journey/engine.js";
 import { findAlternativeTrains, findAlternateStationOptions } from "../journey/engine.js";
 import { pickTrains, type TrainPickerResult } from "../journey/trainpicker.js";
 import { capabilityAvailable, UNAVAILABLE_MESSAGES } from "../providers/capabilities.js";
@@ -1085,6 +1087,8 @@ export type ToolExecContext = {
   userText?: string;
   /** Round-18m-9: passengers from known context — seat filters use it. */
   passengers?: number | null;
+  /** Round-18m-29: agentic loop → planner ka decision final-answer call mein merge (AI 3→2). */
+  deferDecision?: boolean;
 };
 
 export async function executeApprovedTool(
@@ -1650,6 +1654,7 @@ export async function executeApprovedTool(
           includeConnections: Boolean(a.include_connections) || prefRaw === "alternative" || prefRaw === "fewest_changes",
           includeAlternativeDates: Boolean(a.include_alternative_dates) || prefRaw === "alternative",
           passengers: ctx.passengers ?? (a.passengers as number | undefined) ?? null,
+          deferDecision: ctx.deferDecision === true,
         });
         const top = plan.routeOptions.slice(0, 5);
         const line = (o: (typeof top)[number]) =>
@@ -2212,6 +2217,8 @@ export async function runAgenticTurn(input: {
   // Model chain poor fail ho to upar caller (runAgent) deterministic fallback chalata hai.
   const modelChain = transport.models;
   let repaired = false;
+  /* Round-18m-29: deferred planner decision (validated from the final answer). */
+  let pendingDecision: { plan: JourneyPlan; cands: JourneyCandidate[] } | null = null;
 
   // Vercel function wall (~30s default) — poora turn is budget ke andar raho.
   // Wall paar hua to jo tool-data mila uska summary return karo (null nahi).
@@ -2300,7 +2307,9 @@ export async function runAgenticTurn(input: {
             // budget mein ginte hain — 900 par lambe tool-results ke baad
             // final content beech mein kat jaata tha ("…jo result aaya wo").
             // gpt-oss (reasoning_effort low) 900 par theek hai.
-            max_tokens: model.startsWith("openai/gpt-oss") ? 900 : 2000,
+            /* Round-18m-29: merged decision step → reasoning models ko <decision> JSON + reply
+             * ke liye thoda headroom (warna sirf reasoning_content aata hai, content khaali). */
+            max_tokens: model.startsWith("openai/gpt-oss") ? 900 : pendingDecision ? 3000 : 2000,
             messages,
             tools: AGENTIC_TOOLS,
           }),
@@ -2530,7 +2539,7 @@ export async function runAgenticTurn(input: {
             rejected: "date_required",
           };
         } else {
-          result = await executeApprovedTool(toolName, args, { userText: input.text, passengers: input.known?.passengers ?? null });
+          result = await executeApprovedTool(toolName, args, { userText: input.text, passengers: input.known?.passengers ?? null, deferDecision: true });
         }
         // Structured table capture (user feedback 2026-09-05): SEARCH/JOURNEY
         // success par rows nikalo — client proper <table> render karega, aur
@@ -2572,7 +2581,7 @@ export async function runAgenticTurn(input: {
           const d = result.data as { from?: string; to?: string; date?: string; trains?: unknown[]; provider?: string } | null;
           if (d?.from && d?.to && d?.date && Array.isArray(d.trains) && d.trains.length) {
             try {
-              const plan = await planJourney({ from: String(d.from), to: String(d.to), date: String(d.date), travelClass: (args.travel_class as string | undefined)?.toUpperCase() ?? null, preference: "best_overall", includeConnections: false, includeAlternativeDates: false, passengers: input.known?.passengers ?? null });
+              const plan = await planJourney({ from: String(d.from), to: String(d.to), date: String(d.date), travelClass: (args.travel_class as string | undefined)?.toUpperCase() ?? null, preference: "best_overall", includeConnections: false, includeAlternativeDates: false, passengers: input.known?.passengers ?? null, deferDecision: true });
               if (plan.routeOptions.length) {
                 input.capture.plan = plan;
                 /* Round-18l: user-visible text (verbatim when every model times out) — no model instructions. */
@@ -2679,6 +2688,23 @@ export async function runAgenticTurn(input: {
           tool_call_id: tc.id,
           content: JSON.stringify({ ok: result.ok, source: result.source, summary: result.summary, data: result.data }),
         });
+        /* Round-18m-29: planner ka FAISLA ab isi loop ki final call mein (alag decision
+         * call nahi → AI calls 3→2). Model ko wahi grounded candidate sheet + principles
+         * milte hain jo decideJourney deta tha; output `<decision>{json}</decision>` server
+         * par validate hota hai (unknown id/₹/seat-claim → rules fallback). */
+        if (input.capture?.plan?.decisionDeferred && !pendingDecision) {
+          const plan = input.capture.plan;
+          const cands = buildCandidates(plan);
+          if (cands.length) {
+            pendingDecision = { plan, cands };
+            messages.push({
+              role: "user",
+              content:
+                `SYSTEM (journey decision — you are also RailBook's journey planner AI):\n${DECISION_PRINCIPLES}\n\n${candidateSheet(plan, cands)}\n\n` +
+                "In your FINAL answer, FIRST output the decision JSON wrapped exactly as <decision>{...}</decision> (ids only from the sheet), THEN a blank line, THEN the Hinglish reply for the traveller (2-4 lines: what to book, why, what was rejected; numbers/trains exactly as in the tool data). The <decision> block is machine-read and hidden from the user.",
+            });
+          }
+        }
       }
       /* Round-18g: duplicate tool_calls ko unke original ka result relay karo
        * (OpenAI-style APIs har tool_call_id ka tool message maangti hain). */
@@ -2691,7 +2717,36 @@ export async function runAgenticTurn(input: {
       continue; // model dekhega results aur decide karega next step
     }
 
-    const content = (msg?.content ?? msg?.reasoning_content ?? "").trim();
+    let content = (msg?.content ?? msg?.reasoning_content ?? "").trim();
+    /* Round-18m-29 guard: content khaali + sirf reasoning_content (model ne saara budget
+     * sochne mein kha liya) → ye jawab NAHI hai; user ko "We need to parse…" jaisa
+     * chain-of-thought kabhi na dikhe. Empty treat karo → tool summaries (grounded). */
+    if (!String(msg?.content ?? "").trim() && msg?.reasoning_content && /^\s*(we need|let me|let's|the user|i need|i should|okay|ok,|first,|so the|we have|we must|user (?:asked|wants))/i.test(content)) {
+      content = "";
+    }
+    if (pendingDecision) {
+      const { plan, cands } = pendingDecision;
+      if (process.env.DECISION_DEBUG) console.error("[decision raw]", modelUsed, content.slice(0, 900));
+      const m = content.match(/<decision>\s*([\s\S]*?)\s*<\/decision>/i) ?? content.match(/(\{[^{}]*"recommendedId"[\s\S]*?\})/);
+      let applied = false;
+      if (m) {
+        try {
+          const raw = parseDecisionJson(m[1]);
+          if (!raw) throw new Error("decision JSON invalid");
+          const d = validateDecision(plan, cands, raw, modelUsed ?? modelChain[0] ?? null);
+          if (d) { finalizeAiDecision(plan, d); applied = true; if (process.env.DECISION_DEBUG) console.error("[decision applied]", d.recommendedId, plan.decision?.source, plan.whySource); }
+          else if (process.env.DECISION_DEBUG) console.error("[decision rejected]", JSON.stringify(raw).slice(0, 300), "ids:", cands.map((c) => c.id).join(","));
+        } catch (e) { if (process.env.DECISION_DEBUG) console.error("[decision parse error]", String(e), m[1].slice(0, 200)); /* invalid JSON → rules decision stays */ }
+        content = content.replace(m[0], "").replace(/^\s*(?:<\/?decision>)?\s*/i, "").trim();
+      }
+      if (!applied) plan.decisionDeferred = false; // rules decision (already on plan) is final
+      pendingDecision = null;
+      /* Model ne sirf <decision> block diya, traveller-reply nahi → validated verdict + why
+       * points (sab candidate-sheet se grounded) hi jawab hain — raw tool dump nahi. */
+      if (!content && applied && plan.decision?.source === "ai") {
+        content = [plan.decision.verdict ?? plan.summary ?? "", ...plan.decision.whyPoints.map((w) => `• ${w}`)].filter(Boolean).join("\n").trim();
+      }
+    }
     if (!content) {
       // Model ne na tool call kiya na content diya — tools chal chuke hain to unka summary do.
       return {

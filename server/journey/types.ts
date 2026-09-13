@@ -300,6 +300,8 @@ export type JourneyPlan = {
    *  book-from-earlier, connections); recommend/rank/why AI karta hai, candidate IDs se
    *  grounded (invalid ID → rules fallback). */
   decision?: JourneyDecision;
+  /** Round-18m-29: decision left to the agentic final step (rules decision set meanwhile). */
+  decisionDeferred?: boolean;
   /** Round-18m-11: kya-kya check hua (UI strip) — sirf real counts. */
   audit?: { passengers: number | null; directTrains: number; directProbed: number; bfeTrains: number; bfeStopsChecked: number; connHubs: string[]; connLeg1Checked: number; connLeg2Checked: number };
   /** Round-18 freshness envelope (dynamic data must not be shown as current when stale). */

@@ -164,6 +164,8 @@ export function Concierge() {
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [thinking, setThinking] = useState(false);
+  /* Round-18m-29: live progress line from /api/agent/stream (real phases + N/M checks). */
+  const [progressText, setProgressText] = useState<string | null>(null);
   const [debugOn, setDebugOn] = useState(() => {
     try {
       return localStorage.getItem("railbookDebug") === "1";
@@ -823,7 +825,8 @@ export function Concierge() {
       /\b(station\s*(?:par|pe|pr|on)\b[^?]*\b(kya|kaun|kitni|board|trains?)|station board|board dikhao)\b/i.test(trimmed);
     if (!criticalBookingFlow && !classPickWhileSelected && !localUiQuery) {
       try {
-        const agentRes = await api.agent({
+        setProgressText(null);
+        const agentRes = await api.agentStream({
           text: trimmed,
           lastAsked,
           known: {
@@ -838,7 +841,11 @@ export function Concierge() {
             .map((m) => ({ role: m.role, content: String(m.text ?? "").slice(0, 500) })),
           now: new Date().toISOString(),
           bookingFlow: state.flow ?? undefined,
+        }, (e) => {
+          /* Round-18m-29: REAL backend milestones only (no fake percentages). */
+          setProgressText(e.total ? `${e.phase}… ${e.done ?? 0}/${e.total} checks completed` : `${e.phase}…`);
         });
+        setProgressText(null);
         if (agentRes.reply) {
           if (agentRes.context) agentCtxRef.current = agentRes.context;
           const c = agentRes.context;
@@ -1481,7 +1488,9 @@ export function Concierge() {
           <article className="msg assistant">
             <div className="msg-kicker">RailBook</div>
             <p className="msg-text thinking">
-              {state.searching
+              {progressText
+                ? progressText
+                : state.searching
                 ? "Main aapke liye available trains check kar raha hoon…"
                 : thinking
                   ? "Samajh raha hoon…"

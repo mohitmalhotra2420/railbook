@@ -22,6 +22,7 @@ import { env } from "../env.js";
 import type { ClassAvailability, ClassCode, TrainResult } from "../providers/types.js";
 import { routedClassBoard, routedSchedule, searchTrainsRouted, type ServedProvider } from "../railway/router.js";
 import { todayYmd } from "../util.js";
+import { mapLimited, progress } from "../perf/turnScope.js";
 import { MULTI_STATION_CITIES } from "../railway/station-resolve.js";
 import { CONFLICT_MESSAGE, availabilityEquals, freshnessOf, resolveConflict, sourceTypeOf } from "../providers/provenance.js";
 import type { BoardFromEarlierOption, JourneyDecision } from "./types.js";
@@ -331,13 +332,11 @@ export async function probeConnectionLegs(connections: Connection[], date: strin
     }
     return p;
   };
-  await Promise.all(
-    connections.slice(0, limit).map(async (c) => {
-      const rows = await Promise.all(c.legs.map((l) => probe(l)));
+  await mapLimited(connections.slice(0, limit), async (c) => {
+      const rows = await mapLimited(c.legs, (l) => probe(l));
       c.legs = c.legs.map((l, i) => ({ ...l, availability: rows[i]?.best ?? null, classOptions: rows[i]?.all ?? [] }));
       rows.forEach((r) => r?.best && sources.add(r.best.source));
-    }),
-  );
+    });
   return sources;
 }
 
@@ -443,7 +442,7 @@ export async function expandLegPlan(args: { from: string; to: string; hub: strin
     }
   };
   const dateB = addDays(args.date, args.leg2DayOffset ?? 0);
-  const [pa, pb] = await Promise.all([Promise.all(legA.map((l) => probe(l, args.date))), Promise.all(legB.map((l) => probe(l, dateB)))]);
+  const [pa, pb] = await Promise.all([mapLimited(legA, (l) => probe(l, args.date)), mapLimited(legB, (l) => probe(l, dateB))]);
   /* Round-18m-18 (user ConfirmTkt case): leg par seat na mile to ConfirmTkt-trick —
    * usi train mein TRAIN KE ORIGIN tak pichhle stops se, ya destination ke 1-2 stop
    * AAGE tak ticket (passenger apne segment par hi chadhta/utarta hai). Sirf tab jab
@@ -757,8 +756,7 @@ export async function findBoardFromEarlier(args: {
   const options: BoardFromEarlierOption[] = [];
   let stopsChecked = 0;
   let trainsChecked = 0;
-  await Promise.all(
-    args.trains.slice(0, args.limitTrains ?? 3).map(async (t) => {
+  await mapLimited(args.trains.slice(0, args.limitTrains ?? 3), async (t) => {
       try {
         const sched = await routedSchedule(t.number);
         const stops = (sched.schedule && "stops" in sched.schedule ? (sched.schedule.stops as Stop[]) : []) ?? [];
@@ -838,8 +836,7 @@ export async function findBoardFromEarlier(args: {
       } catch {
         /* provider fail → skip this train, never invent */
       }
-    }),
-  );
+    });
   /* Round-18m-7: seat pehle (AVL > RAC), phir SABSE KAM travel time, phir nazdeek ka stop. */
   options.sort((a, b) => Number(!!a.availability.stale) - Number(!!b.availability.stale) || (AVAIL_RANK[a.availability.status] ?? 5) - (AVAIL_RANK[b.availability.status] ?? 5) || (a.durationMinutes ?? 9e9) - (b.durationMinutes ?? 9e9) || (a.stopsBefore + (a.stopsAfter ?? 0)) - (b.stopsBefore + (b.stopsAfter ?? 0)) || a.trainNumber.localeCompare(b.trainNumber));
   return { options, sources, stopsChecked, trainsChecked };
@@ -990,8 +987,7 @@ export async function findAlternateStationOptions(args: { from: string; to: stri
   const sources = new Set<string>();
   /* Step 1: schedule search for every sibling pair (cheap, cached per provider). */
   const found = (
-    await Promise.all(
-      pairs.map(async (p) => {
+    await mapLimited(pairs, async (p) => {
         try {
           const s = await searchTrainsRouted({ from: p.from, to: p.to, date: args.date });
           if (!s.trains.length) return null;
@@ -1000,14 +996,12 @@ export async function findAlternateStationOptions(args: { from: string; to: stri
         } catch {
           return null;
         }
-      }),
-    )
+      })
   ).filter((x): x is NonNullable<typeof x> => x != null);
   /* Step 2: availability probe only for pairs that really have trains (bounded). */
   found.sort((a, b) => b.s.trains.length - a.s.trains.length || a.p.from.localeCompare(b.p.from) || a.p.to.localeCompare(b.p.to));
   const options: AlternateStationOption[] = [];
-  await Promise.all(
-    found.slice(0, maxProbes).map(async ({ p, s }) => {
+  await mapLimited(found.slice(0, maxProbes), async ({ p, s }) => {
       const fastest = [...s.trains].sort((a, b) => (a.durationMinutes || 9e9) - (b.durationMinutes || 9e9) || a.number.localeCompare(b.number))[0];
       const availability = new Map<string, RouteAvailability | null>();
       try {
@@ -1036,8 +1030,7 @@ export async function findAlternateStationOptions(args: { from: string; to: stri
         source: s.provider,
         note: `${p.changed === "origin" ? `Boarding ${p.from}` : `Destination ${p.to}`} (same city) — ${s.trains.length} trains${best?.availability ? `, ${best.trainNumbers[0]} ${best.availability.classCode} ${best.availability.status}${best.availability.seats != null ? ` ${best.availability.seats}` : ""}` : ""}. Ye aapki original ${p.changed === "origin" ? "boarding" : "destination"} station se ALAG hai — confirm karein.`,
       });
-    }),
-  );
+    });
   options.sort((a, b) => availScore(a.best?.availability ?? null) - availScore(b.best?.availability ?? null) || a.from.localeCompare(b.from) || a.to.localeCompare(b.to));
   return { options, sources };
 }
@@ -1059,6 +1052,9 @@ export async function planJourney(args: {
   searchProvider?: ServedProvider;
   /** Round-18m-10: false → model-written why-points skip (tests / fast paths). */
   aiWhy?: boolean;
+  /** Round-18m-29: true → no separate decision AI call; rules decision set, agentic final
+   *  step decides (same grounded candidate sheet + validation). */
+  deferDecision?: boolean;
   /** Round-18m-10: false → top-hub full-route leg expansion skip. */
   expandLegs?: boolean;
   /** Round-18m-9/22: seats needed — bookable = AVL >= pax, ya RAC (kisi bhi pax ke liye; chart ke baad confirm). */
@@ -1101,8 +1097,8 @@ export async function planJourney(args: {
     return codes[0] ?? null;
   };
   const pass1 = new Map<string, ClassAvailability[]>();
-  await Promise.all(
-    probeList.map(async (t) => {
+  progress("Checking availability", `${probeList.length} trains`);
+  await mapLimited(probeList, async (t) => {
       const pc = priorityClass(t);
       if (!pc) return;
       try {
@@ -1111,10 +1107,8 @@ export async function planJourney(args: {
       } catch {
         /* pass-2 covers it */
       }
-    }),
-  );
-  await Promise.all(
-    probeList.map(async (t) => {
+    });
+  await mapLimited(probeList, async (t) => {
       try {
         const done = new Set<string>((pass1.get(t.number) ?? []).filter((c) => c.status && c.status !== "UNKNOWN").map((c) => c.code));
         const hint = Array.from(new Set<string>([...(args.travelClass ? [args.travelClass] : []), ...t.classes.map((c) => c.code)])).filter((c) => !done.has(c));
@@ -1146,8 +1140,7 @@ export async function planJourney(args: {
       } catch {
         availability.set(t.number, null);
       }
-    }),
-  );
+    });
   const probedKnown = [...availability.values()].filter(Boolean).length;
   if (probeList.length && !probedKnown) notes.push("Seat availability provider se nahi aayi — ranking sirf duration/direct par hai.");
 
@@ -1200,8 +1193,7 @@ export async function planJourney(args: {
       return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}-${String(dt.getUTCDate()).padStart(2, "0")}`;
     };
     const dates = [shift(-1), shift(1), shift(2)].filter((x) => x >= todayYmd() && x !== args.date);
-    alternativeDates = await Promise.all(
-      dates.map(async (dd) => {
+    alternativeDates = await mapLimited(dates, async (dd) => {
         const alt = await searchTrainsRouted({ from, to, date: dd });
         const fastest = [...alt.trains].sort((a, b) => (a.durationMinutes || 9e9) - (b.durationMinutes || 9e9))[0];
         /* Round-18m: alt-date par bhi seat PROVE karo (fastest train, 1 probe) —
@@ -1221,8 +1213,7 @@ export async function planJourney(args: {
           }
         }
         return { date: dd, count: alt.trains.length, fastest: fastest ? { number: fastest.number, durationMinutes: fastest.durationMinutes } : null, seatProof, ...(alt.provider === "none" ? { providerFailed: true } : {}) };
-      }),
-    );
+      });
   }
 
   /* Recovery block. */
@@ -1424,17 +1415,27 @@ export async function planJourney(args: {
   /* Round-18m-13: FAISLA AI ka — engine ne har train × har class, same-train
    * earlier-stop aur connecting legs ka data laaya; ab LLM candidates dekh kar
    * recommend + rank + why karta hai (grounded ids). Rules sirf fallback. */
+  /* Round-18m-29: agentic turn mein DECISION alag AI call nahi — final-answer call hi
+   * (grounded candidate sheet ke saath) decide karta hai → per turn 3 AI calls se 2.
+   * Yahan sirf rules-decision (fallback) set hota hai; agentic loop `finalizeAiDecision`
+   * se model ka validated faisla apply karta hai. Data/coverage bilkul same. */
+  if (args.deferDecision && args.aiWhy !== false) {
+    try {
+      const { buildCandidates, rulesDecision } = await import("./decide.js");
+      plan.decision = rulesDecision(plan, buildCandidates(plan));
+    } catch {
+      /* rules-based summary already set */
+    }
+    plan.decisionDeferred = true;
+    return plan;
+  }
   if (args.aiWhy !== false) {
     try {
       const { decideJourney } = await import("./decide.js");
       const d = await decideJourney(plan, { timeoutMs: 10000 });
       plan.decision = d;
       if (d.source === "ai" && d.recommended) {
-        applyDecision(plan, d);
-        plan.whyPoints = d.whyPoints.length ? d.whyPoints : plan.whyPoints;
-        plan.whySource = "ai";
-        plan.summary = journeySummary(plan);
-        if (d.verdict) plan.summary = `${d.verdict}${plan.summary ? ` ${plan.summary}` : ""}`;
+        finalizeAiDecision(plan, d);
         return plan;
       }
     } catch {
@@ -1461,6 +1462,19 @@ export async function planJourney(args: {
     }
   }
   return plan;
+}
+
+/** Round-18m-29: validated AI decision → plan (order, whyPoints, summary/verdict). Shared by
+ *  the in-engine path and the agentic final step (deferred decision). */
+export function finalizeAiDecision(plan: JourneyPlan, d: JourneyDecision): void {
+  plan.decision = d;
+  plan.decisionDeferred = false;
+  if (d.source !== "ai" || !d.recommended) return;
+  applyDecision(plan, d);
+  plan.whyPoints = d.whyPoints.length ? d.whyPoints : plan.whyPoints;
+  plan.whySource = "ai";
+  plan.summary = journeySummary(plan);
+  if (d.verdict) plan.summary = `${d.verdict}${plan.summary ? ` ${plan.summary}` : ""}`;
 }
 
 /* Round-18m-13: AI ke pick ko plan ke existing fields par map karo taaki UI/agent

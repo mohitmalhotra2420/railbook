@@ -82,7 +82,7 @@ export function candidateSheet(plan: JourneyPlan, cands: JourneyCandidate[]): st
   return L.join("\n");
 }
 
-const SYSTEM = `You are RailBook's AI journey planner for Indian Railways. You DECIDE which option the traveller should book — the engine only fetched data. Think like a smart, honest friend.
+export const DECISION_PRINCIPLES = `You are RailBook's AI journey planner for Indian Railways. You DECIDE which option the traveller should book — the engine only fetched data. Think like a smart, honest friend.
 Decision principles (apply judgement, not a formula):
 1. Seat certainty for the WHOLE party first: FRESH AVL/RAC (enough for pax) beats everything; RAC counts as a seat for any party size (AVL preferred when both exist).
 2. A DIRECT train from the user's origin with a FRESH seat is preferred over a same-train earlier-stop ticket or a connection. A same-train earlier-stop ticket (kind bfe) is a smart trick when the direct segment is WL — the traveller still boards at origin, only pays a little extra. Likewise a "book upto" ticket (bfe with ticket beyond destination) is valid: the traveller boards at origin, deboards at their destination, pays fare upto the farther station — recommend it when direct/earlier/connecting have no seat.
@@ -103,7 +103,7 @@ async function askModel(model: string, sheet: string, timeoutMs: number): Promis
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
       signal: controller.signal,
-      body: JSON.stringify({ model, temperature: 0.2, max_tokens: 700, reasoning_effort: "low", messages: [{ role: "system", content: SYSTEM }, { role: "user", content: `${sheet}\n\nDecide now. Return the JSON only.` }] }),
+      body: JSON.stringify({ model, temperature: 0.2, max_tokens: 700, reasoning_effort: "low", messages: [{ role: "system", content: DECISION_PRINCIPLES }, { role: "user", content: `${sheet}\n\nDecide now. Return the JSON only.` }] }),
     });
     if (!res.ok) return null;
     const j = (await res.json()) as { choices?: { message?: { content?: string | null } }[] };
@@ -144,12 +144,48 @@ export async function decideJourney(plan: JourneyPlan, opts: { timeoutMs?: numbe
     r = await askModel(model, sheet, 12000);
   }
   if (!r) return fallback;
+  return validateDecision(plan, cands, r, model) ?? fallback;
+}
+
+export type RawDecision = { recommendedId?: string; ranking?: string[]; verdict?: string; why?: string[] };
+
+/** Lenient JSON for model decisions: exact parse first; then repair a missing trailing
+ *  `]`/`}` (models cut the last brace) — content itself is never altered, and every value is
+ *  still validated by validateDecision. Returns null when it still isn't valid JSON. */
+export function parseDecisionJson(text: string): RawDecision | null {
+  const t = text.trim();
+  const tries = [t, `${t}}`, `${t}]}`, `${t}"]}`, `${t}"}`];
+  for (const x of tries) {
+    try {
+      const j = JSON.parse(x);
+      if (j && typeof j === "object" && !Array.isArray(j)) return j as RawDecision;
+    } catch { /* next repair */ }
+  }
+  return null;
+}
+
+/** Round-18m-29: model output → grounded JourneyDecision (null = invalid → caller uses rules).
+ *  Same invent-proof validation as before (unknown id drop, seat claims only on seated
+ *  candidates, ₹ only real fares, stale-faster-direct reminder) — now reusable by the agentic
+ *  final step, jahan model decision + user reply EK hi call mein deta hai (3 AI calls → 2). */
+export function validateDecision(plan: JourneyPlan, cands: JourneyCandidate[], r: RawDecision, model: string | null): JourneyDecision | null {
   const byId = new Map(cands.map((c) => [c.id, c]));
-  const rec = r.recommendedId ? byId.get(String(r.recommendedId).trim()) ?? null : null;
-  if (!rec) return fallback;
+  /* Round-18m-29: model kabhi bare train number ("22462") ya "22462+12345" bhejta hai —
+   * sirf tab map karo jab EXACTLY ek candidate match kare (koi guess nahi). */
+  const resolveId = (raw: unknown): string | null => {
+    const id = String(raw ?? "").trim();
+    if (!id) return null;
+    if (byId.has(id)) return id;
+    if (byId.has(`D:${id}`)) return `D:${id}`;
+    const hits = cands.filter((c) => c.trainNumbers.join("+") === id || c.trainNumbers.join("→") === id);
+    return hits.length === 1 ? hits[0].id : null;
+  };
+  const recId = resolveId(r.recommendedId);
+  const rec = recId ? byId.get(recId) ?? null : null;
+  if (!rec) return null;
   /* Guard: model may not recommend a WL/unchecked option when a fresh-seat option exists. */
-  if (rec.seatTier === "none" && cands.some((c) => c.seatTier === "fresh")) return fallback;
-  const ranking = Array.from(new Set([rec.id, ...(Array.isArray(r.ranking) ? r.ranking.map(String).map((x) => x.trim()) : [])])).filter((id) => byId.has(id)).slice(0, 5);
+  if (rec.seatTier === "none" && cands.some((c) => c.seatTier === "fresh")) return null;
+  const ranking = Array.from(new Set([rec.id, ...(Array.isArray(r.ranking) ? r.ranking.map(resolveId).filter((x): x is string => !!x) : [])])).filter((id) => byId.has(id)).slice(0, 5);
   const fares = new Set<number>();
   for (const c of cands) for (const row of c.classOptions) if (row.fare != null) fares.add(row.fare);
   const seatless = new Set(cands.filter((c) => c.seatTier === "none").flatMap((c) => c.trainNumbers));

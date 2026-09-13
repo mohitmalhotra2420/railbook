@@ -1,3 +1,4 @@
+import { dedupe, limited, checkDone, addChecks, progress } from "../perf/turnScope.js";
 import {
   scrapeCoachPositionWeb,
   scrapeLiveStatusWeb,
@@ -589,6 +590,7 @@ function looksIdleAtOrigin(live: RailcoreLiveStatus | LiveTrainStatus | null): b
  *     "abhi kahan hai" ka jawab hai. Kuch na mile → aaj wala hi.
  */
 export async function routedLiveStatus(number: string, dateYmd?: string, trainNameHint?: string | null): Promise<RoutedLive> {
+  progress("Fetching live status", `${number}${dateYmd ? ` ${dateYmd}` : ""}`);
   const first = await routedLiveStatusForDate(number, dateYmd, trainNameHint);
   if (dateYmd || !first.live) return first;
   if (!looksIdleAtOrigin(first.live)) return first;
@@ -848,6 +850,9 @@ function scrapedAsSchedule(sc: Awaited<ReturnType<typeof scrapeTrainScheduleWeb>
 }
 
 export async function routedSchedule(number: string): Promise<RoutedSchedule> {
+  return dedupe(`schedule:${number}`, () => routedScheduleUncached(number));
+}
+async function routedScheduleUncached(number: string): Promise<RoutedSchedule> {
   const started = Date.now();
   if (railcoreIsPrimary()) {
     const primary = await railcoreSchedule(number);
@@ -1000,6 +1005,7 @@ export async function routedCoachPosition(number: string, stationCode?: string):
 }
 
 export async function routedPnr(pnr: string): Promise<PnrLookup | null> {
+  progress("Checking PNR");
   const started = Date.now();
   const remote = await railkitPnr(pnr);
   logServed(remote ? "railkit" : "none", "checkPNRStatus", started, Boolean(remote), remote ? null : "pnr_unavailable");
@@ -1062,6 +1068,7 @@ export async function routedClassBoard(
      * so the railyatri/railradar seat probe can run. */
     if (!codes.length) codes = await webTrainClasses(trainNumber);
     if (codes.length) {
+      addChecks(codes.length);
       const classes = await Promise.all(
         codes.map((code) => provider.getAvailability(trainNumber, date, from, to, code, quota)),
       );
@@ -1334,6 +1341,24 @@ export class FallbackRailwayProvider implements RailwayProvider {
     classCode: ClassCode,
     quotaCode = "GN",
   ): Promise<ClassAvailability> {
+    /* Round-18m-29: same-TURN identical request → one provider hit (in-flight dedup, no TTL cache);
+     * every call still goes to the provider chain, just under the global concurrency limiter. */
+    const key = `avail:${trainNumber}:${date}:${from}:${to}:${classCode}:${quotaCode}`;
+    return dedupe(key, () => limited(async () => {
+      const row = await this.getAvailabilityUncached(trainNumber, date, from, to, classCode, quotaCode);
+      checkDone("Seat checks");
+      return row;
+    }));
+  }
+
+  private async getAvailabilityUncached(
+    trainNumber: string,
+    date: string,
+    from: string,
+    to: string,
+    classCode: ClassCode,
+    quotaCode = "GN",
+  ): Promise<ClassAvailability> {
     const started = Date.now();
     const unknown: ClassAvailability = {
       code: classCode,
@@ -1501,6 +1526,11 @@ export function resetFallbackProvider(): void {
  * Tests inject failures via setRailcoreFetch.
  */
 export async function searchTrainsRouted(query: SearchQuery): Promise<{ trains: TrainResult[]; provider: ServedProvider }> {
+  /* Round-18m-29: same-turn identical search (planner asks the same pair from several branches) → one hit. */
+  return dedupe(`search:${query.from}:${query.to}:${query.date}`, () => searchTrainsRoutedUncached(query));
+}
+async function searchTrainsRoutedUncached(query: SearchQuery): Promise<{ trains: TrainResult[]; provider: ServedProvider }> {
+  progress("Searching trains", `${query.from} → ${query.to} ${query.date ?? ""}`.trim());
   const p = getFallbackProvider();
   if (!railcoreIsPrimary()) {
     const kit = new RailKitProvider();
