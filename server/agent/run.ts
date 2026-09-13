@@ -464,6 +464,7 @@ function mentionsStationOptions(content: string | null | undefined): boolean {
     /kaunse?\s+station|kaun\s*sa\s+station|kis\s+station|kis\s+delhi\s+station|station chahiye|stations?\s+hain?\s*[—–-]?\s*kaun|kaunsa\s+chahiye|konsa\s+chahiye|kaunsa\s+station|konsa\s+station|which\s+station/i.test(c) ||
     /* Round-18m-30l: AI-written options ("1. LKO — Lucknow NR\n2. LJN — …") — 2+ numbered CODE – Name items = options. */
     ((c.match(/(?:^|\s)\d{1,2}[.)]\s*[A-Z]{2,5}\s*[–—-]\s*[A-Za-z]/g) ?? []).length >= 2) ||
+    ((c.match(/(?:^|\s|\()\d{1,2}[.)]\s*[A-Z]{2,5}(?=\s|,|\)|\.|$)/g) ?? []).length >= 2 && /station/i.test(c)) ||
     /\(\s*[A-Z]{2,5}(?:\s*,\s*[A-Z]{2,5}){2,}\s*\)/.test(c)
   );
 }
@@ -495,6 +496,9 @@ const NON_STATION_WORDS =
   /^(kal|aaj|parson|haan|nahi|na|no|yes|ok|okay|done|thik|theek|accha|acha|sahi|aur|kitne|ek|do|teen|char|paanch)$/i;
 
 function parseNumberedOptions(content: string): { n: number; code: string; label: string }[] {
+  /* Round-18m-30m (prod: model ne "1. LKO 2. LJN (Please reply with 1 or 2.)" likha — bina naam/dash — "2" map
+   * nahi hua → "Kahan jana hai?"): bare "N. CODE" bhi options hain. Dash/naam optional. */
+  const bare = [...content.matchAll(/(?:^|\s|\()(\d{1,2})[.)]\s*([A-Z]{2,5})(?=\s|,|\)|\.|$)/g)].map((m) => ({ n: Number(m[1]), code: m[2].toUpperCase(), label: m[2].toUpperCase() }));
   const re = /(\d{1,2})[.)]\s*([A-Za-z]{2,5})\s*[–—-]\s*/g;
   const items: { n: number; code: string; label: string }[] = [];
   let m: RegExpExecArray | null;
@@ -505,6 +509,14 @@ function parseNumberedOptions(content: string): { n: number; code: string; label
     const label = (next >= 0 ? rest.slice(0, next) : rest.slice(0, 60)).replace(/[\n\r].*$/s, "").trim();
     /* Round-18m-30h: label = sirf station naam ("Ayodhya", "Ayodhya Cantt"), trailing ", " / "." / baaki sentence hataao. */
     items.push({ n: Number(m[1]), code: m[2].toUpperCase(), label: label.split(/[,.](?=\s|$)/)[0].trim().slice(0, 40) });
+  }
+  if (items.length >= 2) return items;
+  if (bare.length >= 2) {
+    /* "LKO (Lucknow NR)" / "LKO – Lucknow NR" kahin aur text mein ho to naam wahan se. */
+    return bare.map((b) => {
+      const nm = content.match(new RegExp(`\\b${b.code}\\s*(?:\\(|[–—-]\\s*)([A-Za-z][A-Za-z .'&]{1,40}?)(?:\\)|,|\\.|\\n|$)`));
+      return { ...b, label: nm?.[1]?.trim() || b.code };
+    });
   }
   return items;
 }

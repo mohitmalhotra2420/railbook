@@ -1844,9 +1844,9 @@ function systemPrompt(
           known.stationPicked
             ? ` User ne abhi pichhle station-options se apni choice bheji hai — ${known.stationPicked}=${known.stationPicked === "origin" ? known.origin : known.destination} FINAL hai (server ne verify kiya). Confirm mat karo, seedha tool call karke jawab do.`
             : known.destinationAmbiguous
-              ? ` User ne destination "${known.destinationAmbiguous}" bola jo AMBIGUOUS hai (multiple stations) — AGAR user ka current message isi journey ke baare mein hai to JOURNEY_ANALYZE ya SEARCH_TRAINS tool call karo aur needs_choice ke options user ko do. Station options SIRF tool result se — apni knowledge se station codes/options KABHI mat likho. Preference/date baad mein. Par agar current message koi ALAG sawaal hai (doosri train/PNR/status/fare/doosra route), to PEHLE us naye sawaal ka jawab do — station options us reply mein repeat mat karo. Options dete waqt sirf options do — saath mein koi denial/extra claim ("ye train wahin stop nahi karti" jaisa) mat jodo.`
+              ? ` User ne destination "${known.destinationAmbiguous}" bola jo AMBIGUOUS hai (multiple stations) — AGAR user ka current message isi journey ke baare mein hai to PEHLE SEARCH_STATIONS(query="${known.destinationAmbiguous}") call karo aur uske options user ko do — khud koi ek station (jaise LJN/LKO) chun kar SEARCH_TRAINS/JOURNEY_ANALYZE KABHI mat chalao (user ka station user chunega). Station options SIRF tool result se — apni knowledge se station codes/options KABHI mat likho. Options ka format EXACTLY ye: har option nayi line par "N. CODE – Station Name" (jaise "1. LKO – Lucknow NR"), aur end mein "Number ya code batao." — koi aur format nahi. Preference/date baad mein. Par agar current message koi ALAG sawaal hai (doosri train/PNR/status/fare/doosra route), to PEHLE us naye sawaal ka jawab do — station options us reply mein repeat mat karo. Options dete waqt sirf options do — saath mein koi denial/extra claim ("ye train wahin stop nahi karti" jaisa) mat jodo.`
               : known.originAmbiguous
-                  ? ` User ne ORIGIN "${known.originAmbiguous}" bola jo AMBIGUOUS hai (multiple stations — jaise Agra mein AGC/AF/AGA) — AGAR user ka current message isi journey ke baare mein hai to SEARCH_STATIONS ya JOURNEY_ANALYZE se REAL station options lao aur user se poochho kaunsa. Station options SIRF tool result se — apni knowledge se codes/options KABHI mat likho. Origin station choose hone tak search complete nahi hogi — generic "Kahan se jana hai?" MAT poochho (city pata hai, sirf station chunna hai).`
+                  ? ` User ne ORIGIN "${known.originAmbiguous}" bola jo AMBIGUOUS hai (multiple stations — jaise Agra mein AGC/AF/AGA) — AGAR user ka current message isi journey ke baare mein hai to SEARCH_STATIONS(query="${known.originAmbiguous}") se REAL station options lao aur user se poochho kaunsa — format EXACTLY "N. CODE – Station Name" har option nayi line par; khud koi station chun kar SEARCH_TRAINS mat chalao. Station options SIRF tool result se — apni knowledge se codes/options KABHI mat likho. Origin station choose hone tak search complete nahi hogi — generic "Kahan se jana hai?" MAT poochho (city pata hai, sirf station chunna hai).`
                   : ""
         }`
       : "",
@@ -2372,7 +2372,10 @@ export async function runAgenticTurn(input: {
             // gpt-oss (reasoning_effort low) 900 par theek hai.
             /* Round-18m-29: merged decision step → reasoning models ko <decision> JSON + reply
              * ke liye thoda headroom (warna sirf reasoning_content aata hai, content khaali). */
-            max_tokens: model.startsWith("openai/gpt-oss") ? 900 : pendingDecision ? 3000 : 2000,
+            /* Round-18m-30m (user: "thinking on karo"): Muse HAMESHA reasoning karta hai (measured: har call
+             * 1.5k+ chars reasoning_content; NIM thinking flags ignore karta hai) — switch nahi hai. Jo control
+             * hai wo headroom: reasoning + content dono is cap mein aate hain → 3000 taaki content na kate. */
+            max_tokens: model.startsWith("openai/gpt-oss") ? 900 : 3000,
             messages,
             tools: AGENTIC_TOOLS,
           }),

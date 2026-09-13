@@ -56,3 +56,14 @@ describe("Round-18m-30l: AI-written station options are parsed; 0 trains at chos
     expect(p?.code).toBe("LJN");
   });
 });
+
+describe("Round-18m-30m: bare 'N. CODE' options (model's own wording) map correctly", () => {
+  it("'2' on '… 1. LKO 2. LJN (Please reply with 1 or 2.)' → LJN with its name from the same text", async () => {
+    const ctx = { ...emptyAgentContext(), origin: { code: "LDH", name: "Ludhiana Junction", city: "Ludhiana" }, pendingDestinationChoice: "Lucknow" };
+    const c = "Lucknow mein 2 stations hain – LKO (Lucknow NR) aur LJN (Lucknow Junction NER). Kaunsa station chahte hain? 1. LKO 2. LJN (Please reply with 1 or 2.)";
+    const p = await resolveStationPick("2", [{ role: "assistant", content: c }], ctx);
+    expect(p?.code).toBe("LJN");
+    expect(p?.name).toMatch(/Lucknow Junction/);
+    expect((await resolveStationPick("1", [{ role: "assistant", content: c }], ctx))?.code).toBe("LKO");
+  });
+});
