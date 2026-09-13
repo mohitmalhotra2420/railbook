@@ -803,7 +803,7 @@ async function routedLiveStatusForDate(number: string, dateYmd?: string, trainNa
      * RailCore trainInfo par depend nahi karte (RailCore down/rate-limited
      * hone par wo bhi fail hota tha → prod par fallback kabhi chalta hi nahi tha). */
     const trainName: string | null = String(trainNameHint ?? "").trim() || null;
-    const scraped = await scrapeLiveStatusWeb(number, trainName);
+    const scraped = await scrapeLiveStatusWeb(number, trainName, dateYmd ?? null);
     if (scraped) {
       logServed("web_railyatri", "liveStatus", started, true, "api_both_failed");
       return { live: scraped, provider: "web_railyatri" };

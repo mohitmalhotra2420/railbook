@@ -431,9 +431,47 @@ export function parseRailYatriLive(html: string, trainNumber: string, sourceUrl:
 
 /** URL pattern: /live-train-status/<num>-<name-slug> — naam approximate bhi
  * chalta hai (server number se match karta hai), par bilkul naam ke bina 404. */
-export async function scrapeLiveStatusWeb(trainNumber: string, trainName?: string | null): Promise<ScrapedLiveStatus | null> {
+/* Round-18m-30y (user: "14632 kal wali run raste mein hai, app 'abhi start nahi hui' bol raha; railyatri par sahi
+ * dikh raha"): SSR page hamesha AAJ ki run deta hai. RailYatri ka apna LTS API run-day select karta hai —
+ * /api/v3/train_eta_data/{train}/{daysBack}.json (0 = aaj, 1 = kal, …) — wahi jo site ka "Train start day"
+ * dropdown call karta hai (verified 2026-09-14 01:25 IST: 14632 day=1 → KHAMANON, 7 min late; day=0 → not started). */
+export function ryDaysBack(dateYmd: string | null | undefined): number | null {
+  if (!dateYmd || !/^\d{4}-\d{2}-\d{2}$/.test(dateYmd)) return null;
+  const nowIst = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
+  const todayIst = Date.UTC(nowIst.getUTCFullYear(), nowIst.getUTCMonth(), nowIst.getUTCDate());
+  const [y, m, d] = dateYmd.split("-").map(Number);
+  const back = Math.round((todayIst - Date.UTC(y, m - 1, d)) / 86400000);
+  return back >= 0 && back <= 6 ? back : null;
+}
+export async function scrapeLiveStatusApi(trainNumber: string, daysBack: number): Promise<ScrapedLiveStatus | null> {
   const num = String(trainNumber ?? "").trim();
   if (!/^\d{4,6}$/.test(num)) return null;
+  const url = `https://livestatus.railyatri.in/api/v3/train_eta_data/${num}/${daysBack}.json?start_day=${daysBack}&user_id=-2345434&device_type_id=4&change_name=seo_train_name&lat=&lng=&claim_on_train=false&authentication_token=`;
+  try {
+    const res = await (scrapeFetchImpl ?? globalThis.fetch.bind(globalThis))(url, {
+      headers: { "User-Agent": UA, Accept: "application/json", Referer: "https://www.railyatri.in/" },
+      signal: AbortSignal.timeout(SCRAPE_TIMEOUT_MS),
+    });
+    if (!res.ok) return null;
+    const lts = (await res.json()) as LtsData;
+    if (!lts || lts.success !== true) return null;
+    /* Same shape as SSR ltsData → same parser (wrap as __NEXT_DATA__). */
+    return parseRailYatriLive(`<script id="__NEXT_DATA__" type="application/json">${JSON.stringify({ props: { pageProps: { ltsData: lts } } })}</script>`, num, `https://www.railyatri.in/live-train-status/${num}-train?start_day=${daysBack}`);
+  } catch {
+    return null;
+  }
+}
+
+export async function scrapeLiveStatusWeb(trainNumber: string, trainName?: string | null, dateYmd?: string | null): Promise<ScrapedLiveStatus | null> {
+  const num = String(trainNumber ?? "").trim();
+  if (!/^\d{4,6}$/.test(num)) return null;
+  /* Date di gayi ho to us run-day ka LTS API pehle (SSR sirf aaj ki run deta hai). */
+  const back = ryDaysBack(dateYmd);
+  if (back != null) {
+    const viaApi = await scrapeLiveStatusApi(num, back);
+    if (viaApi) return viaApi;
+    if (back > 0) return null; // purani run ka data SSR se nahi milega — galat (aaj wali) run mat lautao
+  }
   /* Round-16b: RailYatri sirf number se route karta hai — slug koi bhi chale
    * (verified 2026-09-07: /12904-x → same __NEXT_DATA__). Naam optional. */
   const name = String(trainName ?? "").trim().replace(/[^\p{L}\p{N}\s-]/gu, "").replace(/\s+/g, "-") || "train";
