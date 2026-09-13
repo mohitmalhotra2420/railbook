@@ -107,6 +107,10 @@ function envInt(name: string, dflt: number): number {
   const n = Number(process.env[name]);
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : dflt;
 }
+/* Default 10 (spec). Sweep 2026-09-13 (scripts/perf-concurrency.mts, same coverage 33+65 rows,
+ * railyatri 0×429 / 0 errors at 10, 15 and 20): 10 → 9.9 s/12.0 s, 15 → 6.9 s/6.7 s, 20 → 6.7 s/5.7 s.
+ * Prod runs 15 via env (RAIL_PROBE_CONCURRENCY) — raised only because rate-limits/errors stayed
+ * healthy; 20 gives little more and leaves less headroom for concurrent users. */
 export const PROBE_CONCURRENCY = envInt("RAIL_PROBE_CONCURRENCY", 10);
 
 let active = 0;
