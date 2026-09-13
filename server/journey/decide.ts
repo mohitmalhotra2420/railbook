@@ -185,6 +185,13 @@ export function validateDecision(plan: JourneyPlan, cands: JourneyCandidate[], r
   if (!rec) return null;
   /* Guard: model may not recommend a WL/unchecked option when a fresh-seat option exists. */
   if (rec.seatTier === "none" && cands.some((c) => c.seatTier === "fresh")) return null;
+  /* Round-18m-30 guard (prod: model ne 24h35m wali 13308 chuni jabki 12238 direct 1A AVL 18h05m aur
+   * 13042 PGW 2A AVL 17h25m fresh the): seat-proven AND fastest rule — agar koi doosra FRESH same-train
+   * (direct/bfe) option 3h+ fast hai to ye faisla reject → rules (seat → from-origin → time). */
+  if (rec.seatTier === "fresh" && rec.kind !== "connecting" && rec.durationMinutes != null) {
+    const muchFaster = cands.some((c) => c !== rec && c.seatTier === "fresh" && c.kind !== "connecting" && c.durationMinutes != null && c.durationMinutes <= rec.durationMinutes! - 180);
+    if (muchFaster) return null;
+  }
   const ranking = Array.from(new Set([rec.id, ...(Array.isArray(r.ranking) ? r.ranking.map(resolveId).filter((x): x is string => !!x) : [])])).filter((id) => byId.has(id)).slice(0, 5);
   const fares = new Set<number>();
   for (const c of cands) for (const row of c.classOptions) if (row.fare != null) fares.add(row.fare);

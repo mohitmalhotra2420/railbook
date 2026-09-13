@@ -1733,10 +1733,15 @@ export function journeyWhyPoints(plan: JourneyPlan): string[] {
   const fastestDirect = [...direct].sort((a, b) => (a.durationMinutes ?? 9e9) - (b.durationMinutes ?? 9e9))[0] ?? null;
   const seatTxt = (a: RouteAvailability) => `${a.classCode} ${a.status === "AVAILABLE" ? `AVL ${a.seats ?? ""}`.trim() : a.status === "RAC" ? `RAC ${a.rac ?? ""}`.trim() : a.status}`;
   const bfeBeats = !!bfe && !!best && (!legBookable(best.availability, pax) || (best.changes > 0 && (bfe.durationMinutes ?? 9e9) <= (best.durationMinutes ?? 9e9)));
-  if (bfe && (plan.directUnavailable || bfeBeats)) {
+  /* Round-18m-30: AI ne same-train earlier-stop chuna (direct mein kisi class mein seat hote hue bhi) →
+   * why-points USI pick ke hon, direct best ke nahi (verdict/why mismatch prod mein dikha). */
+  const aiBfe = plan.decision?.source === "ai" && plan.decision.recommended?.kind === "bfe" && !!bfe && bfe.trainNumber === plan.decision.recommended.trainNumbers[0];
+  if (bfe && (plan.directUnavailable || bfeBeats || aiBfe)) {
     const wlCount = direct.filter((o) => o.availability && !legBookable(o.availability, pax)).length;
     const staleAvl = direct.filter((o) => o.availability?.stale && enoughSeats(o.availability, pax)).map((o) => o.trainNumbers[0]);
-    pts.push(`${plan.query.from}→${plan.query.to} par ${wlCount || direct.length} direct train${(wlCount || direct.length) > 1 ? "s" : ""} ki har class check ki — kisi mein${paxTxt ? ` ${paxTxt} ke liye` : ""} FRESH confirmed seat nahi${staleAvl.length ? ` (${staleAvl.slice(0, 3).join(", ")} mein AVL sirf 24h+ purane web-cache mein — Seat check se verify karo)` : " (WL/N-A)"}.`);
+    const seatedDirect = direct.filter((o) => legBookable(o.availability, pax));
+    if (seatedDirect.length) pts.push(`${plan.query.from} se seedhi ticket par seat sirf ${seatedDirect.slice(0, 3).map((o) => `${o.trainNumbers[0]} ${seatTxt(o.availability!)}${o.availability!.fare != null ? ` @ ₹${o.availability!.fare}` : ""} (${o.durationLabel ?? "?"})`).join(", ")} mein — baaki direct trains WL/N-A; AI ne seat + time + fare tol kar ${bfe.trainNumber} chuna.`);
+    else pts.push(`${plan.query.from}→${plan.query.to} par ${wlCount || direct.length} direct train${(wlCount || direct.length) > 1 ? "s" : ""} ki har class check ki — kisi mein${paxTxt ? ` ${paxTxt} ke liye` : ""} FRESH confirmed seat nahi${staleAvl.length ? ` (${staleAvl.slice(0, 3).join(", ")} mein AVL sirf 24h+ purane web-cache mein — Seat check se verify karo)` : " (WL/N-A)"}.`);
     if (bfe.bookUpto) pts.push(`${bfe.trainNumber} mein ticket ${bfe.bookFrom}→${bfe.bookUpto} tak (${bfe.stopsAfter ?? 0} stop aage) lene par ${seatTxt(bfe.availability)}${bfe.availability.fare != null ? ` @ ₹${bfe.availability.fare}` : ""} — aap ${plan.query.to} par utar jaayenge; ${plan.query.from}→${plan.query.to} segment par seat nahi thi. Provider-verified.`);
     else pts.push(`${bfe.trainNumber} mein ${bfe.bookFrom} (${bfe.stopsBefore} stop pehle) se ticket lene par ${seatTxt(bfe.availability)}${bfe.availability.fare != null ? ` @ ₹${bfe.availability.fare}` : ""} — provider-verified, fresh data.`);
     if (bfe.durationMinutes && fastestDirect?.durationMinutes) {
