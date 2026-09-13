@@ -132,7 +132,11 @@ function ClassRow({ label, rows, onPick }: { label: string; rows: AvailLike[]; o
       <div className="jx-classes-chips">
         {rows.map((r) => {
           const av = availTextOf(r);
-          const inner = <>{av.text.replace(" ⚠ stale", "")}{r.fare != null ? ` · ${inr(r.fare)}` : ""}{r.stale ? <span className="jx-cchip-tag">· {ageLabel(r.asOf)}{onPick ? " ↻" : ""}</span> : null}</>;
+          /* Round-18m-30v (user: "ConfirmTkt par seat nahi dikh rahi"): IRCTC maintenance window (23:45–00:20) mein data
+           * RailYatri CACHED se aata hai (24h ke andar = stale nahi) — par user ko pata ho ki ye "X min pehle" ka hai. */
+          const ageMs = r.asOf ? Date.now() - Date.parse(r.asOf) : NaN;
+          const recentButNotLive = !r.stale && Number.isFinite(ageMs) && ageMs > 10 * 60 * 1000;
+          const inner = <>{av.text.replace(" ⚠ stale", "")}{r.fare != null ? ` · ${inr(r.fare)}` : ""}{r.stale || recentButNotLive ? <span className="jx-cchip-tag">· {ageLabel(r.asOf)}{onPick ? " ↻" : ""}</span> : null}</>;
           return onPick ? (
             <button key={r.classCode} type="button" className={`jx-cchip jx-cchip-btn jx-cchip-${av.tone}`} onClick={(e) => { e.stopPropagation(); onPick(r); }} title={`${r.classCode} ki fresh seat check`}>{inner}</button>
           ) : (
@@ -578,7 +582,7 @@ export function JourneyOptions({
           <div className="jx-hero-cta">
             <div className="jx-hero-note">
               <span className="jx-hero-note-ic">{isOk(heroDirect.availability) ? IC.shield : IC.warn}</span>
-              <div><strong>{isOk(heroDirect.availability) ? "Seat verified" : heroDirect.availability?.stale && (heroDirect.availability.status === "AVAILABLE" || heroDirect.availability.status === "RAC") ? "Available (not fresh) — verify" : "Availability may have changed"}</strong><div className="jx-sub">{heroDirect.availability?.stale ? "Data 24h+ purana (web cache) — Seat check se refresh karo, phir book" : asOf ? `Last checked: ${asOf}` : "Seat check se confirm karein"}</div></div>
+              <div><strong>{isOk(heroDirect.availability) ? "Seat verified" : heroDirect.availability?.stale && (heroDirect.availability.status === "AVAILABLE" || heroDirect.availability.status === "RAC") ? "Available (not fresh) — verify" : "Availability may have changed"}</strong><div className="jx-sub">{heroDirect.availability?.stale ? "Data 24h+ purana (web cache) — Seat check se refresh karo." : heroDirect.availability?.asOf && Date.now() - Date.parse(heroDirect.availability.asOf) > 10 * 60 * 1000 ? `IRCTC data ${ageLabel(heroDirect.availability.asOf)} ka (IRCTC ka live pull abhi band hai — 23:45–00:20 maintenance; booking se pehle dobara check).` : asOf ? `Last checked: ${asOf}` : "Seat check se confirm karo."}</div></div>
             </div>
             {pick && <button type="button" className="jx-btn jx-btn-primary" onClick={() => pick(heroDirect)}>Is train ko dekho {IC.arrow}</button>}
             {onOpenBoard && <button type="button" className="jx-btn jx-btn-dark" onClick={onOpenBoard}>Sabhi trains · Book {IC.arrow}</button>}
