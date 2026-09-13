@@ -68,6 +68,8 @@ export interface AgentRouteOption {
   /** Round-18m-12: full class board (every class probed) for this train — RAC/WL rows included. */
   classOptions?: { classCode: string; status: string; seats: number | null; rac: number | null; waitlist: number | null; fare: number | null; source: string; stale?: boolean; asOf?: string | null }[];
   probed?: boolean;
+  /** Round-18m-30: WL/N-A classes ke liye earlier-stop / book-upto ticket par seat rows (same train). */
+  earlierStopOptions?: AgentBoardFromEarlier[];
   reliability: null;
   source: string;
   why: string;

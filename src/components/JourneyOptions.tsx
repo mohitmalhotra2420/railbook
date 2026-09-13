@@ -406,6 +406,14 @@ export function JourneyOptions({
         <div key={o.trainNumbers[0]} className="jx-sb-row">
           <button type="button" className="jx-sb-head" onClick={pick ? () => pick(o) : undefined}><span className="jx-no">{o.trainNumbers[0]}</span> <span className="jx-name">{o.trainNames[0]}</span> <span className="jx-sub">{o.departure}→{o.arrival}{dateTag(baseDate, o.arrivalDayOffset)} · {o.durationLabel ?? ""}</span>{aiRec?.kind === "direct" && aiRec.trainNumbers[0] === o.trainNumbers[0] && <span className="jx-sb-pick">{IC.star} AI pick</span>}</button>
           {o.classOptions && o.classOptions.length ? <ClassRow label="" rows={o.classOptions} onPick={onPickClass ? (r) => onPickClass({ trainNumber: o.trainNumbers[0], classCode: r.classCode, from: o.origin, to: o.destination }) : undefined} /> : <button type="button" className="jx-sub jx-linkbtn" onClick={onPickClass ? () => onPickClass({ trainNumber: o.trainNumbers[0], classCode: "", from: o.origin, to: o.destination }) : undefined}>{o.probed ? "Koi class data nahi" : "Seat data provider se nahi aayi"} · ↻ check karo</button>}
+          {/* Round-18m-30 (user rule): jo class boarding se WL/N-A thi, usi train mein train-origin se / destination
+              ke aage tak ticket par seat — har row = book-from → book-upto, passenger apne hi stations par. */}
+          {(o.earlierStopOptions ?? []).map((b) => (
+            <div key={`${b.trainNumber}-${b.bookFrom}-${b.bookUpto ?? ""}`} className="jx-sb-alt">
+              <span className="jx-sb-alt-label">Ticket {b.bookFromName ?? b.bookFrom} ({b.bookFrom}){b.bookUpto ? ` → ${b.bookUptoName ?? b.bookUpto} (${b.bookUpto})` : ` → ${b.destination}`} · board {b.boardAt}, utro {b.destination}:</span>
+              <ClassRow label="" rows={b.classOptions ?? [b.availability]} onPick={onPickClass ? (r) => onPickClass({ trainNumber: b.trainNumber, classCode: r.classCode, from: b.bookFrom, to: b.bookUpto ?? b.destination, boardAt: b.boardAt }) : undefined} />
+            </div>
+          ))}
         </div>
       ))}
     </Section>

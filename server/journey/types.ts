@@ -80,6 +80,9 @@ export type RouteOption = {
   /** Round-18m-12: is train ka POORA class board (har class ka status) — provider se jo mila, sab. */
   classOptions?: RouteAvailability[];
   /** Round-18m-12: seat probe hua ya nahi (false = provider fail / not checked — "seat nahi" nahi bolna). */
+  /** Round-18m-30: is train ki jo classes user segment par WL/N-A thi, unke liye train-origin→boarding
+   *  (earlier stop) ya destination ke aage (book-upto) ticket par provider-proven seat rows. */
+  earlierStopOptions?: BoardFromEarlierOption[];
   probed?: boolean;
   /** Reliability SIRF tab jab provider real data de — abhi koi nahi deta → null. */
   reliability: null;
