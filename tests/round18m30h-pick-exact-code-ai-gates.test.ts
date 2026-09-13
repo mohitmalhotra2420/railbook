@@ -48,3 +48,11 @@ describe("Round-18m-30j: date-format hint in a clarifying question is not a hall
     expect(turn.reply).not.toMatch(/provider se nahi mil/);
   }, 30000);
 });
+
+describe("Round-18m-30l: AI-written station options are parsed; 0 trains at chosen sibling → same-city fallback with a clear note", () => {
+  it("'2' on '1. LKO — Lucknow NR\\n2. LJN — Lucknow Junction NER' → LJN", async () => {
+    const ctx = { ...emptyAgentContext(), origin: { code: "LDH", name: "Ludhiana Junction", city: "Ludhiana" }, pendingDestinationChoice: "Lucknow" };
+    const p = await resolveStationPick("2", [{ role: "assistant", content: "Lucknow mein 2 stations hain — kaunsa chahiye? 1. LKO — Lucknow NR\n2. LJN — Lucknow Junction NER" }], ctx);
+    expect(p?.code).toBe("LJN");
+  });
+});

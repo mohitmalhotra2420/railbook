@@ -1,4 +1,5 @@
-import type { Station } from "../providers/types.js";
+import type { Station, TrainResult } from "../providers/types.js";
+import type { ServedProvider } from "../railway/router.js";
 import { aiPhraseGate } from "./agentic.js";
 import { runUnderstand } from "../understand/index.js";
 import { generalRailwayAnswer } from "../understand/llm.js";
@@ -249,7 +250,19 @@ async function atlasFallback(
 
   /* 3) REAL search + bounded fare probe — numbers sirf provider evidence se. */
   const search = await searchTrainsRouted({ from: ctx.origin!.code, to: ctx.destination!.code, date: ctx.date! });
+  let siblingNote = "";
+  if (!search.trains.length) {
+    const sib = await sameCityFallbackSearch(ctx.origin!.code, ctx.destination!.code, ctx.date!);
+    if (sib) {
+      const newCode = sib.changed === "destination" ? sib.to : sib.from;
+      const nm = (sib.changed === "destination" ? sib.trains[0]?.to.name : sib.trains[0]?.from.name) || newCode;
+      siblingNote = `${ctx.origin!.code} → ${ctx.destination!.code} ke liye seedhi train nahi — usi shehar ke ${newCode} (${nm}) ki trains dikha raha hoon (station badla hai). `;
+      if (sib.changed === "destination") ctx.destination = { code: newCode, name: nm, city: ctx.destination!.city ?? ctx.destination!.name }; else ctx.origin = { code: newCode, name: nm, city: ctx.origin!.city ?? ctx.origin!.name };
+      search.trains = sib.trains; search.provider = sib.provider;
+    }
+  }
   const trains = search.trains;
+  void siblingNote;
   if (!trains.length) {
     return {
       reply: `${ctx.origin!.code} → ${ctx.destination!.code} (${ctx.date!}) ke liye koi train nahi mili — main andaza nahi lagaunga.`,
@@ -448,7 +461,9 @@ function mentionsStationOptions(content: string | null | undefined): boolean {
   const c = String(content ?? "");
   return (
     /options?\s*:/i.test(c) ||
-    /kaunse?\s+station|kaun\s*sa\s+station|kis\s+station|kis\s+delhi\s+station|station chahiye/i.test(c) ||
+    /kaunse?\s+station|kaun\s*sa\s+station|kis\s+station|kis\s+delhi\s+station|station chahiye|stations?\s+hain?\s*[—–-]?\s*kaun|kaunsa\s+chahiye|konsa\s+chahiye|kaunsa\s+station|konsa\s+station|which\s+station/i.test(c) ||
+    /* Round-18m-30l: AI-written options ("1. LKO — Lucknow NR\n2. LJN — …") — 2+ numbered CODE – Name items = options. */
+    ((c.match(/(?:^|\s)\d{1,2}[.)]\s*[A-Z]{2,5}\s*[–—-]\s*[A-Za-z]/g) ?? []).length >= 2) ||
     /\(\s*[A-Z]{2,5}(?:\s*,\s*[A-Z]{2,5}){2,}\s*\)/.test(c)
   );
 }
@@ -551,6 +566,26 @@ async function verifyStationCode(code: string, label: string, side: "to" | "from
     return { code: code.toUpperCase(), name: label && label !== code.toUpperCase() ? label : code.toUpperCase(), city: label || code.toUpperCase(), side };
   }
   void apiAnswered;
+  return null;
+}
+
+/* Round-18m-30l (prod screenshot LDH→LJN: "koi train nahi mili" jabki ConfirmTkt LDH→LKO ki trains dikha raha
+ * tha): chune station par 0 trains → usi city ke sibling stations (LKO↔LJN, NDLS↔DLI↔NZM…) par search karke
+ * user ko SAAF bata kar suggest karo — route chupke se kabhi nahi badalta (user rule), sirf bataya jaata hai. */
+async function sameCityFallbackSearch(from: string, to: string, date: string): Promise<{ from: string; to: string; changed: "origin" | "destination"; trains: TrainResult[]; provider: ServedProvider } | null> {
+  const { clusterSiblings } = await import("../journey/engine.js");
+  const pairs = [
+    ...clusterSiblings(to).map((t) => ({ from, to: t, changed: "destination" as const })),
+    ...clusterSiblings(from).map((f) => ({ from: f, to, changed: "origin" as const })),
+  ];
+  for (const p of pairs.slice(0, 4)) {
+    try {
+      const r = await searchTrainsRouted({ from: p.from, to: p.to, date });
+      if (r.trains.length) return { ...p, trains: r.trains, provider: r.provider };
+    } catch {
+      /* next sibling */
+    }
+  }
   return null;
 }
 
@@ -1926,9 +1961,20 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
           ? withDur.reduce((b, t) => (t.durationMinutes < (b.durationMinutes ?? Infinity) ? t : b))
           : null;
         const fastestLine = fastest ? ` Sabse fast: ${fastest.number} ${fastest.name} (${fastest.durationLabel}).` : "";
-        reply = search.trains.length
+        let sibling: Awaited<ReturnType<typeof sameCityFallbackSearch>> = null;
+        if (!search.trains.length) sibling = await sameCityFallbackSearch(ctx.origin!.code, ctx.destination!.code, ctx.date!);
+        if (sibling) {
+          const chg = sibling.changed === "destination" ? ctx.destination! : ctx.origin!;
+          const newCode = sibling.changed === "destination" ? sibling.to : sibling.from;
+          const newSt = { code: newCode, name: (sibling.trains[0] && (sibling.changed === "destination" ? sibling.trains[0].to.name : sibling.trains[0].from.name)) || newCode, city: chg.city ?? chg.name };
+          if (sibling.changed === "destination") ctx.destination = newSt; else ctx.origin = newSt;
+          reply = `${ctx.origin!.code === newCode ? chg.code : ctx.origin!.code} → ${sibling.changed === "destination" ? chg.code : ctx.destination!.code} (${ctx.date}) ke liye seedhi koi train nahi hai — lekin usi shehar ke ${newCode} (${newSt.name}) tak ${sibling.trains.length} trains hain. Main ${sibling.from} → ${sibling.to} dikha raha hoon (station badla hai, note kar lo).`;
+          search.trains = sibling.trains;
+          search.provider = sibling.provider;
+        }
+        reply = reply || (search.trains.length
           ? `Theek hai — ${ctx.origin!.code} → ${ctx.destination!.code} (${ctx.date}): ${search.trains.length} trains mili.${fastestLine} Poori list neeche table mein hai.`
-          : `${ctx.origin!.code} → ${ctx.destination!.code} (${ctx.date}) ke liye koi train nahi mili — main andaza nahi lagaunga.`;
+          : `${ctx.origin!.code} → ${ctx.destination!.code} (${ctx.date}) ke liye koi train nahi mili — main andaza nahi lagaunga.`);
         toolOk = search.trains.length > 0;
         detTrains = tableFromSearch(ctx.origin!.code, ctx.destination!.code, ctx.date!, search.trains.slice(0, 12));
         rememberSearch(ctx, detTrains);
