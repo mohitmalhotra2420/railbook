@@ -841,8 +841,11 @@ function seedContext(req: AgentRequest): AgentContext {
    * ka stale known slot use NAHI hoga. Sirf tab seed karo jab server context khaali ho (pehla turn / reload). */
   const srvCtx = req.context ?? null;
   const ctxHasRoute = Boolean(srvCtx && (srvCtx.origin || srvCtx.destination || srvCtx.pendingDestinationChoice || srvCtx.pendingOriginChoice));
-  const allowClientDate = !ctxHasRoute || srvCtx?.dateProvided === true;
-  const allowClientPax = !ctxHasRoute || srvCtx?.paxProvided === true;
+  /* Is message mein user ne khud koi ROUTE bola ("X se Y") → ye nayi journey ho sakti hai; client ki purani
+   * date/pax tab tak nahi jab tak isi message mein na ho (mergeAgentContext NLU se nayi date/pax laata hai). */
+  const speaksRoute = /\b(se|from)\b[\s\S]{1,40}\b(jaana|jana|jaunga|jaungi|tak|ko|to|ke liye|train|trains|seat|seats|ticket)\b/i.test(String(req.text ?? "")) && !/^\s*\d{1,2}\s*$/.test(String(req.text ?? ""));
+  const allowClientDate = !speaksRoute && (!ctxHasRoute || srvCtx?.dateProvided === true);
+  const allowClientPax = !speaksRoute && (!ctxHasRoute || srvCtx?.paxProvided === true);
   if (req.known?.date && allowClientDate) {
     base.date = req.known.date;
     base.dateProvided = true;

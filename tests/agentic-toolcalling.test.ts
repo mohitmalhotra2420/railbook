@@ -825,10 +825,11 @@ describe("agent integration: agentic path + deterministic fallback", () => {
     const res = await request(createApp())
       .post("/api/agent")
       .send({
-        text: "Amritsar se Delhi Saturday ko sabse fast train kaunsi hai aur CC ka fare aur availability kya hai?",
+        /* Round-18m-30o: NAYI route ke pehle message par client ki purani pax/date ignore hoti hai (user rule:
+         * nayi journey = date + passengers dobara) — isliye pax TEXT mein. */
+        text: "Amritsar se Delhi Saturday ko 2 passengers ke liye sabse fast train kaunsi hai aur CC ka fare aur availability kya hai?",
         now: NOW,
-        /* Round-18m-30f: availability/fare = party-size sawaal → pax gate pehle; yahan pax known (user rule: kabhi 1 assume nahi). */
-        known: { from: { code: "ASR", name: "Amritsar Junction" }, to: { code: "NDLS", name: "New Delhi" }, passengerCount: 2 },
+        known: { from: { code: "ASR", name: "Amritsar Junction" }, to: { code: "NDLS", name: "New Delhi" } },
       });
     expect(res.status).toBe(200);
     expect(res.body.engine).toBe("agentic_tool_calling");

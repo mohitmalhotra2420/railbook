@@ -85,3 +85,20 @@ describe("Round-18m-30n: stale client known.date/passengerCount never overrides 
     expect(res.context.dateProvided).toBe(true);
   }, 30000);
 });
+
+describe("Round-18m-30n(b): first turn of a NEW route ignores stale client date/pax", () => {
+  it("'ludhiana se lucknow jaana hai' + known.date/pax from old journey → context has no date/pax", async () => {
+    process.env.RAILWAY_PROVIDER = "mock";
+    const { runAgent } = await import("../server/agent/run");
+    const res = await runAgent({ text: "Mujhe ludhiana se lucknow jaana hai", now: "2026-09-13T16:05:00.000Z", known: { date: "2026-09-14", passengerCount: 2 } } as never);
+    expect(res.context.dateProvided).toBe(false);
+    expect(res.context.paxProvided).toBe(false);
+  }, 30000);
+  it("same-route follow-up with date in ctx keeps it ('ASR se BSB fastest?')", async () => {
+    const { runAgent } = await import("../server/agent/run");
+    const prev = { ...emptyAgentContext(), origin: { code: "ASR", name: "Amritsar Jn" }, destination: { code: "BSB", name: "Varanasi Jn" }, date: "2026-09-14", dateProvided: true, passengers: 3, paxProvided: true };
+    const res = await runAgent({ text: "ASR se BSB fastest train konsi hai", now: "2026-09-13T16:05:00.000Z", context: prev, known: { date: "2026-09-14", passengerCount: 3 } } as never);
+    expect(res.context.date).toBe("2026-09-14");
+    expect(res.context.passengers).toBe(3);
+  }, 30000);
+});
