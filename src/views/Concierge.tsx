@@ -190,7 +190,16 @@ export function Concierge() {
   const lastFactTrainRef = useRef<string | null>(null);
   /** Last server-side AI agent context — sent back each turn so multi-turn state survives.
    * Round-8: persisted memory se initialize — refresh par bhi train/topic yaad. */
-  const agentCtxRef = useRef<import("../api").AgentContextClient | null>(persistedMemory()?.agentCtx ?? null);
+  /* Round-18m-30w (user screenshot 00:27: fresh open, "ludhiana se mathura" → seedha 138 seat checks, na date na
+   * pax): screen par purani chat NAHI thi (naya open) par agent context 7-din wali memory se aa gaya → server
+   * ne "wahi journey" maan kar purani date/pax reuse kar li. Rule: jo user ko dikh raha hai wahi context —
+   * fresh screen = fresh journey context. Purani chat sirf same-tab reload par restore hoti hai (upar), to
+   * agent context bhi sirf tabhi. */
+  const agentCtxRef = useRef<import("../api").AgentContextClient | null>((() => {
+    const mem = persistedMemory();
+    if (!mem) return null;
+    return mem.pageSession && mem.pageSession === currentPageSession() ? mem.agentCtx ?? null : null;
+  })());
   const saved = loadTravellers();
 
   const voice = useVoiceInput(

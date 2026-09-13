@@ -135,3 +135,13 @@ describe("Round-18m-30s(b): model-invented passengers arg is ignored — tool st
     process.env.NVIDIA_API_KEY = "";
   }, 30000);
 });
+
+describe("Round-18m-30w: fresh screen never inherits the previous journey's agent context", () => {
+  it("Concierge restores agentCtx only for the same page session (source-level guard)", () => {
+    const src = require("node:fs").readFileSync(require("node:path").join(__dirname, "../src/views/Concierge.tsx"), "utf8");
+    const i = src.indexOf("const agentCtxRef = useRef");
+    const block = src.slice(i, i + 500);
+    expect(block).toMatch(/pageSession === currentPageSession\(\)/);
+    expect(block).not.toMatch(/useRef<[^>]*>\(persistedMemory\(\)\?\.agentCtx/);
+  });
+});
