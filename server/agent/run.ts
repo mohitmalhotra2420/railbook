@@ -834,11 +834,20 @@ function seedContext(req: AgentRequest): AgentContext {
   delete base.justReset;
   if (req.known?.from) base.origin = req.known.from;
   if (req.known?.to) base.destination = req.known.to;
-  if (req.known?.date) {
+  /* Round-18m-30n (prod screenshot: "ludhiana se lucknow" → "1" → seedha 14 Sept ka plan, na date poochhi na
+   * pax): client ka `known.date/passengerCount` sessionStorage se PURANI journey ka tha. Server ka agent
+   * context (req.context) is journey ke liye date/pax reset kar chuka tha — wahi sach hai. Rule: agar server
+   * context mein dateProvided/paxProvided FALSE hai (yaani is route ke liye user ne abhi nahi bataya), to client
+   * ka stale known slot use NAHI hoga. Sirf tab seed karo jab server context khaali ho (pehla turn / reload). */
+  const srvCtx = req.context ?? null;
+  const ctxHasRoute = Boolean(srvCtx && (srvCtx.origin || srvCtx.destination || srvCtx.pendingDestinationChoice || srvCtx.pendingOriginChoice));
+  const allowClientDate = !ctxHasRoute || srvCtx?.dateProvided === true;
+  const allowClientPax = !ctxHasRoute || srvCtx?.paxProvided === true;
+  if (req.known?.date && allowClientDate) {
     base.date = req.known.date;
     base.dateProvided = true;
   }
-  if (req.known?.passengerCount) {
+  if (req.known?.passengerCount && allowClientPax) {
     base.passengers = req.known.passengerCount;
     base.paxProvided = true;
   }

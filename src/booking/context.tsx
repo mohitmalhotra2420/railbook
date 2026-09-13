@@ -41,6 +41,7 @@ interface BookingCtx {
   setDate: (d: string) => void;
   setPassengerCount: (n: number) => void;
   clearPassengerCount: () => void;
+  clearDateProvided: () => void;
   /** Round-8: "nayi baat/reset" command — journey slots/selection sab clear. */
   resetJourney: () => void;
   search: () => Promise<void>;
@@ -319,6 +320,7 @@ export function BookingProvider({ children }: { children: ReactNode }) {
       setDate,
       setPassengerCount: (count) => dispatch({ type: "SET_PASSENGER_COUNT", count }),
       clearPassengerCount: () => dispatch({ type: "CLEAR_PASSENGER_COUNT" }),
+      clearDateProvided: () => dispatch({ type: "CLEAR_DATE_PROVIDED" }),
       resetJourney: () => dispatch({ type: "RESET_JOURNEY" }),
       search,
       searchRoute: runSearch,

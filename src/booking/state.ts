@@ -52,6 +52,7 @@ export type BookingAction =
   | { type: "SET_DATE"; date: string }
   | { type: "SET_PASSENGER_COUNT"; count: number }
   | { type: "CLEAR_PASSENGER_COUNT" }
+  | { type: "CLEAR_DATE_PROVIDED" }
   /* Round-8: "nayi baat/reset" — poora journey context clear (session/wallet
    * context ke bahar hain, waise bhi preserve hote hain). */
   | { type: "RESET_JOURNEY" }
@@ -205,6 +206,10 @@ export function bookingReducer(
      * "provided" flag hatao (count 1 default rehta hai, par poochha jayega). */
     case "CLEAR_PASSENGER_COUNT":
       return state.paxProvided ? { ...state, paxProvided: false } : state;
+    /* Round-18m-30n: nayi journey — server ne date reset ki → client bhi "provided" bhoole (warna known.date se
+     * purani date server ko wapas chali jaati thi aur plan bina poochhe ban jaata tha). */
+    case "CLEAR_DATE_PROVIDED":
+      return state.dateProvided ? { ...state, dateProvided: false } : state;
     case "SEARCH_START":
       return {
         ...state,

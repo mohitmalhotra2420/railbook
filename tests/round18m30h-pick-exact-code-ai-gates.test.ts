@@ -67,3 +67,21 @@ describe("Round-18m-30m: bare 'N. CODE' options (model's own wording) map correc
     expect((await resolveStationPick("1", [{ role: "assistant", content: c }], ctx))?.code).toBe("LKO");
   });
 });
+
+describe("Round-18m-30n: stale client known.date/passengerCount never overrides a server context that reset them", () => {
+  it("station pick with server ctx dateProvided=false + client known.date (old journey) → still asks the date, no plan", async () => {
+    process.env.RAILWAY_PROVIDER = "mock";
+    const { runAgent } = await import("../server/agent/run");
+    const ctx = { ...emptyAgentContext(), origin: { code: "LDH", name: "Ludhiana Junction", city: "Ludhiana" }, pendingDestinationChoice: "Lucknow", date: null, dateProvided: false, passengers: null, paxProvided: false };
+    const res = await runAgent({ text: "1", now: "2026-09-13T15:50:00.000Z", context: ctx, lastAsked: "destination", known: { date: "2026-09-14", passengerCount: 2 }, history: [{ role: "assistant", content: "Lucknow ke liye 2 stations hain:\n1. LKO – Lucknow NR\n2. LJN – Lucknow Junction NER Number ya code batao." }] } as never);
+    expect(res.context.destination?.code).toBe("LKO");
+    expect(res.context.dateProvided).toBe(false);
+    expect(res.journey ?? null).toBeNull();
+    expect(res.reply).toMatch(/date/i);
+  }, 30000);
+  it("fresh session (no server ctx) still seeds client known slots", async () => {
+    const { runAgent } = await import("../server/agent/run");
+    const res = await runAgent({ text: "12238 ka live status", now: "2026-09-13T15:50:00.000Z", known: { date: "2026-09-14", passengerCount: 2 } } as never);
+    expect(res.context.dateProvided).toBe(true);
+  }, 30000);
+});
