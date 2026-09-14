@@ -211,25 +211,6 @@ export function useVoiceInput(
       startingRef.current = false;
       return fail(mapGetUserMediaError(err));
     }
-    /* "Main sun raha hoon" PEHLE bolo aur khatam hone do — TTS aur recognizer ek saath Android Chrome par
-     * recognizer ko mute/abort kar dete hain (isi wajah se transcript nahi aa raha tha). Max 1.8 s wait. */
-    if (manual && opts.greet !== false && typeof window !== "undefined" && "speechSynthesis" in window) {
-      await new Promise<void>((resolve) => {
-        let done = false;
-        const finish = () => { if (!done) { done = true; resolve(); } };
-        try {
-          const u = new SpeechSynthesisUtterance("Main sun raha hoon");
-          u.lang = "hi-IN"; u.rate = 1.1; u.volume = 1;
-          u.onend = finish; u.onerror = finish;
-          window.speechSynthesis.cancel();
-          window.speechSynthesis.speak(u);
-          setTimeout(finish, 1800);
-        } catch {
-          finish();
-        }
-      });
-      if (!wantListenRef.current) { startingRef.current = false; return null; } // user ne beech mein cancel kiya
-    }
     /* Waveform: mic stream → AnalyserNode → RMS level (0..1). Recognition se alag stream — dono saath chalte hain. */
     if (manual && typeof navigator !== "undefined" && navigator.mediaDevices?.getUserMedia && typeof AudioContext !== "undefined") {
       try {
@@ -253,6 +234,17 @@ export function useVoiceInput(
         /* meter optional */
       }
     }
+    /* "Main sun raha hoon" — bol kar batao (short, cancel-able). */
+    if (manual && opts.greet !== false && typeof window !== "undefined" && "speechSynthesis" in window) {
+      try {
+        const u = new SpeechSynthesisUtterance("Main sun raha hoon");
+        u.lang = "hi-IN"; u.rate = 1.05; u.volume = 0.9;
+        window.speechSynthesis.cancel();
+        window.speechSynthesis.speak(u);
+      } catch {
+        /* optional */
+      }
+    }
 
     const rec = createRecognizer("hi-IN");
     if (!rec) {
@@ -274,7 +266,6 @@ export function useVoiceInput(
       }
       const shown = mergeGrowingText([bufferRef.current, mid].filter(Boolean));
       if (shown) setInterim(shown);
-      if (manual) setStatus("Main sun raha hoon… (OK dabao jab ho jaye)");
       if (bufferRef.current || mid) armSilence();
     };
 
@@ -287,7 +278,6 @@ export function useVoiceInput(
         return;
       }
       if (ev.error === "no-speech" && wantListenRef.current) return;
-      if (manual && wantListenRef.current && (ev.error === "aborted" || ev.error === "network" || ev.error === "audio-capture")) return; // onend restart handles
       const kind = mapSpeechError(ev.error);
       lastErrorRef.current = kind;
       setStatus(VOICE_MESSAGES[kind]);
@@ -296,21 +286,11 @@ export function useVoiceInput(
     rec.onend = () => {
       const leftover = bufferRef.current.trim();
       if (manual) {
-        /* User ne abhi OK/cancel nahi dabaya → NAYA recognizer chupchaap start (Android Chrome par purane
-         * instance ka dobara start() aksar "already started"/silent fail deta hai). */
+        /* User ne abhi OK/cancel nahi dabaya → recognizer chupchaap dobara start (browser silence par band karta hai). */
         if (wantListenRef.current && restartRef.current < MANUAL_MAX_RESTARTS && stopReasonRef.current !== "user" && stopReasonRef.current !== "commit") {
           restartRef.current += 1;
           lastErrorRef.current = null;
-          try {
-            const next = createRecognizer("hi-IN");
-            if (next) {
-              next.onstart = rec.onstart; next.onresult = rec.onresult; next.onerror = rec.onerror; next.onend = rec.onend;
-              rec.onstart = null; rec.onresult = null; rec.onerror = null; rec.onend = null;
-              recRef.current = next;
-              setTimeout(() => { try { next.start(); } catch { /* next onend → retry */ } }, 120);
-              return;
-            }
-          } catch { /* fall through */ }
+          try { rec.start(); return; } catch { /* fall through */ }
         }
         if (stopReasonRef.current === "user" || stopReasonRef.current === "commit") return;
         teardown(false);

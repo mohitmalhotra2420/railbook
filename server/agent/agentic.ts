@@ -1116,6 +1116,8 @@ export type ToolExecContext = {
   passengers?: number | null;
   /** Round-18m-29: agentic loop → planner ka decision final-answer call mein merge (AI 3→2). */
   deferDecision?: boolean;
+  /** Round-18m-33: SEARCH_STATIONS ka dropdown choice yahan likha jaata hai. */
+  capture?: SearchCapture | null;
 };
 
 export async function executeApprovedTool(
@@ -1313,6 +1315,8 @@ export async function executeApprovedTool(
         if (!res.stations.length) {
           return failResult(res.provider, `"${a.query}" se koi station nahi mila.`);
         }
+        /* Round-18m-33: 2+ stations → client dropdown (needs_choice data, ok result). */
+        if (res.stations.length > 1 && ctx.capture) ctx.capture.choice = { kind: "station", title: `${res.city ?? a.query} — kaunsa station?`, options: res.stations.slice(0, 8).map((st) => ({ label: `${st.code} – ${st.name}`, value: st.code, sub: null })), sendTemplate: "{value}" };
         return okResult(
           res.provider,
           `${res.city ?? a.query}: ${res.stations.length} stations mile.`,
@@ -2794,7 +2798,7 @@ export async function runAgenticTurn(input: {
             rejected: "date_required",
           };
         } else {
-          result = await executeApprovedTool(toolName, args, { userText: input.text, passengers: input.known?.passengers ?? (typeof args.passengers === "number" && args.passengers >= 1 && args.passengers <= 6 && userStatedPax(input.text, args.passengers, { bareDigitIsPax: lastAskedPax }) ? args.passengers : null), deferDecision: true });
+          result = await executeApprovedTool(toolName, args, { userText: input.text, capture: input.capture ?? null, passengers: input.known?.passengers ?? (typeof args.passengers === "number" && args.passengers >= 1 && args.passengers <= 6 && userStatedPax(input.text, args.passengers, { bareDigitIsPax: lastAskedPax }) ? args.passengers : null), deferDecision: true });
         }
         // Structured table capture (user feedback 2026-09-05): SEARCH/JOURNEY
         // success par rows nikalo — client proper <table> render karega, aur
