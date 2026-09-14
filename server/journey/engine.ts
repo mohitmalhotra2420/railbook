@@ -519,9 +519,12 @@ export async function findConnections(
   from: string,
   to: string,
   date: string,
-  opts: { hubs?: string[]; maxHubs?: number; legsPerHub?: number } = {},
+  opts: { hubs?: string[]; maxHubs?: number; legsPerHub?: number; maxTotalMinutes?: number | null } = {},
 ): Promise<{ connections: Connection[]; hubsTried: string[]; sources: Set<string> }> {
   const hubs = (opts.hubs ?? JOURNEY_CONFIG.connectionHubs).filter((h) => h !== from && h !== to).slice(0, opts.maxHubs ?? 3);
+  /* Round-18m-39 (user: "ASR→LDH ke liye NDLS via kyun? Delhi kya karne jaunga"): detour guard — connection ka
+   * total time fastest direct ke 1.6× (+45 min) se zyada ho to wo route hai hi nahi (hub aage nikal kar wapas). */
+  const cap = opts.maxTotalMinutes ?? null;
   const legsPerHub = opts.legsPerHub ?? 8; // Round-18m-9: poore route ki trains (bounded), sirf 4 nahi
   const out: Connection[] = [];
   const sources = new Set<string>();
@@ -536,7 +539,9 @@ export async function findConnections(
         for (const tb of legB) {
           if (ta.number === tb.number) continue; // same train = not a connection
           const c = evaluateConnection(toLeg(ta), toLeg(tb), hub, { source: a.provider === b.provider ? a.provider : `${a.provider}+${b.provider}` });
-          if (c.valid) out.push(c);
+          if (!c.valid) continue;
+          if (cap != null && c.totalDurationMinutes != null && c.totalDurationMinutes > cap) continue;
+          out.push(c);
         }
       }
     } catch {
@@ -1160,17 +1165,24 @@ export async function planJourney(args: {
   const probedConnections: Connection[] = [];
   let bfeAudit = { trains: 0, stops: 0 };
   if (args.includeConnections || trains.length <= 1) {
-    const c = await findConnections(from, to, args.date, { maxHubs: trains.length ? 2 : 3 });
+    /* Round-18m-39: direct trains hain → hubs SIRF unke route ke BEECH ke junctions (ASR→LDH: JRC/PGW, NDLS nahi).
+     * Fixed hub-list sirf tab jab koi direct train na ho — aur tab bhi detour cap ke saath. */
+    const fastestDirectMin = trains.reduce<number | null>((m, t) => (t.durationMinutes && t.durationMinutes > 0 ? Math.min(m ?? 9e9, t.durationMinutes) : m), null);
+    const detourCap = fastestDirectMin != null ? Math.round(fastestDirectMin * 1.6 + 45) : null;
+    const routeHubs = trains.length ? await routeDerivedHubs(probeList, from, to) : [];
+    const c = routeHubs.length
+      ? await findConnections(from, to, args.date, { hubs: routeHubs, maxHubs: routeHubs.length, legsPerHub: 6, maxTotalMinutes: detourCap })
+      : await findConnections(from, to, args.date, { maxHubs: trains.length ? 2 : 3, maxTotalMinutes: detourCap });
     connections = c.connections;
     c.sources.forEach((s) => sources.add(s));
     (await probeConnectionLegs(connections, args.date, args.travelClass ?? null)).forEach((s) => sources.add(s));
     const found = connections.length;
     probedConnections.push(...connections);
     connections = bookableConnections(connections, pax);
-    if (!connections.length && trains.length) {
+    if (!connections.length && trains.length && !routeHubs.length) {
       const hubs = await routeDerivedHubs(probeList, from, to);
       if (hubs.length) {
-        const c2 = await findConnections(from, to, args.date, { hubs, maxHubs: hubs.length, legsPerHub: 5 });
+        const c2 = await findConnections(from, to, args.date, { hubs, maxHubs: hubs.length, legsPerHub: 5, maxTotalMinutes: detourCap });
         c2.sources.forEach((s) => sources.add(s));
         (await probeConnectionLegs(c2.connections, args.date, args.travelClass ?? null)).forEach((s) => sources.add(s));
         probedConnections.push(...c2.connections);
@@ -1316,16 +1328,21 @@ export async function planJourney(args: {
       boardFromEarlier = [];
     }
     if (!connections.length) {
-      const c = await findConnections(from, to, args.date, { maxHubs: 3 });
+      const fastestDirectMin2 = trains.reduce<number | null>((m, t) => (t.durationMinutes && t.durationMinutes > 0 ? Math.min(m ?? 9e9, t.durationMinutes) : m), null);
+      const detourCap2 = fastestDirectMin2 != null ? Math.round(fastestDirectMin2 * 1.6 + 45) : null;
+      const routeHubs2 = trains.length ? await routeDerivedHubs(probeList, from, to) : [];
+      const c = routeHubs2.length
+        ? await findConnections(from, to, args.date, { hubs: routeHubs2, maxHubs: routeHubs2.length, legsPerHub: 6, maxTotalMinutes: detourCap2 })
+        : await findConnections(from, to, args.date, { maxHubs: 3, maxTotalMinutes: detourCap2 });
       connections = c.connections;
       c.sources.forEach((s) => sources.add(s));
       (await probeConnectionLegs(connections, args.date, args.travelClass ?? null)).forEach((s) => sources.add(s));
       probedConnections.push(...connections);
       connections = bookableConnections(connections, pax);
-      if (!connections.length) {
+      if (!connections.length && !routeHubs2.length) {
         const hubs = await routeDerivedHubs(probeList, from, to);
         if (hubs.length) {
-          const c2 = await findConnections(from, to, args.date, { hubs, maxHubs: hubs.length, legsPerHub: 5 });
+          const c2 = await findConnections(from, to, args.date, { hubs, maxHubs: hubs.length, legsPerHub: 5, maxTotalMinutes: detourCap2 });
           c2.sources.forEach((s) => sources.add(s));
           (await probeConnectionLegs(c2.connections, args.date, args.travelClass ?? null)).forEach((s) => sources.add(s));
           probedConnections.push(...c2.connections);
