@@ -1179,3 +1179,73 @@ export async function scrapeTrainNameSearchWeb(query: string, limit = 10): Promi
     .slice(0, limit)
     .map(({ t }) => ({ ...t, provider: "web_erail" as const }));
 }
+
+/* ── Round-18m-30z: TRAIN FACTS (pantry/catering, classes, type, rating, run-days) from verified sites ──
+ * User (2026-09-14): "12461 mein khaana milta hai?" → app ne Wikipedia ka galat page dump kiya. Ab per-train
+ * facts do sources se: erail.in train-enquiry (plain sentence: "Pantry is not available", classes, category,
+ * gauge) + confirmtkt.com train-schedule (JSON: HasPantry, TrainType, FoodRating, DaysOfRun). Dono se mila to
+ * cross-check; mismatch ho to dono batao (invent nahi). */
+export type ScrapedTrainFacts = {
+  trainNumber: string;
+  trainName: string | null;
+  source: string | null;
+  destination: string | null;
+  pantry: boolean | null;
+  classes: string[];
+  trainType: string | null;
+  runDays: string | null;
+  foodRating: number | null;
+  rating: number | null;
+  sentence: string | null;
+  providers: string[];
+  sourceUrls: string[];
+};
+
+export async function scrapeTrainFactsWeb(trainNumber: string): Promise<ScrapedTrainFacts | null> {
+  const num = String(trainNumber ?? "").trim();
+  if (!/^\d{4,6}$/.test(num)) return null;
+  const out: ScrapedTrainFacts = { trainNumber: num, trainName: null, source: null, destination: null, pantry: null, classes: [], trainType: null, runDays: null, foodRating: null, rating: null, sentence: null, providers: [], sourceUrls: [] };
+  const erailUrl = `https://erail.in/train-enquiry/${num}`;
+  const ctUrl = `https://www.confirmtkt.com/train-schedule/${num}`;
+  const [erail, ct] = await Promise.all([fetchHtml(erailUrl), fetchHtml(ctUrl)]);
+  if (erail) {
+    const text = erail.replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, "\n").replace(/&nbsp;/g, " ");
+    const flat = text.replace(/\s+/g, " ");
+    const m = new RegExp(`${num}\\s+([A-Z0-9 .'&-]+?),\\s*(.+?)\\s+to\\s+(.+?)\\s+runs\\s+(.+?),\\s*has classes\\s+([A-Z0-9 ]+)\\.\\s*(Pantry is (?:not )?available)`, "i").exec(flat);
+    if (m) {
+      /* Sentence ke aage page-title text chipka hota hai ("X Train Route Abount Train 12461 X 12461 X") → last "NNNNN NAME" hi asli. */
+      const nm = m[1].trim();
+      const parts = nm.split(new RegExp(`\\b${num}\\b`)).map((x) => x.trim()).filter(Boolean);
+      out.trainName = (parts.length ? parts[parts.length - 1] : nm).replace(/\s+Train Route.*$/i, "").trim();
+      out.source = m[2].trim();
+      out.destination = m[3].trim();
+      out.runDays = m[4].trim();
+      out.classes = m[5].trim().split(/\s+/).filter((c) => /^[0-9A-Z]{2,3}$/.test(c) && c !== "GN");
+      out.pantry = !/not available/i.test(m[6]);
+      out.sentence = `${num} ${out.trainName}, ${out.source} to ${out.destination}, runs ${out.runDays}, classes ${out.classes.join(" ")}. ${m[6]}.`;
+      const cat = /category type is ([A-Za-z ]+?)\./i.exec(text.replace(/\s+/g, " "));
+      if (cat) out.trainType = cat[1].trim();
+      out.providers.push("web_erail");
+      out.sourceUrls.push(erailUrl);
+    }
+  }
+  if (ct) {
+    const hp = /"HasPantry":(true|false)/.exec(ct);
+    const tt = /"TrainType":"([^"]+)"/.exec(ct);
+    const fr = /"FoodRating":([0-9.]+)/.exec(ct);
+    const rt = /"Rating":([0-9.]+)/.exec(ct);
+    const tn = /"TrainName":"([^"]+)"/.exec(ct);
+    if (hp || tt) {
+      const ctPantry = hp ? hp[1] === "true" : null;
+      if (out.pantry == null) out.pantry = ctPantry;
+      else if (ctPantry != null && ctPantry !== out.pantry) out.sentence = `${out.sentence ?? ""} (Note: erail (IR timetable data) says pantry ${out.pantry ? "available" : "not available"}, confirmtkt says ${ctPantry ? "available" : "not available"} — sources differ; tell the user both; erail is the primary source; suggest confirming on IRCTC while booking. Do NOT ask the user to retry.)`.trim();
+      if (!out.trainType && tt) out.trainType = tt[1];
+      if (fr) out.foodRating = Number(fr[1]);
+      if (rt) out.rating = Number(rt[1]);
+      if (!out.trainName && tn) out.trainName = tn[1];
+      out.providers.push("web_confirmtkt");
+      out.sourceUrls.push(ctUrl);
+    }
+  }
+  return out.providers.length ? out : null;
+}

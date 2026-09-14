@@ -740,6 +740,10 @@ async function resolveTrainByName(
    * hai — train-number resolve karke "kaunsi?" poochna hi nahi. Fact words +
    * no number → naam-resolution skip, general-fact web path jawab dega. */
   if ((GENERAL_FACT_RE.test(text) || CONCEPT_QUESTION_RE.test(text)) && !/\b\d{5}\b/.test(text)) return null;
+  /* Round-18m-30z (screenshot: "Kya vande bharat mein khaana milta hai?" → 6-train picker, phir Wikipedia dump):
+   * "vande bharat/rajdhani mein khaana/pantry/catering/wifi/charging…" = TRAIN-TYPE ka GENERAL sawaal (kisi ek
+   * train ka nahi) — picker nahi; KB/web jawab dega. Aur agar ek train pehle se selected hai to wahi train. */
+  if (/\b(khaana|khana|food|meal|meals|pantry|catering|wifi|wi-fi|charging|bedding|blanket|toilet|washroom|ac\b|luggage|saman|samaan)\b/i.test(text) && !/\b\d{5}\b/.test(text)) return null;
   if (!hasNameKeyword) {
     const followish =
       /^(timetable|live|fare|availability|coach|train_pick)$/.test(classifyFollowUp(text) ?? "") ||

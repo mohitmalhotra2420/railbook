@@ -29,7 +29,7 @@ import {
   getLastRailwayLog,
   searchTrainsRouted,
 } from "../railway/router.js";
-import { webSourceLabel } from "../railway/webscrape.js";
+import { scrapeTrainFactsWeb, webSourceLabel } from "../railway/webscrape.js";
 import { parseDatePhrase, parseStatusDate } from "../understand/legacy-dates.js";
 import { RailKitProvider } from "../railway/railkit.js";
 import type { ClassCode } from "../providers/types.js";
@@ -45,8 +45,8 @@ import { findAlternativeTrains, findAlternateStationOptions } from "../journey/e
 import { pickTrains, type TrainPickerResult } from "../journey/trainpicker.js";
 import { capabilityAvailable, UNAVAILABLE_MESSAGES } from "../providers/capabilities.js";
 import { makeProvenance } from "../providers/provenance.js";
-import { webSearch } from "./websearch.js";
-import { findTopicAnswer, HINGLISH_TOPIC_WORDS, significantWords } from "./topicpage.js";
+import { generalWebSearch, scrapeWebPage, trustedSiteOf, webSearch } from "./websearch.js";
+import { cleanQueryEn, findTopicAnswer, HINGLISH_TOPIC_WORDS, significantWords } from "./topicpage.js";
 import { railKbAnswer } from "./railkb.js";
 /* Round-18i: rules/procedure topics → KB before Wikipedia (see WEB_SEARCH). */
 const RULES_TOPIC_RE = /\b(tatkal|premium tatkal|rac|waiting list|waitlist|wl|gnwl|pqwl|rlwl|chart|pnr|refund|cancel(?:lation)?|luggage|saman|samaan|blanket|bedroll|pantry|catering|id proof|photo id|concession|senior citizen|quota|break journey|child (?:ticket|fare)|bachcha|tte|ticket checker|arp|advance reservation|kitne din pehle)\b/i;
@@ -408,7 +408,7 @@ export const AGENTIC_TOOLS = [
     type: "function",
     function: {
       name: "GET_TRAIN_INFO",
-      description: "Ek train ka naam/running days info.",
+      description: "Ek train ka naam, running days, classes, type, aur PANTRY/CATERING (khaana milta hai ya nahi), food rating — verified sites se. 'is train mein khaana/pantry/catering/food?' jaise sawaal ke liye YEHI tool (WEB_SEARCH nahi).",
       parameters: {
         type: "object",
         properties: { train_number: { type: "string", description: "5-digit train number" } },
@@ -1218,6 +1218,12 @@ export async function executeApprovedTool(
             note: "YAHI JAWAB HAI (RailBook knowledge base — stable railway rules) — dobara WEB_SEARCH MAT karo. Is text ko 2-4 line Hinglish mein do, numbers waise hi; end mein '(General railway rules — official/IRCTC se verify karein.)' likho.",
           });
         }
+        /* Round-18m-30z: Wikipedia/KB se jawab nahi → TRUSTED railway sites (IRCTC/indianrail.gov.in/
+         * indiarailinfo/erail/railyatri/confirmtkt/ixigo/trainman…) par search + best page ka focused para. */
+        const scraped = await answerFromWebScrapeTool(userText || q).catch(() => null);
+        if (scraped) {
+          return okResult("web", scraped.summary, { query: q, answer_found: true, answer: scraped.answer, source_url: scraped.url, title: scraped.title, kind: "web_page", note: "YAHI JAWAB HAI — dobara WEB_SEARCH MAT karo. Is 'answer' ko 2-4 line Hinglish mein do, source site ka naam + URL ke saath; 'web se mila' likho." });
+        }
         const results = await webSearch(q, 4);
         if (!results.length) {
           return failResult("web", `"${q}" par web se bhi kuch nahi mila — invent nahi karunga.`);
@@ -1456,10 +1462,16 @@ export async function executeApprovedTool(
         );
       }
       case "GET_TRAIN_INFO": {
-        const res = await routedTrainInfo(a.train_number as string);
-        return res.info
-          ? okResult(res.provider, `${res.info.trainNumber} ${res.info.trainName}.${webSourceLabel(res.provider)}`, res.info)
-          : failResult(res.provider, "Train info nahi mili.");
+        /* Round-18m-30z (user: "12461 mein khaana milta hai?" → Wikipedia ka galat page): train FACTS
+         * (pantry/catering, classes, type, run-days, food rating) verified sites (erail + confirmtkt) se —
+         * API info ke saath merge. Model ko seedha jawab-ready sentence milta hai. */
+        const [res, facts] = await Promise.all([routedTrainInfo(a.train_number as string), scrapeTrainFactsWeb(a.train_number as string).catch(() => null)]);
+        if (!res.info && !facts) return failResult(res.provider, "Train info nahi mili.");
+        const name = res.info?.trainName ?? facts?.trainName ?? "";
+        const factLine = facts
+          ? ` FACTS (${facts.providers.join("+")}): ${facts.source && facts.destination ? `${facts.source} → ${facts.destination}; ` : ""}${facts.runDays ? `runs ${facts.runDays}; ` : ""}${facts.classes.length ? `classes ${facts.classes.join("/")}; ` : ""}${facts.trainType ? `type ${facts.trainType}; ` : ""}${facts.pantry === true ? "PANTRY CAR AVAILABLE (onboard khaana milta hai — meals/snacks pantry se; IRCTC eCatering se bhi station par order ho sakta hai)" : facts.pantry === false ? "NO PANTRY CAR (onboard pantry nahi — khaana IRCTC eCatering (ecatering.irctc.co.in / 1323) se en-route station par order karo, ya Vande Bharat/Shatabdi type ho to catering ticket ke saath included ho sakti hai — ticket par check karo)" : "pantry info unknown"}${facts.foodRating != null ? `; food rating ${facts.foodRating}/5` : ""}${facts.rating != null ? `; overall rating ${facts.rating}/5` : ""}.${facts.sentence && /sources differ/i.test(facts.sentence) ? ` ${facts.sentence.slice(facts.sentence.indexOf("(Note:"))}` : ""} (Sources: ${facts.sourceUrls.join(", ")})`
+          : "";
+        return okResult(facts ? `${res.provider === "none" ? "" : res.provider + "+"}${facts.providers.join("+")}` : res.provider, `${a.train_number} ${name}.${factLine}${webSourceLabel(res.provider)}`, { ...(res.info ?? {}), facts });
       }
       case "GET_TIMETABLE": {
         const res = await routedSchedule(a.train_number as string);
@@ -2083,6 +2095,35 @@ export function userStatedPax(text: string | undefined, n: number, opts: { bareD
     if (paxCtx && !dateOrTrain) return true;
   }
   return Object.entries(PAX_WORDS).some(([w, v]) => v === n && new RegExp(`\\b${w}\\b`).test(t) && /\b(passenger|passengers|log|logon|bande|banda|jan|jane|adult|seat|seats|ticket|pax|people|person|hum|akel)/.test(t + (w.startsWith("akel") ? " akel" : "")));
+}
+
+/* Round-18m-30z: trusted railway sites par search + page para (WEB_SEARCH tool ka fallback). */
+async function answerFromWebScrapeTool(questionText: string): Promise<{ summary: string; answer: string; url: string; title: string } | null> {
+  const contentWords = significantWords(questionText).filter((w) => !HINGLISH_TOPIC_WORDS.has(w));
+  const q0 = cleanQueryEn(questionText);
+  if (q0.length < 4) return null;
+  const rest = q0.split(/\s+/).filter((w) => w.length >= 3 && !contentWords.includes(w));
+  const q = [...contentWords, ...rest.slice(0, 4), "indian railways"].join(" ").slice(0, 120);
+  const results = await generalWebSearch(q, 6);
+  if (!results.length) return null;
+  const hit = (hay: string, w: string) => new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "i").test(hay);
+  const ranked = results
+    .map((r) => { let sc = 0; for (const w of contentWords) if (hit(`${r.title} ${r.snippet}`, w)) sc += 2; if (trustedSiteOf(r.url)) sc += 3 - Math.min(2, (trustedSiteOf(r.url)?.rank ?? 3) - 1); return { r, sc }; })
+    .filter((x) => x.sc >= 2)
+    .sort((a, b) => b.sc - a.sc)
+    .map((x) => x.r);
+  for (const r of ranked.slice(0, 3)) {
+    const text = await scrapeWebPage(r.url);
+    if (!text) continue;
+    const paras = text.split("\n").map((p) => p.replace(/\s+/g, " ").trim()).filter((p) => p.length > 60 && p.length < 1200);
+    let best: { p: string; sc: number } | null = null;
+    for (const p of paras) { let sc = 0; for (const w of contentWords) if (hit(p, w)) sc += 3; if (/\b(pantry|catering|food|meal|wifi|charging|bedding|fare|rule|allowed|permitted|not allowed|policy|timing|time)\b/i.test(p)) sc += 1; if (sc > (best?.sc ?? 0)) best = { p, sc }; }
+    if (best && best.sc >= 3) {
+      const site = trustedSiteOf(r.url)?.label ?? new URL(r.url).hostname;
+      return { summary: `Web se mila (${site} — ${r.title.replace(/^\[[^\]]+\]\s*/, "")}): ${best.p.slice(0, 700)}\n(Source: ${r.url})`, answer: best.p.slice(0, 700), url: r.url, title: r.title };
+    }
+  }
+  return null;
 }
 
 function deterministicSummary(steps: ToolTraceStep[]): string {

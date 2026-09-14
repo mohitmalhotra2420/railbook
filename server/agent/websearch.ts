@@ -336,12 +336,65 @@ async function bingSearch(query: string): Promise<WebSearchResult[]> {
 /** General web search — Bing primary (stable, no bot-challenge), DDG-lite
  * fallback (rate-limit ho sakta hai). Wikipedia ke baad (universal fallback
  * mein) hi chalta hai — booking-critical kabhi nahi. */
+/* Round-18m-30z (user: "aur web sources add karo — IRCTC eCatering, indianrail.gov.in, indianrailways.gov.in,
+ * indiarailinfo, erail, confirmtkt, railyatri, ixigo, trainman, etc."): general web search ab do pass —
+ * (1) TRUSTED railway sites par site:-restricted search, (2) open web. Results trusted-domain pehle rank hote
+ * hain (official > enthusiast/aggregator > baaki). Sab labelled web-sourced rehta hai; booking-critical nahi. */
+export const TRUSTED_RAIL_SITES: { host: string; label: string; rank: number }[] = [
+  { host: "irctc.co.in", label: "IRCTC", rank: 1 },
+  { host: "ecatering.irctc.co.in", label: "IRCTC eCatering", rank: 1 },
+  { host: "indianrail.gov.in", label: "Indian Railways (indianrail.gov.in)", rank: 1 },
+  { host: "indianrailways.gov.in", label: "Indian Railways (official)", rank: 1 },
+  { host: "enquiry.indianrail.gov.in", label: "NTES", rank: 1 },
+  { host: "rdso.indianrailways.gov.in", label: "RDSO", rank: 1 },
+  { host: "pib.gov.in", label: "PIB (Govt of India)", rank: 1 },
+  { host: "indiarailinfo.com", label: "India Rail Info", rank: 2 },
+  { host: "erail.in", label: "eRail", rank: 2 },
+  { host: "railyatri.in", label: "RailYatri", rank: 2 },
+  { host: "confirmtkt.com", label: "ConfirmTkt", rank: 2 },
+  { host: "ixigo.com", label: "ixigo", rank: 2 },
+  { host: "trainman.in", label: "Trainman", rank: 2 },
+  { host: "etrain.info", label: "eTrain", rank: 2 },
+  { host: "railmitra.com", label: "RailMitra", rank: 2 },
+  { host: "trainspnrstatus.com", label: "TrainsPNRStatus", rank: 2 },
+  { host: "railrestro.com", label: "RailRestro (IRCTC eCatering partner)", rank: 2 },
+  { host: "24coaches.com", label: "24Coaches", rank: 3 },
+  { host: "wikipedia.org", label: "Wikipedia", rank: 3 },
+  { host: "thehindu.com", label: "The Hindu", rank: 3 },
+  { host: "timesofindia.indiatimes.com", label: "Times of India", rank: 3 },
+  { host: "indianexpress.com", label: "Indian Express", rank: 3 },
+  { host: "hindustantimes.com", label: "Hindustan Times", rank: 3 },
+  { host: "livemint.com", label: "Mint", rank: 3 },
+  { host: "ndtv.com", label: "NDTV", rank: 3 },
+];
+export function trustedSiteOf(url: string): { host: string; label: string; rank: number } | null {
+  let host = "";
+  try {
+    host = new URL(url).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+  let best: { host: string; label: string; rank: number } | null = null;
+  for (const t of TRUSTED_RAIL_SITES) if (host === t.host || host.endsWith(`.${t.host}`)) if (!best || t.host.length > best.host.length) best = t;
+  return best;
+}
+export function rankTrusted(results: WebSearchResult[]): WebSearchResult[] {
+  return [...results]
+    .map((r, i) => ({ r, i, t: trustedSiteOf(r.url) }))
+    .sort((a, b) => (a.t?.rank ?? 9) - (b.t?.rank ?? 9) || a.i - b.i)
+    .map(({ r, t }) => (t ? { ...r, title: r.title.startsWith(`[${t.label}]`) ? r.title : `[${t.label}] ${r.title}` } : r));
+}
+const SITE_PASS_HOSTS = ["irctc.co.in", "indianrail.gov.in", "indianrailways.gov.in", "indiarailinfo.com", "erail.in", "railyatri.in", "confirmtkt.com", "ixigo.com", "trainman.in", "etrain.info", "railmitra.com", "pib.gov.in"];
 export async function generalWebSearch(query: string, limit = 5): Promise<WebSearchResult[]> {
   const q = query.trim().slice(0, 150);
   if (!q) return [];
-  let results = await bingSearch(q);
+  const siteQ = `${q} (${SITE_PASS_HOSTS.map((h) => `site:${h}`).join(" OR ")})`.slice(0, 400);
+  const [trusted, open] = await Promise.all([bingSearch(siteQ).catch(() => [] as WebSearchResult[]), bingSearch(q).catch(() => [] as WebSearchResult[])]);
+  let results = [...trusted, ...open];
   if (!results.length) results = await ddgLiteSearch(q);
-  return results.slice(0, limit);
+  const seen = new Set<string>();
+  const dedup = results.filter((r) => { const k = r.url.replace(/[#?].*$/, ""); if (seen.has(k)) return false; seen.add(k); return true; });
+  return rankTrusted(dedup).slice(0, limit);
 }
 
 /** Web page HTML → clean text (scripts/styles/nav/footer strip). */

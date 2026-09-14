@@ -93,7 +93,7 @@ const ENTRIES: KbEntry[] = [
       "Bedding (blanket+sheet+pillow) AC classes (1A/2A/3A/CC kuch trains) mein included hoti hai. Sleeper (SL) mein bedroll included NAHI hota — station/online se kharidna ya apna le jaana padta hai. Specific train ke catering/bedding ke liye us train ki details dekhein.",
   },
   {
-    keys: ["pantry car", "pantry kya", "khana milta", "food milta", "catering kaise", "e-catering", "ecatering"],
+    keys: ["pantry car", "pantry kya", "khana milta", "khaana milta", "food milta", "khaana milega", "khana milega", "catering kaise", "catering services", "catering milti", "e-catering", "ecatering", "khaana kaise", "food kaise", "khane ka", "khaane ka", "food order"],
     answer:
       "Pantry car train ka onboard kitchen-coach hota hai jisse meals/breakfast serve hote hain (meal plan ya alag khareed). Pantry na ho to IRCTC eCatering se bade stations par pre-booked food milta hai (Ecatering.irctc / app). Rajdhani/Shatabdi/Vande Bharat mein catering aam taur par fare ke saath hota hai; Jan Shatabdi/express mein optional.",
   },
@@ -101,6 +101,11 @@ const ENTRIES: KbEntry[] = [
     keys: ["vistadome", "vistadome coach", "glass roof"],
     answer:
       "Vistadome special AC coach hai — badi glass windows, glass roof section, rotating seats aur observation lounge — scenic routes (Jungle Safari, hill routes) ke liye. Premium fare hota hai, limited trains mein.",
+  },
+  {
+    keys: ["vande bharat khaana", "vande bharat khana", "vande bharat food", "vande bharat catering", "vande bharat meal", "vande bharat mein khaana", "vande bharat mein khana", "vande bharat mein catering", "vande bharat mein food", "vande bharat pantry"],
+    answer:
+      "Vande Bharat Express mein alag pantry car nahi hoti, lekin IRCTC catering ONBOARD milti hai — booking ke time 'catering' option choose karo to fare mein meal/snacks/tea (journey time ke hisaab se breakfast/lunch/dinner) included hota hai aur seat par serve hota hai; 'no food' option lo to fare kam aur onboard sirf paid snacks/paani. Alag se IRCTC eCatering (ecatering.irctc.co.in / 1323) se en-route station par bhi order kar sakte ho. Kisi specific Vande Bharat (train number) ka catering status chahiye to number batao — main uski pantry/catering info verified site se laakar dunga.",
   },
   {
     keys: ["vande bharat kya", "vande bharat train", "bande bharat", "semi high speed", "vande bharat speed"],
