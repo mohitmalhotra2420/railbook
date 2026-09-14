@@ -95,3 +95,24 @@ describe("Round-18m-30: per-class earlier-stop / book-upto rescue runs even when
     expect(p.notes.some((n) => /Class-wise scan/.test(n))).toBe(true);
   });
 });
+
+describe("Round-18m-37: book-upto scan always includes the train's terminus", () => {
+  it("LDH→LKO on a train terminating at BSB (5 stops past LKO) → JAT→BSB segment is probed", async () => {
+    const { findBoardFromEarlier } = await import("../server/journey/engine");
+    const router = await import("../server/railway/router");
+    const stops = ["JAT","PTKC","JRC","LDH","UMB","SRE","MB","BE","LKO","RBL","PBH","JNU","BSB"].map((c, i) => ({ code: c, name: c, arrival: "10:00", departure: "10:05", day: 1 + (i > 6 ? 1 : 0) }));
+    const spySched = vi.spyOn(router, "routedSchedule").mockResolvedValue({ schedule: { trainNumber: "12238", trainName: "BEGUMPURA", stops }, provider: "mock" } as never);
+    const probed: string[] = [];
+    const spyBoard = vi.spyOn(router, "routedClassBoard").mockImplementation(async (_n, _d, from, to) => {
+      probed.push(`${from}>${to}`);
+      const ok = from === "JAT" && to === "BSB";
+      return { classes: ok ? [{ code: "3A", status: "RAC", rac: 30, fare: 1595, source: "web_railyatri" }, { code: "2A", status: "RAC", rac: 6, fare: 2255, source: "web_railyatri" }] : [{ code: "3A", status: "WAITLIST", waitlist: 5, source: "web_railyatri" }], provider: "web_railyatri" } as never;
+    });
+    const r = await findBoardFromEarlier({ trains: [{ number: "12238", name: "BEGUMPURA", classes: ["3A", "2A"], needClasses: ["3A", "2A"] }] as never, origin: "LDH", destination: "LKO", date: "2026-09-15", passengers: 2, mode: "upto", limitTrains: 1 });
+    expect(probed).toContain("JAT>BSB");
+    expect(r.options[0]?.bookFrom).toBe("JAT");
+    expect(r.options[0]?.bookUpto).toBe("BSB");
+    expect(r.options[0]?.classOptions?.map((c) => c.classCode)).toEqual(["3A", "2A"]);
+    spySched.mockRestore(); spyBoard.mockRestore();
+  });
+});

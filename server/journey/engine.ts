@@ -768,7 +768,11 @@ export async function findBoardFromEarlier(args: {
         if (iFrom <= 0 || iTo < 0 || iTo <= iFrom) return;
         trainsChecked++;
         const earlier = stops.slice(Math.max(0, iFrom - stopsBack), iFrom).reverse(); // nearest first … train origin tak
-        const later = stops.slice(iTo + 1, iTo + 1 + stopsAhead); // Round-18m-16: destination ke aage, nearest first
+        /* Round-18m-37 (user ConfirmTkt LDH→LKO 15 Sep: 12238 "JAT→BSB 3A RAC 29" — BSB terminus LKO ke 5 stop aage):
+         * destination ke aage nearest 3 stops + TRAIN KA TERMINUS hamesha (quota terminus tak khulta hai). */
+        const laterNear = stops.slice(iTo + 1, iTo + 1 + stopsAhead);
+        const terminus = stops[stops.length - 1];
+        const later = mode === "upto" && terminus && iTo < stops.length - 1 && !laterNear.some((x) => String(x.code).toUpperCase() === String(terminus.code).toUpperCase()) ? [...laterNear, terminus] : laterNear;
         const tcls = (t as { classes?: string[] }).classes ?? [];
         const need = (t as { needClasses?: string[] }).needClasses?.filter(Boolean) ?? [];
         const hint = need.length ? [...need] : Array.from(new Set([...(args.travelClass ? [args.travelClass] : []), ...tcls]));
@@ -834,9 +838,9 @@ export async function findBoardFromEarlier(args: {
         /* Phase 3: earlier × later combo — SAARE earlier stops (train origin tak) × nazdeek ke
          * 3 later stops. User case: LDH→INDB par seat JAT(6 stops pehle)→DADN(1 aage) hi mili —
          * 3×3 bound se chhoot jaata tha. Nazdeek wala later stop pehle, phir door ka earlier. */
-        for (let j = 0; j < Math.min(3, later.length); j++) {
+        for (let j = 0; j < later.length; j++) {
           for (let k = 0; k < earlier.length; k++) {
-            if (await tryOneSegment(earlier[k], later[j], k + 1, j + 1)) return;
+            if (await tryOneSegment(earlier[k], later[j], k + 1, later[j] === terminus ? stops.length - 1 - iTo : j + 1)) return;
           }
         }
       } catch {
