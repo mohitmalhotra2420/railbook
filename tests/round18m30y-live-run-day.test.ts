@@ -1,7 +1,7 @@
 /* Round-18m-30y (user: "14632 ka live status yesterday ka — app 'abhi start nahi hui' bol raha, railyatri par sahi"):
  * RailYatri SSR page hamesha AAJ ki run deta hai. Date di ho to RailYatri LTS API (train_eta_data/{n}/{daysBack})
  * se USI run-day ka data; purani run ka data na mile to aaj wali run kabhi nahi lautani. */
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ryDaysBack, scrapeLiveStatusWeb, setScrapeFetch } from "../server/railway/webscrape";
 
 const json = (b: unknown) => new Response(JSON.stringify(b), { status: 200, headers: { "content-type": "application/json" } });
@@ -34,5 +34,23 @@ describe("Round-18m-30y: live status honours the run day", () => {
     setScrapeFetch(async (input) => String(input).includes("train_eta_data") ? json({ success: false }) : new Response(`<script id="__NEXT_DATA__" type="application/json">${JSON.stringify({ props: { pageProps: { ltsData: { success: true, train_number: "14632", train_name: "X", title: "Train starts at 21:35", new_message: "Train hasn't started yet.", train_start_date: "2026-09-14", at_src: true } } } })}</script>`, { status: 200 }));
     const ist = new Date(Date.now() + 5.5 * 3600 * 1000); const yest = new Date(ist.getTime() - 86400000).toISOString().slice(0, 10);
     expect(await scrapeLiveStatusWeb("14632", null, yest)).toBeNull();
+  });
+});
+
+describe("Round-18m-34: 'live status' picks the currently running run without asking", () => {
+  it("one fresh running run → TRACK_TRAIN uses it; stale 'running' flags on 2+ day old runs are ignored", async () => {
+    process.env.NVIDIA_API_KEY = "nvapi-test";
+    const router = await import("../server/railway/router");
+    const spyDates = vi.spyOn(router, "routedLiveDates").mockResolvedValue([
+      { date: "2026-09-14", label: "Aaj (Mon 14)", runState: "running", provider: "web_railyatri" },
+      { date: "2026-09-13", label: "Kal (Sun 13)", runState: "completed", provider: "web_railyatri" },
+      { date: "2026-09-12", label: "Sat 12", runState: "running", provider: "web_railyatri" },
+    ] as never);
+    const spyLive = vi.spyOn(router, "routedLiveStatus").mockResolvedValue({ live: { trainNumber: "12054", trainName: "JAN SHATABDI", status: "Running — near BARARA", currentStation: "BARARA", delayMinutes: 2, lastUpdatedAt: "2026-09-14 11:24:00 +0530", journeyDate: "2026-09-14", runState: "running" }, provider: "web_railyatri" } as never);
+    const { executeApprovedTool } = await import("../server/agent/agentic");
+    const r = await executeApprovedTool("TRACK_TRAIN", { train_number: "12054" }, { userText: "12054 ka live status batao" });
+    expect(r.ok).toBe(true);
+    expect(spyLive).toHaveBeenCalledWith("12054", "2026-09-14");
+    spyDates.mockRestore(); spyLive.mockRestore(); process.env.NVIDIA_API_KEY = "";
   });
 });

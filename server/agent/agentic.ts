@@ -1569,12 +1569,23 @@ export async function executeApprovedTool(
         );
       }
       case "TRACK_TRAIN": {
+        let liveDateOverride: string | null = null;
         /* Round-18m-32 (live fast-path ab AI ke peeche): date nahi di → pehle dekho kis-kis din ki run ka data hai;
          * 2+ runs active hon (overnight/multi-day train) to user se poochho — galat run kabhi nahi. */
         if (!a.date) {
           try {
             const options = await routedLiveDates(a.train_number as string, null);
-            if (options.length > 1) {
+            /* Round-18m-34 (user: "maine live status poocha, tum galat samjhe"): "abhi/live/kahan hai" = jo run ABHI
+             * chal rahi hai. Sirf EK run running ho → wahi lo, mat poochho. 2+ running (multi-day/overnight) ya
+             * user ne "kal wali" jaisa cue diya ho tab hi options. */
+            /* Sirf aaj/kal ki run "running" maani jaati hai — 2+ din purani "running" = provider ka stale flag (ek-din wali
+             * train 2 din baad running nahi ho sakti); wo default ke liye nahi ginte. */
+            const fresh = new Set(options.slice(0, 2).map((o) => o.date));
+            const running = options.filter((o) => o.runState === "running" && fresh.has(o.date));
+            const wantsNow = /\b(abhi|live|kahan|kaha|status|running|chal rahi|kitna late|late hai)\b/i.test(String(ctx.userText ?? "")) && !/\b(kal|yesterday|parso|pichhl|pehle|wali run|\d{1,2}\s*(sep|sept|oct|nov|dec|jan|feb|mar|apr|may|jun|jul|aug))/i.test(String(ctx.userText ?? ""));
+            if (running.length === 1 && wantsNow) {
+              liveDateOverride = running[0].date;
+            } else if (options.length > 1) {
               const lines = options.map((o, i) => `${i + 1}. ${o.label ?? o.date} — ${o.date}${o.runState && o.runState !== "unknown" ? ` (${o.runState.replace("_", " ")})` : ""}`).join("\n");
               return failResult(null, `${a.train_number} ki ${options.length} runs ka live data hai — kis din wali chahiye? User se poochho (options EXACTLY ye do, numbered):\n${lines}\nUser chune to TRACK_TRAIN dobara us date ke saath call karo. Khud koi run mat chuno.`, { needs_choice: true, kind: "run_date", options });
             }
@@ -1582,7 +1593,7 @@ export async function executeApprovedTool(
             /* dates optional */
           }
         }
-        const res = await routedLiveStatus(a.train_number as string, a.date as string | undefined);
+        const res = await routedLiveStatus(a.train_number as string, (a.date as string | undefined) ?? liveDateOverride ?? undefined);
         if (!res.live) return failResult(res.provider, "Live status unavailable — main fake position nahi bataunga.");
         const live = res.live as {
           trainNumber?: string;
@@ -1782,7 +1793,8 @@ export async function executeApprovedTool(
         const pk = await pickTrains(String(a.train_number), { limit: 3 });
         if (!pk.matches.length) return failResult(pk.source, `${a.train_number} kisi provider (RailCore/RailKit/RailRadar/web) mein nahi mili — number galat ho sakta hai; user se confirm karo. Invent mat karo.`, pk);
         const m = pk.matches[0];
-        return okResult(m.source, `${m.number} · ${m.name}${m.from && m.to ? ` (${m.from} → ${m.to}${m.departure ? `, ${m.departure} → ${m.arrival ?? "?"}` : ""})` : " (route provider se nahi mila)"}. App SELECT TRAIN card dikhata hai — 1 line mein confirm karo aur poochho kya chahiye (status/time/seat/fare) agar user ne na bataya ho.${webSourceLabel(m.source)}`, pk);
+        /* Round-18m-34: instruction text summary se hataya (Muse time-out par user ko "App SELECT TRAIN card dikhata hai — 1 line mein confirm karo" dikh gaya) → data.note mein. */
+        return okResult(m.source, `${m.number} · ${m.name}${m.from && m.to ? ` (${m.from} → ${m.to}${m.departure ? `, ${m.departure} → ${m.arrival ?? "?"}` : ""})` : " (route provider se nahi mila)"}.${webSourceLabel(m.source)}`, { ...(pk as object), note: "Train resolve ho gayi. User ne jo poochha (status/time/seat/fare) uska tool AB call karo — sirf confirm karke mat ruko. Kuch na poochha ho to 1 line mein poochho kya chahiye." });
       }
       case "SEARCH_TRAIN_BY_NAME": {
         const pk = await pickTrains(String(a.query), { context: { from: (a.origin as string | undefined) ?? null, to: (a.destination as string | undefined) ?? null }, limit: 6 });
