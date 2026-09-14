@@ -964,8 +964,15 @@ export function Concierge() {
           }
           return;
         }
-      } catch {
-        /* agent unusable — deterministic fallback below */
+      } catch (err) {
+        /* Round-18m-35 (user screenshot: "Aaj" → "Kahan se jana hai?"): AI turn fail/timeout hua to client ka
+         * purana deterministic planner chal padta tha — wo journey-slot machine hai, live/general sawaal nahi
+         * samajhta. User rule: HAR request AI ke paas — AI down ho to SAAF bolo, code se guess mat karo. */
+        setThinking(false);
+        setProgressText(null);
+        setMessages((m) => [...m, { id: newId(), role: "assistant", text: `AI se jawab abhi nahi aa paya (${err instanceof Error && err.message ? err.message.slice(0, 80) : "timeout"}) — main andaza nahi lagaunga. Dobara bhejo ya thodi der baad try karo.` }]);
+        setBusy(false);
+        return;
       }
     }
     try {
