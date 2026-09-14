@@ -47,6 +47,7 @@ import { capabilityAvailable, UNAVAILABLE_MESSAGES } from "../providers/capabili
 import { makeProvenance } from "../providers/provenance.js";
 import { generalWebSearch, scrapeWebPage, trustedSiteOf, webSearch } from "./websearch.js";
 import { cleanQueryEn, findTopicAnswer, HINGLISH_TOPIC_WORDS, significantWords } from "./topicpage.js";
+import { ATTRIBUTE_Q_RE, COUNT_LIST_RE, trainFamilyPage, wikiLargestTable } from "./wikitable.js";
 import { railKbAnswer } from "./railkb.js";
 /* Round-18i: rules/procedure topics → KB before Wikipedia (see WEB_SEARCH). */
 const RULES_TOPIC_RE = /\b(tatkal|premium tatkal|rac|waiting list|waitlist|wl|gnwl|pqwl|rlwl|chart|pnr|refund|cancel(?:lation)?|luggage|saman|samaan|blanket|bedroll|pantry|catering|id proof|photo id|concession|senior citizen|quota|break journey|child (?:ticket|fare)|bachcha|tte|ticket checker|arp|advance reservation|kitne din pehle)\b/i;
@@ -1173,6 +1174,23 @@ export async function executeApprovedTool(
          * quota…) ke liye local KB (stable IRCTC rules) PEHLE — Wikipedia
          * topic-page sirf FACT sawaalon (longest/fastest/zones/history) ke
          * liye pehle rahe. */
+        /* Round-18m-31 (user: "India mein total kitni Vande Bharat chalti hai?" → 6-train picker): COUNT/LIST
+         * sawaal train-family ke liye → Wikipedia family page ka services-table (poori list, count). */
+        const famText = `${userText} ${q}`;
+        const famPage = COUNT_LIST_RE.test(famText) && !ATTRIBUTE_Q_RE.test(userText || q) ? trainFamilyPage(famText) : null;
+        if (famPage) {
+          const tbl = await wikiLargestTable(famPage).catch(() => null);
+          if (tbl) {
+            const nameIdx = Math.max(0, tbl.header.findIndex((h) => /service|route|train name|name/i.test(h)));
+            const numIdx = tbl.header.findIndex((h) => /train no|tr\.no|number/i.test(h));
+            const list = tbl.rows.slice(0, 80).map((r, i) => `${i + 1}. ${r[nameIdx] ?? r[0]}${numIdx >= 0 && r[numIdx] ? ` (${r[numIdx]})` : ""}`);
+            const answer = `${famPage}: Wikipedia ke "${tbl.section ?? "Services"}" table ke hisaab se abhi ${tbl.rowCount} services/routes listed hain (har row = ek route, aam taur par up+down pair). List: ${list.join("; ")}.`;
+            return okResult("web", `Web se mila (Wikipedia — ${tbl.title}, "${tbl.section ?? "Services"}" table): ${tbl.rowCount} services listed.\n${list.slice(0, 40).join("\n")}${list.length > 40 ? `\n… (+${list.length - 40} aur)` : ""}\n(Source: ${tbl.url})`, {
+              query: q, answer_found: true, kind: "count_table", count: tbl.rowCount, title: tbl.title, section: tbl.section, source_url: tbl.url, header: tbl.header, rows: tbl.rows.slice(0, 80), answer,
+              note: `YAHI JAWAB HAI — dobara WEB_SEARCH MAT karo. User ko Hinglish mein bolo: total ${tbl.rowCount} ${famPage} services (Wikipedia list, ${new Date().toISOString().slice(0, 10)} tak), phir poori list numbered dikhao (user ne sirf count poochha ho to bhi count ke saath 8-10 routes ke naam ZAROOR do — jaise "New Delhi–Varanasi, Mumbai Central–Gandhinagar, …" — aur "poori list chahiye?" poochho). Source URL do. Ye Wikipedia ka data hai — official count thoda alag ho sakta hai, ye bhi ek line mein bolo.`,
+            });
+          }
+        }
         const rulesTopic = RULES_TOPIC_RE.test(userText || q);
         if (rulesTopic) {
           const kbFirst = railKbAnswer(userText || q) ?? (userText ? railKbAnswer(q) : null);
