@@ -32,6 +32,8 @@ export type AgentResponse = {
       journey?: import("./ai/agent").AgentJourneyPlan | null;
       alternatives?: import("./ai/agent").AgentAlternatives | null;
       trainPicker?: import("./ai/agent").AgentTrainPicker | null;
+      /** Round-18m-33: dropdown choice (station / run-day / train). */
+      choice?: { kind: "station" | "run_date" | "train"; title: string; options: { label: string; value: string; sub?: string | null }[]; sendTemplate: string } | null;
       /** Round-18m: live-status date chooser (only dates with real provider data). */
       liveDates?: { trainNumber: string; trainName: string | null; options: { date: string; label: string; runState: string; provider: string }[] } | null;
       toolTrace?: {

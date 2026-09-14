@@ -167,7 +167,7 @@ async function atlasFallback(
   pref: "fastest" | "cheapest" | "best",
   ctx: AgentContext,
   nlu: NluResult,
-): Promise<{ reply: string; ok: boolean; trace: ToolTraceStep; grounded: boolean; trains: AgentTrainTable | null; journey?: JourneyPlan | null }> {
+): Promise<{ reply: string; ok: boolean; trace: ToolTraceStep; grounded: boolean; trains: AgentTrainTable | null; journey?: JourneyPlan | null; choice?: import("./agentic.js").ChoiceBlock | null }> {
   /* 2026-09-06: "12014 vs 12054 kon si better" — deterministic compare pehle. */
   if (nlu.intent === "COMPARE_TRAINS" && (nlu.compareNumbers?.length ?? 0) >= 2) {
     const cmp = await compareTrainsDeterministic(nlu.compareNumbers!);
@@ -230,6 +230,7 @@ async function atlasFallback(
       ),
       grounded: true, // sirf sawaal — koi factual claim nahi
       trains: null,
+      choice: res.stations.length ? { kind: "station", title: `${res.city ?? unresolved} — kaunsa station?`, options: res.stations.slice(0, 8).map((st) => ({ label: `${st.code} – ${st.name}`, value: st.code, sub: null })), sendTemplate: "{value}" } : null,
     };
   }
 
@@ -419,6 +420,8 @@ export type AgentResponse = {
   /** Round-18: alternatives card + SELECT TRAIN picker. */
   alternatives?: import("../journey/types.js").AlternativeTrainsResult | null;
   trainPicker?: import("../journey/trainpicker.js").TrainPickerResult | null;
+  /** Round-18m-33: dropdown choice (station / run-day / train) — client renders select + "Chuno". */
+  choice?: import("./agentic.js").ChoiceBlock | null;
   /** Round-18m: live-status run-date chooser — ONLY dates a provider actually has a run for. */
   liveDates?: { trainNumber: string; trainName: string | null; options: import("../railway/router.js").LiveDateOption[] } | null;
   grounded?: boolean;
@@ -1311,7 +1314,7 @@ async function autoResolveSingleStation(ctx: AgentContext, det: NluResult): Prom
 async function askStationChoiceFirst(
   ctx: AgentContext,
   det: NluResult,
-): Promise<{ reply: string; side: "to" | "from" } | null> {
+): Promise<{ reply: string; side: "to" | "from"; stations?: { code: string; name: string }[]; city?: string } | null> {
   const side: "to" | "from" | null =
     !ctx.destination && (det.unresolvedTo || ctx.pendingDestinationChoice)
       ? "to"
@@ -1346,6 +1349,8 @@ async function askStationChoiceFirst(
     return {
       side,
       reply: `${known}${city} mein kaunsa station chahiye? Options: ${list}.${dateNote}`,
+      stations: res.stations.slice(0, 6).map((x) => ({ code: x.code, name: x.name })),
+      city,
     };
   } catch {
     return null;
@@ -1571,6 +1576,7 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
           tool: "searchStations",
           toolOk: true,
           reply: phrasedAsk.text,
+          choice: ask.stations?.length ? { kind: "station", title: `${ask.city ?? ""} — kaunsa station?`.trim(), options: ask.stations.slice(0, 8).map((st) => ({ label: `${st.code} – ${st.name}`, value: st.code, sub: null })), sendTemplate: "{value}" } : null,
           interrupt: false,
           resumeAsk: null,
           resumeText: null,
@@ -1808,6 +1814,7 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
           journey: capture.plan ?? null,
           alternatives: capture.alternatives ?? null,
           trainPicker: capture.trainPicker ?? null,
+          choice: capture.choice ?? null,
           confirmBook: false,
           missingFields: missingOf({
             from: det.from,
@@ -1983,6 +1990,7 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
   const searchishIntent = Boolean(atlasPref) || understood.nlu.intent === "SEARCH_TRAIN" || understood.nlu.intent === "BOOK_TRAIN";
   let detTrains: AgentTrainTable | null = null;
   let detJourney: JourneyPlan | null = null;
+  let detChoice: import("./agentic.js").ChoiceBlock | null = null;
   // tool === "searchTrains" ka deterministic executor hai hi nahi (agentic
   // engine ka tool hai) — searchish intent + complete slots par atlasFallback
   // hi real search + table + memory dega. Warna agentic timeout par EMPTY reply.
@@ -2001,6 +2009,7 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
     atlasGrounded = outcome.grounded;
     detTrains = outcome.trains;
     detJourney = outcome.journey ?? null;
+    detChoice = outcome.choice ?? null;
     rememberSearch(ctx, detTrains);
   }
 
@@ -2486,6 +2495,7 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
     resumeText: null,
     trains: detTrains,
     journey: detJourney,
+    choice: detChoice,
     confirmBook: false,
     missingFields: understood.missingFields,
     modelUsed: understood.modelUsed,

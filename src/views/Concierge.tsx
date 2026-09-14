@@ -896,6 +896,8 @@ export function Concierge() {
           const blocks: Block[] = [];
           // Round-18: SELECT TRAIN picker (number/name → real matches, user taps).
           if (agentRes.trainPicker && agentRes.trainPicker.matches.length) blocks.push({ type: "trainpicker", picker: agentRes.trainPicker });
+          /* Round-18m-33: choice (station / run-day) → dropdown block; reply text mein "1. X 2. Y" bhi ho to dropdown hi primary. */
+          if (agentRes.choice && agentRes.choice.options.length) blocks.push({ type: "choice", choice: agentRes.choice });
           /* Round-18m: live-status run-date chips — sirf un dates ke, jinke liye
            * provider ke paas data hai. Tap → "<train> <date> ka live status". */
           if (agentRes.liveDates && agentRes.liveDates.options.length) {
@@ -1574,6 +1576,27 @@ export function Concierge() {
   );
 }
 
+/* Round-18m-33 (user: "choose karna ho to dropdown — run-day bhi, stations bhi"): native <select> (mobile par
+ * OS picker khulta hai) + "Chuno" — select karte hi bhej deta hai. */
+function ChoiceDropdown({ choice, onPick }: { choice: { kind: string; title: string; options: { label: string; value: string; sub?: string | null }[]; sendTemplate: string }; onPick: (value: string) => void }) {
+  const [val, setVal] = useState("");
+  const [sent, setSent] = useState(false);
+  const icon = choice.kind === "station" ? "📍" : choice.kind === "run_date" ? "📅" : "🚆";
+  return (
+    <div className={`choice-card ${sent ? "sent" : ""}`}>
+      <div className="choice-title">{icon} {choice.title}</div>
+      <div className="choice-row">
+        <select className="choice-select" value={val} disabled={sent} onChange={(e) => { setVal(e.target.value); }} aria-label={choice.title}>
+          <option value="">— chuniye —</option>
+          {choice.options.map((o) => <option key={o.value} value={o.value}>{o.label}{o.sub ? ` · ${o.sub}` : ""}</option>)}
+        </select>
+        <button type="button" className="choice-go" disabled={!val || sent} onClick={() => { setSent(true); onPick(val); }}>Chuno ✓</button>
+      </div>
+      {!sent && <div className="choice-hint">Ya seedha number/code type kar do.</div>}
+    </div>
+  );
+}
+
 /* Round-18m-32: simple bar waveform driven by mic RMS level (0..1); idle = low ripple. */
 function VoiceWave({ level, live }: { level: number; live: boolean }) {
   const bars = 24;
@@ -1627,6 +1650,9 @@ function BlockView({
   const { updatePassenger } = useBooking();
   if (block.type === "traintable") {
     return <TrainTableView table={block.table} />;
+  }
+  if (block.type === "choice") {
+    return <ChoiceDropdown choice={block.choice} onPick={(value) => onChip(block.choice.sendTemplate.replace("{value}", value))} />;
   }
   if (block.type === "trainpicker") {
     return (

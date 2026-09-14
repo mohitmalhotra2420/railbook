@@ -152,9 +152,19 @@ export type AgentTrainTable = {
   rows: AgentTrainRow[];
 };
 
+/* Round-18m-33 (user: "choice ho to dropdown aaye — run-day bhi, multiple stations bhi"): tool ka needs_choice
+ * structured form mein UI tak — client dropdown + "Chuno" render karta hai, selected value agla user message. */
+export type ChoiceBlock = {
+  kind: "station" | "run_date" | "train";
+  title: string;
+  options: { label: string; value: string; sub?: string | null }[];
+  /** Select karne par chat mein kya bhejna hai — value "{value}" se replace hoti hai. */
+  sendTemplate: string;
+};
 export type SearchCapture = {
   table: AgentTrainTable | null;
   plan?: JourneyPlan | null;
+  choice?: ChoiceBlock | null;
   /** Round-18: alternatives card for a poorly-available selected train. */
   alternatives?: AlternativeTrainsResult | null;
   /** Round-18: SELECT TRAIN smart picker list (real validated trains). */
@@ -2160,6 +2170,15 @@ async function answerFromWebScrapeTool(questionText: string): Promise<{ summary:
 
 function deterministicSummary(steps: ToolTraceStep[]): string {
   const okSteps = steps.filter((s) => s.ok);
+  /* Round-18m-33 (screenshot: "User se poochho (options EXACTLY ye do…)" user ko dikh gaya): needs_choice step ka
+   * summary MODEL-instruction hai — user ko sirf saaf sawaal + options. */
+  const choiceStep = [...steps].reverse().find((s) => /needs_choice|kis din wali chahiye|ambiguous hai — pehle user se/i.test(`${s.summary} ${JSON.stringify(s.args ?? {})}`) && !s.ok);
+  if (!okSteps.length && choiceStep) {
+    const m = choiceStep.summary.match(/^(.*?)(?:User se poochho.*?:|—\s*pehle user se station poochna hoga\.)/s);
+    const head = (m ? m[1] : choiceStep.summary.split("\n")[0]).replace(/\s*\(options EXACTLY.*$/s, "").trim();
+    const opts = (choiceStep.summary.match(/^\d+\.\s.+$/gm) ?? []).map((l) => l.replace(/\s*User chune to.*$/s, "").trim());
+    return `${head}${opts.length ? `\n${opts.join("\n")}\nNeeche se chuniye.` : ""}`;
+  }
   if (!okSteps.length) return "Ye jaankari abhi provider se nahi mil pa rahi. Main gadh ke nahi bataunga.";
   /* Round-15: WEB_SEARCH ka answer-ready result (topicpage) hi user ka
    * jawab hai — bullet-list mein "• Web search: 3 results" jaisa raw dump
@@ -2900,9 +2919,14 @@ export async function runAgenticTurn(input: {
             };
           }
         }
-        const rd = result.data as { needs_choice?: boolean; city?: string; stations?: { code: string; name: string }[] } | null;
+        const rd = result.data as { needs_choice?: boolean; kind?: string; city?: string; stations?: { code: string; name: string }[]; options?: { date: string; label: string; runState?: string }[] } | null;
         if (!result.ok && rd?.needs_choice && Array.isArray(rd.stations)) {
           lastNeedsChoice = { city: rd.city ?? "station", stations: rd.stations };
+          if (input.capture) input.capture.choice = { kind: "station", title: `${rd.city ?? "Station"} — kaunsa station?`, options: rd.stations.slice(0, 8).map((st) => ({ label: `${st.code} – ${st.name}`, value: st.code, sub: null })), sendTemplate: "{value}" };
+        }
+        if (!result.ok && rd?.needs_choice && rd.kind === "run_date" && Array.isArray(rd.options) && input.capture) {
+          const tn = String(args.train_number ?? "");
+          input.capture.choice = { kind: "run_date", title: `${tn} — kis din wali run ka live status?`, options: rd.options.map((o) => ({ label: `${o.label} (${o.date})`, value: o.date, sub: o.runState && o.runState !== "unknown" ? o.runState.replace("_", " ") : null })), sendTemplate: `${tn} ka live status {value} wali run ka` };
         }
         try {
           evidenceParts.push(JSON.stringify(result.data ?? {}).slice(0, 20000));

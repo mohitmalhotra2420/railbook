@@ -50,7 +50,8 @@ export type Block =
   | { type: "traintable"; table: import("./agent").AgentTrainTable }
   | { type: "journey"; plan: import("./agent").AgentJourneyPlan }
   | { type: "alternatives"; alt: import("./agent").AgentAlternatives }
-  | { type: "trainpicker"; picker: import("./agent").AgentTrainPicker };
+  | { type: "trainpicker"; picker: import("./agent").AgentTrainPicker }
+  | { type: "choice"; choice: { kind: "station" | "run_date" | "train"; title: string; options: { label: string; value: string; sub?: string | null }[]; sendTemplate: string } };
 
 export interface AssistantTurn {
   text: string;
