@@ -123,7 +123,8 @@ export function createRecognizer(lang = "hi-IN"): SpeechRecognitionLike | null {
   rec.lang = lang;
   rec.continuous = true;
   rec.interimResults = true;
-  rec.maxAlternatives = 1;
+  /* Round-18m-38: Hindi/Hinglish/English mix + fuzzy words — 3 alternatives, collectTranscript best chunta hai. */
+  rec.maxAlternatives = 3;
   return rec;
 }
 
@@ -243,12 +244,33 @@ export function stabilizeTranscript(text: string): string {
   return collapseRepeatedPhrases(collapseRepeatWords(text));
 }
 
+/* Round-18m-38: alternatives mein se railway-friendly pick — station/train/ticket words ya digits wala,
+ * warna sabse zyada confidence (browser aksar [0] ko best deta hai; tie par [0]). */
+const RAIL_HINT_RE = /\b(train|trains|station|seat|seats|ticket|tickets|live|status|fare|kiraya|se|tak|jaana|jana|kal|aaj|parso|pnr|book|booking|delhi|mumbai|ludhiana|amritsar|lucknow|varanasi|ayodhya|mathura|jammu|chandigarh|shatabdi|rajdhani|vande bharat|sleeper|ac|3a|2a|1a|sl|cc)\b/i;
+function pickBestAlternative(row: { length?: number; [k: number]: { transcript?: string; confidence?: number } | undefined }): string {
+  const n = typeof row.length === "number" ? row.length : 1;
+  let best = row[0]?.transcript ?? "";
+  let bestScore = -1;
+  for (let k = 0; k < n; k++) {
+    const alt = row[k];
+    if (!alt?.transcript) continue;
+    const t = alt.transcript;
+    const conf = typeof alt.confidence === "number" && alt.confidence > 0 ? alt.confidence : k === 0 ? 0.9 : 0.5;
+    const score = conf + (RAIL_HINT_RE.test(t) ? 0.15 : 0) + (/\d{4,5}/.test(t) ? 0.1 : 0);
+    if (score > bestScore) {
+      bestScore = score;
+      best = t;
+    }
+  }
+  return best;
+}
+
 export function collectTranscript(ev: SpeechResultEvent): { interim: string; final: string } {
   const finals: string[] = [];
   const interims: string[] = [];
   for (let i = 0; i < ev.results.length; i++) {
     const row = ev.results[i];
-    const text = (row[0]?.transcript ?? "").trim();
+    const text = pickBestAlternative(row).trim();
     if (!text) continue;
     if (row.isFinal !== false) finals.push(text);
     else interims.push(text);

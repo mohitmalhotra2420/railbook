@@ -14,7 +14,6 @@ import {
   type SpeechRecognitionLike,
   type VoiceErrorKind,
 } from "./speech";
-import { cancelGuide } from "./speakGuide";
 
 export interface VoiceInputState {
   listening: boolean;
@@ -26,12 +25,16 @@ export interface VoiceInputState {
 const SILENCE_MS = 1800;
 const MAX_LISTEN_MS = 22000;
 const MAX_RESTARTS = 3;
-/* Round-18m-32 (user: "mic beech mein ruk kar search kar deta hai — user bole, screen par dikhe, phir OK dabaye
- * tabhi bheje; tap par 'main sun raha hoon' + waveform"): MANUAL-COMMIT mode — silence par auto-send NAHI,
- * recognizer restart hota rehta hai (browser 5-8 s silence par khud band kar deta hai); user OK dabaye tab
- * transcript jaata hai. Max 90 s, restarts unlimited jab tak user sun raha hai. */
-const MANUAL_MAX_LISTEN_MS = 90000;
-const MANUAL_MAX_RESTARTS = 40;
+/* Round-18m-38 (user: "mic pe jo bolta hoon chat mein nahi aata, screen par bhi nahi"):
+ * ROOT CAUSE — Android Chrome mein SpeechRecognition ke SAATH koi doosra getUserMedia stream (waveform ke
+ * liye AudioContext) ya TTS chal raha ho to recognizer ko audio hi nahi milta → kabhi result nahi.
+ * Ab: (1) mic ka EK hi consumer — SpeechRecognition; waveform recognizer ke events se animate hota hai,
+ * (2) greet sirf TEXT (TTS default OFF — user chahe to VITE_VOICE_TTS=1), (3) manual-commit: silence par
+ * auto-send nahi, recognizer khatam ho to NAYA instance chupchaap start (OK tak), (4) hi-IN recognizer
+ * Hindi/Hinglish/English mix ke liye sabse accha on-device option hai; maxAlternatives=3 se fuzzy words
+ * ke liye best alternative uthate hain. */
+const MANUAL_MAX_LISTEN_MS = 120000;
+const MANUAL_MAX_RESTARTS = 60;
 
 export function useVoiceInput(
   onTranscript: (text: string) => void,
@@ -42,9 +45,10 @@ export function useVoiceInput(
   const [listening, setListening] = useState(false);
   const [status, setStatus] = useState("Tap to speak");
   const [interim, setInterim] = useState("");
-  /* 0..1 mic level (waveform) — AnalyserNode se, ~30fps. */
+  /* 0..1 "activity" level for the waveform — driven by recognition events (no second mic stream). */
   const [level, setLevel] = useState(0);
-  const audioRef = useRef<{ ctx: AudioContext; stream: MediaStream; raf: number } | null>(null);
+  const levelTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const lastActivityRef = useRef(0);
   const recRef = useRef<SpeechRecognitionLike | null>(null);
   const onTranscriptRef = useRef(onTranscript);
   const onErrorRef = useRef(onVoiceError);
@@ -55,6 +59,7 @@ export function useVoiceInput(
   const notifiedRef = useRef(false);
   const wantListenRef = useRef(false);
   const bufferRef = useRef("");
+  const interimRef = useRef("");
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const maxTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const restartRef = useRef(0);
@@ -72,6 +77,10 @@ export function useVoiceInput(
     if (maxTimerRef.current) {
       clearTimeout(maxTimerRef.current);
       maxTimerRef.current = null;
+    }
+    if (levelTimerRef.current) {
+      clearInterval(levelTimerRef.current);
+      levelTimerRef.current = null;
     }
   }, []);
 
@@ -96,15 +105,8 @@ export function useVoiceInput(
       wantListenRef.current = false;
       clearTimers();
       setListening(false);
-      if (!manual) setInterim("");
-      const a = audioRef.current;
-      audioRef.current = null;
-      if (a) {
-        cancelAnimationFrame(a.raf);
-        for (const t of a.stream.getTracks()) t.stop();
-        void a.ctx.close().catch(() => undefined);
-      }
       setLevel(0);
+      if (!manual) setInterim("");
     },
     [clearTimers, manual],
   );
@@ -132,11 +134,13 @@ export function useVoiceInput(
   const finishWith = useCallback(
     (text: string) => {
       bufferRef.current = "";
+      interimRef.current = "";
       wantListenRef.current = false;
       stopReasonRef.current = "commit";
       teardown();
       const clean = stabilizeTranscript(text);
       if (clean) onTranscriptRef.current(clean);
+      setInterim("");
       setStatus("Tap to speak");
     },
     [teardown],
@@ -155,15 +159,15 @@ export function useVoiceInput(
   /* Manual mode: OK → commit jo bhi bola (final + interim). */
   const commit = useCallback(() => {
     stopReasonRef.current = "commit";
-    const text = (interim || bufferRef.current).trim();
+    const text = (interimRef.current || bufferRef.current).trim();
     finishWith(text);
-    setInterim("");
-  }, [finishWith, interim]);
+  }, [finishWith]);
 
   /* Manual mode: cancel → kuch nahi bhejna. */
   const cancel = useCallback(() => {
     stopReasonRef.current = "user";
     bufferRef.current = "";
+    interimRef.current = "";
     wantListenRef.current = false;
     teardown();
     setInterim("");
@@ -171,7 +175,10 @@ export function useVoiceInput(
   }, [teardown]);
 
   const stop = useCallback(() => {
-    if (manual) { commit(); return; }
+    if (manual) {
+      commit();
+      return;
+    }
     stopReasonRef.current = "user";
     const leftover = bufferRef.current.trim();
     finishWith(leftover);
@@ -196,171 +203,182 @@ export function useVoiceInput(
     wantListenRef.current = true;
     restartRef.current = 0;
     bufferRef.current = "";
+    interimRef.current = "";
     setStatus(manual ? "Main sun raha hoon… bolo, khatam ho jaaye to OK dabao." : "Sun raha hoon… bolo, khatam hone ke baad ruk jaunga.");
     setInterim("");
     clearTimers();
     maxTimerRef.current = setTimeout(() => {
-      if (manual) { setStatus("Bahut der ho gayi — jo bola wo neeche hai, OK dabao ya dobara mic tap karo."); return; }
+      if (manual) {
+        setStatus("Bahut der ho gayi — jo bola wo neeche hai, OK dabao ya dobara mic tap karo.");
+        return;
+      }
       if (wantListenRef.current && !gotResultRef.current) fail("no-speech");
       else if (wantListenRef.current && bufferRef.current.trim()) finishWith(bufferRef.current.trim());
     }, manual ? MANUAL_MAX_LISTEN_MS : MAX_LISTEN_MS);
 
+    /* Permission prompt sirf pehli baar (helper khud tracks band kar deta hai) — koi lambi doosri stream nahi. */
     try {
       await requestMicrophoneAccess();
     } catch (err) {
       startingRef.current = false;
       return fail(mapGetUserMediaError(err));
     }
-    /* "Main sun raha hoon" PEHLE bolo aur khatam hone do — TTS aur recognizer ek saath Android Chrome par
-     * recognizer ko mute/abort kar dete hain (isi wajah se transcript nahi aa raha tha). Max 1.8 s wait. */
-    if (manual && opts.greet !== false && typeof window !== "undefined" && "speechSynthesis" in window) {
+    /* Optional TTS greet — DEFAULT OFF (Android par recognizer ko block karta tha). */
+    if (manual && opts.greet === true && import.meta.env?.VITE_VOICE_TTS === "1" && typeof window !== "undefined" && "speechSynthesis" in window) {
       await new Promise<void>((resolve) => {
         let done = false;
-        const finish = () => { if (!done) { done = true; resolve(); } };
+        const finish = () => {
+          if (!done) {
+            done = true;
+            resolve();
+          }
+        };
         try {
           const u = new SpeechSynthesisUtterance("Main sun raha hoon");
-          u.lang = "hi-IN"; u.rate = 1.1; u.volume = 1;
-          u.onend = finish; u.onerror = finish;
+          u.lang = "hi-IN";
+          u.rate = 1.1;
+          u.onend = finish;
+          u.onerror = finish;
           window.speechSynthesis.cancel();
           window.speechSynthesis.speak(u);
-          setTimeout(finish, 1800);
+          setTimeout(finish, 1500);
         } catch {
           finish();
         }
       });
-      if (!wantListenRef.current) { startingRef.current = false; return null; } // user ne beech mein cancel kiya
-    }
-    /* Waveform: mic stream → AnalyserNode → RMS level (0..1). Recognition se alag stream — dono saath chalte hain. */
-    if (manual && typeof navigator !== "undefined" && navigator.mediaDevices?.getUserMedia && typeof AudioContext !== "undefined") {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        const ctx = new AudioContext();
-        const src = ctx.createMediaStreamSource(stream);
-        const an = ctx.createAnalyser();
-        an.fftSize = 512;
-        src.connect(an);
-        const buf = new Uint8Array(an.fftSize);
-        const tick = () => {
-          an.getByteTimeDomainData(buf);
-          let sum = 0;
-          for (let i = 0; i < buf.length; i++) { const v = (buf[i] - 128) / 128; sum += v * v; }
-          const rms = Math.sqrt(sum / buf.length);
-          setLevel(Math.min(1, rms * 4));
-          if (audioRef.current) audioRef.current.raf = requestAnimationFrame(tick);
-        };
-        audioRef.current = { ctx, stream, raf: requestAnimationFrame(tick) };
-      } catch {
-        /* meter optional */
+      if (!wantListenRef.current) {
+        startingRef.current = false;
+        return null;
       }
     }
+    /* Waveform animation from recognition activity (no AudioContext / second mic stream). */
+    lastActivityRef.current = 0;
+    levelTimerRef.current = setInterval(() => {
+      const since = Date.now() - lastActivityRef.current;
+      setLevel(since < 600 ? 0.55 + Math.random() * 0.45 : since < 1500 ? 0.25 + Math.random() * 0.2 : 0.08 + Math.random() * 0.08);
+    }, 90);
+
+    const attach = (rec: SpeechRecognitionLike) => {
+      rec.onstart = () => {
+        startingRef.current = false;
+        setListening(true);
+        setStatus(manual ? "Main sun raha hoon… (OK dabao jab ho jaye)" : "Sun raha hoon…");
+      };
+
+      rec.onresult = (ev) => {
+        lastActivityRef.current = Date.now();
+        const { interim: mid, final } = collectTranscript(ev);
+        if (final) {
+          gotResultRef.current = true;
+          bufferRef.current = mergeGrowingText([bufferRef.current, final].filter(Boolean));
+        }
+        const shown = mergeGrowingText([bufferRef.current, mid].filter(Boolean));
+        if (shown) {
+          interimRef.current = shown;
+          setInterim(shown);
+        }
+        if (bufferRef.current || mid) armSilence();
+      };
+
+      rec.onerror = (ev) => {
+        if (ev.error === "aborted" && (stopReasonRef.current === "user" || stopReasonRef.current === "commit")) {
+          lastErrorRef.current = "user-stop";
+          return;
+        }
+        if (ev.error === "no-speech" && wantListenRef.current) return;
+        /* Manual: transient errors → onend restart handles; sirf permission/unsupported surface karo. */
+        if (manual && wantListenRef.current && (ev.error === "aborted" || ev.error === "network" || ev.error === "audio-capture")) return;
+        const kind = mapSpeechError(ev.error);
+        lastErrorRef.current = kind;
+        setStatus(VOICE_MESSAGES[kind]);
+        if (kind === "denied" || kind === "unsupported" || kind === "insecure") {
+          fail(kind);
+        }
+      };
+
+      rec.onend = () => {
+        const leftover = bufferRef.current.trim();
+        if (manual) {
+          /* User ne abhi OK/cancel nahi dabaya → NAYA recognizer (Android par purane instance ka re-start unreliable). */
+          if (
+            wantListenRef.current &&
+            restartRef.current < MANUAL_MAX_RESTARTS &&
+            stopReasonRef.current !== "user" &&
+            stopReasonRef.current !== "commit"
+          ) {
+            restartRef.current += 1;
+            lastErrorRef.current = null;
+            rec.onstart = null;
+            rec.onresult = null;
+            rec.onerror = null;
+            rec.onend = null;
+            const next = createRecognizer("hi-IN");
+            if (next) {
+              /* Android: recognizer ke result-buffer alag hota hai — pichhla final text bufferRef mein safe hai. */
+              attach(next);
+              recRef.current = next;
+              setTimeout(() => {
+                try {
+                  next.start();
+                } catch {
+                  /* next.onend → dobara try */
+                }
+              }, 150);
+              return;
+            }
+          }
+          if (stopReasonRef.current === "user" || stopReasonRef.current === "commit") return;
+          teardown(false);
+          setStatus(leftover ? "Mic band ho gaya — jo bola wo neeche hai, OK dabao." : "Tap to speak");
+          return;
+        }
+        if (wantListenRef.current && leftover) {
+          finishWith(leftover);
+          return;
+        }
+        if (
+          wantListenRef.current &&
+          !leftover &&
+          restartRef.current < MAX_RESTARTS &&
+          stopReasonRef.current !== "user" &&
+          stopReasonRef.current !== "commit"
+        ) {
+          restartRef.current += 1;
+          lastErrorRef.current = null;
+          try {
+            rec.start();
+            setStatus("Sun raha hoon… boliye.");
+            return;
+          } catch {
+            /* fall through */
+          }
+        }
+        const hadError = Boolean(lastErrorRef.current) && lastErrorRef.current !== "user-stop";
+        teardown(false);
+        if (leftover) {
+          onTranscriptRef.current(stabilizeTranscript(leftover));
+          setStatus("Tap to speak");
+          return;
+        }
+        if (hadError && lastErrorRef.current && lastErrorRef.current !== "user-stop") {
+          const kind = lastErrorRef.current as VoiceErrorKind;
+          const msg = VOICE_MESSAGES[kind] ?? VOICE_MESSAGES.failed;
+          setStatus(msg);
+          if (CHAT_VOICE_ERRORS.has(kind)) notify(msg);
+        } else if (!gotResultRef.current && stopReasonRef.current !== "user" && stopReasonRef.current !== "commit") {
+          setStatus("Mic sun raha tha — thoda tez / saaf boliye, ya type kar do.");
+        } else {
+          setStatus("Tap to speak");
+        }
+      };
+    };
 
     const rec = createRecognizer("hi-IN");
     if (!rec) {
       startingRef.current = false;
       return fail("unsupported");
     }
-
-    rec.onstart = () => {
-      startingRef.current = false;
-      setListening(true);
-      setStatus("Sun raha hoon…");
-    };
-
-    rec.onresult = (ev) => {
-      const { interim: mid, final } = collectTranscript(ev);
-      if (final) {
-        gotResultRef.current = true;
-        bufferRef.current = mergeGrowingText([bufferRef.current, final].filter(Boolean));
-      }
-      const shown = mergeGrowingText([bufferRef.current, mid].filter(Boolean));
-      if (shown) setInterim(shown);
-      if (manual) setStatus("Main sun raha hoon… (OK dabao jab ho jaye)");
-      if (bufferRef.current || mid) armSilence();
-    };
-
-    rec.onerror = (ev) => {
-      if (
-        ev.error === "aborted" &&
-        (stopReasonRef.current === "user" || stopReasonRef.current === "commit")
-      ) {
-        lastErrorRef.current = "user-stop";
-        return;
-      }
-      if (ev.error === "no-speech" && wantListenRef.current) return;
-      if (manual && wantListenRef.current && (ev.error === "aborted" || ev.error === "network" || ev.error === "audio-capture")) return; // onend restart handles
-      const kind = mapSpeechError(ev.error);
-      lastErrorRef.current = kind;
-      setStatus(VOICE_MESSAGES[kind]);
-    };
-
-    rec.onend = () => {
-      const leftover = bufferRef.current.trim();
-      if (manual) {
-        /* User ne abhi OK/cancel nahi dabaya → NAYA recognizer chupchaap start (Android Chrome par purane
-         * instance ka dobara start() aksar "already started"/silent fail deta hai). */
-        if (wantListenRef.current && restartRef.current < MANUAL_MAX_RESTARTS && stopReasonRef.current !== "user" && stopReasonRef.current !== "commit") {
-          restartRef.current += 1;
-          lastErrorRef.current = null;
-          try {
-            const next = createRecognizer("hi-IN");
-            if (next) {
-              next.onstart = rec.onstart; next.onresult = rec.onresult; next.onerror = rec.onerror; next.onend = rec.onend;
-              rec.onstart = null; rec.onresult = null; rec.onerror = null; rec.onend = null;
-              recRef.current = next;
-              setTimeout(() => { try { next.start(); } catch { /* next onend → retry */ } }, 120);
-              return;
-            }
-          } catch { /* fall through */ }
-        }
-        if (stopReasonRef.current === "user" || stopReasonRef.current === "commit") return;
-        teardown(false);
-        setStatus(leftover ? "Mic band ho gaya — jo bola wo neeche hai, OK dabao." : "Tap to speak");
-        return;
-      }
-      if (wantListenRef.current && leftover) {
-        finishWith(leftover);
-        return;
-      }
-      if (
-        wantListenRef.current &&
-        !leftover &&
-        restartRef.current < MAX_RESTARTS &&
-        stopReasonRef.current !== "user" &&
-        stopReasonRef.current !== "commit"
-      ) {
-        restartRef.current += 1;
-        lastErrorRef.current = null;
-        try {
-          rec.start();
-          setStatus("Sun raha hoon… boliye.");
-          return;
-        } catch {
-          /* fall through */
-        }
-      }
-      const hadError = Boolean(lastErrorRef.current) && lastErrorRef.current !== "user-stop";
-      teardown(false);
-      if (leftover) {
-        onTranscriptRef.current(stabilizeTranscript(leftover));
-        setStatus("Tap to speak");
-        return;
-      }
-      if (hadError && lastErrorRef.current && lastErrorRef.current !== "user-stop") {
-        const kind = lastErrorRef.current as VoiceErrorKind;
-        const msg = VOICE_MESSAGES[kind] ?? VOICE_MESSAGES.failed;
-        setStatus(msg);
-        if (CHAT_VOICE_ERRORS.has(kind)) notify(msg);
-      } else if (
-        !gotResultRef.current &&
-        stopReasonRef.current !== "user" &&
-        stopReasonRef.current !== "commit"
-      ) {
-        setStatus("Mic sun raha tha — thoda tez / saaf boliye, ya type kar do.");
-      } else {
-        setStatus("Tap to speak");
-      }
-    };
-
+    attach(rec);
     recRef.current = rec;
     try {
       rec.start();
