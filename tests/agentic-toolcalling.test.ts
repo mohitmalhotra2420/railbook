@@ -613,7 +613,7 @@ describe("agent integration: agentic path + deterministic fallback", () => {
       const body = JSON.parse(String(init?.body));
       const toolMsgs = body.messages.filter((m: any) => m.role === "tool").length;
       if (toolMsgs === 0) {
-        return chatResponse({ tool_calls: [toolCall("TRACK_TRAIN", { train_number: "12014" })] });
+        return chatResponse({ tool_calls: [toolCall("TRACK_TRAIN", { train_number: "12014", date: "2026-09-04" })] }); // Round-18m-32: run-date explicit (tool asks otherwise)
       }
       return chatResponse({
         content: "12014 AMRITSAR SHATABDI RUNNING hai — LUDHIANA JN ke aage, delay 6 min. Agla stop AMBALA CANT JN.",
@@ -625,8 +625,10 @@ describe("agent integration: agentic path + deterministic fallback", () => {
      * ("ambala") wali query fast-path skip karti hai -> agentic trace. */
     const fast = await request(app).post("/api/agent").send({ known: { passengerCount: 1 }, text: "12014 abhi kaha hai?", now: NOW });
     expect(fast.status).toBe(200);
-    expect(fast.body.engine).toBe("deterministic");
-    expect(fast.body.tool).toBe("getLiveStatus");
+    /* Round-18m-32 (user: "har question AI ke paas jaaye"): live fast-path ab AI ke peeche — AI TRACK_TRAIN tool se
+     * wahi live data laata hai (grounded). Deterministic fast-path sirf AI_OWNS_FLOW=0 par. */
+    expect(fast.body.engine).toBe("agentic_tool_calling");
+    expect((fast.body.toolTrace ?? []).some((t: { tool: string }) => t.tool === "TRACK_TRAIN")).toBe(true);
     expect(fast.body.grounded).toBe(true);
     const res = await request(app).post("/api/agent").send({ known: { passengerCount: 1 }, text: "12014 ambala kahan hai?", now: NOW });
     expect(res.status).toBe(200);

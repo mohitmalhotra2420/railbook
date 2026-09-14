@@ -26,14 +26,25 @@ export interface VoiceInputState {
 const SILENCE_MS = 1800;
 const MAX_LISTEN_MS = 22000;
 const MAX_RESTARTS = 3;
+/* Round-18m-32 (user: "mic beech mein ruk kar search kar deta hai — user bole, screen par dikhe, phir OK dabaye
+ * tabhi bheje; tap par 'main sun raha hoon' + waveform"): MANUAL-COMMIT mode — silence par auto-send NAHI,
+ * recognizer restart hota rehta hai (browser 5-8 s silence par khud band kar deta hai); user OK dabaye tab
+ * transcript jaata hai. Max 90 s, restarts unlimited jab tak user sun raha hai. */
+const MANUAL_MAX_LISTEN_MS = 90000;
+const MANUAL_MAX_RESTARTS = 40;
 
 export function useVoiceInput(
   onTranscript: (text: string) => void,
   onVoiceError?: (message: string) => void,
+  opts: { manualCommit?: boolean; greet?: boolean } = {},
 ) {
+  const manual = opts.manualCommit === true;
   const [listening, setListening] = useState(false);
   const [status, setStatus] = useState("Tap to speak");
   const [interim, setInterim] = useState("");
+  /* 0..1 mic level (waveform) — AnalyserNode se, ~30fps. */
+  const [level, setLevel] = useState(0);
+  const audioRef = useRef<{ ctx: AudioContext; stream: MediaStream; raf: number } | null>(null);
   const recRef = useRef<SpeechRecognitionLike | null>(null);
   const onTranscriptRef = useRef(onTranscript);
   const onErrorRef = useRef(onVoiceError);
@@ -85,9 +96,17 @@ export function useVoiceInput(
       wantListenRef.current = false;
       clearTimers();
       setListening(false);
-      setInterim("");
+      if (!manual) setInterim("");
+      const a = audioRef.current;
+      audioRef.current = null;
+      if (a) {
+        cancelAnimationFrame(a.raf);
+        for (const t of a.stream.getTracks()) t.stop();
+        void a.ctx.close().catch(() => undefined);
+      }
+      setLevel(0);
     },
-    [clearTimers],
+    [clearTimers, manual],
   );
 
   useEffect(() => () => teardown(), [teardown]);
@@ -124,19 +143,39 @@ export function useVoiceInput(
   );
 
   const armSilence = useCallback(() => {
+    if (manual) return; // manual-commit: silence par kuch nahi — user OK dabayega
     if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
     silenceTimerRef.current = setTimeout(() => {
       if (wantListenRef.current && bufferRef.current.trim()) {
         finishWith(bufferRef.current.trim());
       }
     }, SILENCE_MS);
-  }, [finishWith]);
+  }, [finishWith, manual]);
+
+  /* Manual mode: OK → commit jo bhi bola (final + interim). */
+  const commit = useCallback(() => {
+    stopReasonRef.current = "commit";
+    const text = (interim || bufferRef.current).trim();
+    finishWith(text);
+    setInterim("");
+  }, [finishWith, interim]);
+
+  /* Manual mode: cancel → kuch nahi bhejna. */
+  const cancel = useCallback(() => {
+    stopReasonRef.current = "user";
+    bufferRef.current = "";
+    wantListenRef.current = false;
+    teardown();
+    setInterim("");
+    setStatus("Tap to speak");
+  }, [teardown]);
 
   const stop = useCallback(() => {
+    if (manual) { commit(); return; }
     stopReasonRef.current = "user";
     const leftover = bufferRef.current.trim();
     finishWith(leftover);
-  }, [finishWith]);
+  }, [commit, finishWith, manual]);
 
   const start = useCallback(async (): Promise<string | null> => {
     if (startingRef.current) return null;
@@ -157,19 +196,54 @@ export function useVoiceInput(
     wantListenRef.current = true;
     restartRef.current = 0;
     bufferRef.current = "";
-    setStatus("Sun raha hoon… bolo, khatam hone ke baad ruk jaunga.");
+    setStatus(manual ? "Main sun raha hoon… bolo, khatam ho jaaye to OK dabao." : "Sun raha hoon… bolo, khatam hone ke baad ruk jaunga.");
     setInterim("");
     clearTimers();
     maxTimerRef.current = setTimeout(() => {
+      if (manual) { setStatus("Bahut der ho gayi — jo bola wo neeche hai, OK dabao ya dobara mic tap karo."); return; }
       if (wantListenRef.current && !gotResultRef.current) fail("no-speech");
       else if (wantListenRef.current && bufferRef.current.trim()) finishWith(bufferRef.current.trim());
-    }, MAX_LISTEN_MS);
+    }, manual ? MANUAL_MAX_LISTEN_MS : MAX_LISTEN_MS);
 
     try {
       await requestMicrophoneAccess();
     } catch (err) {
       startingRef.current = false;
       return fail(mapGetUserMediaError(err));
+    }
+    /* Waveform: mic stream → AnalyserNode → RMS level (0..1). Recognition se alag stream — dono saath chalte hain. */
+    if (manual && typeof navigator !== "undefined" && navigator.mediaDevices?.getUserMedia && typeof AudioContext !== "undefined") {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const ctx = new AudioContext();
+        const src = ctx.createMediaStreamSource(stream);
+        const an = ctx.createAnalyser();
+        an.fftSize = 512;
+        src.connect(an);
+        const buf = new Uint8Array(an.fftSize);
+        const tick = () => {
+          an.getByteTimeDomainData(buf);
+          let sum = 0;
+          for (let i = 0; i < buf.length; i++) { const v = (buf[i] - 128) / 128; sum += v * v; }
+          const rms = Math.sqrt(sum / buf.length);
+          setLevel(Math.min(1, rms * 4));
+          if (audioRef.current) audioRef.current.raf = requestAnimationFrame(tick);
+        };
+        audioRef.current = { ctx, stream, raf: requestAnimationFrame(tick) };
+      } catch {
+        /* meter optional */
+      }
+    }
+    /* "Main sun raha hoon" — bol kar batao (short, cancel-able). */
+    if (manual && opts.greet !== false && typeof window !== "undefined" && "speechSynthesis" in window) {
+      try {
+        const u = new SpeechSynthesisUtterance("Main sun raha hoon");
+        u.lang = "hi-IN"; u.rate = 1.05; u.volume = 0.9;
+        window.speechSynthesis.cancel();
+        window.speechSynthesis.speak(u);
+      } catch {
+        /* optional */
+      }
     }
 
     const rec = createRecognizer("hi-IN");
@@ -211,6 +285,18 @@ export function useVoiceInput(
 
     rec.onend = () => {
       const leftover = bufferRef.current.trim();
+      if (manual) {
+        /* User ne abhi OK/cancel nahi dabaya → recognizer chupchaap dobara start (browser silence par band karta hai). */
+        if (wantListenRef.current && restartRef.current < MANUAL_MAX_RESTARTS && stopReasonRef.current !== "user" && stopReasonRef.current !== "commit") {
+          restartRef.current += 1;
+          lastErrorRef.current = null;
+          try { rec.start(); return; } catch { /* fall through */ }
+        }
+        if (stopReasonRef.current === "user" || stopReasonRef.current === "commit") return;
+        teardown(false);
+        setStatus(leftover ? "Mic band ho gaya — jo bola wo neeche hai, OK dabao." : "Tap to speak");
+        return;
+      }
       if (wantListenRef.current && leftover) {
         finishWith(leftover);
         return;
@@ -263,7 +349,7 @@ export function useVoiceInput(
       return fail("failed");
     }
     return null;
-  }, [armSilence, clearTimers, fail, finishWith, listening, notify, stop, teardown]);
+  }, [armSilence, clearTimers, fail, finishWith, listening, manual, notify, opts.greet, stop, teardown]);
 
   const toggle = useCallback(async () => {
     if (listening || recRef.current) {
@@ -278,12 +364,18 @@ export function useVoiceInput(
     supported: typeof window === "undefined" ? true : isSpeechSupported(),
     status,
     interim,
+    level,
     start,
     stop,
     toggle,
+    commit,
+    cancel,
   } satisfies VoiceInputState & {
+    level: number;
     start: () => Promise<string | null>;
     stop: () => void;
     toggle: () => Promise<string | null>;
+    commit: () => void;
+    cancel: () => void;
   };
 }

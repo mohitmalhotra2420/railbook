@@ -1987,3 +1987,23 @@ table.traintable {
 /* Round-18m-18: connecting-leg ConfirmTkt trick tag */
 .jx-ticket-tag { color: #166534; font-weight: 600; font-size: 11px; }
 .jx-lrow-noseat { opacity: 0.85; background: rgba(0,0,0,0.02); cursor: default; }
+
+/* Round-18m-32: voice panel (manual-commit mic) */
+.voice-panel{margin:0 12px 8px;padding:12px 14px;border-radius:16px;background:#0f172a;color:#fff;box-shadow:0 8px 24px rgba(15,23,42,.25);display:grid;gap:10px}
+.voice-panel.done{background:#1e293b}
+.voice-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:15px}
+.voice-head .voice-sub{font-size:12px;color:#cbd5e1;margin-left:auto}
+.voice-dot{width:10px;height:10px;border-radius:50%;background:#ef4444;box-shadow:0 0 0 0 rgba(239,68,68,.7);animation:voicePulse 1.2s infinite}
+.voice-panel.done .voice-dot{background:#22c55e;animation:none}
+@keyframes voicePulse{0%{box-shadow:0 0 0 0 rgba(239,68,68,.7)}70%{box-shadow:0 0 0 10px rgba(239,68,68,0)}100%{box-shadow:0 0 0 0 rgba(239,68,68,0)}}
+.voice-wave{display:flex;align-items:center;gap:3px;height:44px}
+.voice-wave span{flex:1;min-height:4px;border-radius:3px;background:linear-gradient(180deg,#38bdf8,#818cf8);transition:height 80ms linear;opacity:.55}
+.voice-wave.live span{opacity:1}
+.voice-text{min-height:44px;font-size:17px;line-height:1.4;background:rgba(255,255,255,.08);border-radius:12px;padding:10px 12px;word-break:break-word}
+.voice-placeholder{color:#94a3b8;font-style:italic;font-size:14px}
+.voice-actions{display:flex;gap:10px;justify-content:flex-end}
+.voice-cancel,.voice-ok{border:0;border-radius:999px;padding:10px 16px;font-weight:800;font-size:14px;cursor:pointer}
+.voice-cancel{background:rgba(255,255,255,.12);color:#fff}
+.voice-ok{background:#22c55e;color:#052e16;min-width:130px}
+.voice-ok:disabled{opacity:.45;cursor:not-allowed}
+.composer .mic.live{background:#22c55e;color:#052e16}

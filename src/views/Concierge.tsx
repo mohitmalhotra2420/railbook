@@ -202,6 +202,7 @@ export function Concierge() {
   })());
   const saved = loadTravellers();
 
+  /* Round-18m-32: manual-commit voice — bolo → screen par live dikhe → OK dabao tab bheje (auto-send band). */
   const voice = useVoiceInput(
     (text) => {
       handleTextRef.current(text);
@@ -209,6 +210,7 @@ export function Concierge() {
     (msg) => {
       setMessages((m) => [...m, { id: newId(), role: "assistant", text: msg }]);
     },
+    { manualCommit: true, greet: true },
   );
 
   useEffect(() => {
@@ -1216,7 +1218,8 @@ export function Concierge() {
   async function onMicTap(e: MouseEvent<HTMLButtonElement>) {
     e.preventDefault();
     e.stopPropagation();
-    await voice.toggle();
+    if (voice.listening) { voice.commit(); return; } // doosra tap = OK
+    await voice.start();
   }
 
   async function onChooseTrain(train: TrainResult) {
@@ -1510,23 +1513,35 @@ export function Concierge() {
         )}
       </div>
 
+      {(voice.listening || voice.interim) && (
+        <div className={`voice-panel ${voice.listening ? "live" : "done"}`} role="status" aria-live="polite">
+          <div className="voice-head">
+            <span className="voice-dot" aria-hidden />
+            <strong>{voice.listening ? "Main sun raha hoon…" : "Sun liya — bhejein?"}</strong>
+            <span className="voice-sub">{voice.listening ? "Bol kar khatam ho jaaye to OK dabao" : "OK = bhejo · ✕ = hatao"}</span>
+          </div>
+          <VoiceWave level={voice.level} live={voice.listening} />
+          <div className="voice-text">{voice.interim || <span className="voice-placeholder">… boliye, yahan likhta jaaunga</span>}</div>
+          <div className="voice-actions">
+            <button type="button" className="voice-cancel" onClick={() => voice.cancel()} aria-label="Cancel">✕ Hatao</button>
+            <button type="button" className="voice-ok" onClick={() => voice.commit()} disabled={!voice.interim.trim()} aria-label="OK — send">OK ✓ Bhejo</button>
+          </div>
+        </div>
+      )}
       <form
         className="composer"
         onSubmit={(e) => {
           e.preventDefault();
-          if (voice.listening) return;
+          if (voice.listening) { voice.commit(); return; }
           const t = draft.trim();
           setDraft("");
           void handleText(t);
         }}
       >
         <input
-          value={voice.listening && voice.interim ? voice.interim : draft}
-          onChange={(e) => {
-            if (voice.listening) return;
-            setDraft(e.target.value);
-          }}
-          placeholder={voice.listening ? "Sun raha hoon…" : "Kahan se kahan jaana hai?"}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder={voice.listening ? "Mic chal raha hai — upar dekho…" : "Kahan se kahan jaana hai?"}
           aria-label="Type your journey"
           autoComplete="off"
         />
@@ -1534,23 +1549,41 @@ export function Concierge() {
           type="button"
           className={`mic ${voice.listening ? "live" : ""}`}
           onClick={onMicTap}
-          title={voice.listening ? "Sun raha hoon…" : "Tap to speak"}
-          aria-label={voice.listening ? "Stop listening" : "Tap to speak"}
+          title={voice.listening ? "OK — bhejo" : "Tap to speak"}
+          aria-label={voice.listening ? "OK — send what I said" : "Tap to speak"}
           aria-pressed={voice.listening}
         >
           <span className="mic-icon" aria-hidden>
-            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-              <rect x="9" y="3" width="6" height="11" rx="3" />
-              <path d="M6 11a6 6 0 0 0 12 0M12 17v4M8 21h8" />
-            </svg>
+            {voice.listening ? (
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12l5 5L20 7" /></svg>
+            ) : (
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <rect x="9" y="3" width="6" height="11" rx="3" />
+                <path d="M6 11a6 6 0 0 0 12 0M12 17v4M8 21h8" />
+              </svg>
+            )}
           </span>
           {voice.listening && <span className="mic-rings" aria-hidden />}
         </button>
-        <button type="submit" className="send" aria-label="Send" disabled={voice.listening}>➤</button>
+        <button type="submit" className="send" aria-label="Send" disabled={voice.listening && !voice.interim.trim()}>➤</button>
       </form>
       <div className={`composer-hint ${voice.listening ? "live" : ""}`} role="status" aria-live="polite">
-        {voice.listening ? "Sun raha hoon…" : voice.status === "Tap to speak" ? "🎙️ बोलकर बताएं  ·  ✍️ Type करें" : voice.status}
+        {voice.listening ? "Sun raha hoon — khatam ho to OK ✓ dabao (mic auto-send nahi karega)" : voice.status === "Tap to speak" ? "🎙️ बोलकर बताएं  ·  ✍️ Type करें" : voice.status}
       </div>
+    </div>
+  );
+}
+
+/* Round-18m-32: simple bar waveform driven by mic RMS level (0..1); idle = low ripple. */
+function VoiceWave({ level, live }: { level: number; live: boolean }) {
+  const bars = 24;
+  return (
+    <div className={`voice-wave ${live ? "live" : ""}`} aria-hidden>
+      {Array.from({ length: bars }).map((_, i) => {
+        const centre = 1 - Math.abs(i - (bars - 1) / 2) / ((bars - 1) / 2);
+        const h = live ? Math.max(0.12, Math.min(1, level * (0.55 + centre * 0.9) + (Math.sin(i * 1.7 + level * 20) + 1) * 0.04)) : 0.12;
+        return <span key={i} style={{ height: `${Math.round(h * 100)}%` }} />;
+      })}
     </div>
   );
 }

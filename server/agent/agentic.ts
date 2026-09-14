@@ -22,6 +22,7 @@ import {
   routedCancelled,
   routedClassBoard,
   routedLiveStatus,
+  routedLiveDates,
   routedPnr,
   routedSchedule,
   routedStationSearch,
@@ -1554,6 +1555,19 @@ export async function executeApprovedTool(
         );
       }
       case "TRACK_TRAIN": {
+        /* Round-18m-32 (live fast-path ab AI ke peeche): date nahi di → pehle dekho kis-kis din ki run ka data hai;
+         * 2+ runs active hon (overnight/multi-day train) to user se poochho — galat run kabhi nahi. */
+        if (!a.date) {
+          try {
+            const options = await routedLiveDates(a.train_number as string, null);
+            if (options.length > 1) {
+              const lines = options.map((o, i) => `${i + 1}. ${o.label ?? o.date} — ${o.date}${o.runState && o.runState !== "unknown" ? ` (${o.runState.replace("_", " ")})` : ""}`).join("\n");
+              return failResult(null, `${a.train_number} ki ${options.length} runs ka live data hai — kis din wali chahiye? User se poochho (options EXACTLY ye do, numbered):\n${lines}\nUser chune to TRACK_TRAIN dobara us date ke saath call karo. Khud koi run mat chuno.`, { needs_choice: true, kind: "run_date", options });
+            }
+          } catch {
+            /* dates optional */
+          }
+        }
         const res = await routedLiveStatus(a.train_number as string, a.date as string | undefined);
         if (!res.live) return failResult(res.provider, "Live status unavailable — main fake position nahi bataunga.");
         const live = res.live as {

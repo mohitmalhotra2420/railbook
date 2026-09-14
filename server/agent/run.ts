@@ -1354,6 +1354,10 @@ async function askStationChoiceFirst(
 
 export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
   const seeded = seedContext(req);
+  /* Round-18m-32 (user: "HAR question AI ke paas jaaye — train search, station lookup, live, seats, general —
+   * AI decide kare kaunsa API/scrape"): code-first shortcuts (arrival/departure fast-path, live fast-path,
+   * name-picker) ab sirf tab jab AI configured na ho ya AI_OWNS_FLOW=0. Warna AI pehle; ye sab uske TOOLS hain. */
+  const aiFirst = agenticConfigured() && process.env.AI_OWNS_FLOW !== "0" && !isBookingMutation(req);
 
   /* ── 1) AI-DRIVEN TOOL CALLING (primary engine) ────────────────────
    * Model request + multi-turn state dekh kar KHUD decide karta hai kaunse
@@ -1394,7 +1398,9 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
         nameResolvedTrain = { number: resolved.trainNumber, name: resolved.trainName };
         seeded.selectedTrainNumber = resolved.trainNumber;
         seeded.selectedTrainName = resolved.trainName;
-      } else if (resolved && "clarify" in resolved) {
+      } else if (resolved && "clarify" in resolved && !aiFirst) {
+        /* AI-first: ambiguous naam par picker code nahi dega — AI TRAIN_NAME_SEARCH/SEARCH_TRAIN_BY_NAME tool se
+         * khud options dikhayega (ya sawaal general ho to seedha jawab). */
         nameClarify = resolved.clarify;
         namePicker = resolved.picker ?? null;
       }
@@ -1436,7 +1442,7 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
   /* ── ROUND-8b (screenshot fix): "{train} {station} kitne baje pahunchegi" —
    * deterministic arrival-at-station. Pehle ye (confidence-gated) chalta hai,
    * taaki LLM ise live-status na bana de aur "Kahan se jana hai?" na pooche. */
-  if (!nameClarify && !isBookingMutation(req)) {
+  if (!aiFirst && !nameClarify && !isBookingMutation(req)) {
     try {
       const arrival = await arrivalAtStationTurn(req.text, seeded);
       if (arrival) {
@@ -1481,7 +1487,7 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
   /* ── ROUND-11 (screenshot fix): "12411 kya ludhiana departure kar gyi?" —
    * deterministic departure-from-station jawab (live + route-order), taaki
    * SEARCH_TRAIN ka "Kahan jaana hai?" na aaye. */
-  if (!nameClarify && !isBookingMutation(req)) {
+  if (!aiFirst && !nameClarify && !isBookingMutation(req)) {
     try {
       const dep = await departureFromStationTurn(req.text, seeded);
       if (dep) {
@@ -1619,7 +1625,7 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
      * → seedha getLiveStatus tool, instant deterministic. Messy/ambiguous
      * ("18310 cdg kahan hai", typo wali) query ab bhi agentic jaati hai. */
     const LIVE_PHRASE_RE = /\b(kahan hai|kahaan hai|kaha hai|abhi kahan|abhi kaha|kahan tak|kahan pahunchi|live status|running status|live hai)\b/i;
-    if (trainNo && LIVE_PHRASE_RE.test(req.text)) {
+    if (!aiFirst && trainNo && LIVE_PHRASE_RE.test(req.text)) {
       const liveStop = new Set([
         "kahan", "kahaan", "kaha", "hai", "hain", "abhi", "kya", "live", "status", "running",
         "right", "now", "ab", "tell", "me", "batao", "bata", "bataiye", "btado", "dijiye",
