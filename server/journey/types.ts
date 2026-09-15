@@ -27,6 +27,9 @@ export type RouteAvailability = {
   stale?: boolean;
   /** Round-18m-26: provider timestamp (ISO) — "X din pehle ka data". */
   asOf?: string;
+  /** Round-18m-42: not a seat — a WAITLIST on a longer ticket segment that is much shorter than the direct WL. */
+  betterWl?: boolean;
+  directWaitlist?: number | null;
 };
 
 export type RouteLeg = {

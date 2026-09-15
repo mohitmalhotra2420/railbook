@@ -53,7 +53,7 @@ export function buildCandidates(plan: JourneyPlan): JourneyCandidate[] {
   return out;
 }
 
-const rowTxt = (r: RouteAvailability) => `${r.classCode} ${r.status === "AVAILABLE" ? `AVL ${r.seats ?? ""}`.trim() : r.status === "RAC" ? `RAC ${r.rac ?? ""}`.trim() : r.status === "WAITLIST" ? `WL ${r.waitlist ?? ""}`.trim() : r.status}${r.fare != null ? ` ₹${r.fare}` : ""}${r.stale ? " (STALE 24h+ cache)" : ""}`;
+const rowTxt = (r: RouteAvailability) => `${r.classCode} ${r.status === "AVAILABLE" ? `AVL ${r.seats ?? ""}`.trim() : r.status === "RAC" ? `RAC ${r.rac ?? ""}`.trim() : r.status === "WAITLIST" ? `WL ${r.waitlist ?? ""}`.trim() : r.status}${r.fare != null ? ` ₹${r.fare}` : ""}${r.stale ? " (STALE 24h+ cache)" : ""}${r.betterWl ? ` (BETTER-WL: longer ticket segment, direct WL was ${r.directWaitlist ?? "?"} — still a waitlist, NOT a seat; mention only as a fallback if user wants that class)` : ""}`;
 const dur = (m: number | null) => (m == null ? "?" : `${Math.floor(m / 60)}h${String(m % 60).padStart(2, "0")}m`);
 
 export function candidateSheet(plan: JourneyPlan, cands: JourneyCandidate[]): string {

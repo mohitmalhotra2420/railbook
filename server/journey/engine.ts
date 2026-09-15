@@ -793,6 +793,8 @@ export async function findBoardFromEarlier(args: {
   mode?: "earlier" | "upto";
   limitTrains?: number;
   passengers?: number | null;
+  /** Round-18m-42: per-class WL of the direct from→to segment (for "better WL" detection). */
+  directWl?: Record<string, number> | null;
 }): Promise<{ options: BoardFromEarlierOption[]; sources: Set<string>; stopsChecked: number; trainsChecked: number }> {
   const from = args.origin.toUpperCase();
   const to = args.destination.toUpperCase();
@@ -810,7 +812,9 @@ export async function findBoardFromEarlier(args: {
         const codes = stops.map((s) => String(s.code).toUpperCase());
         const iFrom = codes.indexOf(from);
         const iTo = codes.indexOf(to);
-        if (iFrom <= 0 || iTo < 0 || iTo <= iFrom) return;
+        /* Round-18m-42: "upto" mode mein boarding = train ka SOURCE bhi ho sakta hai (12904 ASR se hi chalti hai) —
+         * tab earlier stops nahi, sirf destination ke aage/terminus tak ticket. */
+        if (iFrom < 0 || iTo < 0 || iTo <= iFrom || (mode === "earlier" && iFrom === 0)) return;
         trainsChecked++;
         const earlier = stops.slice(Math.max(0, iFrom - stopsBack), iFrom).reverse(); // nearest first … train origin tak
         /* Round-18m-37 (user ConfirmTkt LDH→LKO 15 Sep: 12238 "JAT→BSB 3A RAC 29" — BSB terminus LKO ke 5 stop aage):
@@ -820,10 +824,14 @@ export async function findBoardFromEarlier(args: {
         const later = mode === "upto" && terminus && iTo < stops.length - 1 && !laterNear.some((x) => String(x.code).toUpperCase() === String(terminus.code).toUpperCase()) ? [...laterNear, terminus] : laterNear;
         const tcls = (t as { classes?: string[] }).classes ?? [];
         const need = (t as { needClasses?: string[] }).needClasses?.filter(Boolean) ?? [];
+        const directWlOf = (t as { directWl?: Record<string, number> }).directWl ?? args.directWl ?? null;
         const hint = need.length ? [...need] : Array.from(new Set([...(args.travelClass ? [args.travelClass] : []), ...tcls]));
         const dest = stops[iTo];
         const dayOf = (st: Stop) => (typeof st.day === "number" ? st.day : 1);
         /* Ek ticket-segment (bookFrom → bookUpto) probe karo — passenger phir bhi from→to hi travel karta hai. */
+        /* Returns true only for a REAL seat (AVL/RAC) — better-WL is recorded but the scan continues (a real seat
+         * further back / further ahead must still be found). Max 1 better-WL per train. */
+        let betterWlRecorded = false;
         const tryOneSegment = async (bf: Stop, bu: Stop | null, stopsBefore: number, stopsAfterN: number): Promise<boolean> => {
           stopsChecked++;
           const segTo = bu ? String(bu.code).toUpperCase() : to;
@@ -832,7 +840,18 @@ export async function findBoardFromEarlier(args: {
           const segDate = addDays(args.date, Math.min(0, dayOf(bf) - dayOf(stops[iFrom])));
           const board = await routedClassBoard(t.number, segDate, String(bf.code).toUpperCase(), segTo, "GN", hint);
           /* Round-18m-7: SAB classes check — jis class mein bhi seat mile, sab dikhao. Stale AVL/RAC bhi option (⚠), fresh pehle. */
-          const all = bookableRows(board.classes, { includeStale: true }).filter((r) => enoughSeats(r, args.passengers) && (!need.length || need.includes(r.classCode)));
+          let all = bookableRows(board.classes, { includeStale: true }).filter((r) => enoughSeats(r, args.passengers) && (!need.length || need.includes(r.classCode)));
+          /* Round-18m-42 (user ConfirmTkt: 12904 ASR→LDH SL WL 164, ASR→BVI SL WL 38 "Same Train Alternate"): AVL/RAC
+           * na mile to BEHTAR WL bhi option hai — direct WL se kam-se-kam 40% chhoti aur ≤ 60. Alag flag (betterWl)
+           * ke saath — UI blue "WL — better chance", kabhi seat-proven nahi kehte. */
+          if (!all.length && directWlOf && !betterWlRecorded) {
+            const wlRows = board.classes
+              .filter((c) => !c.stale && c.status === "WAITLIST" && typeof c.waitlist === "number" && c.waitlist > 0 && (!need.length || need.includes(c.code)))
+              .filter((c) => { const dw = directWlOf?.[c.code]; return typeof dw === "number" && dw > 0 && c.waitlist! <= 60 && c.waitlist! <= dw * 0.6; })
+              .map((c) => ({ ...(c.updatedAt ? { asOf: c.updatedAt } : {}), classCode: c.code, status: c.status, seats: null, rac: null, waitlist: c.waitlist ?? null, fare: c.fare > 0 ? c.fare : null, source: String(c.source ?? "web"), betterWl: true, directWaitlist: directWlOf?.[c.code] ?? null }) as RouteAvailability)
+              .sort((a, b) => (a.waitlist ?? 999) - (b.waitlist ?? 999));
+            all = wlRows;
+          }
           const row = (args.travelClass ? all.find((r) => r.classCode === args.travelClass) : undefined) ?? all[0] ?? null;
           if (!row) return false;
           sources.add(row.source);
@@ -866,6 +885,10 @@ export async function findBoardFromEarlier(args: {
             bookUptoArrival: bu ? bu.arrival ?? bu.departure ?? null : null,
             stopsAfter: stopsAfterN,
           });
+          if (row.betterWl) {
+            betterWlRecorded = true;
+            return false; // keep scanning for a real seat
+          }
           return true;
         };
         /* Phase 1 (Round-18m-6): earlier stop → destination. */
@@ -892,8 +915,8 @@ export async function findBoardFromEarlier(args: {
         /* provider fail → skip this train, never invent */
       }
     });
-  /* Round-18m-7: seat pehle (AVL > RAC), phir SABSE KAM travel time, phir nazdeek ka stop. */
-  options.sort((a, b) => Number(!!a.availability.stale) - Number(!!b.availability.stale) || (AVAIL_RANK[a.availability.status] ?? 5) - (AVAIL_RANK[b.availability.status] ?? 5) || (a.durationMinutes ?? 9e9) - (b.durationMinutes ?? 9e9) || (a.stopsBefore + (a.stopsAfter ?? 0)) - (b.stopsBefore + (b.stopsAfter ?? 0)) || a.trainNumber.localeCompare(b.trainNumber));
+  /* Round-18m-7: seat pehle (AVL > RAC), phir SABSE KAM travel time, phir nazdeek ka stop. Round-18m-42: better-WL sabse baad. */
+  options.sort((a, b) => Number(!!a.availability.betterWl) - Number(!!b.availability.betterWl) || Number(!!a.availability.stale) - Number(!!b.availability.stale) || (AVAIL_RANK[a.availability.status] ?? 5) - (AVAIL_RANK[b.availability.status] ?? 5) || (a.durationMinutes ?? 9e9) - (b.durationMinutes ?? 9e9) || (a.stopsBefore + (a.stopsAfter ?? 0)) - (b.stopsBefore + (b.stopsAfter ?? 0)) || a.trainNumber.localeCompare(b.trainNumber));
   return { options, sources, stopsChecked, trainsChecked };
 }
 
@@ -1299,7 +1322,7 @@ export async function planJourney(args: {
       };
       const list = [...trains]
         .sort((a, b) => (a.durationMinutes || 9e9) - (b.durationMinutes || 9e9) || a.number.localeCompare(b.number))
-        .map((t) => ({ number: t.number, name: t.name, classes: t.classes.map((c) => c.code), needClasses: needOf(t), directStatus: (() => { const a = availability.get(t.number); return a ? `${a.status}${a.stale ? " (not fresh)" : ""}` : null; })(), durationMinutes: t.durationMinutes }))
+        .map((t) => ({ number: t.number, name: t.name, classes: t.classes.map((c) => c.code), needClasses: needOf(t), directWl: Object.fromEntries((classBoards.get(t.number) ?? []).filter((r) => r.status === "WAITLIST" && typeof r.waitlist === "number").map((r) => [r.classCode, r.waitlist as number])), directStatus: (() => { const a = availability.get(t.number); return a ? `${a.status}${a.stale ? " (not fresh)" : ""}` : null; })(), durationMinutes: t.durationMinutes }))
         .filter((t) => t.needClasses.length > 0);
       if (list.length) {
         const r1 = await findBoardFromEarlier({ trains: list, origin: from, destination: to, date: args.date, travelClass: args.travelClass ?? null, limitTrains: JOURNEY_CONFIG.boardEarlierTrains, passengers: pax, mode: "earlier" });
@@ -1308,7 +1331,7 @@ export async function planJourney(args: {
         perClassAudit = { trains: r1.trainsChecked, stops: r1.stopsChecked };
         /* Jo classes earlier-stop se bhi nahi mili → book-upto (destination ke 2–3 stops aage). */
         const foundCls = new Map<string, Set<string>>();
-        for (const o of r1.options) for (const r of o.classOptions ?? [o.availability]) { if (!r.stale) (foundCls.get(o.trainNumber) ?? foundCls.set(o.trainNumber, new Set()).get(o.trainNumber)!).add(r.classCode); }
+        for (const o of r1.options) for (const r of o.classOptions ?? [o.availability]) { if (!r.stale && !r.betterWl) (foundCls.get(o.trainNumber) ?? foundCls.set(o.trainNumber, new Set()).get(o.trainNumber)!).add(r.classCode); }
         const list2 = list.map((t) => ({ ...t, needClasses: t.needClasses.filter((c) => !foundCls.get(t.number)?.has(c)) })).filter((t) => t.needClasses.length > 0);
         if (list2.length) {
           const r2 = await findBoardFromEarlier({ trains: list2, origin: from, destination: to, date: args.date, travelClass: args.travelClass ?? null, limitTrains: JOURNEY_CONFIG.boardEarlierTrains, passengers: pax, mode: "upto" });

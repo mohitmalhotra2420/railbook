@@ -116,3 +116,33 @@ describe("Round-18m-37: book-upto scan always includes the train's terminus", ()
     spySched.mockRestore(); spyBoard.mockRestore();
   });
 });
+
+describe("Round-18m-42: better-WL on a longer ticket segment + source-station trains get the upto scan", () => {
+  it("12904 from its source ASR: direct SL WL 170, ASR→BDTS SL WL 38 → betterWl option (never a seat)", async () => {
+    const { findBoardFromEarlier, legBookable } = await import("../server/journey/engine");
+    const router = await import("../server/railway/router");
+    const stops = ["ASR","JUC","LDH","UMB","NDLS","MTJ","RTM","BRC","ST","BDTS"].map((c, i) => ({ code: c, name: c, arrival: "10:00", departure: "10:05", day: 1 + (i > 4 ? 1 : 0) }));
+    const spySched = vi.spyOn(router, "routedSchedule").mockResolvedValue({ schedule: { trainNumber: "12904", trainName: "GOLDEN TEMPLE", stops }, provider: "mock" } as never);
+    const spyBoard = vi.spyOn(router, "routedClassBoard").mockImplementation(async (_n, _d, from, to) => ({ classes: [{ code: "SL", status: "WAITLIST", waitlist: from === "ASR" && to === "BDTS" ? 38 : 170, fare: 810, source: "web_railyatri" }], provider: "web_railyatri" }) as never);
+    const r = await findBoardFromEarlier({ trains: [{ number: "12904", name: "GOLDEN TEMPLE", classes: ["SL"], needClasses: ["SL"], directWl: { SL: 170 } }] as never, origin: "ASR", destination: "LDH", date: "2026-09-15", passengers: 1, mode: "upto", limitTrains: 1 });
+    expect(r.options.length).toBe(1);
+    const o = r.options[0];
+    expect(o.bookFrom).toBe("ASR");
+    expect(o.bookUpto).toBe("BDTS");
+    expect(o.availability.status).toBe("WAITLIST");
+    expect(o.availability.waitlist).toBe(38);
+    expect(o.availability.betterWl).toBe(true);
+    expect(legBookable(o.availability, 1)).toBe(false); // WL is never "seat-proven"
+    spySched.mockRestore(); spyBoard.mockRestore();
+  });
+  it("WL that is not much better than direct (WL 150 vs 170) is NOT offered", async () => {
+    const { findBoardFromEarlier } = await import("../server/journey/engine");
+    const router = await import("../server/railway/router");
+    const stops = ["ASR","LDH","UMB","NDLS"].map((c) => ({ code: c, name: c, arrival: "10:00", departure: "10:05", day: 1 }));
+    const spySched = vi.spyOn(router, "routedSchedule").mockResolvedValue({ schedule: { trainNumber: "1", trainName: "T", stops }, provider: "mock" } as never);
+    const spyBoard = vi.spyOn(router, "routedClassBoard").mockResolvedValue({ classes: [{ code: "SL", status: "WAITLIST", waitlist: 150, fare: 500, source: "web" }], provider: "web" } as never);
+    const r = await findBoardFromEarlier({ trains: [{ number: "1", name: "T", classes: ["SL"], needClasses: ["SL"], directWl: { SL: 170 } }] as never, origin: "ASR", destination: "LDH", date: "2026-09-15", passengers: 1, mode: "upto", limitTrains: 1 });
+    expect(r.options.length).toBe(0);
+    spySched.mockRestore(); spyBoard.mockRestore();
+  });
+});

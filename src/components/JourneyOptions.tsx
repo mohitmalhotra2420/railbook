@@ -36,6 +36,8 @@ function availTextOf(a: AvailLike | null | undefined): { text: string; tone: Ton
   if (a.status === "AVAILABLE") return { text: `${a.classCode} AVL${a.seats != null ? ` ${a.seats}` : ""}${st}`, tone: tone("ok") };
   /* Round-18m-22 (user): RAC = available ki tarah (chart ke baad confirm) → green; label RAC N hi rehta hai. */
   if (a.status === "RAC") return { text: `${a.classCode} RAC${a.rac != null ? ` ${a.rac}` : ""}${st}`, tone: tone("ok") };
+  /* Round-18m-42: "better WL" (longer ticket segment, much shorter waitlist than direct) — blue, clearly WL, not a seat. */
+  if (a.status === "WAITLIST" && (a as { betterWl?: boolean }).betterWl) return { text: `${a.classCode} WL ${a.waitlist ?? "?"} (direct WL ${(a as { directWaitlist?: number | null }).directWaitlist ?? "?"}) — better chance${st}`, tone: tone("wl") };
   if (a.status === "WAITLIST") return { text: `${a.classCode} WL${a.waitlist != null ? ` ${a.waitlist}` : ""}${st}`, tone: tone("wl") };
   if (a.status === "NOT_AVAILABLE") return { text: `${a.classCode} Not available`, tone: tone("bad") };
   if (/REGRET/i.test(String(a.status))) return { text: `${a.classCode} Regret`, tone: tone("bad") };
