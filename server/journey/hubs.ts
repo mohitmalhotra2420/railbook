@@ -26,10 +26,10 @@ export type HubDecision = {
 
 const HUB_PRINCIPLES = `You choose CHANGE-OVER stations (hubs) for an Indian Railways connecting journey. You know Indian railway geography.
 Rules:
-1. A hub is only sensible if it lies BETWEEN origin and destination along a realistic rail path — never a station that forces the traveller to overshoot and come back (e.g. Amritsar→Ludhiana via New Delhi is absurd; Ludhiana→Varanasi via New Delhi or Lucknow is fine).
-2. Prefer big junctions with many trains on the second leg. Candidates marked onRoute=true are on the fastest direct train's own route (safe). Candidates from the fixed list are big cities that may or may not be on the way — use geography to accept or reject.
-3. Return 0 hubs if no candidate is a genuine intermediate point (short routes with many direct trains usually need none).
-4. Return at most 4, best first. Output ONLY JSON: {"hubs":["CODE",...],"reason":"<one short English sentence>"}. Only codes from the candidate list.`;
+1. ALWAYS return hubs — even when fast direct trains exist. The traveller may not get a seat in their class on the direct train, or the direct timings may not suit them, so connecting options via sensible junctions must be offered too. Return 0 only if literally no candidate is a genuine intermediate point (e.g. adjacent stations).
+2. A hub is sensible only if it lies BETWEEN origin and destination along a realistic rail path — never one that forces the traveller to overshoot and come back (Amritsar→Ludhiana via New Delhi is absurd; Amritsar→Ludhiana via Jalandhar City or Phagwara is fine; Ludhiana→Varanasi via New Delhi, Ambala, Lucknow, Kanpur is fine).
+3. Prefer big junctions with many trains on BOTH legs. Candidates marked onRoute=true are on the fastest direct train's own route (safe). Fixed-list candidates are big cities that may or may not be on the way — use geography to accept or reject.
+4. Return as MANY sensible hubs as exist, up to 6, best first (most trains / most central first). Output ONLY JSON: {"hubs":["CODE",...],"reason":"<one short English sentence>"}. Only codes from the candidate list.`;
 
 let hubFetchImpl: typeof fetch | null = null;
 export function setHubFetch(fn: typeof fetch | null): void {
@@ -46,7 +46,7 @@ export async function decideHubsWithAI(args: {
   timeoutMs?: number;
 }): Promise<HubDecision> {
   const routeDerived = args.candidates.filter((c) => c.onRouteIndex != null).map((c) => c.code);
-  const fallback: HubDecision = { hubs: routeDerived.slice(0, 4), source: "rules", model: null, reason: routeDerived.length ? "route-derived junctions (AI unavailable)" : "no intermediate junction on the direct route" };
+  const fallback: HubDecision = { hubs: routeDerived.slice(0, 6), source: "rules", model: null, reason: routeDerived.length ? "route-derived junctions (AI unavailable)" : "no intermediate junction on the direct route" };
   if (!args.candidates.length) return { hubs: [], source: "rules", model: null, reason: "no candidates" };
   const key = env.nvidiaApiKey;
   if (!key || process.env.VITEST) return fallback;
@@ -102,7 +102,11 @@ export async function decideHubsWithAI(args: {
     const hubs = (Array.isArray(parsed.hubs) ? parsed.hubs : [])
       .map((h) => String(h).toUpperCase().trim())
       .filter((h, i, arr) => allowed.has(h) && arr.indexOf(h) === i && h !== args.from && h !== args.to)
-      .slice(0, 4);
+      .slice(0, 6);
+    if (!hubs.length && routeDerived.length) {
+      /* User rule (Round-18m-41): direct ho ya na ho, connecting options hamesha — AI ne 0 diye to route junctions. */
+      return { hubs: routeDerived.slice(0, 6), source: "ai", model: got.model, reason: `${typeof parsed.reason === "string" ? parsed.reason.slice(0, 120) + " — " : ""}route junctions rakhe (class/time options ke liye)` };
+    }
     return { hubs, source: "ai", model: got.model, reason: typeof parsed.reason === "string" ? parsed.reason.slice(0, 200) : null };
   } catch {
     return fallback;

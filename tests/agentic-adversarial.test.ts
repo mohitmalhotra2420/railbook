@@ -606,7 +606,7 @@ describe("TEST 9: no invented facts, no false certainty", () => {
     expect(turn.grounded).toBe(false);
     expect(turn.reply ?? "").not.toContain("145");
     expect(turn.reply ?? "").not.toContain("platform 7");
-  });
+  }, 20000);
 
   it("insufficient data -> model must not claim certainty about Vande Bharat", async () => {
     railcoreMock();

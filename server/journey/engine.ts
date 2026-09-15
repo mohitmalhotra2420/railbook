@@ -1209,7 +1209,7 @@ export async function planJourney(args: {
     /* Round-18m-39: direct trains hain → hubs SIRF unke route ke BEECH ke junctions (ASR→LDH: JRC/PGW, NDLS nahi).
      * Fixed hub-list sirf tab jab koi direct train na ho — aur tab bhi detour cap ke saath. */
     const fastestDirectMin = trains.reduce<number | null>((m, t) => (t.durationMinutes && t.durationMinutes > 0 ? Math.min(m ?? 9e9, t.durationMinutes) : m), null);
-    const detourCap = fastestDirectMin != null ? Math.round(fastestDirectMin * 1.6 + 45) : null;
+    const detourCap = fastestDirectMin != null ? Math.round(fastestDirectMin * 2.2 + 60) : null;
     /* Round-18m-40 (user: "hubs bhi AI decide kare"): AI chunta hai kaunse junctions par change sensible hai. */
     const hubPick = await chooseHubsForRoute(probeList, from, to, fastestDirectMin, { from: trains[0]?.from?.name ?? null, to: trains[0]?.to?.name ?? null });
     hubDecision = hubPick;
@@ -1374,7 +1374,7 @@ export async function planJourney(args: {
     }
     if (!connections.length) {
       const fastestDirectMin2 = trains.reduce<number | null>((m, t) => (t.durationMinutes && t.durationMinutes > 0 ? Math.min(m ?? 9e9, t.durationMinutes) : m), null);
-      const detourCap2 = fastestDirectMin2 != null ? Math.round(fastestDirectMin2 * 1.6 + 45) : null;
+      const detourCap2 = fastestDirectMin2 != null ? Math.round(fastestDirectMin2 * 2.2 + 60) : null;
       const hubPick2 = hubDecision ?? (await chooseHubsForRoute(probeList, from, to, fastestDirectMin2, { from: trains[0]?.from?.name ?? null, to: trains[0]?.to?.name ?? null }));
       hubDecision = hubPick2;
       const routeHubs2 = hubPick2.hubs;
@@ -1507,8 +1507,9 @@ export async function planJourney(args: {
         g.n++;
         hubCount.set(c.station, g);
       }
-      /* Ek hub (sabse zyada candidates wala) — time budget: prod agent turn 180s. */
-      const hubs = [...hubCount.entries()].sort((a, b) => b[1].n - a[1].n).slice(0, 1);
+      /* Round-18m-41 (user: "jitne possible hubs se connection bane"): top 3 hubs (candidates ke hisaab se) —
+       * har ek par leg-1/leg-2 poora scan; time budget ke andar (prod turn 180s). */
+      const hubs = [...hubCount.entries()].sort((a, b) => b[1].n - a[1].n).slice(0, Number(process.env.LEGPLAN_HUBS ?? 3) || 3);
       for (const [hub, g] of hubs) {
         const ex = await expandLegPlan({ from, to, hub, hubName: g.name, date: args.date, travelClass: args.travelClass ?? null, pax, leg2DayOffset: g.off });
         ex.sources.forEach((x) => sources.add(x));
@@ -1522,7 +1523,6 @@ export async function planJourney(args: {
             if (i >= 0) plan.notes.splice(i, 1);
           }
           plan.sources = [...sources];
-          if (ex.plan.leg1.length && ex.plan.leg2.length) break;
         }
       }
     } catch {

@@ -25,4 +25,12 @@ describe("Round-18m-40: AI-chosen hubs", () => {
     expect(d.hubs).toEqual(["NDLS", "PGW"]);
     expect(d.reason).toBe("test");
   });
+  it("Round-18m-41: AI says 0 hubs but route junctions exist → route junctions kept (connections always offered)", async () => {
+    const saved = process.env.VITEST; delete process.env.VITEST; process.env.NVIDIA_API_KEY = "nvapi-test";
+    setHubFetch(async () => new Response(JSON.stringify({ model: "m", choices: [{ message: { content: '{"hubs":[],"reason":"short route"}' } }] }), { status: 200, headers: { "content-type": "application/json" } }));
+    const d = await decideHubsWithAI({ from: "ASR", to: "LDH", fastestDirectMinutes: 95, candidates: cands });
+    process.env.VITEST = saved;
+    expect(d.hubs).toEqual(["JUC", "PGW"]);
+    expect(d.reason).toMatch(/route junctions/);
+  });
 });
