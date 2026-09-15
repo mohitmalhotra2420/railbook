@@ -52,7 +52,7 @@ export const JOURNEY_CONFIG = {
   /** Bounded fan-out: how many trains get an availability probe. */
   availabilityProbeLimit: Number(process.env.JOURNEY_AVAIL_PROBE ?? 20) || 20, // Round-18m-12: route ki HAR train (bounded 20), sirf fastest 4 nahi
   /** Hubs tried for connections (comma env override). */
-  connectionHubs: String(process.env.CONNECTION_HUBS ?? "NDLS,UMB,LJN,CNB,JUC,ASR,BPL,ET,NGP,HWH,MAS,SBC,ADI,BCT")
+  connectionHubs: String(process.env.CONNECTION_HUBS ?? "NDLS,UMB,LJN,LKO,CNB,PRYJ,JUC,ASR,BPL,ET,NGP,HWH,MAS,SBC,ADI,BCT,MTJ,AGC,JP,GKP,PNBE,JBP,SC,VSKP,BBS,ERS,TVC,MAO")
     .split(",")
     .map((s) => s.trim().toUpperCase())
     .filter(Boolean),
@@ -513,6 +513,46 @@ export async function routeDerivedHubs(directTrains: { number: string }[], from:
     if (out.length >= limit) break;
   }
   return out;
+}
+
+/* Round-18m-40: AI chooses hubs. Candidates = direct-route junctions (with position) + configured major hubs. */
+export async function chooseHubsForRoute(directTrains: { number: string }[], from: string, to: string, fastestDirectMinutes: number | null, names?: { from?: string | null; to?: string | null }): Promise<{ hubs: string[]; source: "ai" | "rules"; model: string | null; reason: string | null; candidates: number }> {
+  const { decideHubsWithAI } = await import("./hubs.js");
+  const cands: import("./hubs.js").HubCandidate[] = [];
+  const seen = new Set<string>();
+  for (const t of directTrains.slice(0, 2)) {
+    try {
+      const sched = await routedSchedule(t.number);
+      const stops = (sched.schedule && "stops" in sched.schedule ? (sched.schedule.stops as Stop[]) : []) ?? [];
+      const codes = stops.map((x) => String(x.code).toUpperCase());
+      const iFrom = codes.indexOf(from);
+      const iTo = codes.indexOf(to);
+      if (iFrom < 0 || iTo < 0 || iTo - iFrom < 3) continue;
+      const JN_RE = /\b(JN|JUNCTION|CANTT?|CENTRAL|TERMINUS|CITY)\b/i;
+      const mid = stops.slice(iFrom + 1, iTo);
+      mid.forEach((st, i) => {
+        const c = String(st.code).toUpperCase();
+        if (seen.has(c) || c === from || c === to) return;
+        if (!(JN_RE.test(String(st.name ?? "")) || JOURNEY_CONFIG.connectionHubs.includes(c))) return;
+        seen.add(c);
+        cands.push({ code: c, name: st.name ?? null, onRouteIndex: i, routeLength: mid.length, fromFixedList: JOURNEY_CONFIG.connectionHubs.includes(c) });
+      });
+    } catch {
+      /* timetable nahi — skip */
+    }
+    if (cands.length >= 8) break;
+  }
+  for (const h of JOURNEY_CONFIG.connectionHubs) {
+    const c = h.toUpperCase();
+    if (seen.has(c) || c === from || c === to) continue;
+    seen.add(c);
+    cands.push({ code: c, name: null, onRouteIndex: null, routeLength: null, fromFixedList: true });
+  }
+  /* Route junctions (max 10) + SAB fixed majors — AI ko poori picture mile (LKO/NDLS/CNB jaise). */
+  const routeC = cands.filter((c) => c.onRouteIndex != null).slice(0, 10);
+  const fixedC = cands.filter((c) => c.onRouteIndex == null);
+  const d = await decideHubsWithAI({ from, to, fromName: names?.from ?? null, toName: names?.to ?? null, fastestDirectMinutes, candidates: [...routeC, ...fixedC] });
+  return { ...d, candidates: cands.length };
 }
 
 export async function findConnections(
@@ -1161,6 +1201,7 @@ export async function planJourney(args: {
 
   /* Connections: only when thin direct list or requested. */
   let connections: Connection[] = [];
+  let hubDecision: { hubs: string[]; source: "ai" | "rules"; model: string | null; reason: string | null; candidates: number } | null = null;
   /* Round-18m-10: har probed connection (bookable ya nahi) — legPlans ke liye. */
   const probedConnections: Connection[] = [];
   let bfeAudit = { trains: 0, stops: 0 };
@@ -1169,17 +1210,21 @@ export async function planJourney(args: {
      * Fixed hub-list sirf tab jab koi direct train na ho — aur tab bhi detour cap ke saath. */
     const fastestDirectMin = trains.reduce<number | null>((m, t) => (t.durationMinutes && t.durationMinutes > 0 ? Math.min(m ?? 9e9, t.durationMinutes) : m), null);
     const detourCap = fastestDirectMin != null ? Math.round(fastestDirectMin * 1.6 + 45) : null;
-    const routeHubs = trains.length ? await routeDerivedHubs(probeList, from, to) : [];
+    /* Round-18m-40 (user: "hubs bhi AI decide kare"): AI chunta hai kaunse junctions par change sensible hai. */
+    const hubPick = await chooseHubsForRoute(probeList, from, to, fastestDirectMin, { from: trains[0]?.from?.name ?? null, to: trains[0]?.to?.name ?? null });
+    hubDecision = hubPick;
+    const routeHubs = hubPick.hubs;
+    if (hubPick.source === "ai") notes.push(`Connecting hubs AI ne chune: ${routeHubs.length ? routeHubs.join(", ") : "koi nahi (direct route par beech mein koi sensible junction nahi)"}${hubPick.reason ? ` — ${hubPick.reason}` : ""}.`);
     const c = routeHubs.length
       ? await findConnections(from, to, args.date, { hubs: routeHubs, maxHubs: routeHubs.length, legsPerHub: 6, maxTotalMinutes: detourCap })
-      : await findConnections(from, to, args.date, { maxHubs: trains.length ? 2 : 3, maxTotalMinutes: detourCap });
+      : { connections: [] as Connection[], hubsTried: [] as string[], sources: new Set<string>() };
     connections = c.connections;
     c.sources.forEach((s) => sources.add(s));
     (await probeConnectionLegs(connections, args.date, args.travelClass ?? null)).forEach((s) => sources.add(s));
     const found = connections.length;
     probedConnections.push(...connections);
     connections = bookableConnections(connections, pax);
-    if (!connections.length && trains.length && !routeHubs.length) {
+    if (!connections.length && trains.length && !routeHubs.length && hubPick.source !== "ai") {
       const hubs = await routeDerivedHubs(probeList, from, to);
       if (hubs.length) {
         const c2 = await findConnections(from, to, args.date, { hubs, maxHubs: hubs.length, legsPerHub: 5, maxTotalMinutes: detourCap });
@@ -1330,16 +1375,21 @@ export async function planJourney(args: {
     if (!connections.length) {
       const fastestDirectMin2 = trains.reduce<number | null>((m, t) => (t.durationMinutes && t.durationMinutes > 0 ? Math.min(m ?? 9e9, t.durationMinutes) : m), null);
       const detourCap2 = fastestDirectMin2 != null ? Math.round(fastestDirectMin2 * 1.6 + 45) : null;
-      const routeHubs2 = trains.length ? await routeDerivedHubs(probeList, from, to) : [];
+      const hubPick2 = hubDecision ?? (await chooseHubsForRoute(probeList, from, to, fastestDirectMin2, { from: trains[0]?.from?.name ?? null, to: trains[0]?.to?.name ?? null }));
+      hubDecision = hubPick2;
+      const routeHubs2 = hubPick2.hubs;
+      if (hubPick2.source === "ai" && !notes.some((n) => n.startsWith("Connecting hubs AI ne chune"))) notes.push(`Connecting hubs AI ne chune: ${routeHubs2.length ? routeHubs2.join(", ") : "koi nahi"}${hubPick2.reason ? ` — ${hubPick2.reason}` : ""}.`);
       const c = routeHubs2.length
         ? await findConnections(from, to, args.date, { hubs: routeHubs2, maxHubs: routeHubs2.length, legsPerHub: 6, maxTotalMinutes: detourCap2 })
-        : await findConnections(from, to, args.date, { maxHubs: 3, maxTotalMinutes: detourCap2 });
+        : hubPick2.source === "ai"
+          ? { connections: [] as Connection[], hubsTried: [] as string[], sources: new Set<string>() }
+          : await findConnections(from, to, args.date, { maxHubs: 3, maxTotalMinutes: detourCap2 });
       connections = c.connections;
       c.sources.forEach((s) => sources.add(s));
       (await probeConnectionLegs(connections, args.date, args.travelClass ?? null)).forEach((s) => sources.add(s));
       probedConnections.push(...connections);
       connections = bookableConnections(connections, pax);
-      if (!connections.length && !routeHubs2.length) {
+      if (!connections.length && !routeHubs2.length && hubPick2.source !== "ai") {
         const hubs = await routeDerivedHubs(probeList, from, to);
         if (hubs.length) {
           const c2 = await findConnections(from, to, args.date, { hubs, maxHubs: hubs.length, legsPerHub: 5, maxTotalMinutes: detourCap2 });
@@ -1486,6 +1536,7 @@ export async function planJourney(args: {
     bfeTrains: bfeAudit.trains,
     bfeStopsChecked: bfeAudit.stops,
     connHubs: (plan.legPlans ?? []).map((l) => l.hub),
+    hubDecision: hubDecision ? { hubs: hubDecision.hubs, source: hubDecision.source, model: hubDecision.model, reason: hubDecision.reason, candidates: hubDecision.candidates } : null,
     connLeg1Checked: (plan.legPlans ?? []).reduce((n, l) => n + l.checkedLeg1, 0),
     connLeg2Checked: (plan.legPlans ?? []).reduce((n, l) => n + l.checkedLeg2, 0),
   };

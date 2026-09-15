@@ -479,6 +479,7 @@ export function JourneyOptions({
           <span>· {direct.reduce((n, o) => n + (o.classOptions?.length ?? 0), 0)} class rows</span>
           {plan.audit.bfeStopsChecked > 0 && <span>· Leg-1 (train origin → {plan.query.from}): {plan.audit.bfeTrains} trains × {plan.audit.bfeStopsChecked} earlier-stop segments, every class</span>}
           {plan.audit.connLeg1Checked > 0 && <span>· via {plan.audit.connHubs.join("/")}: leg-1 {plan.audit.connLeg1Checked} trains + leg-2 {plan.audit.connLeg2Checked} trains, every class (specials incl.)</span>}
+          {plan.audit.hubDecision && <span>· Change-over hubs {plan.audit.hubDecision.source === "ai" ? "AI ne chune" : "route se"}: {plan.audit.hubDecision.hubs.length ? plan.audit.hubDecision.hubs.join(", ") : "koi nahi (direct hi sahi)"}{plan.audit.hubDecision.reason ? ` — ${plan.audit.hubDecision.reason}` : ""}</span>}
         </div>
       )}
 
