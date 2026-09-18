@@ -56,6 +56,14 @@ const SERVER_STARTED_AT = new Date().toISOString();
 
 installFetchMetrics();
 
+/* Single-process in-flight confirmation claim. Ek booking ID par ek waqt me sirf ek hi
+ * confirm critical section chal sakta hai — check + set synchronous hain (beech me koi await
+ * nahi), isliye overlapping requests me sirf pehla jeetta hai, baaki ko CONFIRM_IN_PROGRESS
+ * (409) milta hai. Isse "sab DRAFT dekhe → sab ne debit kiya" race band hoti hai.
+ * NOTE: single-process architecture ke liye kaafi hai; multi-instance me DB-level
+ * conditional update / unique idempotency key chahiye. */
+const confirmInFlight = new Map<string, true>();
+
 export function createApp() {
   const app = express();
   app.disable("x-powered-by");
@@ -961,26 +969,48 @@ export function createApp() {
         res.status(404).json({ error: "Booking not found." });
         return;
       }
-      const wallet = getWallet();
-      if (wallet.balance < existing.fare.total) {
-        res.status(402).json({
-          error: "Insufficient wallet balance.",
-          code: "INSUFFICIENT_FUNDS",
-          wallet,
-          required: existing.fare.total,
+      /* Idempotent duplicate-confirm guard: pehle se CONFIRMED booking par wallet debit aur
+       * provider.confirmBooking() dobara NAHI — wahi record (same PNR) turant wapas. UI button
+       * disable hone par bharosa nahi (direct API retry bhi safe). Terminal FAILED/CANCELLED
+       * ka behaviour jaisa tha waisa hi hai. */
+      if (existing.status === "CONFIRMED") {
+        res.json({ booking: existing, wallet: getWallet() });
+        return;
+      }
+      /* Atomic in-flight claim: has() aur set() ke beech koi await nahi — ek hi tick me decide
+       * hota hai ki is booking ka confirmation kaun karega. Concurrent duplicate ko 409. */
+      if (confirmInFlight.has(req.params.id)) {
+        res.status(409).json({
+          error: "Confirmation already in progress.",
+          code: "CONFIRM_IN_PROGRESS",
         });
         return;
       }
-      debit(existing.fare.total, `Booking ${existing.id}`);
+      confirmInFlight.set(req.params.id, true);
       try {
-        const booking = await provider.confirmBooking(req.params.id);
-        if (booking.status !== "CONFIRMED") {
-          credit(existing.fare.total, `Refund · ${existing.id} failed`);
+        const wallet = getWallet();
+        if (wallet.balance < existing.fare.total) {
+          res.status(402).json({
+            error: "Insufficient wallet balance.",
+            code: "INSUFFICIENT_FUNDS",
+            wallet,
+            required: existing.fare.total,
+          });
+          return;
         }
-        res.json({ booking, wallet: getWallet() });
-      } catch (err) {
-        credit(existing.fare.total, `Refund · ${existing.id} error`);
-        throw err;
+        debit(existing.fare.total, `Booking ${existing.id}`);
+        try {
+          const booking = await provider.confirmBooking(req.params.id);
+          if (booking.status !== "CONFIRMED") {
+            credit(existing.fare.total, `Refund · ${existing.id} failed`);
+          }
+          res.json({ booking, wallet: getWallet() });
+        } catch (err) {
+          credit(existing.fare.total, `Refund · ${existing.id} error`);
+          throw err;
+        }
+      } finally {
+        confirmInFlight.delete(req.params.id);
       }
     } catch (err) {
       next(err);
