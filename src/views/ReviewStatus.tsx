@@ -1,4 +1,5 @@
 import { useBooking } from "../booking/context";
+import { IrctcHandoff } from "../components/IrctcHandoff";
 import { Shell } from "../components/Shell";
 import { formatLongDate, inr } from "../format";
 import { CLASS_LABELS } from "../types";
@@ -68,6 +69,8 @@ export function FareReview() {
         <p className="muted" style={{ marginTop: 12 }}>
           Nothing is confirmed until the railway provider accepts this booking.
         </p>
+        {/* Additive: optional, user-initiated IRCTC handoff. Existing summary + Confirm Booking above are unchanged. */}
+        <IrctcHandoff train={train} date={state.date} classCode={klass.code} passengers={state.passengers} />
       </main>
       <div className="sticky-cta">
         {short ? (
