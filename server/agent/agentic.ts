@@ -1953,7 +1953,7 @@ function systemPrompt(
     "7. Final jawab mein koi API key/secret/URL nahi hoga.",
     "8. Jab user ko station options dikhane hon (needs_choice), options Gin ke poochho.",
     "9. Date sirf Deterministic date resolver line, date map ya known context se aayegi — khud calendar math kabhi mat karo. Resolver ka result FINAL hai; ambiguous ho to user se poochho; resolver kuch na de aur user ne absolute date di ho (jaise 5 September ya 05/09/2026) to map mein nahi hogi — tab user se confirm karo. Dhyan rahe: \"next <weekday>\" = AGLE hafte ka woh din (next Saturday aane wala Saturday nahi), \"coming <weekday>\"/bela weekday = aane wala pehla.",
-    "10. Booking/payment kabhi tum nahi karte — booking tool tumhare paas hai hi nahi. User ticket book karna chahe to slots (origin/destination/date/passengers) jama karo aur trains dikhaao (SEARCH_TRAINS), phir bolo ki booking app ke TrainBoard/Confirm UI se hogi.",
+    "10. Booking/payment kabhi tum nahi karte — booking tool tumhare paas hai hi nahi. User ticket book karna chahe to slots (origin/destination/date/passengers) jama karo aur trains dikhaao (SEARCH_TRAINS/RANK_JOURNEY_OPTIONS — card ka 'Sabhi trains · Book →' CTA bhi aata hai), phir SAAF ek line me booking ka option poochho (rule 13 ka 'booking-confirm' sawaal exempt hai) — jaise: 'Book karna hai? Card ke “Sabhi trains · Book →” ya Confirm screen se aap khud confirm karenge (ya IRCTC par apne haath se) — bolo to aage badhaun.' Ye ek line har us reply ke end me aayegi jahan user ne booking ki baat ki ho (book karna hai/book kar do/ticket chahiye) chahe us waqt tum sirf availability, fare ya timing dikha rahe ho. Book/Confirm/Pay click, currency ya booking khud KABHI mat karo, aur 'book ho gaya' kabhi mat bolo.",
     "11. Multi-station cities (Delhi, Bombay/Mumbai, Madras/Chennai, Calcutta/Kolkata…) ke liye KHUD station mat chuno — destination mein CITY NAAM hi pass karo; tool needs_choice ke saath real station options laayega, wahi user ko dikhao. Apni knowledge se station substitute (Calcutta→Howrah jaisa) kabhi nahi.",
             "16. User ne train ka NAAM bola aur known context mein uska number nahi hai (ya naam doosri train ka lag raha hai) to PEHLE TRAIN_NAME_SEARCH call karke number resolve karo, phir jo poocha uska data doosre tool se lao. Naam se multiple trains milein to user se kaunsi poochho — galat train ka data KABHI mat do.",
     "17. SIRF wahi data do jo user ne poocha. 'kitne time leti hai' = sirf duration; 'fare kitna' = sirf fare; 'platform/coach' = sirf coach position; 'kahan hai abhi' = sirf live position. Poora dump mat karo — user ne jo manga bas wahi, ek-do line mein.",
@@ -1992,8 +1992,16 @@ function redact(s: string): string {
 export function scrubProactiveOffers(s: string): string {
   const OFFER_RE =
     /(?:waise\b[^.?!]*continue|continue\s+kar\s+sakte|hum\s+continue\s+kar|aap\s+chahe\w*\s+to\b[^.?!]*(?:kar\s+sakte|dekh|bata|dika)|kya\s+aapko\s+(?:aur|bhi)\s+[^.?!]*(?:chahiye|dekh|bata|dika)|shall\s+(?:we|i)\s+(?:continue|proceed)|aur\s+kuch\s+(?:chahiye|poochh))/i;
+  /* 2026-09-20 (user report: "seats dikhane ke baad book karne ka option poochhna chahiye tha"):
+   * booking-confirm wala sawaal/offer REQUIRED hai (rule 10 + rule 13 ka exemption) — lekin
+   * OFFER_RE kuch phrasings ko kha jaata tha, jaise "Aap chahe to card se booking kar sakte hain"
+   * ya "Shall I proceed with booking?" → poora sentence kat jaata tha, aur agar reply sirf wahi ho
+   * to reply KHALI ho jaata (runAgent phir deterministic fallback de deta). Isliye: sentence jo
+   * booking/confirm/ticket/IRCTC/TrainBoard ka zikr karta hai use scrub MAT karo; generic
+   * chit-chat offers ("kya aapko aur kuch chahiye?", "shall we continue?") par guard waise hi lagta hai. */
+  const BOOKING_CONFIRM_RE = /\b(book|booking|ticket|irctc|trainboard|confirm)\b/i;
   const sentences = s.split(/(?<=[.?!])\s+/);
-  const kept = sentences.filter((x) => !OFFER_RE.test(x));
+  const kept = sentences.filter((x) => !(OFFER_RE.test(x) && !BOOKING_CONFIRM_RE.test(x)));
   // Sirf-pura-offer reply → "" (runAgent phir deterministic fallback se jawab dega).
   // Short-but-legit remainder ("Done.") kabhi original se replace NAHI hota.
   const out = kept.join(" ").replace(/\s{2,}/g, " ").trimEnd();
