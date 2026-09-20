@@ -2008,6 +2008,28 @@ export function scrubProactiveOffers(s: string): string {
   return out.length > 0 ? out : "";
 }
 
+/**
+ * Booking-intent offer line — DETERMINISTIC (2026-09-20, user report: "seats show karne ke
+ * baad booking ka option poochhna chahiye tha"). Prod me model ne seat data diya par offer
+ * line chhod di (rule 10 par depend karna kaafi nahi nikla) — isliye final reply par guard:
+ * user ne booking maangi ho + reply me seat ka bookable status ho + koi offer-sawaal pehle se
+ * na ho → end me ek saaf offer sawaal add karo. Ye SIRF TEXT hai: AI koi Book/Confirm/Pay
+ * click, currency ya booking khud nahi karta (neverAutoBook always true).
+ * No-data/unavailable reply par kuch nahi jodta (jahan book karne ko kuch hi nahi).
+ */
+const BOOKING_INTENT_RE = /\b(?:book(?:ing)?\s*karn\w*|book\s*kar\w*|book\s+(?:a\s+)?ticket|ticket\s+(?:book|chahiye)|ticket\s*book)|(?:^|\s)book\s+(?:it|karo|kardo)\b/i;
+const BOOKABLE_REPLY_RE = /\b(?:AVAILABLE|RAC\s*\d+|WL\s*\d+|waitlist|\d+\s*seats?)\b/i;
+const NO_DATA_REPLY_RE = /\bunavailable\b|invent nahi|nahi mil|data nahi/i;
+const BOOKING_OFFER_ALREADY_RE = /[^.?!\n]*\b(?:book|booking|confirm)\b[^.?!\n]*\?/i;
+
+export function ensureBookingOffer(reply: string | null, userText: string | null | undefined): string | null {
+  if (!reply || !userText) return reply;
+  if (!BOOKING_INTENT_RE.test(userText)) return reply;
+  if (BOOKING_OFFER_ALREADY_RE.test(reply)) return reply;
+  if (!BOOKABLE_REPLY_RE.test(reply) || NO_DATA_REPLY_RE.test(reply)) return reply;
+  return `${reply.trimEnd()}\n\nBook karna hai? Aap Confirm screen (ya card ke “Sabhi trains · Book →”) se khud confirm karenge — booking/payment main nahi karta. Bolo to aage badhaun.`;
+}
+
 /** Trace/test ke liye: model ke raw args ko zod se guzar kar EXECUTED args nikaalo. */
 export function sanitizedArgs(name: string, raw: Record<string, unknown>): Record<string, unknown> {
   if (!APPROVED.includes(name as AgenticToolName)) return {};

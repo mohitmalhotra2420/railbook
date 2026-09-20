@@ -28,6 +28,7 @@ import { executeTool, livePositionLabel, type ToolName } from "./tools.js";
 import { parseStatusDate } from "../understand/legacy-dates.js";
 import {
   agenticConfigured,
+  ensureBookingOffer,
   runAgenticTurn,
   webRescueEligible,
   type AgentTrainRow,
@@ -2482,6 +2483,12 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
 
   // lines KABHI nahi bhejna — resume mechanism band.
   void neverAutoBook(understood.nlu.intent, req.bookingFlow);
+
+  /* 2026-09-20 (user: "seats show karne ke baad book karne ka option poochhna chahiye tha"):
+   * model seat data deta hai par offer line bhool jaata hai — isliye FINAL reply par
+   * deterministic guard (har path: agentic + deterministic). Sirf sawaal add hota hai;
+   * booking/payment/click ka koi rasta yahan se nahi khulta (confirmBook: false niche). */
+  reply = ensureBookingOffer(reply, req.text);
 
   return {
     nlu: understood.nlu,
