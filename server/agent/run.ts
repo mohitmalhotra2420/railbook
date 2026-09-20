@@ -1807,7 +1807,7 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
           context: ctx,
           tool: null,
           toolOk: turn.ok ? true : false,
-          reply: turn.reply,
+          reply: ensureBookingOffer(turn.reply, req.text),
           interrupt: false,
           resumeAsk: null,
           resumeText: null,
