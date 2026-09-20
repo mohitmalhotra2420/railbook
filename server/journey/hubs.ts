@@ -59,7 +59,8 @@ export async function decideHubsWithAI(args: {
   ].join("\n");
   /* Muse primary (project rule), gpt-oss fallback — dono ek hi budget mein. */
   const chain = [env.nvidiaModel, (process.env.NVIDIA_FALLBACK_MODEL ?? "openai/gpt-oss-20b").trim()].filter((m, i, a) => m && a.indexOf(m) === i);
-  const perModelMs = args.timeoutMs ?? 40000;
+  /* Stage-5L-net (2026-09-20): default 40s×2 models could burn ~80s BEFORE leg scans — mobile/CF drop the SSE. Cap per-model hub AI. */
+  const perModelMs = args.timeoutMs ?? Math.max(2000, Number(process.env.HUB_AI_TIMEOUT_MS ?? 6000));
   const askOne = async (model: string): Promise<{ raw: string; model: string } | null> => {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), perModelMs);

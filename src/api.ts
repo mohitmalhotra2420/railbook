@@ -215,8 +215,18 @@ export const api = {
     let buf = "";
     let result: AgentResponse | null = null;
     let error: string | null = null;
+    let sawProgress = false;
     for (;;) {
-      const { value, done } = await reader.read();
+      let read: ReadableStreamReadResult<Uint8Array>;
+      try {
+        read = await reader.read();
+      } catch {
+        /* mobile/CF often aborts an idle long stream — surface network error, do NOT restart a full turn */
+        if (result) return result;
+        if (error) throw new Error(error);
+        throw new Error("network error");
+      }
+      const { value, done } = read;
       if (done) break;
       buf += dec.decode(value, { stream: true });
       let idx: number;
@@ -227,7 +237,7 @@ export const api = {
         const data = chunk.split("\n").filter((l) => l.startsWith("data: ")).map((l) => l.slice(6)).join("\n");
         if (!ev || !data) continue;
         try {
-          if (ev === "progress") onProgress(JSON.parse(data) as AgentProgress);
+          if (ev === "progress") { sawProgress = true; onProgress(JSON.parse(data) as AgentProgress); }
           else if (ev === "result") result = JSON.parse(data) as AgentResponse;
           else if (ev === "error") error = String((JSON.parse(data) as { error?: string }).error ?? "stream error");
         } catch { /* partial/invalid frame ignored */ }
@@ -235,6 +245,10 @@ export const api = {
     }
     if (result) return result;
     if (error) throw new Error(error);
+    /* Stage-5L-net: stream opened and made progress but never sent `result` (proxy idle cut /
+     * browser tab freeze). Restarting plain /api/agent would re-run a 60–120s turn and still
+     * fail on mobile — report network error once instead. Fresh stream never started → plain OK. */
+    if (sawProgress) throw new Error("network error");
     return plain();
   },
   agent: (body: unknown) =>

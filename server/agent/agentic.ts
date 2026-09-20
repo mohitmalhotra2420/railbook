@@ -2477,7 +2477,8 @@ export async function runAgenticTurn(input: {
 
   // Vercel function wall (~30s default) — poora turn is budget ke andar raho.
   // Wall paar hua to jo tool-data mila uska summary return karo (null nahi).
-  const TURN_TIME_BUDGET_MS = Number(process.env.AI_AGENTIC_TURN_BUDGET_MS ?? 90000);
+  /* Stage-5L-net: 90s wall + 66s planner left no room for a final AI round; mobile saw "network error". 70s still covers RANK + short reply. */
+  const TURN_TIME_BUDGET_MS = Number(process.env.AI_AGENTIC_TURN_BUDGET_MS ?? 70000);
   const timeLeft = () => TURN_TIME_BUDGET_MS - (Date.now() - startedAll);
 
   for (let step = 1; step <= MAX_STEPS; step++) {
@@ -2500,7 +2501,7 @@ export async function runAgenticTurn(input: {
     const started = Date.now();
     // Agentic loop ke paas multi-step reasoning + bada context hota hai — NLU se zyada time do,
     // par ek single call poora budget kha nahi sakti.
-    const agenticBaseMs = Math.max(3000, Number(process.env.AI_AGENTIC_TIMEOUT_MS ?? 60000));
+    const agenticBaseMs = Math.max(3000, Number(process.env.AI_AGENTIC_TIMEOUT_MS ?? 25000));
     let json: NvidiaChatJson | null = null;
     let msg: { content?: string | null; reasoning_content?: string | null; tool_calls?: ChatMsg["tool_calls"] } | undefined;
     let lastFailure: string | null = null;
@@ -2527,7 +2528,8 @@ export async function runAgenticTurn(input: {
        * ab kam-se-kam AI_PRIMARY_MIN_MS (default 20s) milta hai jab tak budget
        * bacha ho; fallbacks ke liye reserve 8s → 6s. */
       const isPrimary = modelChain.indexOf(model) === 0;
-      const primaryMinMs = Math.max(4000, Number(process.env.AI_PRIMARY_MIN_MS ?? 40000));
+      /* Stage-5L-net: 40s primary floor ate the whole turn when Muse hung; 18s still covers healthy NIM rounds. */
+      const primaryMinMs = Math.max(4000, Number(process.env.AI_PRIMARY_MIN_MS ?? 18000));
       const reservePerFallback = 6000;
       const naturalCap = Math.max(4000, timeLeft() - modelsAfterThis * reservePerFallback - 1500);
       const agenticTimeoutMs = Math.max(
@@ -3019,6 +3021,37 @@ export async function runAgenticTurn(input: {
         const orig = toolCalls.find((tc) => callKeyOf(tc) === key);
         const origMsg = orig ? [...messages].reverse().find((m) => m.role === "tool" && m.tool_call_id === orig.id) : undefined;
         messages.push({ role: "tool", tool_call_id: d.id, content: origMsg?.content ?? JSON.stringify({ ok: false, summary: "duplicate call skipped" }) });
+      }
+      /* Stage-5L-net (user: baar-baar "network error" on ASR→DDN): RANK_JOURNEY_OPTIONS /
+       * JOURNEY_ANALYZE already return a verified Hinglish-ready summary + capture.plan card.
+       * A second AI round (decision polish / rewrite) often burns 20–40s and the mobile/CF
+       * stream drops → client shows network error even though the plan is ready. Return now. */
+      const journeyStep = [...steps].reverse().find((st) => st.ok && (st.tool === "RANK_JOURNEY_OPTIONS" || st.tool === "JOURNEY_ANALYZE"));
+      if (journeyStep) {
+        if (pendingDecision) {
+          pendingDecision.plan.decisionDeferred = false;
+          pendingDecision = null;
+        } else if (input.capture?.plan?.decisionDeferred) {
+          input.capture.plan.decisionDeferred = false;
+        }
+        const cleanPlan = (t: string) =>
+          t
+            .replace(/AI DECISION \(journey planner AI ne[^)]*\):\s*/g, "")
+            .replace(/JOURNEY SUMMARY \(verified,[^)]*\):\s*/g, "")
+            .replace(/\s*Atlas rank \([^)]*\):[\s\S]*$/g, "")
+            .replace(/\s*\(Sources?:[^)]*\)\s*$/g, "")
+            .trim();
+        const planReply = cleanPlan(journeyStep.summary) || deterministicSummary(steps);
+        return {
+          ok: true,
+          reply: scrubProactiveOffers(redact(planReply)),
+          grounded: true,
+          steps,
+          modelUsed,
+          modelFallbacks,
+          latencyMs: Date.now() - startedAll,
+          failureReason: null,
+        };
       }
       continue; // model dekhega results aur decide karega next step
     }
