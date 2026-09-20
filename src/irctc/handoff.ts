@@ -67,7 +67,7 @@ export type HandoffBuild =
 
 /** Everything the handoff needs, all of it already present on the review screen. */
 export interface HandoffInput {
-  train: Pick<TrainResult, "number" | "from" | "to">;
+  train: Pick<TrainResult, "number" | "from" | "to" | "date">;
   date: string;
   classCode: ClassCode;
   passengers: Array<Pick<Passenger, "name" | "age" | "gender" | "berthPreference">>;
@@ -96,7 +96,12 @@ export function buildHandoffPayload(input: HandoffInput, now: Date = new Date())
   const toCode = String(input.train?.to?.code ?? "").trim().toUpperCase();
   const trainNumber = String(input.train?.number ?? "").trim();
   const classCode = String(input.classCode ?? "").trim().toUpperCase();
-  const date = String(input.date ?? "").trim();
+  /* Review screen prints train.date; booking state.date can lag on a restored session.
+   * Prefer a real calendar date on the selected train when present so the IRCTC handoff
+   * matches what the user sees on Review (e.g. 27 Sep), not a stale default (today). */
+  const trainDate = String(input.train?.date ?? "").trim();
+  const stateDate = String(input.date ?? "").trim();
+  const date = isRealCalendarDate(trainDate) ? trainDate : stateDate;
 
   if (!fromName || !toName) errors.push("journey from/to missing");
   if (!/^\d{4,6}$/.test(trainNumber)) errors.push("invalid train number");
@@ -196,6 +201,130 @@ export function openIrctcInNewTab(): boolean {
   try {
     const w = window.open(IRCTC_HANDOFF_URL, "_blank", "noopener,noreferrer");
     return w != null;
+  } catch {
+    return false;
+  }
+}
+
+/** Official IRCTC Rail Connect Android package (Play Store / device). */
+export const IRCTC_ANDROID_PACKAGE = "cris.org.in.prs.ima";
+
+export type IrctcOpenResult = {
+  opened: boolean;
+  /** How we tried to open IRCTC. */
+  via: "android-app-intent" | "new-tab" | "same-tab-fallback" | "blocked";
+  /** True only when we fired an Android intent toward the Rail Connect package (best-effort). */
+  triedOfficialApp: boolean;
+};
+
+function isAndroidMobile(): boolean {
+  try {
+    return /Android/i.test(navigator.userAgent || "") && /Mobile|wv/i.test(navigator.userAgent || "");
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Best-effort open of IRCTC for the current device.
+ *
+ *  · Desktop / iOS / non-Android → https://www.irctc.co.in/... in a new tab (unchanged).
+ *  · Android mobile → try an intent that targets the official Rail Connect package so the
+ *    *system* can open the IRCTC app if installed; if the app is missing or the browser
+ *    ignores the intent, fall back to the same IRCTC **website** URL.
+ *
+ * HARD LIMIT (browser security — not a RailBook bug):
+ *  We can ask Android to open the IRCTC app/site. We CANNOT push From/To/Date/pax into the
+ *  official IRCTC app’s private screens. Auto-fill of those fields needs either:
+ *    (a) Chrome extension on desktop, or
+ *    (b) RailBook’s own Android WebView app (injects fill JS into irctc.co.in web).
+ *  The website-only path always shows a copy-ready summary so the user can paste/type fast.
+ */
+export function openIrctcHandoff(): IrctcOpenResult {
+  /* 1) Android: try official app via intent (user gesture required — call only from click). */
+  if (typeof window !== "undefined" && isAndroidMobile()) {
+    try {
+      const intentUrl =
+        "intent://www.irctc.co.in/nget/train-search#Intent;" +
+        "scheme=https;" +
+        "package=" + IRCTC_ANDROID_PACKAGE + ";" +
+        "S.browser_fallback_url=" + encodeURIComponent(IRCTC_HANDOFF_URL) + ";" +
+        "end";
+      /* Same-tab navigate is the reliable way to fire VIEW intents from Chrome/Android browsers. */
+      window.location.href = intentUrl;
+      return { opened: true, via: "android-app-intent", triedOfficialApp: true };
+    } catch {
+      /* fall through to new-tab */
+    }
+  }
+
+  /* 2) Default: new tab to official IRCTC website */
+  try {
+    const w = window.open(IRCTC_HANDOFF_URL, "_blank", "noopener,noreferrer");
+    if (w != null) return { opened: true, via: "new-tab", triedOfficialApp: false };
+  } catch {
+    /* ignore */
+  }
+
+  /* 3) Popup blocked → same-tab last resort (still user-initiated). */
+  try {
+    window.location.assign(IRCTC_HANDOFF_URL);
+    return { opened: true, via: "same-tab-fallback", triedOfficialApp: false };
+  } catch {
+    return { opened: false, via: "blocked", triedOfficialApp: false };
+  }
+}
+
+/** Human-readable card the user can copy into IRCTC (website-only path; no PII beyond journey pax names). */
+export function formatHandoffSummary(payload: IrctcHandoffPayload): string {
+  const j = payload.journey;
+  const lines: string[] = [
+    "RailBook → IRCTC handoff (copy/paste)",
+    "--------------------------------",
+    `From: ${j.from}${j.fromCode ? ` (${j.fromCode})` : ""}`,
+    `To:   ${j.to}${j.toCode ? ` (${j.toCode})` : ""}`,
+    `Date: ${j.date}`,
+    `Train (hint): ${j.trainNumber}`,
+    `Class: ${j.classCode}`,
+    "",
+    "Passengers:",
+  ];
+  payload.passengers.forEach((p, i) => {
+    lines.push(
+      `  ${i + 1}. ${p.name} · age ${p.age} · ${p.gender} · berth ${p.berth || "No Preference"}` +
+        (p.food ? ` · food ${p.food}` : ""),
+    );
+  });
+  lines.push(
+    "",
+    "Note: IRCTC me Search / Book / Login / Pay aap khud karenge.",
+    "Website se official IRCTC app ke andar fields auto-fill nahi ho sakti (OS security).",
+  );
+  return lines.join("\n");
+}
+
+/** Clipboard helper — user gesture only. Returns false if clipboard API blocked. */
+export async function copyHandoffSummary(payload: IrctcHandoffPayload): Promise<boolean> {
+  const text = formatHandoffSummary(payload);
+  try {
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    /* fall through */
+  }
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.left = "-9999px";
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(ta);
+    return ok;
   } catch {
     return false;
   }

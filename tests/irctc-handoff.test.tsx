@@ -119,7 +119,7 @@ describe("IRCTC handoff — payload contract", () => {
       ["bad age", input({ passengers: [pax({ age: "0" })] })],
       ["unclear train number", input({ train: { ...train, number: "12" } })],
       ["unsupported class", input({ classCode: "GN" as ClassCode })],
-      ["bogus calendar date", input({ date: "2026-02-30" })],
+      ["bogus calendar date", input({ date: "2026-02-30", train: { ...train, date: "2026-02-30" } })],
       ["missing passenger name", input({ passengers: [pax({ name: "   " })] })],
     ];
     for (const [label, value] of bad) {
