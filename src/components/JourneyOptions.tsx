@@ -455,11 +455,18 @@ export function JourneyOptions({
     if (t === "cheapest") return all.filter((o) => o.availability?.fare != null).sort((x, y) => x.availability!.fare! - y.availability!.fare! || x.trainNumbers[0].localeCompare(y.trainNumbers[0])).slice(0, 5);
     return [];
   };
+  /* Round-23 (user: "list me seats nahi aa rahi, card me aa rahi"): ListRow/hero bhi
+   * wahi rows dikhayein jo seat-board me hain — plan-time empty ho to live route board. */
+  const seatOf = (o: AgentRouteOption): AvailLike | null => o.availability ?? rowsFor(o)[0] ?? null;
+  const chipsOf = (o: AgentRouteOption): AvailLike[] => {
+    const seat = seatOf(o);
+    return (rowsFor(o).length ? rowsFor(o) : o.classOptions ?? []).filter((r) => r.classCode !== seat?.classCode);
+  };
   const optRow = (o: AgentRouteOption) =>
     o.changes > 0 && o.legs.length > 1 ? (
       <ConnCard key={o.trainNumbers.join("+")} c={{ station: o.legs[0].to, stationName: o.legs[0].toName ?? null, legs: o.legs, layoverMinutes: o.layoverMinutes ?? 0, totalDurationMinutes: o.durationMinutes, valid: true } as unknown as AgentConnection} baseDate={baseDate} onPickLeg={pickLeg} />
     ) : (
-      <ListRow key={o.trainNumbers.join("+")} no={o.trainNumbers[0]} name={o.trainNames[0]} mid={`${o.origin}→${o.destination}`} midSub={`${o.departure} · ${o.arrival}${dateTag(baseDate, o.arrivalDayOffset)}`} dur={o.durationLabel} durSub="Direct" seat={o.availability} chips={(o.classOptions ?? []).filter((r) => r.classCode !== o.availability?.classCode)} onClick={pick ? () => pick(o) : undefined} />
+      <ListRow key={o.trainNumbers.join("+")} no={o.trainNumbers[0]} name={o.trainNames[0]} mid={`${o.origin}→${o.destination}`} midSub={`${o.departure} · ${o.arrival}${dateTag(baseDate, o.arrivalDayOffset)}`} dur={o.durationLabel} durSub="Direct" seat={seatOf(o)} chips={chipsOf(o)} onClick={pick ? () => pick(o) : undefined} />
     );
   /* Round-18m-12 (user: "har train × har class check ho, RAC bhi dikhe"): seat-check
    * audit list — HAR direct train ka poora class board (AVL/RAC/WL/N-A, stale ⚠), aur
