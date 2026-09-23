@@ -887,9 +887,11 @@ export function Concierge() {
               sources ? ` · ${sources}` : ""
             } · ${((agentRes.latencyMs ?? 0) / 1000).toFixed(1)}s`,
           );
-          const traceLine = trace.length
-            ? `\n\n⚙️ ${trace.map((t) => t.tool).join(" → ")}${sources ? ` (${sources})` : ""}`
-            : "";
+          /* 24 Sep 2026 (user: "chat UI confusing hai — har cheez easily samajh aaye"):
+           * pehle yahan raw tool naam dikhte the ("SEARCH_STATIONS → RANK_JOURNEY_OPTIONS
+           * (web_erail)") — user ke liye bematlab jargon. Ab wahi kaam friendly Hinglish
+           * me, aur technical naam chhote "details" me (tap = khul jaye). */
+          const traceLine = trace.length ? `\n\n⚙️ ${friendlyToolLine(trace.map((t) => t.tool))}` : "";
           setThinking(false);
           // User feedback (2026-09-05): train list chat-text nahi — proper organized TABLE.
           // Round-17: RANK_JOURNEY_OPTIONS → BEST OPTION card (table ki jagah); warna table.
@@ -1583,23 +1585,80 @@ export function Concierge() {
   );
 }
 
+/* 24 Sep 2026: tool-trace ko user ki bhasha me — "SEARCH_STATIONS → RANK_JOURNEY_OPTIONS
+ * (web_erail)" ki jagah "Stations dhoondhe → Trains + seats check kiye". */
+const TOOL_FRIENDLY: Record<string, string> = {
+  SEARCH_STATIONS: "Stations dhoondhe",
+  SEARCH_TRAINS: "Trains dhoondhe",
+  SEARCH_TRAIN_BY_NUMBER: "Train dekhi",
+  SEARCH_TRAIN_BY_NAME: "Train naam se dhoondhi",
+  TRAIN_NAME_SEARCH: "Train naam se dhoondhi",
+  RANK_JOURNEY_OPTIONS: "Trains + seats check kiye",
+  JOURNEY_ANALYZE: "Journey plan banaya",
+  CHECK_AVAILABILITY: "Seat check kiya",
+  GET_FARE: "Fare check kiya",
+  TRACK_TRAIN: "Live position dekhi",
+  GET_TIMETABLE: "Route/schedule dekha",
+  CHECK_PNR: "PNR check kiya",
+  GET_CANCELLED_TRAINS: "Cancelled list dekhi",
+  GET_COACH_POSITION: "Coach position dekhi",
+  GET_STATION_BOARD: "Station board dekha",
+  GET_TRAIN_INFO: "Train info dekhi",
+  GET_TRAIN_HISTORY: "Train history dekhi",
+  FIND_PARTIAL_ROUTE_SEATS: "Ticket-trick options dhoondhe",
+  FIND_CONNECTIONS: "Connecting trains dhoondhe",
+  FIND_ALTERNATIVE_TRAINS: "Alternative trains dhoondhe",
+  FIND_VACANT_SEATS: "Khaali seats dhoondhe",
+  WEB_SEARCH: "Web se verify kiya",
+  GENERAL_RAILWAY_ANSWER: "Railway rule check kiya",
+};
+
+/** Tool chain → ek friendly line (duplicates hata kar, order bachaa kar). */
+export function friendlyToolLine(tools: string[]): string {
+  const out: string[] = [];
+  for (const t of tools) {
+    const label = TOOL_FRIENDLY[t] ?? t.toLowerCase().replace(/_/g, " ");
+    if (out[out.length - 1] !== label) out.push(label);
+  }
+  return out.join(" → ");
+}
+
 /* Round-18m-33 (user: "choose karna ho to dropdown — run-day bhi, stations bhi"): native <select> (mobile par
  * OS picker khulta hai) + "Chuno" — select karte hi bhej deta hai. */
-function ChoiceDropdown({ choice, onPick }: { choice: { kind: string; title: string; options: { label: string; value: string; sub?: string | null }[]; sendTemplate: string }; onPick: (value: string) => void }) {
-  const [val, setVal] = useState("");
-  const [sent, setSent] = useState(false);
+export function ChoiceDropdown({ choice, onPick }: { choice: { kind: string; title: string; options: { label: string; value: string; sub?: string | null }[]; sendTemplate: string }; onPick: (value: string) => void }) {
+  /* 24 Sep 2026 (user: "chat UI confusing hai — har cheez easily samajh aaye"):
+   * pehle native <select> + "Chuno" button tha (2 step, chhota dropdown). Ab har
+   * option EK TAP ka row hai — code badge + naam, tap = bhej diya. Option ke label
+   * "MTJ – Mathura Jn" ko code/naam me baant kar dikhate hain (scan karna asaan). */
+  const [sent, setSent] = useState<string | null>(null);
   const icon = choice.kind === "station" ? "📍" : choice.kind === "run_date" ? "📅" : "🚆";
+  const hint = choice.kind === "station" ? "Ek baar tap karo — baaki main sambhal lunga." : "Ek baar tap karo.";
   return (
     <div className={`choice-card ${sent ? "sent" : ""}`}>
       <div className="choice-title">{icon} {choice.title}</div>
-      <div className="choice-row">
-        <select className="choice-select" value={val} disabled={sent} onChange={(e) => { setVal(e.target.value); }} aria-label={choice.title}>
-          <option value="">— chuniye —</option>
-          {choice.options.map((o) => <option key={o.value} value={o.value}>{o.label}{o.sub ? ` · ${o.sub}` : ""}</option>)}
-        </select>
-        <button type="button" className="choice-go" disabled={!val || sent} onClick={() => { setSent(true); onPick(val); }}>Chuno ✓</button>
+      <div className="choice-opts" role="list">
+        {choice.options.map((o) => {
+          const m = /^([A-Z0-9]{2,6})\s*[–-]\s*(.+)$/.exec(o.label.trim());
+          const code = m ? m[1] : null;
+          const name = m ? m[2] : o.label;
+          const isSent = sent === o.value;
+          return (
+            <button
+              key={o.value}
+              type="button"
+              role="listitem"
+              className={`choice-opt${isSent ? " picked" : ""}`}
+              disabled={Boolean(sent)}
+              onClick={() => { setSent(o.value); onPick(o.value); }}
+            >
+              {code ? <span className="choice-code">{code}</span> : null}
+              <span className="choice-name">{name}{o.sub ? <span className="choice-sub"> · {o.sub}</span> : null}</span>
+              <span className="choice-go-ic">{isSent ? "✓" : "›"}</span>
+            </button>
+          );
+        })}
       </div>
-      {!sent && <div className="choice-hint">Ya seedha number/code type kar do.</div>}
+      {!sent && <div className="choice-hint">{hint}</div>}
     </div>
   );
 }

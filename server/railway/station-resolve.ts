@@ -88,7 +88,28 @@ const PREFERRED: Record<string, string[]> = {
 };
 
 function norm(s: string): string {
-  return s.trim().toLowerCase().replace(/\s+/g, " ");
+  /* Qualifier synonyms ko ek roop me laao — user "Mathura Junction"/"Mathura Cantt"
+   * likhta hai, provider "Mathura Jn"/"Mathura Cant" deta hai. Warna exact naam
+   * match fail hota tha aur user ko bina zaroorat options dikhte the. */
+  return (
+    s
+      .trim()
+      .toLowerCase()
+      /* 24 Sep 2026 (user: "station fix karo jisme Jn miss ho raha tha"): separator
+       * (hyphen/underscore/slash) aur ATTACHED qualifier ("mathurajn", "mathuracantt")
+       * ko bhi alag kar do — warna yeh ek hi token ban jata tha, na station match hota
+       * tha aur wapas 4-option picker khul jata tha. */
+      .replace(/[-_/]+/g, " ")
+      .replace(/([a-z])(jn|junction|junc|jct|cantt|cant|cntt|city|road|terminal|central|halt)\b/g, "$1 $2")
+      .replace(/\s+/g, " ")
+      .replace(/\bjunction\b/g, "jn")
+      .replace(/\bjunc\b/g, "jn")
+      .replace(/\bjct\b/g, "jn")
+      .replace(/\bcantt\b/g, "cant")
+      .replace(/\bcntt\b/g, "cant")
+      .replace(/\brd\b/g, "road")
+      .replace(/\./g, "")
+  );
 }
 
 function tokens(s: string): string[] {

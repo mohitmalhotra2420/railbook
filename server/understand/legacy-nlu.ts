@@ -228,6 +228,25 @@ function cleanPlace(raw: string): string {
   return s;
 }
 
+/* Station naam ke qualifier words — user ke literal phrase ko preserve karte hain
+ * (canonical form: Jn/Cantt/City/Road/Terminal/Central/Halt) taaki provider exact
+ * naam se match kar sake ("Mathura Jn" → MTJ, "Mathura" → options). */
+export const STATION_QUALIFIER_CANON: Record<string, string> = {
+  jn: "Jn",
+  junction: "Jn",
+  junc: "Jn",
+  jct: "Jn",
+  cantt: "Cantt",
+  cant: "Cantt",
+  cntt: "Cantt",
+  city: "City",
+  road: "Road",
+  rd: "Road",
+  terminal: "Terminal",
+  central: "Central",
+  halt: "Halt",
+};
+
 function looksLikePlace(raw: string): boolean {
   const q = cleanPlace(raw);
   /* Screenshot fix (2026-09-06): "ludhiana se hw ki" mein "hw" (Haridwar) ko
@@ -300,6 +319,24 @@ function extractPair(t: string): {
       if (/^[\p{L}]{2,}$/u.test(nextWord)) {
         const b2 = resolveBare(`${se[2]} ${nextWord}`);
         if (b2?.station) b = b2;
+      }
+      /* 24 Sep 2026 (user: "maine ludhiana se mathura jn likha, phir bhi 4 options kyun?"):
+       * user ne station ke saath QUALIFIER likha ho (Jn/Junction/Cantt/City/Road/Terminal/
+       * Central/Halt) to wo phrase provider tak pahunchna chahiye — warna "Mathura Jn" ka
+       * "jn" kat jata tha aur city-lookup 4 stations (MTJ/MRT/MUW/MPRD) ke options pooch leta
+       * tha, jabki "Mathura Jn" seedha MTJ hai. Ye local list me na ho to bhi qualifier
+       * unresolved phrase me juda rehta hai (provider exact naam match kar leta hai). */
+      if (b && !b.station && b.unresolved) {
+        const words = rest.split(/\s+/).map((w) => w.replace(/[^\p{L}]/gu, "")).filter(Boolean);
+        let extended = b.unresolved;
+        for (const w of words.slice(0, 2)) {
+          const canon = STATION_QUALIFIER_CANON[w.toLowerCase()];
+          if (!canon) break;
+          extended = `${extended} ${canon}`;
+        }
+        if (extended !== b.unresolved) {
+          b = resolveBare(extended) ?? { unresolved: extended };
+        }
       }
     }
     const hit = asRoute(a, b);

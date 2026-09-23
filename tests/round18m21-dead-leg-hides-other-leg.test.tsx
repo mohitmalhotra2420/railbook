@@ -1,4 +1,7 @@
-/* Round-18m-21: real render — leg-2 dead → leg-1 ki 15 seated trains render NAHI honi chahiye. */
+/* Round-18m-21: real render — leg-2 dead → leg-1 ki 15 seated trains render NAHI honi chahiye.
+ * 24 Sep 2026 (user: "leg 1 / leg 2 ka alag page"): connecting detail ab chat me nahi, alag page
+ * par hai — chat me sirf header card. Isliye page `initialPage="connect"` se kholte hain.
+ * Behaviour wahi hai (assertions bilkul same). */
 import { describe, expect, it } from "vitest";
 import { render } from "@testing-library/react";
 import React from "react";
@@ -22,7 +25,13 @@ describe("Round-18m-21 render: dead leg-2 hides leg-1's seated trains", () => {
   it("leg-2 0 seated → no leg-1 train rows, verdict shown", () => {
     const leg1 = ["14632", "11906", "13152", "20808"].map((n) => leg(n, "LDH", "UMB", true));
     const leg2All = [leg("19326", "UMB", "INDB", false), leg("12920", "UMB", "INDB", false)];
-    const { container, queryByText, getByText } = render(<JourneyOptions plan={basePlan([{ hub: "UMB", hubName: "Ambala Cant Jn", leg1, leg2: [], checkedLeg1: 20, checkedLeg2: 2, best: null, leg1All: leg1, leg2All }])} />);
+    const plan = basePlan([{ hub: "UMB", hubName: "Ambala Cant Jn", leg1, leg2: [], checkedLeg1: 20, checkedLeg2: 2, best: null, leg1All: leg1, leg2All }]);
+    /* Chat front: sirf header card, koi leg row nahi. */
+    const front = render(<JourneyOptions plan={plan} />);
+    expect(front.container.querySelector(".jx-pagecard")).not.toBeNull();
+    expect(front.container.querySelector(".jx-leglist-head")).toBeNull();
+    front.unmount();
+    const { container, queryByText, getByText } = render(<JourneyOptions plan={plan} initialPage="connect" />);
     expect(container.querySelector(".jx-legplan-dead")).not.toBeNull();
     expect(container.querySelector(".jx-legplan-verdict")).not.toBeNull();
     // Leg-1 seated trains must NOT appear.
@@ -38,7 +47,7 @@ describe("Round-18m-21 render: dead leg-2 hides leg-1's seated trains", () => {
   it("both legs seated → normal card with Leg 1 and Leg 2 lists", () => {
     const leg1 = [leg("14632", "LDH", "UMB", true)];
     const leg2 = [leg("19326", "UMB", "INDB", true)];
-    const { container, getByText } = render(<JourneyOptions plan={basePlan([{ hub: "UMB", hubName: "Ambala Cant Jn", leg1, leg2, checkedLeg1: 20, checkedLeg2: 2, best: null }])} />);
+    const { container, getByText } = render(<JourneyOptions plan={basePlan([{ hub: "UMB", hubName: "Ambala Cant Jn", leg1, leg2, checkedLeg1: 20, checkedLeg2: 2, best: null }])} initialPage="connect" />);
     expect(container.querySelector(".jx-legplan-dead")).toBeNull();
     expect(getByText("TRAIN 14632")).toBeTruthy();
     expect(getByText("TRAIN 19326")).toBeTruthy();

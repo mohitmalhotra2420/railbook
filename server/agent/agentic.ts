@@ -32,6 +32,7 @@ import {
 } from "../railway/router.js";
 import { scrapeTrainFactsWeb, webSourceLabel } from "../railway/webscrape.js";
 import { parseDatePhrase, parseStatusDate } from "../understand/legacy-dates.js";
+import { STATION_QUALIFIER_CANON } from "../understand/legacy-nlu.js";
 import { RailKitProvider } from "../railway/railkit.js";
 import type { ClassCode } from "../providers/types.js";
 import { executeTool, livePositionLabel, liveRunDateLabel } from "./tools.js";
@@ -1311,7 +1312,12 @@ export async function executeApprovedTool(
         );
       }
       case "SEARCH_STATIONS": {
-        const res = await routedStationSearch(a.query as string);
+        /* 24 Sep 2026 (user: "mathura JN likha, phir bhi options kyun?"): model ne
+         * query "Mathura" bhej di ho par user ke message me "mathura jn" likha ho, to
+         * user ka POORA phrase search karo — "Mathura Jn" seedha MTJ hai, options
+         * poochhne ki zaroorat nahi. (Provider exact-naam match khud kar leta hai.) */
+        const userPhrase = stationQueryWithUserQualifier(String(a.query ?? ""), String(ctx.userText ?? ""));
+        const res = await routedStationSearch(userPhrase);
         if (!res.stations.length) {
           return failResult(res.provider, `"${a.query}" se koi station nahi mila.`);
         }
@@ -1877,6 +1883,32 @@ export function deterministicDateHint(
   return null;
 }
 
+/** User ke literal station phrase ka qualifier bachao (Jn/Junction/Cantt/City/Road/…) —
+ * model ne sirf city bhej di ho to bhi provider tak poora phrase jaana chahiye. */
+export function stationQueryWithUserQualifier(query: string, userText: string): string {
+  const q = String(query ?? "").trim();
+  if (!q || !userText) return q;
+  /* 24 Sep 2026 (user: "wo station wala fix karo jisme Jn miss ho raha tha"): pehle sirf
+   * "mathura jn" (space wala) match hota tha — "mathura-jn", "mathurajn", "mathura jn."
+   * likhne par qualifier chhoot jata tha, provider ko sirf "mathura" jata tha aur wapas
+   * 4-option picker khul jata tha. Ab separator optional (space/hyphen/underscore) aur
+   * spellings zyada (junc/jct/cntt/rd). */
+  const qualifiers = "(jn|junc|jct|junction|cantt|cant|cntt|city|road|rd|terminal|central|halt)";
+  const words = q.split(/\s+/).map((w) => w.replace(/[^A-Za-z0-9]/g, "")).filter(Boolean);
+  if (!words.length) return q;
+  const sep = "\\s*[-_/]?\\s*";
+  const tail = words.slice(-2).join(sep);
+  try {
+    const re = new RegExp(tail + sep + qualifiers + "\\b", "i");
+    const m = re.exec(userText);
+    if (!m) return q;
+    const canon = STATION_QUALIFIER_CANON[m[1].toLowerCase()] ?? m[1];
+    return `${q} ${canon}`;
+  } catch {
+    return q;
+  }
+}
+
 function systemPrompt(
   now: string | undefined,
   known: {
@@ -1920,6 +1952,8 @@ function systemPrompt(
   return [
     "Tum RailBook ka railway assistant ho (Hinglish jawab, 2-4 chhoti lines).",
     "Tumhara kaam: user ke sawaal samajhkar APPROVED TOOLS se sachchi railway data laana. Tum khud decide karte ho kaunsa tool chahiye — multi-step allowed hai.",
+    /* 24 Sep 2026 (user: "maine mathura jn likha, phir bhi 4 options kyun aaye?"): */
+    "STATION QUERY RULE: user ne station ke saath qualifier likha ho (Jn/Junction/Cantt/Cant/City/Road/Terminal/Central/Halt) to SEARCH_STATIONS me POORA phrase bhejo — \"Mathura Jn\", \"Mathura Cantt\", \"Agra City\". Sirf city (\"Mathura\") mat bhejo — warna bina zaroorat multiple-choice options dikhte hain. Exact station naam mile to options MAT poochho, seedha wahi station use karo.",
     `Aaj ki date (IST): ${todayLabel}.`,
     `Date map (agle 7 din, IST): ${weekdayDateMap(now)}.`,
     hintLine,

@@ -132,9 +132,12 @@ const IC = {
   compass: <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M15.5 8.5l-2 5-5 2 2-5z" /></svg>,
   warn: <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l10 18H2z" /><path d="M12 10v4M12 17.5h.01" /></svg>,
   shield: <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2l8 3v6c0 5-3.5 9-8 11-4.5-2-8-6-8-11V5z" /><path d="M9 12l2 2 4-4" /></svg>,
+  back: <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 19 8 12l7-7" /></svg>,
+  page: <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 6h16M4 12h16M4 18h10" /></svg>,
   chev: <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 6l6 6-6 6" /></svg>,
   bolt: <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round"><path d="M13 2L4 14h7l-1 8 9-12h-7z" /></svg>,
   swap: <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 8h14l-3-3M20 16H6l3 3" /></svg>,
+  ticket: <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9V7a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v2a3 3 0 0 0 0 6v2a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-2a3 3 0 0 0 0-6Z" /><path d="M13 5v14" /></svg>,
 };
 
 function durLabel(m?: number | null): string | null {
@@ -370,6 +373,7 @@ export function JourneyOptions({
   onPickDate,
   onPickStations,
   onOpenBoard,
+  initialPage = null,
 }: {
   plan: AgentJourneyPlan;
   onPickTrain?: (trainNumber: string) => void;
@@ -383,7 +387,9 @@ export function JourneyOptions({
   /** Round-18 §8: user explicitly confirms a different boarding/destination station. */
   onPickStations?: (from: string, to: string) => void;
   /** Round-18e: open the bookable TrainBoard (explicit user action, never auto). */
-  onOpenBoard?: () => void;
+  onOpenBoard?: () => void;  /** 24 Sep 2026 (user): "alternative trains ka alag page ho, leg 1/leg 2 ka alag page" —
+   *  ye prop sirf preview/demo ke liye page khula hua dikhata hai (app flow wahi rehta hai). */
+  initialPage?: "direct" | "alt" | "connect" | null;
 }) {
   const [tab, setTab] = useState<Tab | null>(null);
   const [whyOpen, setWhyOpen] = useState(true);
@@ -511,6 +517,11 @@ export function JourneyOptions({
     const seat = seatOf(o);
     return (rowsFor(o).length ? rowsFor(o) : o.classOptions ?? []).filter((r) => r.classCode !== seat?.classCode);
   };
+  /* "kitni trains me seat hai" — sirf wahi count jo user ko turant kaam aata hai. */
+  const seatTrainCount = direct.filter((o) => {
+    const a = seatOf(o);
+    return a?.status === "AVAILABLE" || a?.status === "RAC";
+  }).length;
   const optRow = (o: AgentRouteOption) =>
     o.changes > 0 && o.legs.length > 1 ? (
       <ConnCard key={o.trainNumbers.join("+")} c={{ station: o.legs[0].to, stationName: o.legs[0].toName ?? null, legs: o.legs, layoverMinutes: o.layoverMinutes ?? 0, totalDurationMinutes: o.durationMinutes, valid: true } as unknown as AgentConnection} baseDate={baseDate} onPickLeg={pickLeg} />
@@ -526,16 +537,37 @@ export function JourneyOptions({
   /* Round-18m-30f: AI ne direct nahi chuna (sab WL) → board default collapsed, ek-line summary; tap = poora board. */
   const recKind = plan.decision?.recommended?.kind ?? (bfeHero ? "bfe" : best && best.changes > 0 ? "connecting" : "direct");
   const [boardOpen, setBoardOpen] = useState<boolean>(() => recKind === "direct" && !plan.directUnavailable);
+  /* 24 Sep 2026 (user: "chat UI confusing hai — har cheez easily samajh aaye"): 18 trains ×
+   * 5 chips ek saath = deewar. Pehle 5 dikhao, baaki ek tap par. */
+  const [showAllTrains, setShowAllTrains] = useState(false);
+  const [openTricks, setOpenTricks] = useState<Record<string, boolean>>({});
+  /* 24 Sep 2026 (user: "alternative trains ka alag page, leg 1/leg 2 ka alag page banao,
+   * front chat me sirf header rahe"): poora detail ab alag page par. */
+  const [page, setPage] = useState<"direct" | "alt" | "connect" | null>(initialPage ?? null);
   const seatBoard = direct.length > 0 && (
     <Section ic={IC.train} title={`Direct trains ${plan.query.from}→${plan.query.to}`} badge={`${probedDirect.length}/${direct.length} seat-checked`} foot={unprobedDirect.length ? `${unprobedDirect.map((o) => o.trainNumbers[0]).join(", ")}: seat data provider se nahi aayi — inhe "seat nahi" nahi maana; Refresh seats se dobara check karo.` : "Har direct train ki har class ka status upar hai — RAC bhi booking option hai (berth chart ke baad)."}>
       <button type="button" className="jx-why-head" onClick={() => setBoardOpen((v) => !v)}>{boardOpen ? "Hide" : "Show"} {direct.length} trains · har class ka seat status{!boardOpen && plan.directUnavailable ? " · sab WL/N-A" : ""} <span className={`jx-caret${boardOpen ? " open" : ""}`} /></button>
-      {boardOpen && [...direct].sort((a, b) => (a.departure ?? "").localeCompare(b.departure ?? "")).map((o) => (
+      {boardOpen && (showAllTrains ? [...direct] : [...direct].slice(0, 5)).sort((a, b) => (a.departure ?? "").localeCompare(b.departure ?? "")).map((o) => (
         <div key={o.trainNumbers[0]} className="jx-sb-row">
           <button type="button" className="jx-sb-head" onClick={pick ? () => pick(o) : undefined}><span className="jx-no">{o.trainNumbers[0]}</span> <span className="jx-name">{o.trainNames[0]}</span> <span className="jx-sub">{o.departure}→{o.arrival}{dateTag(baseDate, o.arrivalDayOffset)} · {o.durationLabel ?? ""}</span>{aiRec?.kind === "direct" && aiRec.trainNumbers[0] === o.trainNumbers[0] && <span className="jx-sb-pick">{IC.star} AI pick</span>}</button>
           {rowsFor(o).length ? <ClassRow label="" rows={rowsFor(o)} onPick={onPickClass ? (r) => onPickClass({ trainNumber: o.trainNumbers[0], classCode: r.classCode, from: o.origin, to: o.destination }) : undefined} /> : liveNotes[o.trainNumbers[0]] ? <span className="jx-sub">{liveNotes[o.trainNumbers[0]]}</span> : <button type="button" className="jx-sub jx-linkbtn" onClick={onPickClass ? () => onPickClass({ trainNumber: o.trainNumbers[0], classCode: "", from: o.origin, to: o.destination }) : undefined}>{o.probed ? "Koi class data nahi" : "Seat data provider se nahi aayi"} · ↻ check karo</button>}
           {/* Round-18m-30 (user rule): jo class boarding se WL/N-A thi, usi train mein train-origin se / destination
-              ke aage tak ticket par seat — har row = book-from → book-upto, passenger apne hi stations par. */}
-          {(o.earlierStopOptions ?? []).map((b) => (
+              ke aage tak ticket par seat — har row = book-from → book-upto, passenger apne hi stations par.
+              24 Sep 2026: ye blocks default COLLAPSED (ek line summary) — pehle har train ke neeche 5-6 extra
+              chips dikhte the aur list bahut lambi/confusing ho jati thi. */}
+          {(o.earlierStopOptions ?? []).length > 0 && (
+            <button
+              type="button"
+              className="jx-trick-head"
+              onClick={() => setOpenTricks((v) => ({ ...v, [o.trainNumbers[0]]: !v[o.trainNumbers[0]] }))}
+            >
+              <span className="jx-trick-ic">{IC.ticket ?? IC.check}</span>
+              <span>Ticket trick: {[...new Set((o.earlierStopOptions ?? []).map((b) => `${b.bookFrom}→${b.bookUpto ?? b.destination}`))].slice(0, 3).join(", ")}</span>
+              <span className="jx-sub"> · board {o.origin}</span>
+              <span className={`jx-caret${openTricks[o.trainNumbers[0]] ? " open" : ""}`} />
+            </button>
+          )}
+          {openTricks[o.trainNumbers[0]] && (o.earlierStopOptions ?? []).map((b) => (
             <div key={`${b.trainNumber}-${b.bookFrom}-${b.bookUpto ?? ""}`} className="jx-sb-alt">
               <span className="jx-sb-alt-label">Ticket {b.bookFromName ?? b.bookFrom} ({b.bookFrom}){b.bookUpto ? ` → ${b.bookUptoName ?? b.bookUpto} (${b.bookUpto})` : ` → ${b.destination}`} · board {b.boardAt}, utro {b.destination}:</span>
               <ClassRow label="" rows={b.classOptions ?? [b.availability]} onPick={onPickClass ? (r) => onPickClass({ trainNumber: b.trainNumber, classCode: r.classCode, from: b.bookFrom, to: b.bookUpto ?? b.destination, boardAt: b.boardAt }) : undefined} />
@@ -543,6 +575,14 @@ export function JourneyOptions({
           ))}
         </div>
       ))}
+      {/* 24 Sep 2026 (user: "har direct train ke neeche mat likho — sirf last train ke baad likhna hai"):
+       * pehle ye button map ke ANDAR tha, to har train ke neeche repeat ho raha tha. Ab list ke
+       * ekdum aant me, sirf ek baar. */}
+      {boardOpen && direct.length > 5 && (
+        <button type="button" className="jx-more-trains" onClick={() => setShowAllTrains((v) => !v)}>
+          {showAllTrains ? "Sirf pehli 5 trains dikhao" : `Sabhi ${direct.length} trains dikhao`} <span className={`jx-caret${showAllTrains ? " open" : ""}`} />
+        </button>
+      )}
     </Section>
   );
 
@@ -560,6 +600,122 @@ export function JourneyOptions({
     if (pax) pills.push({ tone: "muted", ic: IC.users, strong: `${pax} passenger${pax > 1 ? "s" : ""}` });
   }
 
+  /* ── 24 Sep 2026 (user): "alternative trains ka alag page, leg 1/leg 2 ka alag page banao;
+   *    front chat me sirf header rahe jisse pata chale ki option hai" ──────────────────────
+   * Sirf UI: wahi plan data, wahi handlers — bas detail alag page par. */
+  const altBestOffer = (rec?.differentTrain ?? []).find((o) => isOk(seatOf(o))) ?? rec?.differentTrain?.[0] ?? null;
+  const altCount = (rec?.differentTrain?.length ?? 0) + bfeRest.length + (partialPlans.length ? 1 : 0) + altStations.length + altDates.length;
+  const hubs = plan.legPlans ?? [];
+  const legsWithSeat = hubs.filter((lp) => lp.leg1.length > 0 && lp.leg2.length > 0);
+  const hasAltPage = altCount > 0;
+  const hasConnectPage = hubs.length > 0 || connections.length > 0;
+  const hubSummary = hubs
+    .map((lp) => `${lp.hubName ?? lp.hub} (Leg 1 ${lp.leg1.length} + Leg 2 ${lp.leg2.length})`)
+    .join(" · ");
+
+  /* "fresh chat page" jaisa feel: har page ka apna intro line (user: "fresh chat page pe khule"). */
+  const pageIntro: Record<"direct" | "alt" | "connect", string> = {
+    direct: `Saari ${direct.length} direct trains × har class ka status — koi bhi class chip tap karo to fresh seat check ho jaayega.`,
+    alt: "Jo direct list me nahi mila: same train me pehle station se ticket, doosri trains jisme seat hai, doosre station, aur doosri dates.",
+    connect: "Do tickets (har leg ka apna) — dono legs me seat verify hui hai. Leg 1 aur Leg 2 me se jis train par tap karo, uski fresh seat check khul jaayegi.",
+  };
+  const directPageBody = (
+    <>
+      <div className="jx-page-note">{IC.check} {pageIntro.direct}</div>
+      {seatBoard}
+    </>
+  );
+
+  const altPageBody = (
+    <>
+      {bfeRest.length > 0 && (
+        <Section ic={IC.refresh} title="Same-train alternatives" badge={`+${bfeRest.length} option${bfeRest.length > 1 ? "s" : ""}`}>
+          {bfeRest.slice(0, 7).map((b) => (
+            <div key={`${b.trainNumber}-${b.bookFrom}`} role="button" tabIndex={0} className="jx-bfe-row" onClick={pickBfe ? () => pickBfe(b) : undefined} onKeyDown={pickBfe ? (e) => { if (e.key === "Enter") pickBfe(b); } : undefined}>
+              <div className="jx-bfe-top">
+                <div className="jx-lrow-train"><span className="jx-no">{b.trainNumber}</span> <span className="jx-name">{b.trainName}</span></div>
+                <SeatPill a={b.availability} />
+                <span className="jx-lrow-chev">{IC.chev}</span>
+              </div>
+              {/* Round-18m-11 (user: "proper do — kahan se book, kahan board, kahan tak") */}
+              <div className="jx-strip jx-strip-sm" style={{ gridTemplateColumns: `repeat(${b.bookUpto ? 4 : 3}, 1fr)` }}>
+                <div className="jx-strip-col"><div className="jx-strip-name">{b.bookFromName ?? b.bookFrom}</div><div className="jx-strip-sub">{b.bookFrom}, {b.bookFromDeparture ?? "—"}</div></div>
+                <div className="jx-strip-col"><div className="jx-strip-name">{b.boardAtName ?? b.boardAt}</div><div className="jx-strip-sub">{b.boardAt}, {b.boardAtDeparture ?? "—"}</div></div>
+                <div className="jx-strip-col"><div className="jx-strip-name">{b.destinationName ?? b.destination}</div><div className="jx-strip-sub">{b.destination}, {b.arrival ?? "—"}{b.arrivalDayOffset ? ` (+${b.arrivalDayOffset}d)` : ""}</div></div>
+                {b.bookUpto && <div className="jx-strip-col"><div className="jx-strip-name">{b.bookUptoName ?? b.bookUpto}</div><div className="jx-strip-sub">{b.bookUpto}, {b.bookUptoArrival ?? "—"}</div></div>}
+              </div>
+              <div className="jx-strip-labels" style={b.bookUpto ? { gridTemplateColumns: "repeat(4, 1fr)" } : undefined}><span>Book from</span><span>Boarding</span><span>Deboarding</span>{b.bookUpto && <span>Book upto</span>}</div>
+              {/* Round-18m-14: alternative row ki classes bhi tappable (stale → refresh). */}
+              <ClassRow label="" rows={(b.classOptions ?? [b.availability]).filter((r) => r.classCode !== b.availability.classCode || r.stale)} onPick={onPickClass ? (r) => onPickClass({ trainNumber: b.trainNumber, classCode: r.classCode, from: b.bookFrom, to: b.bookUpto ?? b.destination, boardAt: b.boardAt }) : undefined} />
+              <div className="jx-bfe-foot">
+                <span className="jx-stat"><span className="jx-stat-ic">{IC.clock}</span>{durLabel(b.durationMinutes) ?? "—"} · Direct · board {b.boardAt}</span>
+                {(b.classOptions ?? []).filter((r) => r.classCode !== b.availability.classCode).length > 0 && (
+                  <span className="jx-classes-chips">{(b.classOptions ?? []).filter((r) => r.classCode !== b.availability.classCode).slice(0, 3).map((r) => { const av = availTextOf(r); return <span key={r.classCode} className={`jx-cchip jx-cchip-${av.tone}`}>{av.text.replace(" ⚠ stale", "")}{r.fare != null ? ` · ${inr(r.fare)}` : ""}{r.stale ? <span className="jx-cchip-tag"> · {ageLabel(r.asOf)}</span> : null}</span>; })}</span>
+                )}
+              </div>
+            </div>
+          ))}
+        </Section>
+      )}
+      {plan.directUnavailable && rec && rec.differentTrain.length > 0 && (
+        <Section ic={IC.train} title="Doosri train · seat available" badge={`${rec.differentTrain.length}`}>
+          {rec.differentTrain.slice(0, 4).map(optRow)}
+        </Section>
+      )}
+      {plan.directUnavailable && partial && (partialPlans.length > 0 || partial.sameTrainSwitch) && (
+        <Section ic={IC.swap} title={`Split booking · ${partial.trainNumber} ${partial.classCode}`}>
+          {partialPlans.slice(0, 2).map((p) => (
+            <div key={p.switchStation} className="jx-split">
+              {p.segments.map((s) => (
+                <div key={`${s.from}-${s.to}`} className="jx-split-seg"><span>{s.from} → {s.to}</span><SeatPill a={{ classCode: s.classCode, status: "AVAILABLE", seats: s.seats ?? null, rac: null, waitlist: null, fare: null, source: "" }} /></div>
+              ))}
+              <div className="jx-sub">Seat change @ {p.switchStationName ?? p.switchStation} · berth no. chart ke baad</div>
+            </div>
+          ))}
+          {partial.sameTrainSwitch && !partialPlans.length && (
+            <div className="jx-split">
+              <div className="jx-split-seg"><span>{partial.sameTrainSwitch.segment.from} → {partial.sameTrainSwitch.segment.to}</span><SeatPill a={{ classCode: partial.sameTrainSwitch.segment.classCode, status: "AVAILABLE", seats: partial.sameTrainSwitch.segment.seats ?? null, rac: null, waitlist: null, fare: null, source: "" }} /></div>
+              <div className="jx-sub">Seat {partial.sameTrainSwitch.afterStationName ?? partial.sameTrainSwitch.afterStation} ke baad available</div>
+            </div>
+          )}
+        </Section>
+      )}
+      {plan.directUnavailable && altStations.length > 0 && (
+        <Section ic={IC.pin} title="Doosra station · same city" badge={`${altStations.length}`} foot="Aapka route badla nahi — tap karke confirm karein.">
+          {altStations.slice(0, 3).map((o) => (
+            <ListRow key={`${o.from}-${o.to}`} no={o.best?.trainNumbers[0] ?? "—"} name={o.changed === "origin" ? "Alternate boarding" : "Alternate destination"} mid={`${o.from}→${o.to}`} midSub={o.best ? `${o.best.departure} · ${o.best.arrival}` : `${o.count} trains`} dur={o.best?.durationLabel ?? null} durSub={`${o.count} trains`} seat={o.best?.availability ?? null} onClick={onPickStations ? () => onPickStations(o.from, o.to) : undefined} />
+          ))}
+        </Section>
+      )}
+      {plan.directUnavailable && altDates.length > 0 && (
+        <Section ic={IC.cal} title="Other dates" badge={`${altDates.length} alternative${altDates.length > 1 ? "s" : ""}`} foot="Aapki date badli nahi — tap karke us date ka plan dekho. Jahan seat likhi hai wahi verify hui hai.">
+          {altDates.map((d) => (
+            <button key={d.date} type="button" className="jx-drow" onClick={onPickDate ? () => onPickDate(d.date) : undefined}>
+              <span className="jx-drow-date">{formatShortDate(d.date)} · {d.count} train{d.count > 1 ? "s" : ""}</span>
+              <span className="jx-drow-proof">{d.seatProof ?? "seat status unverified"}</span>
+              <span className="jx-lrow-chev">{IC.chev}</span>
+            </button>
+          ))}
+        </Section>
+      )}
+
+    </>
+  );
+  const connectPageBody = (
+    <>
+      {(plan.legPlans?.length ?? 0) > 0 && (
+        <Section ic={IC.link} title={plan.legPlans!.some((lp) => lp.leg1.length > 0 && lp.leg2.length > 0) ? (plan.directUnavailable ? "Connecting · leg-wise seat options" : "Connecting · leg-wise (comparison — direct mein seat hai)") : "Connecting · koi route possible nahi"} badge={`${plan.legPlans!.length} hub${plan.legPlans!.length > 1 ? "s" : ""}`} foot={plan.legPlans!.some((lp) => lp.leg1.length > 0 && lp.leg2.length > 0) ? (pax ? `Har train par ${pax} passengers ke liye seat verify hui hai — dono tickets alag book hongi.` : "Har train provider-verified — tickets alag-alag book hongi.") : "Har hub par dono legs × saari trains × har class check hui — ek leg par bhi seat na ho to route nahi banta."}>
+          {plan.legPlans!.map((lp) => <LegPlanCard key={lp.hub} lp={lp} baseDate={baseDate} pax={pax} onPickLeg={pickLeg} heroKey={heroDirect && heroDirect.changes > 0 ? heroDirect.trainNumbers.join("+") : null} />)}
+        </Section>
+      )}
+      {!(plan.legPlans?.length) && connections.length > 0 && (
+        <Section ic={IC.link} title="Connecting · dono trains mein seat" badge={`${connections.length}`} foot={pax ? `Har leg par ${pax} passengers ke liye seat verify hui hai — dono tickets alag book hongi.` : "Dono legs provider-verified — tickets alag-alag book hongi."}>
+          {connections.slice(0, 2).map((c, i) => <ConnCard key={i} c={c} baseDate={baseDate} onPickLeg={pickLeg} />)}
+        </Section>
+      )}
+    </>
+  );
+
   return (
     <div className="jx-wrap">
       {/* ── Header ── */}
@@ -571,6 +727,11 @@ export function JourneyOptions({
           {pax ? <span className="jx-pill">{IC.users} {pax} passenger{pax > 1 ? "s" : ""}</span> : <span className="jx-pill jx-pill-warn">{IC.users} passengers? — batao, seats usi hisaab se</span>}
           {plan.query.travelClass && <span className="jx-pill">{plan.query.travelClass}</span>}
           <span className="jx-pill">{IC.train} {direct.length} direct</span>
+          {direct.length > 0 && (
+            <span className={`jx-pill ${seatTrainCount > 0 ? "jx-pill-ok" : "jx-pill-warn"}`}>
+              {IC.check} {seatTrainCount > 0 ? `${seatTrainCount} me seat` : "seat kisi me nahi"}
+            </span>
+          )}
         </div>
         <ToneLegend />
       </header>
@@ -719,87 +880,52 @@ export function JourneyOptions({
         <button type="button" className="jx-btn jx-btn-dark jx-btn-wide" onClick={onOpenBoard}>Sabhi trains dekho / book {IC.arrow}</button>
       )}
 
-      {/* ── Sections ── */}
-      {bfeRest.length > 0 && (
-        <Section ic={IC.refresh} title="Same-train alternatives" badge={`+${bfeRest.length} option${bfeRest.length > 1 ? "s" : ""}`}>
-          {bfeRest.slice(0, 7).map((b) => (
-            <div key={`${b.trainNumber}-${b.bookFrom}`} role="button" tabIndex={0} className="jx-bfe-row" onClick={pickBfe ? () => pickBfe(b) : undefined} onKeyDown={pickBfe ? (e) => { if (e.key === "Enter") pickBfe(b); } : undefined}>
-              <div className="jx-bfe-top">
-                <div className="jx-lrow-train"><span className="jx-no">{b.trainNumber}</span> <span className="jx-name">{b.trainName}</span></div>
-                <SeatPill a={b.availability} />
-                <span className="jx-lrow-chev">{IC.chev}</span>
-              </div>
-              {/* Round-18m-11 (user: "proper do — kahan se book, kahan board, kahan tak") */}
-              <div className="jx-strip jx-strip-sm" style={{ gridTemplateColumns: `repeat(${b.bookUpto ? 4 : 3}, 1fr)` }}>
-                <div className="jx-strip-col"><div className="jx-strip-name">{b.bookFromName ?? b.bookFrom}</div><div className="jx-strip-sub">{b.bookFrom}, {b.bookFromDeparture ?? "—"}</div></div>
-                <div className="jx-strip-col"><div className="jx-strip-name">{b.boardAtName ?? b.boardAt}</div><div className="jx-strip-sub">{b.boardAt}, {b.boardAtDeparture ?? "—"}</div></div>
-                <div className="jx-strip-col"><div className="jx-strip-name">{b.destinationName ?? b.destination}</div><div className="jx-strip-sub">{b.destination}, {b.arrival ?? "—"}{b.arrivalDayOffset ? ` (+${b.arrivalDayOffset}d)` : ""}</div></div>
-                {b.bookUpto && <div className="jx-strip-col"><div className="jx-strip-name">{b.bookUptoName ?? b.bookUpto}</div><div className="jx-strip-sub">{b.bookUpto}, {b.bookUptoArrival ?? "—"}</div></div>}
-              </div>
-              <div className="jx-strip-labels" style={b.bookUpto ? { gridTemplateColumns: "repeat(4, 1fr)" } : undefined}><span>Book from</span><span>Boarding</span><span>Deboarding</span>{b.bookUpto && <span>Book upto</span>}</div>
-              {/* Round-18m-14: alternative row ki classes bhi tappable (stale → refresh). */}
-              <ClassRow label="" rows={(b.classOptions ?? [b.availability]).filter((r) => r.classCode !== b.availability.classCode || r.stale)} onPick={onPickClass ? (r) => onPickClass({ trainNumber: b.trainNumber, classCode: r.classCode, from: b.bookFrom, to: b.bookUpto ?? b.destination, boardAt: b.boardAt }) : undefined} />
-              <div className="jx-bfe-foot">
-                <span className="jx-stat"><span className="jx-stat-ic">{IC.clock}</span>{durLabel(b.durationMinutes) ?? "—"} · Direct · board {b.boardAt}</span>
-                {(b.classOptions ?? []).filter((r) => r.classCode !== b.availability.classCode).length > 0 && (
-                  <span className="jx-classes-chips">{(b.classOptions ?? []).filter((r) => r.classCode !== b.availability.classCode).slice(0, 3).map((r) => { const av = availTextOf(r); return <span key={r.classCode} className={`jx-cchip jx-cchip-${av.tone}`}>{av.text.replace(" ⚠ stale", "")}{r.fare != null ? ` · ${inr(r.fare)}` : ""}{r.stale ? <span className="jx-cchip-tag"> · {ageLabel(r.asOf)}</span> : null}</span>; })}</span>
-                )}
-              </div>
-            </div>
-          ))}
-        </Section>
-      )}
-      {plan.directUnavailable && rec && rec.differentTrain.length > 0 && (
-        <Section ic={IC.train} title="Doosri train · seat available" badge={`${rec.differentTrain.length}`}>
-          {rec.differentTrain.slice(0, 4).map(optRow)}
-        </Section>
-      )}
-      {plan.directUnavailable && partial && (partialPlans.length > 0 || partial.sameTrainSwitch) && (
-        <Section ic={IC.swap} title={`Split booking · ${partial.trainNumber} ${partial.classCode}`}>
-          {partialPlans.slice(0, 2).map((p) => (
-            <div key={p.switchStation} className="jx-split">
-              {p.segments.map((s) => (
-                <div key={`${s.from}-${s.to}`} className="jx-split-seg"><span>{s.from} → {s.to}</span><SeatPill a={{ classCode: s.classCode, status: "AVAILABLE", seats: s.seats ?? null, rac: null, waitlist: null, fare: null, source: "" }} /></div>
-              ))}
-              <div className="jx-sub">Seat change @ {p.switchStationName ?? p.switchStation} · berth no. chart ke baad</div>
-            </div>
-          ))}
-          {partial.sameTrainSwitch && !partialPlans.length && (
-            <div className="jx-split">
-              <div className="jx-split-seg"><span>{partial.sameTrainSwitch.segment.from} → {partial.sameTrainSwitch.segment.to}</span><SeatPill a={{ classCode: partial.sameTrainSwitch.segment.classCode, status: "AVAILABLE", seats: partial.sameTrainSwitch.segment.seats ?? null, rac: null, waitlist: null, fare: null, source: "" }} /></div>
-              <div className="jx-sub">Seat {partial.sameTrainSwitch.afterStationName ?? partial.sameTrainSwitch.afterStation} ke baad available</div>
-            </div>
-          )}
-        </Section>
-      )}
-      {(plan.legPlans?.length ?? 0) > 0 && (
-        <Section ic={IC.link} title={plan.legPlans!.some((lp) => lp.leg1.length > 0 && lp.leg2.length > 0) ? (plan.directUnavailable ? "Connecting · leg-wise seat options" : "Connecting · leg-wise (comparison — direct mein seat hai)") : "Connecting · koi route possible nahi"} badge={`${plan.legPlans!.length} hub${plan.legPlans!.length > 1 ? "s" : ""}`} foot={plan.legPlans!.some((lp) => lp.leg1.length > 0 && lp.leg2.length > 0) ? (pax ? `Har train par ${pax} passengers ke liye seat verify hui hai — dono tickets alag book hongi.` : "Har train provider-verified — tickets alag-alag book hongi.") : "Har hub par dono legs × saari trains × har class check hui — ek leg par bhi seat na ho to route nahi banta."}>
-          {plan.legPlans!.map((lp) => <LegPlanCard key={lp.hub} lp={lp} baseDate={baseDate} pax={pax} onPickLeg={pickLeg} heroKey={heroDirect && heroDirect.changes > 0 ? heroDirect.trainNumbers.join("+") : null} />)}
-        </Section>
-      )}
-      {!(plan.legPlans?.length) && connections.length > 0 && (
-        <Section ic={IC.link} title="Connecting · dono trains mein seat" badge={`${connections.length}`} foot={pax ? `Har leg par ${pax} passengers ke liye seat verify hui hai — dono tickets alag book hongi.` : "Dono legs provider-verified — tickets alag-alag book hongi."}>
-          {connections.slice(0, 2).map((c, i) => <ConnCard key={i} c={c} baseDate={baseDate} onPickLeg={pickLeg} />)}
-        </Section>
-      )}
-      {plan.directUnavailable && altStations.length > 0 && (
-        <Section ic={IC.pin} title="Doosra station · same city" badge={`${altStations.length}`} foot="Aapka route badla nahi — tap karke confirm karein.">
-          {altStations.slice(0, 3).map((o) => (
-            <ListRow key={`${o.from}-${o.to}`} no={o.best?.trainNumbers[0] ?? "—"} name={o.changed === "origin" ? "Alternate boarding" : "Alternate destination"} mid={`${o.from}→${o.to}`} midSub={o.best ? `${o.best.departure} · ${o.best.arrival}` : `${o.count} trains`} dur={o.best?.durationLabel ?? null} durSub={`${o.count} trains`} seat={o.best?.availability ?? null} onClick={onPickStations ? () => onPickStations(o.from, o.to) : undefined} />
-          ))}
-        </Section>
-      )}
-      {plan.directUnavailable && altDates.length > 0 && (
-        <Section ic={IC.cal} title="Other dates" badge={`${altDates.length} alternative${altDates.length > 1 ? "s" : ""}`} foot="Aapki date badli nahi — tap karke us date ka plan dekho. Jahan seat likhi hai wahi verify hui hai.">
-          {altDates.map((d) => (
-            <button key={d.date} type="button" className="jx-drow" onClick={onPickDate ? () => onPickDate(d.date) : undefined}>
-              <span className="jx-drow-date">{formatShortDate(d.date)} · {d.count} train{d.count > 1 ? "s" : ""}</span>
-              <span className="jx-drow-proof">{d.seatProof ?? "seat status unverified"}</span>
-              <span className="jx-lrow-chev">{IC.chev}</span>
-            </button>
-          ))}
-        </Section>
-      )}
+      {/* ── Front ke OPTION CARDS (user 24 Sep: "front pe after direct train user ko alternative
+           train aur connecting trains ka option dena hai; click = fresh chat page") ────────── */}
+      <div className="jx-optcards">
+        <div className="jx-optcards-h">Aage ke options · tap = apna page</div>
+        {direct.length > 0 && (
+          <button type="button" className="jx-pagecard" onClick={() => setPage("direct")}>
+            <span className="jx-pagecard-ic">{IC.train}</span>
+            <span className="jx-pagecard-txt">
+              <strong>Direct trains · {direct.length} trains</strong>
+              <span className="jx-pagecard-sub">
+                {probedDirect.length}/{direct.length} seat-checked · {seatTrainCount > 0 ? `${seatTrainCount} trains me seat hai` : "kisi me confirmed seat nahi"} · poora class board
+              </span>
+            </span>
+            <span className="jx-pagecard-go">Dekho {IC.chev}</span>
+          </button>
+        )}
+        {hasAltPage && (
+          <button type="button" className="jx-pagecard" onClick={() => setPage("alt")}>
+            <span className="jx-pagecard-ic">{IC.swap}</span>
+            <span className="jx-pagecard-txt">
+              <strong>Alternative trains · {altCount} option{altCount > 1 ? "s" : ""}</strong>
+              <span className="jx-pagecard-sub">
+                {altBestOffer
+                  ? `Best: ${altBestOffer.trainNumbers[0]} ${altBestOffer.trainNames[0]} · ${availTextOf(seatOf(altBestOffer)).text.replace(" ⚠ stale", "")}${seatOf(altBestOffer)?.fare != null ? ` · ${inr(seatOf(altBestOffer)!.fare)}` : ""}`
+                  : "Same-train tricks, doosri trains, doosra station, doosri dates"}
+              </span>
+            </span>
+            <span className="jx-pagecard-go">Dekho {IC.chev}</span>
+          </button>
+        )}
+        {hasConnectPage && (
+          <button type="button" className="jx-pagecard" onClick={() => setPage("connect")}>
+            <span className="jx-pagecard-ic">{IC.link}</span>
+            <span className="jx-pagecard-txt">
+              <strong>Connecting · Leg 1 → Leg 2 {hubs.length ? `· ${hubs.length} hub${hubs.length > 1 ? "s" : ""}` : ""}</strong>
+              <span className="jx-pagecard-sub">
+                {hubs.length
+                  ? hubs.map((lp) => `${lp.hubName ?? lp.hub}: Leg 1 ${lp.leg1.length} + Leg 2 ${lp.leg2.length} trains me seat`).join(" · ")
+                  : `${connections.length} connecting option${connections.length > 1 ? "s" : ""} — dono legs me seat`}
+                {legsWithSeat.length > 0 ? " · dono legs bookable" : ""}
+              </span>
+            </span>
+            <span className="jx-pagecard-go">Dekho {IC.chev}</span>
+          </button>
+        )}
+      </div>
 
       {/* ── Explore ── */}
       {tabs.length > 0 && (
@@ -828,6 +954,25 @@ export function JourneyOptions({
             </div>
           )}
         </Section>
+      )}
+
+      {/* ── Alag page (full-screen): detail yahan, chat me sirf header ── */}
+      {page && (
+        <div className="jx-page" role="dialog" aria-label={page === "direct" ? "Direct trains" : page === "alt" ? "Alternative trains" : "Connecting trains"}>
+          <div className="jx-page-head">
+            <button type="button" className="jx-page-back" onClick={() => setPage(null)}>{IC.back} Wapas</button>
+            <div className="jx-page-title">
+              <strong>{page === "direct" ? `Direct trains · ${direct.length}` : page === "alt" ? `Alternative trains · ${altCount}` : "Connecting · Leg 1 → Leg 2"}</strong>
+              <span className="jx-page-sub">
+                {`${plan.query.from} → ${plan.query.to} · ${formatShortDate(plan.query.date)}`}
+                {page === "direct" ? ` · ${probedDirect.length}/${direct.length} seat-checked` : page === "alt" ? " · jo direct list me nahi mila" : hubs.length ? ` · ${hubSummary}` : ` · ${connections.length} option`}
+              </span>
+            </div>
+          </div>
+          <div className="jx-page-body">
+            {page === "direct" ? directPageBody : page === "alt" ? altPageBody : connectPageBody}
+          </div>
+        </div>
       )}
 
       <footer className="jx-foot">
