@@ -651,6 +651,66 @@ export async function scrapeTrainFareWeb(trainNumber: string, from?: string | nu
   return parsed ? { ...parsed, ...(segment ? { from: f, to: t } : {}) } : null;
 }
 
+/* ------------------------------------------------------------------ */
+/* 23 Sep 2026 (user): 64551 LDH-CIA MEMU jaise UNRESERVED trains ka     */
+/* reserved seat data kahin nahi hota (IRCTC reservation hi nahi hoti).  */
+/* erail train-enquiry page ka title honest naam/type deta hai —          */
+/* "64551 LDH-CIA MEMU Train Route". Isse row ko "check karo" par atkane  */
+/* ke bajaye sach dikhate hain. 12h cache; generic title → null.          */
+/* ------------------------------------------------------------------ */
+
+export type ScrapedTrainType = {
+  trainNumber: string;
+  trainName: string;
+  /** MEMU / DEMU / PASSENGER / LOCAL — reserved classes nahi hoti. */
+  unreserved: boolean;
+  kind: string | null;
+  sourceUrl: string;
+};
+
+const UNRESERVED_RE = /\b(MEMU|DEMU|EMU|PASSENGER|PASS|LOCAL|SHUTTLE)\b/i;
+const trainTypeCache = new Map<string, { at: number; val: ScrapedTrainType | null }>();
+const TRAIN_TYPE_TTL_MS = 12 * 60 * 60 * 1000;
+
+/** <title>64551 LDH-CIA MEMU Train Route</title> → name + unreserved flag. */
+export function parseErailTrainEnquiryTitle(html: string, trainNumber: string): ScrapedTrainType | null {
+  const m = html.match(/<title>\s*(?:\r?\n\s*)?(\d{4,6})\s+([^<]{2,90}?)\s*(?:Train Route)?\s*<\/title>/i);
+  if (!m) return null;
+  if (m[1] !== String(trainNumber).trim()) return null;
+  const name = m[2].replace(/\s+/g, " ").trim();
+  if (!name || /^(train enquiry|indian railways|erail)/i.test(name)) return null;
+  const hit = name.match(UNRESERVED_RE);
+  return {
+    trainNumber: m[1],
+    trainName: name,
+    unreserved: Boolean(hit),
+    kind: hit ? hit[1].toUpperCase() : null,
+    sourceUrl: `https://erail.in/train-enquiry/${trainNumber}`,
+  };
+}
+
+export async function scrapeTrainTypeWeb(trainNumber: string): Promise<ScrapedTrainType | null> {
+  const num = String(trainNumber ?? "").trim();
+  if (!/^\d{4,6}$/.test(num)) return null;
+  const hit = trainTypeCache.get(num);
+  if (hit && Date.now() - hit.at < TRAIN_TYPE_TTL_MS) return hit.val;
+  try {
+    const sourceUrl = `https://erail.in/train-enquiry/${num}`;
+    const html = await fetchHtml(sourceUrl);
+    const parsed = html ? parseErailTrainEnquiryTitle(html, num) : null;
+    trainTypeCache.set(num, { at: Date.now(), val: parsed });
+    return parsed;
+  } catch {
+    trainTypeCache.set(num, { at: Date.now(), val: null });
+    return null;
+  }
+}
+
+/** Tests ke liye cache clear. */
+export function _clearTrainTypeCache(): void {
+  trainTypeCache.clear();
+}
+
 /** erail fare page ke from/to selects mein wahi station selected hain jo maange the? */
 export function erailPageIsForSegment(html: string, from: string, to: string): boolean {
   const sel = (name: string): string | null => {

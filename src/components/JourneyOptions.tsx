@@ -362,6 +362,9 @@ export function JourneyOptions({
    * dikhati hai — per-train probe ki kismat par nirbhar nahi. Jo row pehle se probed
    * hai usko ye kabhi overwrite nahi karta. */
   const [liveRows, setLiveRows] = useState<Record<string, AvailLike[]>>({});
+  /* 23 Sep 2026: un rows ke liye honest note jo board me hi nahi hain (MEMU/unreserved) —
+   * warna wo row hamesha "seat data provider se nahi aayi · check karo" par atki rehti hai. */
+  const [liveNotes, setLiveNotes] = useState<Record<string, string>>({});
   const needKey = (plan.routeOptions ?? [])
     .filter((o) => !(o.classOptions && o.classOptions.length) && !liveRows[o.trainNumbers[0]])
     .map((o) => o.trainNumbers[0])
@@ -374,20 +377,24 @@ export function JourneyOptions({
     (async () => {
       try {
         const res = await fetch(
-          `/api/availability?from=${encodeURIComponent(plan.query.from)}&to=${encodeURIComponent(plan.query.to)}&date=${encodeURIComponent(plan.query.date)}`,
+          `/api/availability?from=${encodeURIComponent(plan.query.from)}&to=${encodeURIComponent(plan.query.to)}&date=${encodeURIComponent(plan.query.date)}&trains=${encodeURIComponent(need.join(","))}`,
           { headers: { accept: "application/json" } },
         );
         if (!res.ok) return;
-        const j = (await res.json()) as { trains?: { trainNumber?: string; classes?: AvailLike[] }[] };
+        const j = (await res.json()) as { trains?: { trainNumber?: string; classes?: AvailLike[]; note?: string }[] };
         const trains = Array.isArray(j?.trains) ? j.trains : [];
         const next: Record<string, AvailLike[]> = {};
+        const notes: Record<string, string> = {};
         for (const t of trains) {
           const no = String(t?.trainNumber ?? "");
           if (!no || !need.includes(no)) continue;
           const cls = Array.isArray(t?.classes) ? (t!.classes as AvailLike[]) : [];
           if (cls.length) next[no] = cls;
+          else if (t?.note) notes[no] = String(t.note);
         }
-        if (alive && Object.keys(next).length) setLiveRows((prev) => ({ ...prev, ...next }));
+        if (!alive) return;
+        if (Object.keys(next).length) setLiveRows((prev) => ({ ...prev, ...next }));
+        if (Object.keys(notes).length) setLiveNotes((prev) => ({ ...prev, ...notes }));
       } catch {
         /* honest: fill na ho to row jaisi thi waisi (koi guess nahi) */
       }
@@ -459,7 +466,7 @@ export function JourneyOptions({
    * jo train probe nahi hui usko saaf "seat data nahi aayi" — "seat nahi" nahi. */
   const rowsFor = (o: AgentRouteOption): AvailLike[] => liveRows[o.trainNumbers[0]] ?? (o.classOptions ?? []);
   const probedDirect = direct.filter((o) => (rowsFor(o).length > 0 ? true : o.probed));
-  const unprobedDirect = direct.filter((o) => rowsFor(o).length === 0 && !o.probed);
+  const unprobedDirect = direct.filter((o) => rowsFor(o).length === 0 && !o.probed && !liveNotes[o.trainNumbers[0]]);
   /* Round-18m-30f: AI ne direct nahi chuna (sab WL) → board default collapsed, ek-line summary; tap = poora board. */
   const recKind = plan.decision?.recommended?.kind ?? (bfeHero ? "bfe" : best && best.changes > 0 ? "connecting" : "direct");
   const [boardOpen, setBoardOpen] = useState<boolean>(() => recKind === "direct" && !plan.directUnavailable);
@@ -469,7 +476,7 @@ export function JourneyOptions({
       {boardOpen && [...direct].sort((a, b) => (a.departure ?? "").localeCompare(b.departure ?? "")).map((o) => (
         <div key={o.trainNumbers[0]} className="jx-sb-row">
           <button type="button" className="jx-sb-head" onClick={pick ? () => pick(o) : undefined}><span className="jx-no">{o.trainNumbers[0]}</span> <span className="jx-name">{o.trainNames[0]}</span> <span className="jx-sub">{o.departure}→{o.arrival}{dateTag(baseDate, o.arrivalDayOffset)} · {o.durationLabel ?? ""}</span>{aiRec?.kind === "direct" && aiRec.trainNumbers[0] === o.trainNumbers[0] && <span className="jx-sb-pick">{IC.star} AI pick</span>}</button>
-          {rowsFor(o).length ? <ClassRow label="" rows={rowsFor(o)} onPick={onPickClass ? (r) => onPickClass({ trainNumber: o.trainNumbers[0], classCode: r.classCode, from: o.origin, to: o.destination }) : undefined} /> : <button type="button" className="jx-sub jx-linkbtn" onClick={onPickClass ? () => onPickClass({ trainNumber: o.trainNumbers[0], classCode: "", from: o.origin, to: o.destination }) : undefined}>{o.probed ? "Koi class data nahi" : "Seat data provider se nahi aayi"} · ↻ check karo</button>}
+          {rowsFor(o).length ? <ClassRow label="" rows={rowsFor(o)} onPick={onPickClass ? (r) => onPickClass({ trainNumber: o.trainNumbers[0], classCode: r.classCode, from: o.origin, to: o.destination }) : undefined} /> : liveNotes[o.trainNumbers[0]] ? <span className="jx-sub">{liveNotes[o.trainNumbers[0]]}</span> : <button type="button" className="jx-sub jx-linkbtn" onClick={onPickClass ? () => onPickClass({ trainNumber: o.trainNumbers[0], classCode: "", from: o.origin, to: o.destination }) : undefined}>{o.probed ? "Koi class data nahi" : "Seat data provider se nahi aayi"} · ↻ check karo</button>}
           {/* Round-18m-30 (user rule): jo class boarding se WL/N-A thi, usi train mein train-origin se / destination
               ke aage tak ticket par seat — har row = book-from → book-upto, passenger apne hi stations par. */}
           {(o.earlierStopOptions ?? []).map((b) => (

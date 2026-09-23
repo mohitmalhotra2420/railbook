@@ -5,6 +5,7 @@ import {
   scrapeTrainScheduleWeb,
   scrapeLiveStatusRailEnquiry,
   scrapeTrainFareWeb,
+  scrapeTrainTypeWeb,
   scrapeStationLookupWeb,
   scrapeSeatAvailabilityWeb,
   scrapeStationSearchWeb,
@@ -327,6 +328,22 @@ async function railyatriAvailability(
  * row nahi) to ConfirmTkt ka route board dekho — ek call me poore route ke saare
  * trains × classes ka IRCTC board (AVL/WL/RAC/Regret/Cancelled + fare + confirm%).
  */
+/**
+ * Unreserved (MEMU/DEMU/passenger) trains ka reserved seat data kahin nahi hota —
+ * IRCTC par inki reservation hi nahi hoti. ConfirmTkt/railyatri sab khaali hi denge.
+ * erail train-enquiry title se naam/type nikaal kar row ko honest label dete hain
+ * (warna wo hamesha "seat data provider se nahi aayi · check karo" par atki rehti hai).
+ */
+async function unreservedTrainNote(trainNumber: string): Promise<string | null> {
+  try {
+    const t = await scrapeTrainTypeWeb(trainNumber);
+    if (!t || !t.unreserved) return null;
+    return `${t.trainName} — unreserved ${t.kind ?? "passenger"} (general ticket). Reserved seat data provider par nahi hoti.`;
+  } catch {
+    return null;
+  }
+}
+
 async function confirmTktAvailability(
   trainNumber: string,
   date: string,
@@ -1079,7 +1096,7 @@ export async function routedClassBoard(
   to: string,
   quota = "GN",
   hintClasses: string[] = [],
-): Promise<{ classes: ClassAvailability[]; provider: ServedProvider }> {
+): Promise<{ classes: ClassAvailability[]; provider: ServedProvider; note?: string }> {
   const started = Date.now();
   const provider = getFallbackProvider();
   if (railcoreIsPrimary()) {
@@ -1105,6 +1122,13 @@ export async function routedClassBoard(
       if (ctOnly && ctOnly.length) {
         logServed("web_confirmtkt", "classBoard", started, true, "no_classes_anywhere → confirmtkt board");
         return { classes: ctOnly, provider: "web_confirmtkt" };
+      }
+      /* 23 Sep 2026: 64551 LDH-CIA MEMU jaise unreserved trains — koi reserved class
+       * hi nahi hoti. Honest label (guess nahi) taaki row atki na rahe. */
+      const unNote = await unreservedTrainNote(trainNumber);
+      if (unNote) {
+        logServed("none", "classBoard", started, false, "no_classes_anywhere → unreserved train");
+        return { classes: [], provider: "none", note: unNote };
       }
     }
     if (codes.length) {
@@ -1156,19 +1180,32 @@ export async function routedRouteBoard(
   from: string,
   to: string,
   date: string,
-): Promise<{ trains: { trainNumber: string; trainName: string; classes: ClassAvailability[] }[]; at: number; provider: ServedProvider } | null> {
+  extraTrains: string[] = [],
+): Promise<{
+  trains: { trainNumber: string; trainName: string; classes: ClassAvailability[]; note?: string }[];
+  at: number;
+  provider: ServedProvider;
+} | null> {
   const started = Date.now();
   const board = await confirmTktRouteBoard(from, to, date);
   if (!board || !board.trains.length) {
     logServed("none", "routeBoard", started, false, "confirmtkt_empty");
     return null;
   }
-  logServed("web_confirmtkt", "routeBoard", started, true);
-  return {
-    at: board.at,
-    provider: "web_confirmtkt",
-    trains: board.trains.map((t) => ({ trainNumber: t.trainNumber, trainName: t.trainName, classes: t.classes })),
-  };
+  const trains: { trainNumber: string; trainName: string; classes: ClassAvailability[]; note?: string }[] =
+    board.trains.map((t) => ({ trainNumber: t.trainNumber, trainName: t.trainName, classes: t.classes }));
+  /* Client ke un rows ke liye (jo CT board me nahi — jaise MEMU/unreserved) honest
+   * note: erail train-enquiry se type check (12h cache). Cap 6 — latency guard. */
+  const have = new Set(trains.map((t) => t.trainNumber));
+  const extra = [...new Set(extraTrains.map((n) => String(n).trim()))]
+    .filter((n) => /^\d{4,6}$/.test(n) && !have.has(n))
+    .slice(0, 6);
+  await Promise.all(extra.map(async (n) => {
+    const unNote = await unreservedTrainNote(n);
+    if (unNote) trains.push({ trainNumber: n, trainName: "—", classes: [], note: unNote });
+  }));
+  logServed("web_confirmtkt", "routeBoard", started, true, extra.length ? `+${extra.length} extra checked` : undefined);
+  return { at: board.at, provider: "web_confirmtkt", trains };
 }
 
 /** Train ke facts (Wikipedia) — provider chain ke baad, facts-only reference. */

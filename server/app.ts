@@ -681,7 +681,13 @@ export function createApp() {
        * Regret/Cancelled + fare + confirm%). App/list isse saari stuck rows
        * ek request me bhar sakti hai. */
       if (!trainNumber.trim() && from && to && date) {
-        const board = await routedRouteBoard(from, to, date);
+        /* trains= (optional): client ke list rows — jo CT board me na hon unke
+         * liye honest note (unreserved/MEMU) bhi isi call me aa jata hai. */
+        const extraTrains = String(req.query.trains ?? "")
+          .split(",")
+          .map((t) => t.trim())
+          .filter(Boolean);
+        const board = await routedRouteBoard(from, to, date, extraTrains);
         res.json(
           board
             ? { trains: board.trains, source: board.provider, at: new Date(board.at).toISOString() }
@@ -698,9 +704,11 @@ export function createApp() {
           const board = await routedClassBoard(trainNumber, date, from, to, quota, hintClasses).catch(() => ({
             classes: [] as never[],
             provider: "none" as const,
+            note: undefined as string | undefined,
           }));
-          /* Honest empty: 200 + khaali board (row retry karti rahe, error na dikhe). */
-          res.json({ classes: board.classes, source: board.provider });
+          /* Honest empty: 200 + khaali board (row retry karti rahe, error na dikhe).
+           * note = unreserved (MEMU) jaise cases ka honest label. */
+          res.json({ classes: board.classes, source: board.provider, ...(board.note ? { note: board.note } : {}) });
           return;
         }
         const p = getProvider();
