@@ -1171,6 +1171,105 @@ export async function routedClassBoard(
 }
 
 /**
+ * Focus trains ke stale/UNKNOWN class rows ko LIVE source se replace karo (23 Sep 2026).
+ * Kyun: ConfirmTkt board apni cache serve karta hai (kabhi 17 din purani) — user ko
+ * IRCTC ka aaj ka board chahiye. Sirf client ke visible trains (cap 6) × unke
+ * stale/UNKNOWN classes (cap 5) probe hote hain, isliye poore 23-train board ke liye
+ * 100 calls nahi lagte. Time budget 13s — us se zyada lage to jo mil chuka wahi bhejte
+ * hain (endpoint kabhi hang na kare). Cancel-note wali row ko live row override nahi
+ * karti (cancellation sach hai, aur live source usi ko "Not available" kahta hai).
+ */
+/* Live-enriched row cache (3 min): same train+date+class par baar-baar 2-3s ka live
+ * pull na ho (client 90s board cache ke baad dobara poochh sakta hai). */
+const liveRowCache = new Map<string, { at: number; row: ClassAvailability | null }>();
+const LIVE_ROW_TTL_MS = 3 * 60 * 1000;
+/** Itni der purani row ko "fresh" nahi maanenge — visible rows live probe se aati hain. */
+const CT_ROW_FRESH_MS = 30 * 60 * 1000;
+
+async function liveRowFor(
+  provider: { getAvailability: (tn: string, d: string, f: string, t: string, c: ClassCode, q: string) => Promise<ClassAvailability> },
+  trainNumber: string,
+  date: string,
+  from: string,
+  to: string,
+  classCode: ClassCode,
+  quota: string,
+): Promise<ClassAvailability | null> {
+  const key = `${trainNumber}:${date}:${classCode}:${quota}`;
+  const hit = liveRowCache.get(key);
+  if (hit && Date.now() - hit.at < LIVE_ROW_TTL_MS) return hit.row;
+  const row = await provider.getAvailability(trainNumber, date, from, to, classCode, quota).catch(() => null);
+  const val = row && row.status !== "UNKNOWN" ? row : null;
+  liveRowCache.set(key, { at: Date.now(), row: val });
+  return val;
+}
+
+/** Tests ke liye cache clear. */
+export function _clearLiveRowCache(): void {
+  liveRowCache.clear();
+}
+
+async function enrichFocusTrains(
+  trains: { trainNumber: string; trainName: string; classes: ClassAvailability[]; note?: string }[],
+  focus: string[],
+  from: string,
+  to: string,
+  date: string,
+  quota: string,
+): Promise<number> {
+  const wanted = new Set(focus.map((n) => String(n).trim()));
+  const targets = trains.filter((t) => wanted.has(t.trainNumber)).slice(0, 6);
+  if (!targets.length) return 0;
+  const provider = getFallbackProvider();
+  let swapped = 0;
+  const jobs: Promise<void>[] = [];
+  /* Har train ke liye candidates: UNKNOWN (data hi nahi) pehle, phir sabse purani row.
+   * 30 min se fresh row ko chhodte hain (usme live probe ka faayda nahi). */
+  const age = (c: ClassAvailability): number => (c.updatedAt ? Date.now() - Date.parse(c.updatedAt) : Number.MAX_SAFE_INTEGER);
+  /* Kuch sources (ConfirmTkt cacheTime) IST ko UTC label karte hain → timestamp future
+   * me dikhta hai ("fresh" lagta hai). Aise rows par bhi live probe chalate hain —
+   * sahi time-wala live row hi dikhana hai. */
+  const futureDated = (c: ClassAvailability): boolean => Boolean(c.updatedAt && Date.parse(c.updatedAt) > Date.now() + 5 * 60 * 1000);
+  const perTrain = targets.map((t) =>
+    t.classes
+      .filter((c) => !(c.note && /cancel|depart/i.test(c.note)))
+      .filter((c) => c.status === "UNKNOWN" || c.stale === true || futureDated(c) || age(c) > CT_ROW_FRESH_MS)
+      .sort((a, b) => (a.status === "UNKNOWN" ? 0 : 1) - (b.status === "UNKNOWN" ? 0 : 1) || age(b) - age(a))
+      .slice(0, 4),
+  );
+  /* ROUND-ROBIN: har train ko apna pehla (sabse zaroori) class pehle milta hai, isliye
+   * time budget khatam hone par bhi koi train poori tarah purane data par nahi rehti
+   * (pehle 12411 jaisi aakhri train skip ho jati thi). */
+  const maxPerTrain = Math.max(0, ...perTrain.map((rows) => rows.length));
+  const ordered: { train: (typeof targets)[number]; row: ClassAvailability }[] = [];
+  for (let i = 0; i < maxPerTrain; i++) {
+    for (let ti = 0; ti < targets.length; ti++) {
+      const row = perTrain[ti][i];
+      if (row) ordered.push({ train: targets[ti], row });
+    }
+  }
+  for (const { train: t, row } of ordered) {
+    jobs.push(
+      liveRowFor(provider, t.trainNumber, date, from, to, row.code, quota)
+        .then((live) => {
+          if (!live) return;
+          const i = t.classes.indexOf(row);
+          if (i < 0) return;
+          /* Live row hi dikhayein — par fare khaali ho to CT ka fare bachao. */
+          const merged: ClassAvailability = { ...live, fare: live.fare || row.fare };
+          if (row.note) merged.note = row.note;
+          t.classes[i] = merged;
+          swapped += 1;
+        })
+        .catch(() => undefined),
+    );
+  }
+  if (!jobs.length) return 0;
+  await Promise.race([Promise.all(jobs), new Promise((r) => setTimeout(r, 18_000))]);
+  return swapped;
+}
+
+/**
  * Route-level live seat board (23 Sep 2026) — EK call me poore route ke saare
  * trains × classes (ConfirmTkt board). App/list isse ek hi request me saari
  * "Seat data provider se nahi aayi" rows bhar sakti hai (per-train probe ki
@@ -1204,7 +1303,22 @@ export async function routedRouteBoard(
     const unNote = await unreservedTrainNote(n);
     if (unNote) trains.push({ trainNumber: n, trainName: "—", classes: [], note: unNote });
   }));
-  logServed("web_confirmtkt", "routeBoard", started, true, extra.length ? `+${extra.length} extra checked` : undefined);
+  /* 23 Sep 2026 (user 21:35 screenshot: "14631 me 3A UNKNOWN bta raha jabki IRCTC par
+   * available hai" + "kuch data stale aa raha, live nahi"): ConfirmTkt ka apna board
+   * cache bhI purana ho sakta hai (cacheTime 17 ghante / 17 din) — aur usi wajah se
+   * rows par "X ghante pehle ka data" aur UNKNOWN class dikhti thi. Ab client ke
+   * VISIBLE trains (jo `trains=` me aate hain — poora plan nahi) ke sirf un
+   * classes ke liye live probe chalte hain jo stale ya UNKNOWN hain; RailYatri live
+   * IRCTC pull (refresh=true) se fresh row milti hai jo CT (stale) row ko replace
+   * karti hai. Cancel-notes kabhi override nahi hote (cancellation authoritative). */
+  const enriched = await enrichFocusTrains(trains, extraTrains, from, to, date, "GN");
+  logServed(
+    "web_confirmtkt",
+    "routeBoard",
+    started,
+    true,
+    `${extra.length ? `+${extra.length} extra checked · ` : ""}${enriched ? `live-enriched ${enriched} rows` : "ct board only"}`,
+  );
   return { at: board.at, provider: "web_confirmtkt", trains };
 }
 

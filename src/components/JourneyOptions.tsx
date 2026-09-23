@@ -81,6 +81,9 @@ function availTextOf(a: AvailLike | null | undefined): { text: string; tone: Ton
 function ageLabel(asOf?: string | null): string {
   const ms = asOf ? Date.parse(asOf) : NaN;
   if (!Number.isFinite(ms)) return "purana data";
+  /* 23 Sep 2026: kuch sources (ConfirmTkt cacheTime) future timestamp bhi dete hain
+   * (IST ko UTC label karke) — warna "1 min pehle ka data" jaisa jhootha label aata. */
+  if (ms > Date.now() + 5 * 60000) return "abhi ka data";
   const mins = Math.max(1, Math.round((Date.now() - ms) / 60000));
   if (mins < 60) return `${mins} min pehle ka data`;
   const hrs = Math.round(mins / 60);
@@ -391,17 +394,25 @@ export function JourneyOptions({
    * dikhati hai — per-train probe ki kismat par nirbhar nahi. Jo row pehle se probed
    * hai usko ye kabhi overwrite nahi karta. */
   const [liveRows, setLiveRows] = useState<Record<string, AvailLike[]>>({});
+  /* 23 Sep 2026 (user: "kuch data stale aa raha, live nahi"): jo rows plan-time par hi
+   * purani (stale) ya UNKNOWN class ke saath aayi thi, unko bhi live route-board se
+   * refresh karte hain — sirf "khaali" rows ko nahi. Server un trains ke liye live
+   * probe (RailYatri IRCTC pull) chalata hai aur fresh row bhejta hai. */
+  const rowNeedsLive = (rows: AvailLike[]): boolean =>
+    rows.length > 0 && rows.some((r) => r.stale || String(r.status) === "UNKNOWN");
   /* 23 Sep 2026: un rows ke liye honest note jo board me hi nahi hain (MEMU/unreserved) —
    * warna wo row hamesha "seat data provider se nahi aayi · check karo" par atki rehti hai. */
   const [liveNotes, setLiveNotes] = useState<Record<string, string>>({});
   const needKey = (plan.routeOptions ?? [])
-    .filter((o) => !(o.classOptions && o.classOptions.length) && !liveRows[o.trainNumbers[0]])
+    .filter((o) => !liveRows[o.trainNumbers[0]] && (!(o.classOptions && o.classOptions.length) || rowNeedsLive(o.classOptions ?? [])))
     .map((o) => o.trainNumbers[0])
     .join(",");
   useEffect(() => {
     let alive = true;
     const rows = plan.routeOptions ?? [];
-    const need = rows.filter((o) => !(o.classOptions && o.classOptions.length) && !liveRows[o.trainNumbers[0]]).map((o) => o.trainNumbers[0]);
+    const need = rows
+      .filter((o) => !liveRows[o.trainNumbers[0]] && (!(o.classOptions && o.classOptions.length) || rowNeedsLive(o.classOptions ?? [])))
+      .map((o) => o.trainNumbers[0]);
     if (!need.length || !plan.query.date) return () => { alive = false; };
     (async () => {
       try {
@@ -486,7 +497,16 @@ export function JourneyOptions({
   };
   /* Round-23 (user: "list me seats nahi aa rahi, card me aa rahi"): ListRow/hero bhi
    * wahi rows dikhayein jo seat-board me hain — plan-time empty ho to live route board. */
-  const seatOf = (o: AgentRouteOption): AvailLike | null => o.availability ?? rowsFor(o)[0] ?? null;
+  const seatOf = (o: AgentRouteOption): AvailLike | null => {
+    /* Live route-board se jo row aayi hai wo plan-time row se upar hai (fresh IRCTC data).
+     * Live data na ho to purana behaviour: jo plan ne verify kiya wahi pill. */
+    const live = liveRows[o.trainNumbers[0]];
+    if (live && live.length) {
+      const fresh = live.find((r) => !r.stale && String(r.status) !== "UNKNOWN");
+      return fresh ?? live[0] ?? null;
+    }
+    return o.availability ?? (o.classOptions ?? [])[0] ?? null;
+  };
   const chipsOf = (o: AgentRouteOption): AvailLike[] => {
     const seat = seatOf(o);
     return (rowsFor(o).length ? rowsFor(o) : o.classOptions ?? []).filter((r) => r.classCode !== seat?.classCode);
