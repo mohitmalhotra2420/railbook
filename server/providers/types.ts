@@ -23,6 +23,9 @@ export interface Station {
 
 export interface ClassAvailability {
   code: ClassCode;
+  /** 23 Sep 2026: UI rows `classCode` maangti hain (agent mapping ki shape) — route
+   * board/live-fill rows me dono field rakhte hain taaki koi consumer "undefined" na dekhe. */
+  classCode?: ClassCode;
   label: string;
   status: AvailabilityStatus;
   seats?: number;

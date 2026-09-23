@@ -18,7 +18,9 @@ describe("Round-18m-22: RAC treated as available", () => {
   });
   it("label stays the provider's RAC (never rewritten to AVL)", () => {
     const jo = readFileSync("src/components/JourneyOptions.tsx", "utf8");
-    expect(jo).toMatch(/if \(a\.status === "RAC"\) return \{ text: `\$\{a\.classCode\} RAC\$\{a\.rac != null \? ` \$\{a\.rac\}` : ""\}\$\{st\}`, tone: tone\("ok"\) \};/);
+    /* 23 Sep 2026: class label ab classCodeOf(a) se aata hai (server `code` + UI
+     * `classCode` dono shapes) — warna live board rows "undefined RAC 7" dikhati thin. */
+    expect(jo).toMatch(/if \(a\.status === "RAC"\) return \{ text: `\$\{cls\} RAC\$\{a\.rac != null \? ` \$\{a\.rac\}` : ""\}\$\{st\}`, tone: tone\("ok"\) \};/);
     const eng = readFileSync("server/journey/engine.ts", "utf8");
     expect(eng).toContain('if (a.status === "RAC") return true;');
     expect(eng).toContain("AVAILABLE: 0, RAC: 1, WAITLIST: 2"); // AVL still ranks above RAC

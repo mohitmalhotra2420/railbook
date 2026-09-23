@@ -148,6 +148,9 @@ function classRow(classCode: ClassCode, info: RawClassCache, dateYmd: string): C
   if (chance != null && parsed.status === "WAITLIST") bits.push(`${chance}% confirm chance`);
   const row: ClassAvailability = {
     code: classCode,
+    /* Dono field (code + classCode) — UI rows classCode padhti hain; isi se "undefined
+     * AVL 9" jaisa label aata tha jab sirf `code` bheja jata tha. */
+    classCode,
     label: CLASS_LABELS_LOCAL[classCode] ?? classCode,
     status: parsed.status,
     fare: Number.isFinite(fareNum as number) ? (fareNum as number) : 0,

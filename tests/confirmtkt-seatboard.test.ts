@@ -199,7 +199,9 @@ describe("seat-board API", () => {
     expect(res.body.source).toBe("web_confirmtkt");
     const t1 = res.body.trains.find((t: { trainNumber: string }) => t.trainNumber === "14653");
     const cancelled = res.body.trains.find((t: { trainNumber: string }) => t.trainNumber === "18309");
-    expect(t1.classes[0]).toMatchObject({ code: "SL", status: "AVAILABLE", seats: 9 });
+    /* UI rows `classCode` padhti hain — dono fields bhejna zaroori hai (warna
+     * "undefined AVL 9" — user screenshot 23 Sep 21:09). */
+    expect(t1.classes[0]).toMatchObject({ code: "SL", classCode: "SL", status: "AVAILABLE", seats: 9 });
     expect(cancelled.classes[0].note).toBe("Train Cancelled");
   });
 

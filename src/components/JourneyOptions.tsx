@@ -29,24 +29,53 @@ type AvailLike = NonNullable<AgentRouteLeg["availability"]>;
 /* Round-18m-26 (user): EK colour scheme har jagah — green = available (AVL/RAC), tan = purana/stale data
  * ("X din pehle ka"), blue = WL, red = Not available / Regret, grey = data nahi. Legend card ke upar. */
 type Tone = "ok" | "stale" | "wl" | "bad" | "muted";
+/* 23 Sep 2026 (user: "undefined AVL 9 aa raha hai"): server ke board rows me class
+ * field `code` hota hai (ClassAvailability), jabki UI rows `classCode` maangti hai.
+ * Pehle is wajah se live-filled rows "undefined AVL 9" dikhati thin aur un par tap
+ * karne se IRCTC handoff me class bhi undefined jati thi. Ab dono shapes ek jagah
+ * normalize hoti hain — 'undefined' text kabhi nahi. */
+function classCodeOf(a: AvailLike | null | undefined): string {
+  if (!a) return "";
+  const raw = (a as { classCode?: string | null; code?: string | null });
+  return String(raw.classCode || raw.code || "").trim();
+}
+function asAvailLike(c: unknown): AvailLike {
+  const o = (c ?? {}) as Record<string, unknown>;
+  const code = String(o.classCode ?? o.code ?? "").trim();
+  return {
+    classCode: code,
+    label: (o.label as string) ?? code,
+    status: (o.status as string) ?? "UNKNOWN",
+    seats: (o.seats as number | null) ?? null,
+    rac: (o.rac as number | null) ?? null,
+    waitlist: (o.waitlist as number | null) ?? null,
+    fare: (o.fare as number | null) ?? null,
+    source: (o.source as string) ?? "web",
+    stale: Boolean(o.stale),
+    asOf: (o.asOf as string | null) ?? (o.updatedAt as string | null) ?? null,
+    note: (o.note as string | null) ?? null,
+  } as unknown as AvailLike;
+}
+
 function availTextOf(a: AvailLike | null | undefined): { text: string; tone: Tone } {
   if (!a) return { text: "Seat data nahi", tone: "muted" };
   const st = a.stale ? " ⚠ stale" : "";
+  const cls = classCodeOf(a);
   const tone = (fresh: Tone): Tone => (a.stale ? "stale" : fresh);
   /* 23 Sep 2026: ConfirmTkt board ka honest note — "Train Cancelled" / "Train Departed".
    * Pehle ye rows sirf "Not available" dikhati thin (list me "seat data nahi aayi"). */
   const note = (a as { note?: string | null }).note;
-  if (note && /cancel/i.test(note)) return { text: `${a.classCode} Train Cancelled`, tone: tone("bad") };
-  if (note && /departed/i.test(note)) return { text: `${a.classCode} Departed`, tone: tone("bad") };
-  if (a.status === "AVAILABLE") return { text: `${a.classCode} AVL${a.seats != null ? ` ${a.seats}` : ""}${st}`, tone: tone("ok") };
+  if (note && /cancel/i.test(note)) return { text: cls ? `${cls} Train Cancelled` : "Train Cancelled", tone: tone("bad") };
+  if (note && /departed/i.test(note)) return { text: cls ? `${cls} Departed` : "Train Departed", tone: tone("bad") };
+  if (a.status === "AVAILABLE") return { text: `${cls} AVL${a.seats != null ? ` ${a.seats}` : ""}${st}`, tone: tone("ok") };
   /* Round-18m-22 (user): RAC = available ki tarah (chart ke baad confirm) → green; label RAC N hi rehta hai. */
-  if (a.status === "RAC") return { text: `${a.classCode} RAC${a.rac != null ? ` ${a.rac}` : ""}${st}`, tone: tone("ok") };
+  if (a.status === "RAC") return { text: `${cls} RAC${a.rac != null ? ` ${a.rac}` : ""}${st}`, tone: tone("ok") };
   /* Round-18m-42: "better WL" (longer ticket segment, much shorter waitlist than direct) — blue, clearly WL, not a seat. */
-  if (a.status === "WAITLIST" && (a as { betterWl?: boolean }).betterWl) return { text: `${a.classCode} WL ${a.waitlist ?? "?"} (direct WL ${(a as { directWaitlist?: number | null }).directWaitlist ?? "?"}) — better chance${st}`, tone: tone("wl") };
-  if (a.status === "WAITLIST") return { text: `${a.classCode} WL${a.waitlist != null ? ` ${a.waitlist}` : ""}${st}`, tone: tone("wl") };
-  if (a.status === "NOT_AVAILABLE") return { text: `${a.classCode} Not available`, tone: tone("bad") };
-  if (/REGRET/i.test(String(a.status))) return { text: `${a.classCode} Regret`, tone: tone("bad") };
-  return { text: `${a.classCode} ${a.status}`, tone: "muted" };
+  if (a.status === "WAITLIST" && (a as { betterWl?: boolean }).betterWl) return { text: `${cls} WL ${a.waitlist ?? "?"} (direct WL ${(a as { directWaitlist?: number | null }).directWaitlist ?? "?"}) — better chance${st}`, tone: tone("wl") };
+  if (a.status === "WAITLIST") return { text: `${cls} WL${a.waitlist != null ? ` ${a.waitlist}` : ""}${st}`, tone: tone("wl") };
+  if (a.status === "NOT_AVAILABLE") return { text: `${cls} Not available`, tone: tone("bad") };
+  if (/REGRET/i.test(String(a.status))) return { text: `${cls} Regret`, tone: tone("bad") };
+  return { text: cls ? `${cls} ${a.status}` : String(a.status), tone: "muted" };
 }
 /** "2 ghante pehle" / "12 din pehle" — provider timestamp se; na ho to "purana data". */
 function ageLabel(asOf?: string | null): string {
@@ -145,9 +174,9 @@ function ClassRow({ label, rows, onPick }: { label: string; rows: AvailLike[]; o
           const recentButNotLive = !r.stale && Number.isFinite(ageMs) && ageMs > 10 * 60 * 1000;
           const inner = <>{av.text.replace(" ⚠ stale", "")}{r.fare != null ? ` · ${inr(r.fare)}` : ""}{r.stale || recentButNotLive ? <span className="jx-cchip-tag">· {ageLabel(r.asOf)}{onPick ? " ↻" : ""}</span> : null}</>;
           return onPick ? (
-            <button key={r.classCode} type="button" className={`jx-cchip jx-cchip-btn jx-cchip-${av.tone}`} onClick={(e) => { e.stopPropagation(); onPick(r); }} title={`${r.classCode} ki fresh seat check`}>{inner}</button>
+            <button key={classCodeOf(r) || r.status} type="button" className={`jx-cchip jx-cchip-btn jx-cchip-${av.tone}`} onClick={(e) => { e.stopPropagation(); onPick(r); }} title={`${classCodeOf(r)} ki fresh seat check`}>{inner}</button>
           ) : (
-            <span key={r.classCode} className={`jx-cchip jx-cchip-${av.tone}`}>{inner}</span>
+            <span key={classCodeOf(r) || r.status} className={`jx-cchip jx-cchip-${av.tone}`}>{inner}</span>
           );
         })}
       </div>
@@ -388,7 +417,7 @@ export function JourneyOptions({
         for (const t of trains) {
           const no = String(t?.trainNumber ?? "");
           if (!no || !need.includes(no)) continue;
-          const cls = Array.isArray(t?.classes) ? (t!.classes as AvailLike[]) : [];
+          const cls = Array.isArray(t?.classes) ? (t!.classes as unknown[]).map(asAvailLike) : [];
           if (cls.length) next[no] = cls;
           else if (t?.note) notes[no] = String(t.note);
         }
