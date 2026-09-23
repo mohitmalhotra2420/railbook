@@ -37,7 +37,9 @@ export interface ClassAvailability {
   /** Round-7: fare API-fail par erail.in scrape se aaya (status UNKNOWN,
    * fare-only). Round-16: "web_railyatri" = seats+status RailYatri SA
    * (IRCTC-sourced, cached) se — `webNote` mein last-updated. */
-  source?: "web_erail" | "web_railyatri" | "railradar" | "indianrailapi";
+  source?: "web_erail" | "web_railyatri" | "web_confirmtkt" | "web_wikipedia" | "railradar" | "indianrailapi";
+  /** Honest note jo UI dikhata hai — jaise "Train Cancelled" (ConfirmTkt board). */
+  note?: string;
   /** Round-18g: fare ka alag source jab seats kisi aur provider se aaye (provenance mix nahi). */
   fareSource?: "web_erail" | "railradar" | "indianrailapi";
   webNote?: string;

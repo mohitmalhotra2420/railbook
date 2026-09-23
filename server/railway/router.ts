@@ -35,6 +35,8 @@ import {
   indianRailApiStationSearch,
   indianRailApiTrainNameSearch,
 } from "./indianrailapi.js";
+import { confirmTktRouteBoard, confirmTktTrainClasses } from "./confirmtkt.js";
+import { wikipediaTrainFacts, type WikiTrainFacts } from "./wikitrain.js";
 import { env } from "../env.js";
 import { searchStations as searchLocalStations } from "../data/stations.js";
 import {
@@ -160,6 +162,7 @@ export type ServedProvider =
   | "web_trainspnrstatus"
   | "web_railyatri"
   | "web_railenquiry"
+  | "web_wikipedia"
   | "web_erail";
 
 export type LastRailwayLog = {
@@ -312,6 +315,31 @@ async function railyatriAvailability(
       ...(sc.stale ? { stale: true } : {}),
       ...(sc.lastUpdatedAt ? { updatedAt: String(Date.parse(String(sc.lastUpdatedAt).replace(" +0530", "+05:30").replace(" ", "T")) > 0 ? new Date(Date.parse(String(sc.lastUpdatedAt).replace(" +0530", "+05:30").replace(" ", "T"))).toISOString() : sc.lastUpdatedAt) } : {}),
     };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * ConfirmTkt fallback (23 Sep 2026, user: "API fallback pe railyatri, confirmtkt,
+ * erail, wikipedia se live data aana chahiye"): RailYatri SA khaali jaye (jaise
+ * 18309 SBP JAT — jo asal me TRAIN CANCELLED hai, ya 64551 MEMU jiski koi seat
+ * row nahi) to ConfirmTkt ka route board dekho — ek call me poore route ke saare
+ * trains × classes ka IRCTC board (AVL/WL/RAC/Regret/Cancelled + fare + confirm%).
+ */
+async function confirmTktAvailability(
+  trainNumber: string,
+  date: string,
+  from: string,
+  to: string,
+  classCode: ClassCode,
+): Promise<ClassAvailability | null> {
+  try {
+    const classes = await confirmTktTrainClasses(trainNumber, from, to, date);
+    if (!classes) return null;
+    const row = classes.find((c) => c.code === classCode);
+    if (!row || row.status === "UNKNOWN") return null;
+    return row;
   } catch {
     return null;
   }
@@ -1067,18 +1095,47 @@ export async function routedClassBoard(
      * Discover the train's classes from the erail fare page (web, cached 12h)
      * so the railyatri/railradar seat probe can run. */
     if (!codes.length) codes = await webTrainClasses(trainNumber);
+    /* 23 Sep 2026 (user: chat/list me seats nahi aa rahi, cards me aa rahi):
+     * erail classes bhi khaali (MEMU/passenger trains) → ConfirmTkt route board
+     * se ek hi call me train ke classes + status + fare (AVL/WL/RAC/Regret/Cancelled).
+     * Ye wahi source hai jo cards jaisa poora board deta hai — aur "TRAIN CANCELLED"
+     * ka sach bhi (18309 SBP JAT 24 Sep). */
+    if (!codes.length) {
+      const ctOnly = await confirmTktTrainClasses(trainNumber, from, to, date).catch(() => null);
+      if (ctOnly && ctOnly.length) {
+        logServed("web_confirmtkt", "classBoard", started, true, "no_classes_anywhere → confirmtkt board");
+        return { classes: ctOnly, provider: "web_confirmtkt" };
+      }
+    }
     if (codes.length) {
       addChecks(codes.length);
-      const classes = await Promise.all(
+      const probed = await Promise.all(
         codes.map((code) => provider.getAvailability(trainNumber, date, from, to, code, quota)),
       );
+      /* Jo class probe me UNKNOWN rah gayi, usko ConfirmTkt board se bharo
+       * (ek call) — par kisi probed row ko kabhi overwrite nahi karte. */
+      let classes = probed;
+      let usedCt = false;
+      if (probed.some((c) => c.status === "UNKNOWN")) {
+        const ct = await confirmTktTrainClasses(trainNumber, from, to, date).catch(() => null);
+        if (ct && ct.length) {
+          const byCode = new Map(ct.map((c) => [c.code, c] as const));
+          classes = probed.map((c) => {
+            if (c.status !== "UNKNOWN") return c;
+            const fill = byCode.get(c.code);
+            if (!fill || fill.status === "UNKNOWN") return c;
+            usedCt = true;
+            return fill;
+          });
+        }
+      }
       const ok = classes.some((c) => c.status !== "UNKNOWN");
       const known = classes.filter((c) => c.status !== "UNKNOWN");
-      const viaWeb = ok && known.every((c) => c.source === "web_railyatri");
+      const viaWeb = ok && !usedCt && known.every((c) => c.source === "web_railyatri");
       /* Round-16o: extra-API rows (railradar/indianrailapi) ka label bhi sahi. */
-      const viaExtra = ok && !viaWeb && known.every((c) => c.source === "railradar" || c.source === "indianrailapi") ? (known[0].source as ServedProvider) : null;
-      const label: ServedProvider = viaWeb ? "web_railyatri" : viaExtra ? viaExtra : ok ? "railcore" : "none";
-      logServed(label, "classBoard", started, ok);
+      const viaExtra = ok && !usedCt && !viaWeb && known.every((c) => c.source === "railradar" || c.source === "indianrailapi") ? (known[0].source as ServedProvider) : null;
+      const label: ServedProvider = usedCt ? "web_confirmtkt" : viaWeb ? "web_railyatri" : viaExtra ? viaExtra : ok ? "railcore" : "none";
+      logServed(label, "classBoard", started, ok, usedCt ? "confirmtkt ne UNKNOWN rows bhari" : undefined);
       return { classes, provider: label };
     }
     const fb = await railkitClassBoard(trainNumber, date, from, to, quota);
@@ -1087,6 +1144,38 @@ export async function routedClassBoard(
   }
   const classes = await railkitClassBoard(trainNumber, date, from, to, quota);
   return { classes, provider: "railkit" };
+}
+
+/**
+ * Route-level live seat board (23 Sep 2026) — EK call me poore route ke saare
+ * trains × classes (ConfirmTkt board). App/list isse ek hi request me saari
+ * "Seat data provider se nahi aayi" rows bhar sakti hai (per-train probe ki
+ * kismat par nirbhar nahi).
+ */
+export async function routedRouteBoard(
+  from: string,
+  to: string,
+  date: string,
+): Promise<{ trains: { trainNumber: string; trainName: string; classes: ClassAvailability[] }[]; at: number; provider: ServedProvider } | null> {
+  const started = Date.now();
+  const board = await confirmTktRouteBoard(from, to, date);
+  if (!board || !board.trains.length) {
+    logServed("none", "routeBoard", started, false, "confirmtkt_empty");
+    return null;
+  }
+  logServed("web_confirmtkt", "routeBoard", started, true);
+  return {
+    at: board.at,
+    provider: "web_confirmtkt",
+    trains: board.trains.map((t) => ({ trainNumber: t.trainNumber, trainName: t.trainName, classes: t.classes })),
+  };
+}
+
+/** Train ke facts (Wikipedia) — provider chain ke baad, facts-only reference. */
+export async function routedTrainFacts(trainNumber: string): Promise<WikiTrainFacts | null> {
+  const facts = await wikipediaTrainFacts(trainNumber).catch(() => null);
+  if (facts) logServed("web_wikipedia", "trainFacts", Date.now(), true);
+  return facts;
 }
 
 function stopIndex(stops: { code: string }[], code: string): number {
@@ -1387,6 +1476,11 @@ export class FallbackRailwayProvider implements RailwayProvider {
         return ry;
       }
       /* Round-7: erail.in se fare to nikaal lo. */
+      const ctNoKit = await confirmTktAvailability(trainNumber, date, from, to, classCode);
+      if (ctNoKit) {
+        logServed("web_confirmtkt", "availability", started, true, "railyatri_empty → confirmtkt board");
+        return ctNoKit;
+      }
       const webFareNoKit = await erailFareForClass(trainNumber, classCode, quotaCode, from, to);
       if (webFareNoKit != null) {
         logServed("web_erail", "availability", started, false, "fare_only_no_seats");
@@ -1412,6 +1506,12 @@ export class FallbackRailwayProvider implements RailwayProvider {
     if (ry) {
       logServed("web_railyatri", "availability", started, true, "railcore+railkit_failed → web-scrape");
       return ry;
+    }
+    /* 23 Sep 2026: confirmtkt route board — ek call, poora route, cancelled/regret/WL bhi. */
+    const ctBoard = await confirmTktAvailability(trainNumber, date, from, to, classCode);
+    if (ctBoard) {
+      logServed("web_confirmtkt", "availability", started, true, "railcore+kit+railyatri_failed → confirmtkt board");
+      return ctBoard;
     }
     /* Round-7: erail.in se class-ka fare to nikaal lo — fare-only row. */
     const webFare = await erailFareForClass(trainNumber, classCode, quotaCode, from, to);

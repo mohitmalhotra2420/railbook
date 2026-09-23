@@ -40,7 +40,7 @@ export interface AgentRouteLeg {
   /** Round-18m-3: is leg ke segment ki seat (provider-proven) — null = data nahi. */
   availability?: { classCode: string; status: string; seats: number | null; rac: number | null; waitlist: number | null; fare: number | null; source: string; stale?: boolean; asOf?: string | null; betterWl?: boolean; directWaitlist?: number | null } | null;
   /** Round-18m-7: is leg par har class jisme seat hai (AVL/RAC). */
-  classOptions?: { classCode: string; status: string; seats: number | null; rac: number | null; waitlist: number | null; fare: number | null; source: string; stale?: boolean; asOf?: string | null; betterWl?: boolean; directWaitlist?: number | null }[];
+  classOptions?: { classCode: string; status: string; seats: number | null; rac: number | null; waitlist: number | null; fare: number | null; source: string; stale?: boolean; asOf?: string | null; betterWl?: boolean; directWaitlist?: number | null; note?: string | null }[];
   /** Round-18m-18: ConfirmTkt-trick on a connecting leg — ticket from train origin / upto 1-2 stops beyond. */
   ticketFrom?: string | null;
   ticketFromName?: string | null;
@@ -64,7 +64,7 @@ export interface AgentRouteOption {
   legs: AgentRouteLeg[];
   layoverMinutes: number | null;
   classes: string[];
-  availability: { classCode: string; status: string; seats: number | null; rac: number | null; waitlist: number | null; fare: number | null; source: string; stale?: boolean; asOf?: string | null; betterWl?: boolean; directWaitlist?: number | null } | null;
+  availability: { classCode: string; status: string; seats: number | null; rac: number | null; waitlist: number | null; fare: number | null; source: string; stale?: boolean; asOf?: string | null; betterWl?: boolean; directWaitlist?: number | null; note?: string | null } | null;
   /** Round-18m-12: full class board (every class probed) for this train — RAC/WL rows included. */
   classOptions?: { classCode: string; status: string; seats: number | null; rac: number | null; waitlist: number | null; fare: number | null; source: string; stale?: boolean; asOf?: string | null; betterWl?: boolean; directWaitlist?: number | null }[];
   probed?: boolean;

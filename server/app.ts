@@ -21,7 +21,9 @@ import {
   routedLiveStatus,
   routedPnr,
   routedSchedule,
+  routedRouteBoard,
   routedStationSearch,
+  routedTrainFacts,
   routedTrainHistory,
 } from "./railway/router.js";
 import { BERTH_OPTIONS, isBookable, type ClassCode } from "./providers/types.js";
@@ -673,30 +675,43 @@ export function createApp() {
       const to = String(req.query.to ?? "");
       const rawClass = String(req.query.classCode ?? "").trim();
       const quota = String(req.query.quota ?? "GN").trim() || "GN";
+      /* 23 Sep 2026 (user: "chat/list me seats nahi aa rahi, cards me aa rahi"):
+       * ROUTE-LEVEL board — trainNumber ke bina from+to+date do to ek hi call me
+       * poore route ke saare trains × classes (ConfirmTkt board: AVL/WL/RAC/
+       * Regret/Cancelled + fare + confirm%). App/list isse saari stuck rows
+       * ek request me bhar sakti hai. */
+      if (!trainNumber.trim() && from && to && date) {
+        const board = await routedRouteBoard(from, to, date);
+        res.json(
+          board
+            ? { trains: board.trains, source: board.provider, at: new Date(board.at).toISOString() }
+            : { trains: [], source: "none" },
+        );
+        return;
+      }
       if (!rawClass) {
         const hintClasses = String(req.query.classes ?? "")
           .split(",")
           .map((c) => c.trim().toUpperCase())
           .filter(Boolean);
         if (railcoreIsPrimary()) {
-          const board = await routedClassBoard(trainNumber, date, from, to, quota, hintClasses);
+          const board = await routedClassBoard(trainNumber, date, from, to, quota, hintClasses).catch(() => ({
+            classes: [] as never[],
+            provider: "none" as const,
+          }));
+          /* Honest empty: 200 + khaali board (row retry karti rahe, error na dikhe). */
           res.json({ classes: board.classes, source: board.provider });
           return;
         }
         const p = getProvider();
-        const classes = p.id === "railkit" ? await loadClassBoard(trainNumber, date, from, to, quota) : [];
+        const classes = p.id === "railkit" ? await loadClassBoard(trainNumber, date, from, to, quota).catch(() => []) : [];
         res.json({ classes, source: p.id });
         return;
       }
       const klass = classCode.parse(rawClass);
-      const row = await getProvider().getAvailability(
-        trainNumber,
-        date,
-        from,
-        to,
-        klass,
-        quota,
-      );
+      const row = await getProvider()
+        .getAvailability(trainNumber, date, from, to, klass, quota)
+        .catch(() => ({ code: klass, label: klass, status: "UNKNOWN" as const, fare: 0 }));
       res.json({ availability: row, bookable: isBookable(row.status) });
     } catch (err) {
       next(err);
@@ -824,6 +839,18 @@ export function createApp() {
   /* Round-16: booking-critical web fallbacks ka prod-side reachability probe.
    * Har source ko actual scraper function se hit karta hai (same headers,
    * same parser) taaki "Render ke IP se chalta hai ya nahi" ka pakka jawab mile. */
+  /* 23 Sep 2026: train facts (Wikipedia) — provider chain ke baad last-resort
+   * reference. Koi seat/fare ka dawa nahi, sirf verified page summary. */
+  app.get("/api/trains/:number/facts", async (req, res, next) => {
+    try {
+      const number = String(req.params.number ?? "").trim();
+      const facts = await routedTrainFacts(number);
+      res.json({ trainNumber: number, facts: facts ?? null, source: facts ? "web_wikipedia" : "none" });
+    } catch (err) {
+      next(err);
+    }
+  });
+
   app.get("/api/debug/web-fallback-health", async (req, res) => {
     const ws = await import("./railway/webscrape.js");
     const train = String(req.query.train ?? "12014");

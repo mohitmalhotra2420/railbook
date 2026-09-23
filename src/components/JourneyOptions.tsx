@@ -8,7 +8,7 @@
  *
  * Koi client-side ranking/guess nahi — jo plan mein nahi hai wo dikhta nahi.
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { AgentConnection, AgentJourneyPlan, AgentRouteLeg, AgentRouteOption } from "../ai/agent";
 import type { JSX, ReactNode } from "react";
 import { addDays, formatShortDate, inr } from "../format";
@@ -33,6 +33,11 @@ function availTextOf(a: AvailLike | null | undefined): { text: string; tone: Ton
   if (!a) return { text: "Seat data nahi", tone: "muted" };
   const st = a.stale ? " ⚠ stale" : "";
   const tone = (fresh: Tone): Tone => (a.stale ? "stale" : fresh);
+  /* 23 Sep 2026: ConfirmTkt board ka honest note — "Train Cancelled" / "Train Departed".
+   * Pehle ye rows sirf "Not available" dikhati thin (list me "seat data nahi aayi"). */
+  const note = (a as { note?: string | null }).note;
+  if (note && /cancel/i.test(note)) return { text: `${a.classCode} Train Cancelled`, tone: tone("bad") };
+  if (note && /departed/i.test(note)) return { text: `${a.classCode} Departed`, tone: tone("bad") };
   if (a.status === "AVAILABLE") return { text: `${a.classCode} AVL${a.seats != null ? ` ${a.seats}` : ""}${st}`, tone: tone("ok") };
   /* Round-18m-22 (user): RAC = available ki tarah (chart ke baad confirm) → green; label RAC N hi rehta hai. */
   if (a.status === "RAC") return { text: `${a.classCode} RAC${a.rac != null ? ` ${a.rac}` : ""}${st}`, tone: tone("ok") };
@@ -350,6 +355,46 @@ export function JourneyOptions({
 }) {
   const [tab, setTab] = useState<Tab | null>(null);
   const [whyOpen, setWhyOpen] = useState(true);
+  /* ── 23 Sep 2026 (user: "chat screen me seats fetch nahi ho rahi, card me ho rahi") ──
+   * Seat-board ki jo rows plan-time probe me reh gayi (""Seat data provider se nahi aayi""),
+   * unke liye ek hi ROUTE-LEVEL call (from+to+date → ConfirmTkt board: saare trains ×
+   * classes). Cards (TrainBoard) apna fresh probe karte hain; ab list bhi wahi data
+   * dikhati hai — per-train probe ki kismat par nirbhar nahi. Jo row pehle se probed
+   * hai usko ye kabhi overwrite nahi karta. */
+  const [liveRows, setLiveRows] = useState<Record<string, AvailLike[]>>({});
+  const needKey = (plan.routeOptions ?? [])
+    .filter((o) => !(o.classOptions && o.classOptions.length) && !liveRows[o.trainNumbers[0]])
+    .map((o) => o.trainNumbers[0])
+    .join(",");
+  useEffect(() => {
+    let alive = true;
+    const rows = plan.routeOptions ?? [];
+    const need = rows.filter((o) => !(o.classOptions && o.classOptions.length) && !liveRows[o.trainNumbers[0]]).map((o) => o.trainNumbers[0]);
+    if (!need.length || !plan.query.date) return () => { alive = false; };
+    (async () => {
+      try {
+        const res = await fetch(
+          `/api/availability?from=${encodeURIComponent(plan.query.from)}&to=${encodeURIComponent(plan.query.to)}&date=${encodeURIComponent(plan.query.date)}`,
+          { headers: { accept: "application/json" } },
+        );
+        if (!res.ok) return;
+        const j = (await res.json()) as { trains?: { trainNumber?: string; classes?: AvailLike[] }[] };
+        const trains = Array.isArray(j?.trains) ? j.trains : [];
+        const next: Record<string, AvailLike[]> = {};
+        for (const t of trains) {
+          const no = String(t?.trainNumber ?? "");
+          if (!no || !need.includes(no)) continue;
+          const cls = Array.isArray(t?.classes) ? (t!.classes as AvailLike[]) : [];
+          if (cls.length) next[no] = cls;
+        }
+        if (alive && Object.keys(next).length) setLiveRows((prev) => ({ ...prev, ...next }));
+      } catch {
+        /* honest: fill na ho to row jaisi thi waisi (koi guess nahi) */
+      }
+    })();
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [needKey, plan.query.from, plan.query.to, plan.query.date]);
   const best = plan.best;
   const direct = plan.routeOptions.filter((o) => o.changes === 0);
   const connections = plan.connections.length ? plan.connections : plan.recovery?.connecting ?? [];
@@ -412,8 +457,9 @@ export function JourneyOptions({
   /* Round-18m-12 (user: "har train × har class check ho, RAC bhi dikhe"): seat-check
    * audit list — HAR direct train ka poora class board (AVL/RAC/WL/N-A, stale ⚠), aur
    * jo train probe nahi hui usko saaf "seat data nahi aayi" — "seat nahi" nahi. */
-  const probedDirect = direct.filter((o) => o.probed);
-  const unprobedDirect = direct.filter((o) => !o.probed);
+  const rowsFor = (o: AgentRouteOption): AvailLike[] => liveRows[o.trainNumbers[0]] ?? (o.classOptions ?? []);
+  const probedDirect = direct.filter((o) => (rowsFor(o).length > 0 ? true : o.probed));
+  const unprobedDirect = direct.filter((o) => rowsFor(o).length === 0 && !o.probed);
   /* Round-18m-30f: AI ne direct nahi chuna (sab WL) → board default collapsed, ek-line summary; tap = poora board. */
   const recKind = plan.decision?.recommended?.kind ?? (bfeHero ? "bfe" : best && best.changes > 0 ? "connecting" : "direct");
   const [boardOpen, setBoardOpen] = useState<boolean>(() => recKind === "direct" && !plan.directUnavailable);
@@ -423,7 +469,7 @@ export function JourneyOptions({
       {boardOpen && [...direct].sort((a, b) => (a.departure ?? "").localeCompare(b.departure ?? "")).map((o) => (
         <div key={o.trainNumbers[0]} className="jx-sb-row">
           <button type="button" className="jx-sb-head" onClick={pick ? () => pick(o) : undefined}><span className="jx-no">{o.trainNumbers[0]}</span> <span className="jx-name">{o.trainNames[0]}</span> <span className="jx-sub">{o.departure}→{o.arrival}{dateTag(baseDate, o.arrivalDayOffset)} · {o.durationLabel ?? ""}</span>{aiRec?.kind === "direct" && aiRec.trainNumbers[0] === o.trainNumbers[0] && <span className="jx-sb-pick">{IC.star} AI pick</span>}</button>
-          {o.classOptions && o.classOptions.length ? <ClassRow label="" rows={o.classOptions} onPick={onPickClass ? (r) => onPickClass({ trainNumber: o.trainNumbers[0], classCode: r.classCode, from: o.origin, to: o.destination }) : undefined} /> : <button type="button" className="jx-sub jx-linkbtn" onClick={onPickClass ? () => onPickClass({ trainNumber: o.trainNumbers[0], classCode: "", from: o.origin, to: o.destination }) : undefined}>{o.probed ? "Koi class data nahi" : "Seat data provider se nahi aayi"} · ↻ check karo</button>}
+          {rowsFor(o).length ? <ClassRow label="" rows={rowsFor(o)} onPick={onPickClass ? (r) => onPickClass({ trainNumber: o.trainNumbers[0], classCode: r.classCode, from: o.origin, to: o.destination }) : undefined} /> : <button type="button" className="jx-sub jx-linkbtn" onClick={onPickClass ? () => onPickClass({ trainNumber: o.trainNumbers[0], classCode: "", from: o.origin, to: o.destination }) : undefined}>{o.probed ? "Koi class data nahi" : "Seat data provider se nahi aayi"} · ↻ check karo</button>}
           {/* Round-18m-30 (user rule): jo class boarding se WL/N-A thi, usi train mein train-origin se / destination
               ke aage tak ticket par seat — har row = book-from → book-upto, passenger apne hi stations par. */}
           {(o.earlierStopOptions ?? []).map((b) => (
@@ -562,7 +608,7 @@ export function JourneyOptions({
           <div className="jx-hero-train">
             <span className="jx-no jx-no-lg">{heroDirect.trainNumbers.join(" + ")}</span>
             <span className="jx-name jx-name-lg">{heroDirect.changes > 0 ? `via ${heroDirect.legs[0]?.toName ?? heroDirect.legs[0]?.to ?? ""}` : heroDirect.trainNames[0]}</span>
-            {heroDirect.changes > 0 ? <span className="jx-cchip jx-cchip-ok jx-cchip-lg">Dono legs seat ✓</span> : <SeatPill a={heroDirect.availability} size="lg" />}
+            {heroDirect.changes > 0 ? <span className="jx-cchip jx-cchip-ok jx-cchip-lg">Dono legs seat ✓</span> : <SeatPill a={heroDirect.availability ?? rowsFor(heroDirect)[0] ?? null} size="lg" />}
           </div>
           {heroDirect.changes > 0 && heroDirect.legs.length > 1 ? (
             <ConnCard c={{ station: heroDirect.legs[0].to, stationName: heroDirect.legs[0].toName ?? null, legs: heroDirect.legs, layoverMinutes: heroDirect.layoverMinutes ?? 0, totalDurationMinutes: heroDirect.durationMinutes, valid: true } as unknown as AgentConnection} baseDate={baseDate} onPickLeg={pickLeg} />
