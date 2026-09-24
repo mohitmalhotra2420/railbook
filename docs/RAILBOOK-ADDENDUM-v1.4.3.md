@@ -92,3 +92,59 @@ Agar model jawab na de aur seat intent ho → deterministic seat reply (`source:
 
 ### "ConfirmTkt seconds me kaise?" (user sawaal)
 ConfirmTkt apna **data pipeline cache** rakhta hai (unke paas apna scraping/DB layer hai) + parallel queries, isliye instant lagta hai. Hum **live providers** (railyatri / ConfirmTkt web / erail) se per-train data laate hain — isliye kabhi provider busy hone par slow/empty milta hai (jaise screenshot 1 me). Isi liye humne retry + honest "board nahi aayi" state + per-train fallback add kiya — **jhooth nahi, dheema sahi**.
+
+---
+
+## 8. Round-17 — AI khud seat/filter ka sawaal handle karta hai (naya tool `findSeats`) — commit `6bbf2a8`, deploy `dep-daql08m7bikc73fr3dg0` **LIVE**
+
+User brief: *"Haan yeh kro do not specific to 2A, user kuch bhi pooch sakta hai"* — matlab sawaal **2A tak seemit nahi**; AI khud samjhe, khud decide kare kaunsa tool chalana hai, aur **live** data se poora jawab de. Kuch bhi fake nahi.
+
+### 8.1 Naya tool (ek hi naya hissa)
+
+`server/agent/seatFinderTool.ts` → **`runFindSeatsTool(...)`**
+
+| Input | Values | Note |
+|---|---|---|
+| `from`, `to`, `date` | station code / name, `YYYY-MM-DD` | `stationCode()` se normalize |
+| `class_code` | `2A`/`3A`/`1A`/`3E`/`CC`/`EC`/`SL`/`2S`, `AC`, `ALL` | `classesFromArg()`: `AC` → 1A/2A/3A/3E/CC/EC, `ALL` → saari |
+| `only_available` | bool | WL rows alag rakhta hai (`wlRows`) |
+| `depart_after` | `"17:00"`, `"5 baje ke baad"`, `"raat 9 ke baad"` | `minutesFromArg()` → departure-minute filter |
+| `sort_by` | `cheapest` / `fastest` | — |
+| `train_numbers` | `["12029"]` | specific train ke sawaal |
+| `quota`, `passengers` | optional | — |
+
+Output: `{ ok, source, summary, data { from, to, date, classCodes, onlyAvailable, rows, wlRows, missingClass, unknownTime, summary } }`.
+
+**Data kahan se (koi naya source nahi):** maujooda **routedRouteBoard + routedClassBoard** (wahi endpoints jo Seat Finder/TrainBoard use karte hain) — 6 trains batch me, 25s budget, per-train fallback.
+
+### 8.2 AI ise kaise use karta hai
+
+- Tool dono engines me register: `agentic.ts` (`FIND_SEATS` + ArgSchema + executor) aur `autonomous.ts`/`autoTools.ts` (`findSeats`; `case "findSeats"`).
+- Dono **system prompts me "SEAT RULE"**: seat/class/filter ka sawaal aaya → **pehle tool, phir jawab**; apni yaad se seat kabhi nahi; WL par confirm% kabhi nahi; 3-5 trains.
+- **Duplicate jawab band:** AI ne khud `findSeats` chalaya aur clean jawab likha → server wali deterministic seat line **attach nahi** hoti (`app.ts` ~L278, `autonomous.ts` ~L1027). Pehle dono aate to 2 jawab dikhte.
+
+### 8.3 Live proof (`railbook-gegs.onrender.com`, build `6bbf2a8`, 24 Sep)
+
+| Sawaal (LDH → BEAS, 25 Sep 2026) | AI ka tool | Time | Jawab (asli) |
+|---|---|---|---|
+| 2A me kaunsi train me seat hai … kal | `FIND_SEATS` | 22.5s | `14719 BKN ASR EXP · 2A · AVAILABLE 84 seats · ₹725` + "23 trains check ki gayi, 2A me seat sirf 1 train me hai" |
+| AC trains dikhao | `FIND_SEATS` | 15.3s | 9 AC trains: `14719 3A 306 ₹520`, `12203 3A 220 ₹285`, `12029 CC 86 ₹345` … |
+| sabse sasti seat wali | `FIND_SEATS` | 21.0s | `14679 2S 373 ₹65`, `12497 2S 80 ₹80`, `12053 2S 852 ₹90`, `14719 SL 287 ₹150` |
+| sirf confirmed seat wali | `FIND_SEATS` | 20.6s | Sirf AVAILABLE list (`12053 2S 852 ₹90` …), WL hataayi |
+| raat 9 baje ke baad ki trains me seat | `FIND_SEATS` | 12.5s | Saaf "koi bhi train me seat available nahi" (21:00+) — **jhooth nahi** |
+| 2A me WL kitni hai | `FIND_SEATS` | 34.0s | Available + WL dono: `14719 2A AVL 84 ₹725`, `18103 WL 1 ₹725`, `12483 WL 5 ₹770` — WL par **koi confirm% nahi** |
+| 12029 me CC seat hai kya | `FIND_SEATS` + `CHECK_AVAILABILITY` | 179.5s* | `12029 CC WL 1 ₹415` (railyatri/IRCTC data) + alternative `12497 CC AVL 28 ₹320` |
+| AUTO mode (`/api/agent/auto`) 2A sawaal | khud chune: search + per-train availability | 19.5s | Wahi asli jawab, `toolsUsed` me AI ke apne calls |
+
+\* Ye ek case **180s** le gaya — us waqt railway API down thi, isliye scraper fallback (railyatri/ConfirmTkt web) chala. Data sahi, sirf slow. Baaki sawaal **12.5–34s** me.
+
+### 8.4 Jo **nahi** chhua (user condition — binding)
+
+AI ka search karne ka tareeka, tools-aur-API calling ka way, alternatives + connecting journeys ka poora logic — **jaisa tha waisa hi**. Sirf **ek naya tool** + prompt rule + duplicate-line suppression add hua; koi purana endpoint/logic/filter nahi badla.
+
+### 8.5 Tests / deploy
+
+- Naye tests: `tests/find-seats-tool.test.ts` (11) — tool registry dono engines me, `classesFromArg`/`minutesFromArg`, AC = 1A/2A/3A/3E/CC/EC, WL par confirm% nahi, per-train board fallback. `tests/agentic-toolcalling.test.ts` list 23 → **24 tools**.
+- Kul: **91 files / 939 tests PASS**; `npm run build` clean.
+- Deploy: `dep-daql08m7bikc73fr3dg0` @ `6bbf2a8`. Pehla deploy "live" hua par `/api/version` **purana commit** dikha raha tha (stale build) → **clear-cache redeploy** ke baad `6bbf2a8` confirm.
+- APK: **v1.4.3 hi chalega** — app WebView me live site kholta hai, isliye ye sab app me apne aap aa gaya. Naya APK chahiye to v1.4.4 bump kar denge.
