@@ -2070,3 +2070,43 @@ table.traintable {
 @keyframes jxPageIn{from{opacity:.4;transform:translateY(8px)}to{opacity:1;transform:none}}
 .jx-page .jx-sec{margin-bottom:10px}
 .jx-page .jx-sec-title{font-size:15px}
+
+/* ── 24 Sep 2026 (user screenshot): audit line collapse + verdict collapse +
+ * "Alternative trains / Connecting Leg1-Leg2" cards ko designful highlight ─────────── */
+.jx-audit-wrap{margin:8px 0 4px;background:#fff;border:1px solid #e3ded4;border-radius:12px;overflow:hidden}
+.jx-audit-sum{display:flex;align-items:center;gap:6px;flex-wrap:wrap;cursor:pointer;list-style:none;padding:9px 11px;font-size:12px;font-weight:700;color:#5b6b7f}
+.jx-audit-sum::-webkit-details-marker{display:none}
+.jx-audit-sum .jx-caret{margin-left:auto}
+.jx-audit-wrap[open] .jx-audit-sum{border-bottom:1px dashed #e3ded4;color:#0b3b66}
+.jx-audit-wrap[open] .jx-caret{transform:rotate(90deg)}
+.jx-audit-wrap .jx-audit{border:0;background:#fbfcfd;margin:0}
+.jx-verdict-more{list-style:none}
+.jx-verdict-more::-webkit-details-marker{display:none}
+.jx-verdict-more>summary{cursor:pointer;display:block}
+.jx-readmore{display:inline-block;margin-left:6px;font-size:12px;font-weight:800;color:#0b3b66;text-decoration:underline;text-underline-offset:2px}
+.jx-verdict-full{margin-top:6px;padding-top:6px;border-top:1px dashed #dbe4ee;line-height:1.55}
+.jx-sb-rowhead{display:flex;align-items:center;gap:6px}
+.jx-sb-rowhead .jx-sb-toggle{flex:1}
+.jx-sb-pagechip{flex:none;display:inline-flex;align-items:center;gap:3px;border:1.5px solid #cbd5e1;background:#fff;color:#0b3b66;border-radius:9px;padding:6px 9px;font:inherit;font-size:11.5px;font-weight:800;cursor:pointer}
+.jx-sb-pagechip:active{background:#eef2f7}
+
+/* highlighted option cards: Alternative = amber, Connecting = indigo/teal */
+.jx-pagecard{position:relative;overflow:hidden}
+.jx-pagecard-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.jx-pagecard-badge{font-size:11px;font-weight:800;border-radius:999px;padding:2px 8px}
+.jx-pagecard-sub2{font-size:11.5px;color:#7b8a9c;font-weight:600}
+.jx-pagecard-go{font-size:12.5px;font-weight:900;white-space:nowrap}
+
+.jx-pagecard-alt{border-color:#f5d08a;background:linear-gradient(135deg,#fffaef 0%,#fff6e2 60%,#fffdf8 100%);box-shadow:0 2px 12px rgba(217,119,6,.13)}
+.jx-pagecard-alt::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:linear-gradient(180deg,#f59e0b,#b45309)}
+.jx-pagecard-alt .jx-pagecard-ic{background:#fde8bf;color:#92400e}
+.jx-pagecard-alt .jx-pagecard-txt strong{color:#7c2d12;font-size:15.5px}
+.jx-pagecard-alt .jx-pagecard-badge{background:#f59e0b;color:#3b1d05}
+.jx-pagecard-alt .jx-pagecard-go{color:#b45309}
+
+.jx-pagecard-connect{border-color:#a7c7f0;background:linear-gradient(135deg,#f3f8ff 0%,#eaf2fd 60%,#fbfdff 100%);box-shadow:0 2px 12px rgba(29,78,216,.13)}
+.jx-pagecard-connect::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:linear-gradient(180deg,#2563eb,#0b3b66)}
+.jx-pagecard-connect .jx-pagecard-ic{background:#d9e6fb;color:#0b3b66}
+.jx-pagecard-connect .jx-pagecard-txt strong{color:#0b3b66;font-size:15.5px}
+.jx-pagecard-connect .jx-pagecard-badge{background:#2563eb;color:#fff}
+.jx-pagecard-connect .jx-pagecard-go{color:#1d4ed8}

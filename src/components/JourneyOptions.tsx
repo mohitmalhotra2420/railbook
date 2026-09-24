@@ -546,7 +546,11 @@ export function JourneyOptions({
   const [page, setPage] = useState<"direct" | "alt" | "connect" | null>(initialPage ?? null);
   const seatBoard = direct.length > 0 && (
     <Section ic={IC.train} title={`Direct trains ${plan.query.from}→${plan.query.to}`} badge={`${probedDirect.length}/${direct.length} seat-checked`} foot={unprobedDirect.length ? `${unprobedDirect.map((o) => o.trainNumbers[0]).join(", ")}: seat data provider se nahi aayi — inhe "seat nahi" nahi maana; Refresh seats se dobara check karo.` : "Har direct train ki har class ka status upar hai — RAC bhi booking option hai (berth chart ke baad)."}>
-      <button type="button" className="jx-why-head" onClick={() => setBoardOpen((v) => !v)}>{boardOpen ? "Hide" : "Show"} {direct.length} trains · har class ka seat status{!boardOpen && plan.directUnavailable ? " · sab WL/N-A" : ""} <span className={`jx-caret${boardOpen ? " open" : ""}`} /></button>
+      <div className="jx-sb-rowhead">
+        <button type="button" className="jx-why-head jx-sb-toggle" onClick={() => setBoardOpen((v) => !v)}>{boardOpen ? "Hide" : "Show"} {direct.length} trains · har class ka seat status{!boardOpen && plan.directUnavailable ? " · sab WL/N-A" : ""} <span className={`jx-caret${boardOpen ? " open" : ""}`} /></button>
+        {/* Direct trains ka apna page — entry yahi (neeche duplicate card nahi). */}
+        <button type="button" className="jx-sb-pagechip" onClick={() => setPage("direct")}>Poora page {IC.chev}</button>
+      </div>
       {boardOpen && (showAllTrains ? [...direct] : [...direct].slice(0, 5)).sort((a, b) => (a.departure ?? "").localeCompare(b.departure ?? "")).map((o) => (
         <div key={o.trainNumbers[0]} className="jx-sb-row">
           <button type="button" className="jx-sb-head" onClick={pick ? () => pick(o) : undefined}><span className="jx-no">{o.trainNumbers[0]}</span> <span className="jx-name">{o.trainNames[0]}</span> <span className="jx-sub">{o.departure}→{o.arrival}{dateTag(baseDate, o.arrivalDayOffset)} · {o.durationLabel ?? ""}</span>{aiRec?.kind === "direct" && aiRec.trainNumbers[0] === o.trainNumbers[0] && <span className="jx-sb-pick">{IC.star} AI pick</span>}</button>
@@ -744,20 +748,62 @@ export function JourneyOptions({
         </div>
       )}
       {plan.conflicts && plan.conflicts.length > 0 && <div className="jx-alert">{plan.conflicts[0].message}</div>}
+      {/* 24 Sep 2026 (user screenshot 02:02 — wo "Checked: 10/10 direct trains · Leg-1 … every class"
+          line chat me deewar jaisi lag rahi thi): ab ye DETAILS me chhupi hai — ek chhoti line
+          "Kaise check kiya?" tap karne par poori transparency khulti hai. */}
       {plan.audit && (plan.audit.directProbed > 0 || plan.audit.bfeStopsChecked > 0 || plan.audit.connLeg1Checked > 0) && (
+        <details className="jx-audit-wrap">
+          <summary className="jx-audit-sum">
+            {IC.check} Kaise check kiya? · {plan.audit.directProbed}/{plan.audit.directTrains} direct trains
+            {plan.audit.connLeg1Checked > 0 ? `, ${plan.audit.connLeg1Checked + plan.audit.connLeg2Checked} connecting` : ""}
+            {plan.audit.bfeStopsChecked > 0 ? `, ${plan.audit.bfeStopsChecked} earlier-stop segments` : ""} — poora detail
+            <span className="jx-caret" />
+          </summary>
         <div className="jx-audit">
           <span className="jx-audit-k">{IC.check} Checked{plan.audit.passengers ? ` for ${plan.audit.passengers} pax` : ""}:</span>
           <span>{plan.audit.directProbed}/{plan.audit.directTrains} direct trains</span>
           <span>· {direct.reduce((n, o) => n + (o.classOptions?.length ?? 0), 0)} class rows</span>
           {plan.audit.bfeStopsChecked > 0 && <span>· Leg-1 (train origin → {plan.query.from}): {plan.audit.bfeTrains} trains × {plan.audit.bfeStopsChecked} earlier-stop segments, every class</span>}
           {plan.audit.connLeg1Checked > 0 && <span>· via {plan.audit.connHubs.join("/")}: leg-1 {plan.audit.connLeg1Checked} trains + leg-2 {plan.audit.connLeg2Checked} trains, every class (specials incl.)</span>}
-          {plan.audit.hubDecision && <span>· Change-over hubs {plan.audit.hubDecision.source === "ai" ? "AI ne chune" : "route se"}: {plan.audit.hubDecision.hubs.length ? plan.audit.hubDecision.hubs.join(", ") : "koi nahi (direct hi sahi)"}{plan.audit.hubDecision.reason ? ` — ${plan.audit.hubDecision.reason}` : ""}</span>}
+          {/* 24 Sep 2026 (user screenshot: "AI unavailable kyu aa rha?"): pehle yahan raw engine
+              reason chipak jata tha ("route-derived junctions (AI unavailable)") — user ko laga
+              kuch toot gaya. Ab saaf Hinglish: kya hua + kya asar padta hai (koi asar nahi). */}
+          {plan.audit.hubDecision && (() => {
+            const hd = plan.audit.hubDecision!;
+            const list = hd.hubs.length ? hd.hubs.join(", ") : "koi nahi (direct hi sahi)";
+            return hd.source === "ai"
+              ? <span>· Change-over hubs (AI ne chune): {list}{hd.reason ? ` — ${hd.reason}` : ""}</span>
+              : <span>· Change-over hubs (RailBook ne khud route ke junctions nikaale): {list} — AI se poochha tha par jawab time par nahi aaya (model provider aaj slow hai), isliye route ke real junctions use kiye; trains aur seats isse badalte nahi.</span>;
+          })()}
         </div>
+        </details>
       )}
 
-      {plan.decision?.verdict && (
-        <div className="jx-verdict"><span className="jx-why-ic">{IC.spark}</span><div><strong>{plan.decision.source === "ai" ? "AI ka faisla" : "RailBook ka faisla"}</strong><div>{plan.decision.verdict}</div><div className="jx-basis">Basis: pehle {plan.query.from} se poori party ke liye FRESH seat (AVL &gt; RAC), phir travel time, phir fare/class — same-train earlier-stop ticket bhi isi mein compare.</div></div></div>
-      )}
+      {plan.decision?.verdict && (() => {
+        /* 24 Sep 2026 (user screenshot): "Best plan: 20986 …" ka 6-line paragraph box chat me
+         * bhaari lag raha tha. Ab pehli 2 line dikhti hai, poori detail tap par (kx-verdict-more). */
+        const text = plan.decision!.verdict;
+        const words = text.split(/\s+/);
+        const long = words.length > 38;
+        const lead = long ? `${words.slice(0, 34).join(" ")}…` : text;
+        return (
+          <div className="jx-verdict">
+            <span className="jx-why-ic">{IC.spark}</span>
+            <div>
+              <strong>{plan.decision!.source === "ai" ? "AI ka faisla" : "RailBook ka faisla"}</strong>
+              {long ? (
+                <details className="jx-verdict-more">
+                  <summary>{lead} <span className="jx-readmore">Poora padho</span><span className="jx-caret" /></summary>
+                  <div className="jx-verdict-full">{text}</div>
+                </details>
+              ) : (
+                <div>{text}</div>
+              )}
+              <div className="jx-basis">Basis: pehle {plan.query.from} se poori party ke liye FRESH seat (AVL &gt; RAC), phir travel time, phir fare/class — same-train earlier-stop ticket bhi isi mein compare.</div>
+            </div>
+          </div>
+        );
+      })()}
       {plan.decision?.verifyFirst && (() => {
         const v = plan.decision!.verifyFirst!;
         const o = direct.find((x) => x.trainNumbers[0] === v.trainNumber);
@@ -880,52 +926,51 @@ export function JourneyOptions({
         <button type="button" className="jx-btn jx-btn-dark jx-btn-wide" onClick={onOpenBoard}>Sabhi trains dekho / book {IC.arrow}</button>
       )}
 
-      {/* ── Front ke OPTION CARDS (user 24 Sep: "front pe after direct train user ko alternative
-           train aur connecting trains ka option dena hai; click = fresh chat page") ────────── */}
-      <div className="jx-optcards">
-        <div className="jx-optcards-h">Aage ke options · tap = apna page</div>
-        {direct.length > 0 && (
-          <button type="button" className="jx-pagecard" onClick={() => setPage("direct")}>
-            <span className="jx-pagecard-ic">{IC.train}</span>
-            <span className="jx-pagecard-txt">
-              <strong>Direct trains · {direct.length} trains</strong>
-              <span className="jx-pagecard-sub">
-                {probedDirect.length}/{direct.length} seat-checked · {seatTrainCount > 0 ? `${seatTrainCount} trains me seat hai` : "kisi me confirmed seat nahi"} · poora class board
+      {/* ── Front ke OPTION CARDS (24 Sep 2026 user: "alternative trains header aur connecting
+           trains header ko designful/highlight karo, aur direct trains ka option dubara mat dikhao") ──
+           Direct ka apna page bhi hai, par uska entry-point upar direct section me chip se hai
+           (neeche duplicate card nahi). */}
+      {(hasAltPage || hasConnectPage) && (
+        <div className="jx-optcards">
+          <div className="jx-optcards-h">Aage kya dekh sakte ho?</div>
+          {hasAltPage && (
+            <button type="button" className="jx-pagecard jx-pagecard-alt" onClick={() => setPage("alt")}>
+              <span className="jx-pagecard-ic">{IC.swap}</span>
+              <span className="jx-pagecard-txt">
+                <span className="jx-pagecard-top">
+                  <strong>Alternative trains</strong>
+                  <span className="jx-pagecard-badge">{altCount} option{altCount > 1 ? "s" : ""}</span>
+                </span>
+                <span className="jx-pagecard-sub">
+                  {altBestOffer
+                    ? `Best: ${altBestOffer.trainNumbers[0]} ${altBestOffer.trainNames[0]} · ${availTextOf(seatOf(altBestOffer)).text.replace(" ⚠ stale", "")}${seatOf(altBestOffer)?.fare != null ? ` · ${inr(seatOf(altBestOffer)!.fare)}` : ""}`
+                    : "Same-train tricks, doosri trains, doosra station, doosri dates"}
+                </span>
+                <span className="jx-pagecard-sub2">Ticket tricks · doosri trains · doosra station · doosri dates</span>
               </span>
-            </span>
-            <span className="jx-pagecard-go">Dekho {IC.chev}</span>
-          </button>
-        )}
-        {hasAltPage && (
-          <button type="button" className="jx-pagecard" onClick={() => setPage("alt")}>
-            <span className="jx-pagecard-ic">{IC.swap}</span>
-            <span className="jx-pagecard-txt">
-              <strong>Alternative trains · {altCount} option{altCount > 1 ? "s" : ""}</strong>
-              <span className="jx-pagecard-sub">
-                {altBestOffer
-                  ? `Best: ${altBestOffer.trainNumbers[0]} ${altBestOffer.trainNames[0]} · ${availTextOf(seatOf(altBestOffer)).text.replace(" ⚠ stale", "")}${seatOf(altBestOffer)?.fare != null ? ` · ${inr(seatOf(altBestOffer)!.fare)}` : ""}`
-                  : "Same-train tricks, doosri trains, doosra station, doosri dates"}
+              <span className="jx-pagecard-go">Kholo {IC.chev}</span>
+            </button>
+          )}
+          {hasConnectPage && (
+            <button type="button" className="jx-pagecard jx-pagecard-connect" onClick={() => setPage("connect")}>
+              <span className="jx-pagecard-ic">{IC.link}</span>
+              <span className="jx-pagecard-txt">
+                <span className="jx-pagecard-top">
+                  <strong>Connecting trains · Leg 1 → Leg 2</strong>
+                  <span className="jx-pagecard-badge">{hubs.length ? `${hubs.length} hub${hubs.length > 1 ? "s" : ""}` : `${connections.length}`}</span>
+                </span>
+                <span className="jx-pagecard-sub">
+                  {hubs.length
+                    ? hubs.map((lp) => `${lp.hubName ?? lp.hub}: Leg 1 ${lp.leg1.length} + Leg 2 ${lp.leg2.length} trains me seat`).join(" · ")
+                    : `${connections.length} connecting option${connections.length > 1 ? "s" : ""} — dono legs me seat`}
+                </span>
+                <span className="jx-pagecard-sub2">{legsWithSeat.length > 0 ? "Dono legs bookable · do tickets" : "Leg-wise trains + seats"}</span>
               </span>
-            </span>
-            <span className="jx-pagecard-go">Dekho {IC.chev}</span>
-          </button>
-        )}
-        {hasConnectPage && (
-          <button type="button" className="jx-pagecard" onClick={() => setPage("connect")}>
-            <span className="jx-pagecard-ic">{IC.link}</span>
-            <span className="jx-pagecard-txt">
-              <strong>Connecting · Leg 1 → Leg 2 {hubs.length ? `· ${hubs.length} hub${hubs.length > 1 ? "s" : ""}` : ""}</strong>
-              <span className="jx-pagecard-sub">
-                {hubs.length
-                  ? hubs.map((lp) => `${lp.hubName ?? lp.hub}: Leg 1 ${lp.leg1.length} + Leg 2 ${lp.leg2.length} trains me seat`).join(" · ")
-                  : `${connections.length} connecting option${connections.length > 1 ? "s" : ""} — dono legs me seat`}
-                {legsWithSeat.length > 0 ? " · dono legs bookable" : ""}
-              </span>
-            </span>
-            <span className="jx-pagecard-go">Dekho {IC.chev}</span>
-          </button>
-        )}
-      </div>
+              <span className="jx-pagecard-go">Kholo {IC.chev}</span>
+            </button>
+          )}
+        </div>
+      )}
 
       {/* ── Explore ── */}
       {tabs.length > 0 && (
