@@ -33,6 +33,11 @@ import { isPastDate } from "./util.js";
 import { runUnderstand } from "./understand/index.js";
 import { runAgent } from "./agent/run.js";
 import { runAutonomousAgent } from "./agent/autonomous.js";
+/* 24 Sep 2026 (user: "12029 ki seat availability CC … AI ne nahi btayi"): app /api/agent chalta hai
+ * (agentic), jahan seat samajh nahi thi. Ye do import SIRF padhne + maujooda board filter karne ke liye
+ * hain — AI ka search/tools/API/planner ko chhua nahi gaya. */
+import { parseSeatIntent } from "./understand/seatIntent.js";
+import { seatFilterFor, seatSummaryLine, type SeatFilterResult } from "./agent/seatFilter.js";
 import { JOURNEY_CONFIG, findAlternativeTrains, findConnections, findPartialRouteSeats, findVacantSeats, planJourney } from "./journey/engine.js";
 import { pickTrains } from "./journey/trainpicker.js";
 import { publicCapabilityPayload } from "./providers/capabilities.js";
@@ -240,13 +245,61 @@ export function createApp() {
           : undefined,
       });
       progress("Preparing results");
+      /* ── 24 Sep 2026: seat intent (server-side) ─────────────────────────────────────────────
+       * User: "12029 ki seat availability CC …" par AI ne seat nahi batayi, aur "AC trains dikhao"
+       * par 2S/SL bhi aa gayi. Yahan sirf TEEN kaam hote hain:
+       *   1) bhasha padhna (parseSeatIntent — koi LLM/tool call nahi),
+       *   2) jo route-board abhi bana hai usi par filter (seatFilterFor — wahi routedRouteBoard),
+       *   3) jawab ke saath ek honest line lagana / provider fail par deterministic seat jawab.
+       * AI ka search karne ka way, tools calling, API calling, alternatives + connecting logic —
+       * sab waisa hi hai. Flag: SEAT_FILTER_SERVER (default ON).
+       */
+      let seatFilter: SeatFilterResult | null = null;
+      let seatClassCodes: string[] = [];
+      if (env.seatFilterServer) {
+        const slots = parseSeatIntent(String(body?.text ?? ""));
+        seatClassCodes = slots.classCodes;
+        const from = result.nlu?.from?.code ?? (body?.known as { from?: { code?: string } } | undefined)?.from?.code ?? null;
+        const to = result.nlu?.to?.code ?? (body?.known as { to?: { code?: string } } | undefined)?.to?.code ?? null;
+        const date = result.nlu?.date ?? (body?.known as { date?: string } | undefined)?.date ?? null;
+        if (slots.seatIntent && from && to && date && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
+          seatFilter = await seatFilterFor({ from, to, date, slots }).catch(() => null);
+        }
+        /* User ne train number boli ho ("12029 ki seat availability") → us train ki row pehle. */
+        const askedTrain = result.nlu?.trainNumber ?? null;
+        if (seatFilter && askedTrain) {
+          const hit = seatFilter.rows.filter((r) => r.number === askedTrain);
+          if (hit.length) seatFilter = { ...seatFilter, rows: [...hit, ...seatFilter.rows.filter((r) => r.number !== askedTrain)] };
+        }
+      }
+      const seatLine = seatFilter?.line ?? null;
+      /* AI ne jawab nahi diya (ya generic "provider se nahi mil" line di) → seat line akele bhi kaafi hai. */
+      const aiFailed =
+        !result.reply ||
+        /jawab nahi aa paya|jawaab nahi aa paya|gadh ke nahi bataunga|provider se nahi mil/i.test(String(result.reply ?? ""));
       return {
         nlu: result.nlu,
         source: result.source,
         context: result.context,
         tool: result.tool,
         toolOk: result.toolOk,
-        reply: result.reply,
+        /* Seat line AI ke jawab ke SAATH (ya AI fail ho to akele) — dono case me asli board data. */
+        reply: seatLine
+          ? result.reply
+            ? `${result.reply}\n\n${seatLine}`
+            : seatLine
+          : result.reply,
+        seatFilter: seatFilter
+          ? {
+              classCodes: seatClassCodes,
+              line: seatLine,
+              rows: seatFilter.rows,
+              wlRows: seatFilter.wlRows,
+              trainsSeen: seatFilter.trainsSeen,
+              source: seatFilter.source,
+            }
+          : null,
+        seatFilterFallback: Boolean(seatLine && aiFailed),
         interrupt: result.interrupt,
         resumeAsk: result.resumeAsk,
         resumeText: result.resumeText,

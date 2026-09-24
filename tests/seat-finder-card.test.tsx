@@ -13,6 +13,7 @@ import type { SeatIntent } from "../src/seatfinder";
 const intent = (over: Partial<SeatIntent> = {}): SeatIntent => ({
   wants: false,
   classCode: null,
+  acOnly: false,
   confirmedOnly: false,
   afterMin: null,
   earliest: false,
@@ -109,5 +110,48 @@ describe("Seat Finder card (jsdom)", () => {
     await waitFor(() => expect(screen.getByText(/Seat pakki nahi/)).toBeTruthy());
     expect(container.textContent).not.toMatch(/\d+\s*%/); /* koi "83% confirm" jaisa andaza nahi */
     expect(container.textContent).toMatch(/confirm % hum nahi dete/i);
+  });
+});
+
+/* ── 24 Sep 2026 (user: "card sirf single class hi dikha raha tha — jabki available hai") ────────
+ * Per-train class board se missing/UNKNOWN class aa jaati hai (wahi endpoint jo TrainBoard
+ * "Refresh seats" use karta hai). Yahan: 12029 ka route-board row sirf CC deta hai; per-train
+ * fetch EC (real, available) laata hai → dono dikhni chahiye. */
+const routeBoardPartial = [
+  { trainNumber: "12029", trainName: "SWARN SHATABDI", classes: [
+    { classCode: "CC", code: "CC", status: "AVAILABLE", seats: 86, rac: null, waitlist: null, fare: 415, source: "web_railyatri" },
+    { classCode: "EC", code: "EC", status: "UNKNOWN", seats: null, rac: null, waitlist: null, fare: null, source: "web_railyatri" },
+  ] },
+];
+const perTrainEC = {
+  classes: [{ code: "EC", status: "AVAILABLE", seats: 6, rac: null, waitlist: null, fare: 660, source: "web_railyatri" }],
+};
+
+function stubFetchSplit() {
+  (globalThis as unknown as { fetch: unknown }).fetch = vi.fn(async (url: string) => {
+    if (String(url).includes("trainNumber=")) return { ok: true, json: async () => perTrainEC };
+    return { ok: true, json: async () => ({ trains: routeBoardPartial }) };
+  });
+}
+
+describe("Seat Finder card — per-train class enrichment", () => {
+  it("route board me UNKNOWN class ko per-train board se real bana kar dikhata hai", async () => {
+    stubFetchSplit();
+    const rows = [{ number: "12029", name: "SWARN SHATABDI", departure: "11:11", arrival: "12:38", durationLabel: "1h 27m", arrivalDayOffset: 0 }];
+    render(<SeatFinder from="LDH" to="BEAS" date="2026-09-25" rows={rows} intent={intent()} onChip={() => {}} />);
+    expect(await screen.findByText("Seat Finder")).toBeTruthy();
+    await waitFor(() => expect(screen.getAllByText(/12029/).length).toBeGreaterThan(0));
+    /* EC asli row (available 6) — "status nahi mila" nahi */
+    await waitFor(() => expect(screen.getByText("AVL 6")).toBeTruthy());
+    expect(screen.queryByText("status nahi mila")).toBeNull();
+  });
+
+  it("'AC' chip 2S/SL hata deta hai", async () => {
+    stubFetch(boardRows);
+    render(<SeatFinder from="AAAB" to="BBBB" date="2026-09-25" rows={search} intent={intent({ wants: true, acOnly: true })} onChip={() => {}} />);
+    expect(await screen.findByText("Seat Finder")).toBeTruthy();
+    await waitFor(() => expect(screen.getAllByText(/SWARAJ EXPRESS/).length).toBeGreaterThan(0));
+    /* card AC mode me hai */
+    expect(screen.getByText(/AC classes/)).toBeTruthy();
   });
 });

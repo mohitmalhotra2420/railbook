@@ -4,7 +4,7 @@
  * merge karke "seat upar / WL neeche" dikhati hai + chips (confirmed-only / class / time).
  * Sab client-side; AI logic, tools, API, architecture ko chhua nahi gaya. */
 import { describe, expect, it } from "vitest";
-import { afterMinuteFromText, buildAllClassRows, buildSeatRows, classFromText, detectSeatIntent, filterSeatRows, seatSummaryLine, uniqueTrainCount } from "../src/seatfinder";
+import { afterMinuteFromText, buildAllClassRows, buildSeatRows, classFromText, detectSeatIntent, filterSeatRows, mergeClassBoards, seatSummaryLine, trainsNeedingClasses, uniqueTrainCount } from "../src/seatfinder";
 
 const search = (n: string, dep: string, arr: string, dur: string) => ({
   number: n,
@@ -218,5 +218,78 @@ describe("Seat Finder — Available / Sabhi trains (24 Sep user: 'all classes di
     const all = buildAllClassRows(rows, b, null, "all");
     expect(all.seat.length + all.wl.length).toBe(4);
     expect(uniqueTrainCount([...all.seat, ...all.wl])).toBe(2);
+  });
+});
+
+/* ── 24 Sep 2026 (user screenshots): AC group + per-train class enrichment ──────────────────── */
+describe("AC group (user: 'AC trains dikhao' par 2S/SL bhi aa gaye the)", () => {
+  it("'AC trains dikhao' → acOnly, koi ek class nahi", () => {
+    const i = detectSeatIntent("AC trains dikhao");
+    expect(i.wants).toBe(true);
+    expect(i.acOnly).toBe(true);
+    expect(i.classCode).toBeNull();
+  });
+  it("'AC class ki train' → acOnly; '2A AC' → specific class jeeti", () => {
+    expect(detectSeatIntent("AC class wali train dikhao").acOnly).toBe(true);
+    const i2 = detectSeatIntent("2A AC me seat hai?");
+    expect(i2.acOnly).toBe(false);
+    expect(i2.classCode).toBe("2A");
+  });
+  it("'sab class dikhao' → na AC group na class filter", () => {
+    const i = detectSeatIntent("sab class dikhao");
+    expect(i.acOnly).toBe(false);
+    expect(i.classCode).toBeNull();
+  });
+  it("acOnly board se 2S/SL hata deta hai, CC/EC rehne deta hai", () => {
+    const board = [
+      { trainNumber: "12497", trainName: "SHANE PUNJAB", classes: [
+        { classCode: "2S", status: "AVAILABLE", seats: 226, fare: 80 },
+        { classCode: "CC", status: "WAITLIST", waitlist: 38, fare: 320 },
+      ] },
+      { trainNumber: "12029", trainName: "SWARN SHATABDI", classes: [
+        { classCode: "CC", status: "AVAILABLE", seats: 86, fare: 415 },
+        { classCode: "EC", status: "AVAILABLE", seats: 6, fare: 660 },
+      ] },
+    ];
+    const out = buildAllClassRows([], board, null, "all", true);
+    const codes = out.seat.concat(out.wl).map((r) => r.classCode);
+    expect(codes).not.toContain("2S");
+    expect(new Set(codes)).toEqual(new Set(["CC", "EC"]));
+  });
+  it("'EC' ab CC nahi banta (EC = Executive Chair Car)", () => {
+    expect(classFromText("EC me seat hai?")).toBe("EC");
+    expect(classFromText("CC me seat hai?")).toBe("CC");
+  });
+});
+
+describe("per-train class board merge (user: 'card sirf single class dikha raha tha')", () => {
+  it("UNKNOWN row ki jagah per-train ki ASLI row aati hai (Swarn Shatabdi EC case)", () => {
+    const base = [{ classCode: "CC", status: "AVAILABLE", seats: 86 }, { classCode: "EC", status: "UNKNOWN" }];
+    const extra = [{ classCode: "EC", status: "AVAILABLE", seats: 6, fare: 660 }];
+    const out = mergeClassBoards(base, extra);
+    const ec = out.find((c) => c.classCode === "EC");
+    expect(ec?.status).toBe("AVAILABLE");
+    expect(ec?.seats).toBe(6);
+  });
+
+  it("missing class jodta hai, maujooda row nahi chhedta", () => {
+    const base = [{ classCode: "CC", status: "AVAILABLE", seats: 86 }];
+    const extra = [
+      { classCode: "CC", status: "WAITLIST", waitlist: 5 }, /* dup — ignore */
+      { classCode: "EC", status: "AVAILABLE", seats: 6, fare: 660 },
+    ];
+    const out = mergeClassBoards(base, extra);
+    expect(out.map((c) => c.classCode)).toEqual(["CC", "EC"]);
+    expect(out[0].status).toBe("AVAILABLE"); /* route board wali asli row waisi hi (dup ignore) */
+  });
+  it("kaun si trains adhoori hain (missing class / UNKNOWN) — bounded list", () => {
+    const board = [
+      { trainNumber: "12029", classes: [{ classCode: "CC", status: "AVAILABLE" }, { classCode: "EC", status: "UNKNOWN" }] },
+      { trainNumber: "12203", classes: [{ classCode: "3A", status: "AVAILABLE" }, { classCode: "1A", status: "RAC" }] },
+      { trainNumber: "12497", classes: [{ classCode: "CC", status: "WAITLIST" }] },
+    ];
+    expect(trainsNeedingClasses(board, null, false)).toEqual(["12029", "12497"]);
+    expect(trainsNeedingClasses(board, "EC", false)).toEqual(["12029", "12203", "12497"]); /* 12029 ki EC UNKNOWN, baaki me EC hi nahi */
+    expect(trainsNeedingClasses(board, null, true)).toEqual(["12029"]); /* EC UNKNOWN hai — dekhna hai */
   });
 });

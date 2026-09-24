@@ -147,10 +147,15 @@ const fmtRow = (r: SeatFilterRow) => {
 /** AI ke jawab me lagne wali chhoti line — sirf asli board numbers. */
 export function seatSummaryLine(
   pick: SeatPickResult,
-  slots: Pick<SeatIntentSlots, "classCodes" | "sortBy" | "departAfterMinute">,
+  slots: Pick<SeatIntentSlots, "classCodes" | "classGroup" | "sortBy" | "departAfterMinute">,
   where: { from: string; to: string },
 ): string {
-  const cls = slots.classCodes?.length ? slots.classCodes.join("/") : "sab class";
+  const cls =
+    slots.classGroup === "AC"
+      ? "AC (1A/2A/3A/3E/CC/EC)"
+      : slots.classCodes?.length
+        ? slots.classCodes.join("/")
+        : "sab class";
   const whenMin = slots.departAfterMinute;
   const when =
     whenMin == null
@@ -163,12 +168,12 @@ export function seatSummaryLine(
     const trains = trainCount(pick.seat);
     const top = pick.seat.slice(0, 4).map(fmtRow).join(" · ");
     const more = pick.seat.length > 4 ? ` · +${pick.seat.length - 4} aur (Seat Finder card me)` : "";
-    return `💺 ${cls} me seat wali ${trains} trains${when}${sortNote} — ${top}${more}. (${head})`;
+    return `💺 ${cls} me seat wali ${trains} train${trains === 1 ? "" : "s"}${when}${sortNote} — ${top}${more}. (${head})`;
   }
   if (pick.wl.length) {
     const trains = trainCount(pick.wl);
     const top = pick.wl.slice(0, 3).map(fmtRow).join(" · ");
-    return `💺 ${cls} me AVAILABLE/RAC wali koi train nahi mili${when}. WL wali ${trains} trains hain — ${top}. (${head})`;
+    return `💺 ${cls} me AVAILABLE/RAC wali koi train nahi mili${when}. WL wali ${trains} train${trains === 1 ? "" : "s"} ${trains === 1 ? "hai" : "hain"} — ${top}. (${head})`;
   }
   const extra = pick.unknownTime ? ` ${pick.unknownTime} trains ka time pata nahi chal paya.` : "";
   return `💺 ${cls} me aaj koi seat wali train nahi mili${when}.${extra} (${head})`;

@@ -12,10 +12,12 @@ export const VOICE_MESSAGES: Record<VoiceErrorKind, string> = {
     "Is browser mein voice input available nahi hai. Aap type karke bhi booking kar sakte hain.",
   insecure:
     "Is browser mein voice input available nahi hai. Aap type karke bhi booking kar sakte hain.",
+  /* 24 Sep 2026 (user screenshot: permission bottom-sheet par kuch samajh nahi aa raha tha) —
+   * ab seedha batao: Allow popup, app settings, ya type karo (koi dead-end nahi). */
   denied:
-    "Microphone permission chahiye. Browser settings se microphone allow karein.",
+    "Microphone permission chahiye. Jo Allow popup aaya ho usme Allow dabao — ya phone Settings → Apps → RailBook → Permissions → Microphone ON karo, phir mic dobara dabao. Chaaho to type bhi kar sakte ho.",
   unavailable:
-    "Microphone permission chahiye. Browser settings se microphone allow karein.",
+    "Microphone is device/browser me available nahi hai. Type karke poochho — baaki sab waisa hi chalega.",
   "no-speech": "Voice input nahi samajh aaya. Dobara try karein.",
   failed: "Voice input nahi samajh aaya. Dobara try karein.",
   busy: "Voice input nahi samajh aaya. Dobara try karein.",

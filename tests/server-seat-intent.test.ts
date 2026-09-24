@@ -134,3 +134,36 @@ describe("server seat filter — asli board rows par (koi andaza nahi)", () => {
     expect(line2).toContain("AVAILABLE/RAC wali koi train nahi");
   });
 });
+
+/* ── 24 Sep 2026 (user screenshot): "AC trains dikhao" par 2S/SL bhi aa gaye the ─────────────── */
+describe("server — AC group", () => {
+  it("'AC trains dikhao' → classGroup AC + AC classes, seat intent ON", () => {
+    const s = parseSeatIntent("AC trains dikhao");
+    expect(s.seatIntent).toBe(true);
+    expect(s.classGroup).toBe("AC");
+    expect(s.classCodes.sort()).toEqual(["1A", "2A", "3A", "3E", "CC", "EC"]);
+  });
+  it("'2A AC me seat hai' → specific class jeeti (group nahi)", () => {
+    const s = parseSeatIntent("2A AC me seat hai");
+    expect(s.classGroup).toBeNull();
+    expect(s.classCodes).toEqual(["2A"]);
+  });
+  it("'AC trains' me 2S / SL filter ke andar nahi aate", () => {
+    const s = parseSeatIntent("AC trains dikhao");
+    expect(s.classCodes).not.toContain("2S");
+    expect(s.classCodes).not.toContain("SL");
+  });
+  it("seat line me AC group ka label (2S nahi dikhta)", () => {
+    const pick = pickSeatRows(
+      [
+        { trainNumber: "12497", trainName: "SHANE PUNJAB", classes: [{ classCode: "2S", status: "AVAILABLE", seats: 87 }, { classCode: "CC", status: "WAITLIST", waitlist: 37 }] },
+        { trainNumber: "12029", trainName: "SWARN SHATABDI", classes: [{ classCode: "CC", status: "AVAILABLE", seats: 63, fare: 415 }, { classCode: "EC", status: "AVAILABLE", seats: 6, fare: 660 }] },
+      ],
+      { classCodes: ["1A", "2A", "3A", "3E", "CC", "EC"], classGroup: "AC", onlyAvailable: true, departAfterMinute: null, sortBy: null },
+    );
+    const line = seatSummaryLine(pick, { classCodes: ["1A", "2A", "3A", "3E", "CC", "EC"], classGroup: "AC", sortBy: null, departAfterMinute: null }, { from: "LDH", to: "BEAS" });
+    expect(line).toContain("AC (1A/2A/3A/3E/CC/EC)");
+    expect(line).not.toContain("2S");
+    expect(pick.seat.map((r) => `${r.number} ${r.classCode}`)).toEqual(["12029 CC", "12029 EC"]);
+  });
+});

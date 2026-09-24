@@ -16,6 +16,9 @@ export type SeatIntent = {
   wants: boolean;
   /** Kis class ki baat ho rahi hai (null = sab). */
   classCode: ClassCode | null;
+  /** "AC trains / AC class" (koi ek class nahi batayi) → AC group.
+   * 24 Sep 2026 user: "AC trains dikhao" par 2S/SL bhi dikh rahe the. */
+  acOnly: boolean;
   /** "confirmed wali dikhao" (WL hata do). */
   confirmedOnly: boolean;
   /** "5 baje ke baad" / "after 5" / "शाम 5 के बाद" → minute of day. */
@@ -82,7 +85,9 @@ const CLASS_PATTERNS: [RegExp, ClassCode][] = [
   [/\b1a\b|\b1ac\b|\bfirst\s*ac/i, "1A"],
   [/स्लीपर|स्लीपिंग|sleep(?:er|ing)|शयनयान/i, "SL"],
   [/\bsl\b|\bsleeper\b/i, "SL"],
-  [/चेयर\s*कार|chair\s*car|\bcc\b|\bec\b/i, "CC"],
+  [/चेयर\s*कार|chair\s*car|\bcc\b/i, "CC"],
+  /* 24 Sep 2026: "EC" pehle galti se CC ban jaata tha — EC = Executive Chair Car (alag class). */
+  [/\bec\b|executive|एग्ज़ीक्यूटिव/i, "EC"],
   [/\b3e\b|3\s*economy|थ्री\s*इकोनॉमी/i, "3E"],
   [/सेकंड\s*सिटिंग|second\s*sitting|\b2s\b/i, "2S"],
 ];
@@ -94,6 +99,17 @@ export function classFromText(text: string): ClassCode | null {
   for (const [re, code] of CLASS_PATTERNS) if (re.test(t)) return code;
   const spoken = resolveSpokenClass(t);
   return (spoken as ClassCode | undefined) ?? null;
+}
+
+/* ── "AC trains" = AC group, kisi ek class ka naam nahi (24 Sep 2026 user shikayat) ──
+ * "AC trains dikhao" bola → 2S / SL bhi dikh rahe the. AC = 1A/2A/3A/3E/CC/EC. */
+const AC_GROUP_WORDS = /\b(?:ac|एसी|ए\.सी\.|air\s*condition(?:ed|ing)?|वातानुकूलित)\b/i;
+export const AC_CLASS_SET: ClassCode[] = ["1A", "2A", "3A", "3E", "CC", "EC"];
+
+export function acGroupFromText(text: string): boolean {
+  const t = ` ${String(text ?? "")} `;
+  if (/(sab\s*class|koi\s*bhi\s*class|any\s*class|सभी\s*क्लास)/i.test(t)) return false;
+  return AC_GROUP_WORDS.test(t);
 }
 
 /* ── bhasha: seat intent ─────────────────────────────────────────────── */
@@ -150,10 +166,15 @@ export function afterMinuteFromText(text: string): number | null {
 export function detectSeatIntent(text: string): SeatIntent {
   const raw = String(text ?? "");
   const cls = classFromText(raw);
-  const wants = SEAT_WORDS.test(raw) || (Boolean(cls) && /(hai|hain|है|हैं|क्या|kaun|which|konsi|dikha|दिखा|batao|बताओ)/i.test(raw));
+  const acOnly = acGroupFromText(raw) && cls === null;
+  const wants =
+    SEAT_WORDS.test(raw) ||
+    acOnly ||
+    (Boolean(cls) && /(hai|hain|है|हैं|क्या|kaun|which|konsi|dikha|दिखा|batao|बताओ)/i.test(raw));
   return {
     wants,
     classCode: cls,
+    acOnly,
     confirmedOnly: CONFIRMED_WORDS.test(raw),
     afterMin: afterMinuteFromText(raw),
     earliest: EARLIEST_WORDS.test(raw),
@@ -256,6 +277,7 @@ export function buildAllClassRows(
   boardRows: BoardTrainRow[],
   classCode: ClassCode | null,
   mode: SeatMode = "all",
+  acOnly = false,
 ): { seat: SeatRow[]; wl: SeatRow[]; noData: SeatRow[]; missingClass: number } {
   const byNumber = new Map<string, BoardTrainRow>();
   for (const b of boardRows) byNumber.set(String(b.trainNumber ?? "").trim(), b);
@@ -265,10 +287,13 @@ export function buildAllClassRows(
   const noData: SeatRow[] = [];
   let missingClass = 0;
 
-  const codeOf = (c: BoardClassRow) => String(c.classCode ?? c.code ?? "").trim().toUpperCase();
+  const codeOf = (c: BoardClassRow) =>
+ String(c.classCode ?? c.code ?? "").trim().toUpperCase();
   const rowsOf = (b: BoardTrainRow): BoardClassRow[] => {
     const all = (b.classes ?? []).filter((c) => codeOf(c));
     if (classCode) return all.filter((c) => codeOf(c) === classCode);
+    /* "AC trains" = sirf AC group (2S/SL nahi) — user ki shikayat ka fix. */
+    if (acOnly) return all.filter((c) => (AC_CLASS_SET as string[]).includes(codeOf(c)));
     return all; /* "Sabhi trains" = har class, chahe status UNKNOWN ho — real row hi dikhega. */
   };
 
@@ -390,4 +415,93 @@ export function seatSummaryLine(seat: SeatRow[], cls: ClassCode | null, to: stri
     return `${r.name}, ${when}, ${how}${r.fare ? `, ${r.fare} rupaye` : ""}`;
   });
   return `${label} me ${seat.length} train me seat hai. ${top.join(". ")}. ${stationName} ke liye. Baaki detail screen par hai.`;
+}
+
+/* ── Ek train ka POORA class board (24 Sep 2026) ──────────────────────────────────────────────
+ * User (screenshot): Swarn Shatabdi ke seats card me sirf EK class dikhi, jabki us train me CC aur
+ * EC dono available the. Route board kuch classes "UNKNOWN" ke saath deta hai (ya poori list nahi).
+ * Isliye: jo endpoint app ke TrainBoard "Refresh seats" me PEHLE SE use hota hai
+ * (/api/availability?trainNumber=…) wahi per-train class board yahan bhi — koi naya endpoint nahi.
+ * Merge sirf tab hota hai jab route board me wo class missing/UNKNOWN ho (fresh row jeet ti hai). */
+const trainBoardCache = new Map<string, Promise<BoardClassRow[]>>();
+
+export function fetchTrainClasses(
+  trainNumber: string,
+  date: string,
+  from: string,
+  to: string,
+): Promise<BoardClassRow[]> {
+  const key = `${trainNumber}>${from}>${to}>${date}`;
+  const hit = trainBoardCache.get(key);
+  if (hit) return hit;
+  const p = fetch(
+    `/api/availability?trainNumber=${encodeURIComponent(trainNumber)}&date=${encodeURIComponent(date)}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+  )
+    .then((r) => (r.ok ? r.json() : { classes: [] }))
+    .then((j: { classes?: BoardClassRow[] }) =>
+      (j.classes ?? [])
+        .map((c) => ({ ...c, classCode: String(c.classCode ?? c.code ?? "").trim().toUpperCase() }))
+        .filter((c) => c.classCode && String(c.status ?? "").toUpperCase() !== "UNKNOWN"),
+    )
+    .catch(() => [] as BoardClassRow[]);
+  trainBoardCache.set(key, p);
+  return p;
+}
+
+/** Route board (asli) + per-train board — union, dup nahi.
+ *  24 Sep 2026: base row jiska status UNKNOWN ho use per-train ki REAL row se badal dete hain
+ *  (warna Swarn Shatabdi ki EC "unknown" me atak jaati thi jabki available thi). Jis class ka
+ *  base row pehle se asli status ke saath hai, use nahi chhedte. Kuch banaya nahi jaata. */
+export function mergeClassBoards(base: BoardClassRow[], extra: BoardClassRow[] | undefined): BoardClassRow[] {
+  if (!extra || !extra.length) return base;
+  const out = base.slice();
+  const codeOf = (c: BoardClassRow) => String(c.classCode ?? c.code ?? "").trim().toUpperCase();
+  const idx = new Map<string, number>();
+  out.forEach((c, i) => idx.set(codeOf(c), i));
+  for (const c of extra) {
+    const code = codeOf(c);
+    if (!code) continue;
+    const at = idx.get(code);
+    if (at == null) {
+      idx.set(code, out.length);
+      out.push(c);
+      continue;
+    }
+    if (String(out[at].status ?? "UNKNOWN").toUpperCase() === "UNKNOWN") out[at] = c;
+  }
+  return out;
+}
+
+/** Kis train ka per-train board laana chahiye (bounded, honest — sirf missing/UNKNOWN ke liye). */
+export function trainsNeedingClasses(
+  board: BoardTrainRow[],
+  cls: ClassCode | null,
+  acOnly: boolean,
+  max = 10,
+): string[] {
+  const out: string[] = [];
+  for (const b of board) {
+    const rows = (b.classes ?? []).filter((c) => String(c.classCode ?? c.code ?? "").trim());
+    const codes = new Set(rows.map((c) => String(c.classCode ?? c.code ?? "").trim().toUpperCase()));
+    const number = String(b.trainNumber ?? "").trim();
+    if (!number) continue;
+    const unknown = (code?: string) =>
+      rows.some(
+        (c) =>
+          String(c.status ?? "UNKNOWN").toUpperCase() === "UNKNOWN" &&
+          (!code || String(c.classCode ?? c.code ?? "").trim().toUpperCase() === code),
+      );
+    let need = false;
+    if (cls) need = !codes.has(cls) || unknown(cls);
+    else if (acOnly) {
+      const acRate = rows.filter((c) => (AC_CLASS_SET as string[]).includes(String(c.classCode ?? c.code ?? "").trim().toUpperCase()));
+      need = acRate.length === 0 || acRate.some((c) => String(c.status ?? "UNKNOWN").toUpperCase() === "UNKNOWN");
+    } else need = rows.length <= 1 || unknown();
+
+    if (need) {
+      out.push(number);
+      if (out.length >= max) break;
+    }
+  }
+  return out;
 }

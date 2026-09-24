@@ -18,9 +18,13 @@ import { speakGuide } from "../voice/speakGuide";
 import {
   buildAllClassRows,
   fetchRouteBoard,
+  fetchTrainClasses,
   filterSeatRows,
+  mergeClassBoards,
   seatSummaryLine,
+  trainsNeedingClasses,
   uniqueTrainCount,
+  type BoardClassRow,
   type BoardTrainRow,
   type SeatIntent,
   type SeatMode,
@@ -92,6 +96,8 @@ export function SeatFinder({
    * User ne "sirf confirmed" bola ho to seedha "Available" mode. */
   const [mode, setMode] = useState<SeatMode>(intent.confirmedOnly ? "avail" : "all");
   const [cls, setCls] = useState<ClassCode | null>(intent.classCode);
+  /* 24 Sep 2026: "AC trains dikhao" → AC group (1A/2A/3A/3E/CC/EC), 2S/SL nahi. */
+  const [acOnly, setAcOnly] = useState(intent.acOnly);
   const [afterMin, setAfterMin] = useState<number | null>(intent.afterMin);
   const [earliest, setEarliest] = useState(intent.earliest);
   const [cheapest, setCheapest] = useState(intent.cheapest);
@@ -110,7 +116,50 @@ export function SeatFinder({
     };
   }, [from, to, date]);
 
-  const merged = useMemo(() => (board ? buildAllClassRows(rows, board, cls, mode) : null), [board, rows, cls, mode]);
+  /* ── 24 Sep 2026 (user: "card sirf single class hi show kar rha" — Swarn Shatabdi ke CC aur EC
+   * dono available the, card me sirf ek dikhi): route board kuch classes "UNKNOWN" ya missing deta
+   * hai. Jo trains adhoori hain unka POORA class board per-train endpoint se laate hain — wahi
+   * /api/availability?trainNumber=… jo TrainBoard "Refresh seats" pehle se use karta hai.
+   * Sirf asli rows; koi naya endpoint/tool nahi. Max 10 trains, 3 ek saath. */
+  const [extraBoards, setExtraBoards] = useState<Record<string, BoardClassRow[]>>({});
+  const enrichKey = useRef("");
+  const enrichRun = useRef(0);
+  useEffect(() => {
+    if (!board) return;
+    const key = `${from}>${to}>${date}|${cls ?? ""}|${acOnly ? "ac" : ""}|${mode}|${board.length}`;
+    if (enrichKey.current === key) return;
+    enrichKey.current = key;
+    const run = ++enrichRun.current;
+    const targets = trainsNeedingClasses(board, cls, acOnly);
+    void (async () => {
+      const add: Record<string, BoardClassRow[]> = {};
+      for (let i = 0; i < targets.length; i += 3) {
+        const batch = targets.slice(i, i + 3);
+        const got = await Promise.all(batch.map((n) => fetchTrainClasses(n, date, from, to)));
+        if (run !== enrichRun.current) return;
+        batch.forEach((n, idx) => {
+          if (got[idx].length) add[n] = got[idx];
+        });
+      }
+      if (run !== enrichRun.current || !Object.keys(add).length) return;
+      setExtraBoards((cur) => ({ ...cur, ...add }));
+    })();
+  }, [board, from, to, date, cls, acOnly, mode]);
+
+  /* Route board + per-train board (jahan class missing/UNKNOWN thi) — sab real rows. */
+  const boardFull = useMemo(
+    () =>
+      (board ?? []).map((b) => {
+        const more = extraBoards[String(b.trainNumber ?? "").trim()];
+        return more ? { ...b, classes: mergeClassBoards(b.classes ?? [], more) } : b;
+      }),
+    [board, extraBoards],
+  );
+
+  const merged = useMemo(
+    () => (board ? buildAllClassRows(rows, boardFull, cls, mode, acOnly) : null),
+    [board, boardFull, rows, cls, mode, acOnly],
+  );
   const sortOpts = { earliest: earliest && !cheapest, cheapest };
   const seat = useMemo(
     () => (merged ? filterSeatRows(merged.seat, { afterMin, ...sortOpts }) : []),
@@ -148,7 +197,7 @@ export function SeatFinder({
         <div>
           <strong>Seat Finder</strong>
           <span className="sf-sub">
-            {from} → {to} · {formatShortDate(date)} · {cls ?? "sab class"} ·{" "}
+            {from} → {to} · {formatShortDate(date)} · {cls ?? (acOnly ? "AC classes" : "sab class")} ·{" "}
             {loading ? "live board aa raha hai…" : `${mode === "avail" ? "Available (AVL + RAC)" : "sabhi trains"}`}
           </span>
         </div>
@@ -172,12 +221,26 @@ export function SeatFinder({
         {CLASS_CHIPS.map((c) => (
           <button
             key={c}
-            className={`sf-chip ${(c === "ALL" ? cls === null : cls === c) ? "sel" : ""}`}
-            onClick={() => setCls(c === "ALL" ? null : (c as ClassCode))}
+            className={`sf-chip ${(c === "ALL" ? cls === null && !acOnly : cls === c) ? "sel" : ""}`}
+            onClick={() => {
+              setAcOnly(false);
+              setCls(c === "ALL" ? null : (c as ClassCode));
+            }}
           >
             {c === "ALL" ? "Sab class" : c}
           </button>
         ))}
+        {/* 24 Sep 2026 user: "AC trains dikhao" par 2S/SL bhi dikh rahe the — ab poora AC group. */}
+        <button
+          className={`sf-chip ${acOnly ? "sel" : ""}`}
+          title="Sirf AC classes: 1A, 2A, 3A, 3E, CC, EC (2S/SL nahi)"
+          onClick={() => {
+            setAcOnly((v) => !v);
+            setCls(null);
+          }}
+        >
+          ❄️ AC
+        </button>
         <select
           className={`sf-chip sf-select ${afterMin != null ? "on-time" : ""}`}
           value={afterMin ?? ""}
@@ -236,7 +299,7 @@ export function SeatFinder({
                 ) : mode === "avail" ? (
                   <>
                     <b>
-                      {cls ?? "Kisi bhi class"} me aaj koi AVAILABLE / RAC train nahi mili.
+                      {cls ?? (acOnly ? "AC classes" : "Kisi bhi class")} me aaj koi AVAILABLE / RAC train nahi mili.
                     </b>{" "}
                     <span className="sf-empty-chips">
                       <button className="sf-chip" onClick={() => setMode("all")}>
@@ -309,7 +372,8 @@ export function SeatFinder({
           )}
           <div className="sf-foot">
             <b>Real data:</b> live route board · {seatTrains + wlTrains + noData.length} trains ka jawab ·
-            Available = AVL + RAC · Sabhi trains = WL / N-A bhi, <b>har class apni real status ke saath</b> ·
+            Available = AVL + RAC · Sabhi trains = WL / N-A bhi, <b>har class apni real status ke saath</b> ·{" "}
+            <b>AC</b> = 1A/2A/3A/3E/CC/EC (2S/SL nahi) ·
             WL ka <b>confirm % hum nahi dete</b> (sirf WL number, koi andaza nahi).
             {(earliest || cheapest) && (
               <> Sort: <b>{cheapest ? "sabse sasta (fare ↑)" : "sabse jaldi (kam time)"}</b>.</>

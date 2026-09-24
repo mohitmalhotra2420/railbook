@@ -19,6 +19,9 @@ export interface SeatIntentSlots {
   seatIntent: boolean;
   /** Kis class ki baat ho rahi hai (khaali array = "sab class" / koi filter nahi). */
   classCodes: string[];
+  /** "AC trains / AC class" (koi ek class nahi batayi) → AC group. 24 Sep 2026 user:
+   * "AC trains dikhao" par 2S/SL bhi dikh rahe the — AC bola to sirf AC classes. */
+  classGroup: "AC" | null;
   /** "seat wali" = AVAILABLE + RAC (dono me seat pakki hone ke kareeb). */
   onlyAvailable: boolean;
   /** "sirf confirmed" — aaj onlyAvailable jaisa hi treat hota hai. */
@@ -46,6 +49,10 @@ const CLASS_RULES: [RegExp, string][] = [
 ];
 /* "sab class / koi bhi class / paise ka farq nahi" → koi class filter nahi. */
 const NO_CLASS = /sab\s*class|sabhi\s*(?:class|क्लास)|koi\s*bhi\s*class|किसी\s*भी\s*(?:class|क्लास)|any\s*class|all\s*class/i;
+/* "AC trains / AC class / AC wali" — koi ek class nahi, poora AC group (24 Sep 2026). */
+const AC_GROUP = /\b(?:ac|एसी|ए\.सी\.|air\s*condition(?:ed|ing)?|वातानुकूलित)\b/i;
+/** AC group ki classes — 2S/SL iske bahar (wahi user ki shikayat thi). */
+export const AC_CLASSES = ["1A", "2A", "3A", "3E", "CC", "EC"] as const;
 
 const SEAT_WORDS =
   /\b(seat|seats|berth|berths|available|availability|avl|vacant|khali|khaali|jagah)\b|सीट|बर्थ|जगह|खाली|उपलब्ध/iu;
@@ -64,6 +71,12 @@ function classFrom(text: string): string[] {
     if (re.test(text) && !out.includes(code)) out.push(code);
   }
   return out;
+}
+
+/** "AC trains" (koi specific class nahi) → AC group. Specific class boli ho to wahi chalti hai. */
+function classGroupFrom(text: string, classCodes: string[]): "AC" | null {
+  if (classCodes.length) return null; /* "2A AC" = user ne class bata di */
+  return AC_GROUP.test(text) ? "AC" : null;
 }
 
 function pmOf(text: string): -1 | 0 | 1 {
@@ -112,7 +125,10 @@ export function departAfterMinute(text: string): number | null {
 
 export function parseSeatIntent(rawText: string): SeatIntentSlots {
   const text = String(rawText ?? "");
-  const classCodes = classFrom(text);
+  const explicitClasses = classFrom(text);
+  const classGroup = classGroupFrom(text, explicitClasses);
+  /* AC group boli gayi to filter AC classes ka hai (1A/2A/3A/3E/CC/EC) — 2S/SL nahi. */
+  const classCodes = classGroup === "AC" ? [...AC_CLASSES] : explicitClasses;
   const matched: string[] = [];
   const seatWord = SEAT_WORDS.test(text);
   const hasQuestion = QUESTION_WORDS.test(text);
@@ -129,19 +145,21 @@ export function parseSeatIntent(rawText: string): SeatIntentSlots {
         : null;
 
   if (seatWord) matched.push("seat-word");
-  if (classCodes.length) matched.push(`class:${classCodes.join("+")}`);
+  if (classGroup) matched.push(`group:${classGroup}`);
+  if (explicitClasses.length) matched.push(`class:${explicitClasses.join("+")}`);
   if (confirmedOnly) matched.push("confirmed");
   if (earliest) matched.push("sort:fastest");
   if (cheapest) matched.push("sort:cheapest");
   if (departAfterMinuteValue != null) matched.push(`after:${departAfterMinuteValue}`);
   if (quota) matched.push(`quota:${quota}`);
 
-  /* Seat intent = seat ka zikr, ya class + sawaal ("2A hai?"), ya sirf-confirmed / sort maanga gaya. */
-  const seatIntent = seatWord || confirmedOnly || (classCodes.length > 0 && hasQuestion);
+  /* Seat intent = seat ka zikr, ya AC group, ya class + sawaal ("2A hai?"), ya sirf-confirmed / sort maanga gaya. */
+  const seatIntent = seatWord || confirmedOnly || classGroup != null || (explicitClasses.length > 0 && hasQuestion);
 
   return {
     seatIntent,
     classCodes,
+    classGroup,
     onlyAvailable: seatIntent,
     confirmedOnly,
     sortBy: cheapest ? "cheapest" : earliest ? "fastest" : null,
