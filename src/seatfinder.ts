@@ -191,7 +191,10 @@ const beforeMinuteFromText = (text: string): number | null => {
 
 export function windowFromText(text: string): { after: number; before: number; label: string } | null {
   const t = String(text ?? "");
-  if (/\d/.test(t)) return null; /* ghadi boli gayi — afterMin/beforeMin alag se parse hote hain */
+  /* Sirf asli CLOCK reading ("9 baje", "17:00") window ko rokti hai. Pehle koi bhi digit window
+   * ko hata deta tha — "kal subha 2A me seat batao" (class ka digit) par subah ka filter gum ho
+   * jaata tha (server mirror me bhi wahi bug tha; dono 24 Sep fix). */
+  if (/\d{1,2}\s*:\s*\d{2}|\d{1,2}\s*(?:baje|बजे|bje|o'?clock)/i.test(t)) return null;
   for (const w of WINDOWS) if (w.re.test(t)) return { after: w.after, before: w.before, label: w.label };
   return null;
 }
@@ -202,7 +205,15 @@ export function detectSeatIntent(text: string): SeatIntent {
   const acOnly = acGroupFromText(raw) && cls === null;
   const after = afterMinuteFromText(raw);
   const wordWindow = after == null ? windowFromText(raw) : null;
-  const before = wordWindow ? wordWindow.before : beforeMinuteFromText(raw);
+  const beforeFromText = beforeMinuteFromText(raw);
+  /* "subah 8 se pehle" jaisa sawaal: shabd ka window + ghadi ka upper bound — dono maano (jhooth nahi). */
+  const before = wordWindow ? (beforeFromText ?? wordWindow.before) : beforeFromText;
+  const clock = (m: number) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+  const windowLabel = wordWindow
+    ? beforeFromText != null && beforeFromText !== wordWindow.before
+      ? `${wordWindow.label.split(" (")[0]} (${clock(wordWindow.after)}–${clock(beforeFromText)})`
+      : wordWindow.label
+    : null;
   const asksTrains = /(train|trains|गाड़ी|गाडी|ट्रेन|gaadi|gadi|express|exp\b|mail)/i.test(raw);
   const asks = /(hai|hain|है|हैं|क्या|kaun|which|konsi|dikha|दिखा|batao|बताओ|chahiye|चाहिए)/i.test(raw);
   const wants =
@@ -217,7 +228,7 @@ export function detectSeatIntent(text: string): SeatIntent {
     confirmedOnly: CONFIRMED_WORDS.test(raw),
     afterMin: wordWindow ? wordWindow.after : after,
     beforeMin: before,
-    windowLabel: wordWindow?.label ?? null,
+    windowLabel,
     earliest: EARLIEST_WORDS.test(raw),
     cheapest: CHEAPEST_WORDS.test(raw),
   };

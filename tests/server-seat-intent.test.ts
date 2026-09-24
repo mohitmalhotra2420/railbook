@@ -205,6 +205,27 @@ describe("server — time window (Round-19)", () => {
     expect(s.matched).toContain("window:Subah (04:00–12:00)");
   });
 
+  /* Live bonus bug (24 Sep, deploy ke baad verify karte waqt mila): window sirf tab banti thi jab
+   * text me koi digit na ho — "kal subha 2A me seat batao" jaisa sawaal (class ka digit) aate hi
+   * window gum ho jaati thi. Ab sirf asli CLOCK reading window rokta hai. */
+  it("class/train/passenger ke digits window ko nahi hataate ('kal subha 2A me seat')", () => {
+    const withClass = parseSeatIntent("Mujhe kal subha 2A me seat wali trains batao");
+    expect(withClass.departAfterMinute).toBe(240);
+    expect(withClass.departBeforeMinute).toBe(720);
+    expect(withClass.classCodes).toEqual(["2A"]);
+    expect(parseSeatIntent("12029 ki subah seat hai kya").departAfterMinute).toBe(240);
+    expect(parseSeatIntent("kal 25 subha 1 passenger ke liye trains").departAfterMinute).toBe(240);
+  });
+
+  it("shabd + ghadi dono ho to ghadi jeetti hai, warna shabd ka window", () => {
+    const both = parseSeatIntent("kal subah 8 se pehle ki trains");
+    expect(both.departAfterMinute).toBe(240);
+    expect(both.departBeforeMinute).toBe(480);
+    expect(both.windowLabel).toBe("Subah (04:00–08:00)");
+    expect(parseSeatIntent("subah 9 baje ke baad ki trains").windowLabel).toBe("09:00 ke baad");
+    expect(parseSeatIntent("subah 9 baje ke baad ki trains").departBeforeMinute).toBeNull();
+  });
+
   it("ghadi wala filter purana hi rehta hai ('raat 9 ke baad' → 21:00, upper bound nahi)", () => {
     const s = parseSeatIntent("raat 9 ke baad sleeper me seat hai kya");
     expect(s.departAfterMinute).toBe(1260);

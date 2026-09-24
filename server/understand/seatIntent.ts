@@ -140,6 +140,10 @@ export const TIME_WINDOWS: { re: RegExp; after: number; before: number; label: s
   { re: /(रात|raat|night)/i, after: 1260, before: 240, label: "Raat (21:00 ke baad)" },
 ];
 
+/** minute-of-day → "HH:MM" (window labels me dikhta hai). */
+const clockLabel = (m: number): string =>
+  `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+
 /** "12 baje se pehle" / "before 8" / "8 baje se pahle" → us se pehle ka time (minute-of-day). */
 export function beforeMinute(text: string): number | null {
   const t = String(text ?? "");
@@ -159,8 +163,11 @@ export function beforeMinute(text: string): number | null {
 /** Sirf shabd wala window ("subah ki trains", "shaam ki gaadi") — ghadi boli ho to null. */
 export function timeWindowWords(text: string): { after: number; before: number; label: string } | null {
   const t = String(text ?? "");
-  /* Ghadi ka zikr ho ("9 baje ke baad", "12 se pehle") to door/after wala parser hi chalta hai. */
-  if (/\d/.test(t)) return null;
+  /* Ghadi ka zikr ho ("9 baje ke baad", "17:00") to wahi parser jeetta hai. LEKIN sirf koi bhi digit
+   * dekh kar window chhod dena bug tha (live, 24 Sep): "kal subha 2A me seat batao" / "1 passenger
+   * subah" jaise sawaal me — class/train/passenger ke digits ki wajah se — subah ka window gum ho
+   * jaata tha aur poori din ki list aa jaati thi. Ab sirf asli CLOCK reading window ko rokta hai. */
+  if (/\d{1,2}\s*:\s*\d{2}|\d{1,2}\s*(?:baje|बजे|bje|o'?clock)/i.test(t)) return null;
   for (const w of TIME_WINDOWS) if (w.re.test(t)) return { after: w.after, before: w.before, label: w.label };
   return null;
 }
@@ -179,18 +186,22 @@ export function parseSeatIntent(rawText: string): SeatIntentSlots {
   const cheapest = CHEAPEST_WORDS.test(text);
   const explicitAfter = departAfterMinute(text);
   /* Round-19: time window — "subah ki trains" jaisa sawaal. Ghadi boli ho ("9 baje ke baad") to
-   * wahi jeetta hai; warna shabd wala window (subah/dopahar/shaam/raat) aur "X se pehle". */
+   * wahi jeetta hai; warna shabd wala window (subah/dopahar/shaam/raat) aur "X se pehle".
+   * Dono ho ("subah 8 se pehle") to neeche ka bound "8 se pehle" hi lagta hai (jhooth nahi). */
   const windowWord = explicitAfter == null ? timeWindowWords(text) : null;
-  const beforeValue = windowWord ? null : beforeMinute(text);
+  const beforeValue = beforeMinute(text);
+  const departedLabel = explicitAfter != null ? `${clockLabel(explicitAfter)} ke baad` : null;
   const departAfterMinuteValue = windowWord ? windowWord.after : explicitAfter;
-  const departBeforeMinuteValue = windowWord ? windowWord.before : beforeValue;
+  const departBeforeMinuteValue = windowWord ? (beforeValue ?? windowWord.before) : beforeValue;
   const windowLabel =
     explicitAfter != null
-      ? `${String(Math.floor(explicitAfter / 60)).padStart(2, "0")}:${String(explicitAfter % 60).padStart(2, "0")} ke baad`
+      ? departedLabel
       : windowWord
-        ? windowWord.label
+        ? beforeValue != null && beforeValue !== windowWord.before
+          ? `${windowWord.label.split(" (")[0]} (${clockLabel(windowWord.after)}–${clockLabel(beforeValue)})`
+          : windowWord.label
         : beforeValue != null
-          ? `${String(Math.floor(beforeValue / 60)).padStart(2, "0")}:${String(beforeValue % 60).padStart(2, "0")} se pehle`
+          ? `${clockLabel(beforeValue)} se pehle`
           : null;
   const quota = /premium\s*tatkal|प्रीमियम\s*तत्काल/i.test(text)
     ? "PT"
