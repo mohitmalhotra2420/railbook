@@ -2186,3 +2186,17 @@ table.traintable {
 .vs-ok{flex:1;border:0;border-radius:12px;padding:12px;font-weight:800;font-size:14px;color:#fff;background:var(--green);box-shadow:0 8px 18px rgba(13,107,67,.25);cursor:pointer}
 .vs-ok:disabled{background:#c9d2cc;box-shadow:none;cursor:default}
 .vs-close{border:1px solid var(--line);background:#fff;border-radius:12px;padding:10px 14px;font-weight:700;color:#4b5563;cursor:pointer}
+
+/* 24 Sep 2026 (user: "2A seat bta esne phir direct trains bta di") — seat ka jawab (💺 …) card ke
+ * upar hamesha dikhta hai, collapse ke andar nahi. Sirf layout, koi logic nahi. */
+.msg-seatline {
+  margin: 6px 0 8px;
+  padding: 9px 12px;
+  border-radius: 12px;
+  background: #e7f6ee;
+  border: 1px solid #bfe3d1;
+  color: #0d4a2f;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.5;
+}

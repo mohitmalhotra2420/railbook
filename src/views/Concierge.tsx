@@ -1529,14 +1529,36 @@ export function Concierge() {
             {msg.role === "assistant" && <div className="msg-kicker">RailBook</div>}
             {/* Round-18m-8 (layout): journey planner card ke saath lamba AI text "chat" jaisa
               * lagta tha — card hi result hai; text ek collapsed note mein (tap → padho). */}
-            {msg.text && msg.blocks?.some((b) => b.type === "journey") ? (
-              <details className="msg-note">
-                <summary>AI note <span className="msg-note-hint">tap karo</span></summary>
-                <p className="msg-text">{msg.text}</p>
-              </details>
-            ) : (
-              msg.text && <p className="msg-text">{msg.text}</p>
-            )}
+            {(() => {
+              /* 24 Sep 2026 (user: "2A seat bta esne phir direct trains bta di" — seat ka jawab
+               * card ke andar chhup gaya tha). Seat line (💺 …) ab card ke UPAR hamesha dikhti hai;
+               * baaki lamba text pehle jaisa collapsed note me. */
+              const text = String(msg.text ?? "");
+              const seatLines = text.split("\n").filter((l) => l.trim().startsWith("💺"));
+              const rest = seatLines.length ? text.split("\n").filter((l) => !l.trim().startsWith("💺")).join("\n").trim() : text;
+              const hasJourney = Boolean(msg.blocks?.some((b) => b.type === "journey"));
+              if (!text) return null;
+              return (
+                <>
+                  {seatLines.map((l, i) => (
+                    <p key={i} className="msg-seatline">
+                      {l.trim()}
+                    </p>
+                  ))}
+                  {rest &&
+                    (hasJourney ? (
+                      <details className="msg-note">
+                        <summary>
+                          AI note <span className="msg-note-hint">tap karo</span>
+                        </summary>
+                        <p className="msg-text">{rest}</p>
+                      </details>
+                    ) : (
+                      <p className="msg-text">{rest}</p>
+                    ))}
+                </>
+              );
+            })()}
             {msg.blocks?.map((b, i) => (
               <BlockView
                 key={i}

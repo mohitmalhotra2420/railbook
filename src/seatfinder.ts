@@ -391,16 +391,37 @@ export function filterSeatRows(
   return out;
 }
 
-/** Live route board (server par pehle se maujood endpoint — koi API change nahi). */
+/** Live route board (server par pehle se maujood endpoint — koi API change nahi).
+ *  24 Sep 2026 (user screenshot: card me saari 28 trains "data nahi aayi" — us waqt board call
+ *  khaali aayi thi, provider busy): ab ek baar khud retry karte hain aur FAIL ko cache nahi karte,
+ *  taaki "↻ dobara try" par fresh call jaaye. */
 const boardCache = new Map<string, Promise<BoardTrainRow[]>>();
+export function clearRouteBoardCache(from: string, to: string, date: string): void {
+  boardCache.delete(`${from}>${to}>${date}`);
+}
 export function fetchRouteBoard(from: string, to: string, date: string): Promise<BoardTrainRow[]> {
   const key = `${from}>${to}>${date}`;
   const hit = boardCache.get(key);
   if (hit) return hit;
-  const p = fetch(`/api/availability?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&date=${encodeURIComponent(date)}`)
-    .then((r) => (r.ok ? r.json() : { trains: [] }))
-    .then((j: { trains?: BoardTrainRow[] }) => j.trains ?? [])
-    .catch(() => [] as BoardTrainRow[]);
+  const one = async (): Promise<BoardTrainRow[]> => {
+    try {
+      const r = await fetch(`/api/availability?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&date=${encodeURIComponent(date)}`);
+      if (!r.ok) return [];
+      const j = (await r.json()) as { trains?: BoardTrainRow[] };
+      return j.trains ?? [];
+    } catch {
+      return [];
+    }
+  };
+  const p = (async () => {
+    let out = await one();
+    if (!out.length) {
+      await new Promise((r) => setTimeout(r, 1200));
+      out = await one();
+    }
+    if (!out.length) boardCache.delete(key); /* fail cache na karo */
+    return out;
+  })();
   boardCache.set(key, p);
   return p;
 }

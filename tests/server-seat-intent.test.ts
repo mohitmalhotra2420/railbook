@@ -131,7 +131,7 @@ describe("server seat filter — asli board rows par (koi andaza nahi)", () => {
     );
     const line2 = seatSummaryLine(wlOnly, { classCodes: ["2A"], sortBy: null, departAfterMinute: null }, { from: "LDH", to: "NDLS" });
     expect(line2).toContain("WL 14");
-    expect(line2).toContain("AVAILABLE/RAC wali koi train nahi");
+    expect(line2).toContain("koi AVAILABLE/RAC seat nahi");
   });
 });
 
@@ -165,5 +165,26 @@ describe("server — AC group", () => {
     expect(line).toContain("AC (1A/2A/3A/3E/CC/EC)");
     expect(line).not.toContain("2S");
     expect(pick.seat.map((r) => `${r.number} ${r.classCode}`)).toEqual(["12029 CC", "12029 EC"]);
+  });
+});
+
+/* ── 24 Sep 2026 (user: "2A ki seats dikhana" → line "koi seat wali train nahi mili" thi, WL ka
+ * pata hi nahi chala tha) — onlyAvailable par bhi WL rows milni chahiye. ────────────────────── */
+describe("server — onlyAvailable par bhi WL rows (honest jawab)", () => {
+  const board = [
+    { trainNumber: "18103", trainName: "JALIANWALABAG EX", classes: [{ classCode: "2A", status: "WAITLIST", waitlist: 11, fare: 725 }, { classCode: "3A", status: "WAITLIST", waitlist: 30, fare: 520 }] },
+    { trainNumber: "12483", trainName: "TVCN ASR SF EXP", classes: [{ classCode: "2A", status: "WAITLIST", waitlist: 5, fare: 770 }] },
+    { trainNumber: "12029", trainName: "SWARN SHATABDI", classes: [{ classCode: "CC", status: "AVAILABLE", seats: 60, fare: 415 }] },
+  ];
+  it("2A maanga, AVL nahi par WL hai → WL list ke saath line", () => {
+    const seats = pickSeatRows(board, { classCodes: ["2A"], onlyAvailable: true, departAfterMinute: null, sortBy: null });
+    const wl = pickSeatRows(board, { classCodes: ["2A"], onlyAvailable: false, departAfterMinute: null, sortBy: null });
+    expect(seats.seat).toHaveLength(0);
+    expect(wl.wl.map((r) => r.number)).toEqual(["12483", "18103"]); /* kam WL pehle */
+    const line = seatSummaryLine({ ...seats, wl: wl.wl }, { classCodes: ["2A"], classGroup: null, sortBy: null, departAfterMinute: null }, { from: "LDH", to: "BEAS" });
+    expect(line).toContain("koi AVAILABLE/RAC seat nahi");
+    expect(line).toContain("12483 2A WL 5 ₹770");
+    expect(line).toContain("Confirm% hum nahi dete");
+    expect(line).not.toMatch(/\d+\s*%/); /* confirm% kabhi nahi */
   });
 });

@@ -173,7 +173,8 @@ export function seatSummaryLine(
   if (pick.wl.length) {
     const trains = trainCount(pick.wl);
     const top = pick.wl.slice(0, 3).map(fmtRow).join(" · ");
-    return `💺 ${cls} me AVAILABLE/RAC wali koi train nahi mili${when}. WL wali ${trains} train${trains === 1 ? "" : "s"} ${trains === 1 ? "hai" : "hain"} — ${top}. (${head})`;
+    /* WL number hi dikhate hain — confirm% nahi (wo data hamare paas nahi hai). */
+    return `💺 ${cls} me abhi koi AVAILABLE/RAC seat nahi${when} — WL wali ${trains} train${trains === 1 ? "" : "s"} ${trains === 1 ? "hai" : "hain"}: ${top}. Confirm% hum nahi dete (data nahi); booking se pehle IRCTC par check karo. (${head})`;
   }
   const extra = pick.unknownTime ? ` ${pick.unknownTime} trains ka time pata nahi chal paya.` : "";
   return `💺 ${cls} me aaj koi seat wali train nahi mili${when}.${extra} (${head})`;
@@ -221,12 +222,18 @@ export async function seatFilterFor(opts: {
   }
 
   const pick = pickSeatRows(board.trains as SeatBoardTrain[], slots, times);
-  const line = seatSummaryLine(pick, slots, { from, to });
+  /* 24 Sep 2026 (user: "2A ki seats dikhana" → "koi seat wali train nahi mili" par WL ka pata hi
+   * nahi chala): onlyAvailable=true par bhi WL rows ALAG se nikaal lo, taaki line bata sake ki
+   * seat nahi hai par WL kitni hai. Data wahi board ka, koi andaza nahi. */
+  const wlPick = slots.onlyAvailable
+    ? pickSeatRows(board.trains as SeatBoardTrain[], { ...slots, onlyAvailable: false }, times)
+    : pick;
+  const line = seatSummaryLine({ ...pick, wl: wlPick.wl }, slots, { from, to });
   const max = opts.maxRows ?? 8;
   return {
     line,
     rows: pick.seat.slice(0, max),
-    wlRows: pick.wl.slice(0, max),
+    wlRows: wlPick.wl.slice(0, max),
     trainsSeen: board.trains.length,
     source: board.provider ?? null,
   };

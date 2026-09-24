@@ -155,3 +155,30 @@ describe("Seat Finder card — per-train class enrichment", () => {
     expect(screen.getByText(/AC classes/)).toBeTruthy();
   });
 });
+
+/* ── 24 Sep 2026 (user screenshot: card me SAARI 28 trains "data nahi aayi" — board call khaali
+ * aayi thi, provider busy). Ab: honest banner + ↻ dobara try, aur 28-row confusion nahi. ─────── */
+describe("Seat Finder card — board fail hone par", () => {
+  it("khaali board → banner + '↻ Dobara try karo', poori list 'data nahi aayi' nahi dikhati", async () => {
+    (globalThis as unknown as { fetch: unknown }).fetch = vi.fn(async () => ({ ok: true, json: async () => ({ trains: [] }) }));
+    const rows = [{ number: "12029", name: "SWARN SHATABDI", departure: "11:11", arrival: "12:38", durationLabel: "1h 27m", arrivalDayOffset: 0 }];
+    render(<SeatFinder from="ZZZZ" to="YYYY" date="2027-01-01" rows={rows} intent={intent()} onChip={() => {}} />);
+    expect(await screen.findByText(/Live board abhi nahi aa payi/, {}, { timeout: 6000 })).toBeTruthy();
+    expect(screen.getByText("↻ Dobara try karo")).toBeTruthy();
+    expect(screen.queryByText(/DATA NAHI/)).toBeNull();
+  });
+
+  it("↻ dabane par board dobara maangta hai aur data aane par rows dikh jaati hain", async () => {
+    let calls = 0;
+    (globalThis as unknown as { fetch: unknown }).fetch = vi.fn(async (url: string) => {
+      if (String(url).includes("trainNumber=")) return { ok: true, json: async () => ({ classes: [] }) };
+      calls += 1;
+      if (calls <= 2) return { ok: true, json: async () => ({ trains: [] }) };
+      return { ok: true, json: async () => ({ trains: boardRows }) };
+    });
+    const rows = [{ number: "11078", name: "JHELUM EXPRESS", departure: "04:30", arrival: "11:15", durationLabel: "6h 45m", arrivalDayOffset: 0 }];
+    render(<SeatFinder from="AAAA" to="BBBB" date="2026-09-26" rows={rows} intent={intent()} onChip={() => {}} />);
+    fireEvent.click(await screen.findByText("↻ Dobara try karo", {}, { timeout: 5000 }));
+    await waitFor(() => expect(screen.getByText("AVL 29")).toBeTruthy());
+  });
+});

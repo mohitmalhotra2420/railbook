@@ -17,6 +17,7 @@ import type { ClassCode } from "../types";
 import { speakGuide } from "../voice/speakGuide";
 import {
   buildAllClassRows,
+  clearRouteBoardCache,
   fetchRouteBoard,
   fetchTrainClasses,
   filterSeatRows,
@@ -106,15 +107,42 @@ export function SeatFinder({
   const [showAllNoData, setShowAllNoData] = useState(false);
   const spokenRef = useRef(false);
 
+  /* ↻ dobara try (user screenshot: board khaali aayi thi aur card me 28 trains "data nahi aayi") */
+  const [reload, setReload] = useState(0);
+  const [boardNote, setBoardNote] = useState<string | null>(null);
   useEffect(() => {
     let live = true;
+    setBoardNote(null);
+    clearRouteBoardCache(from, to, date);
     fetchRouteBoard(from, to, date).then((b) => {
       if (live) setBoard(b);
     });
     return () => {
       live = false;
     };
-  }, [from, to, date]);
+  }, [from, to, date, reload]);
+
+  /* Board poori khaali aayi (provider busy) → pehle 6 trains ka per-train board try karo, taaki
+   * kuch asli data dikhe. Sab fail ho to honest banner + ↻ button (28 rows "data nahi aayi" nahi). */
+  useEffect(() => {
+    if (!board || board.length) return;
+    let live = true;
+    void (async () => {
+      const targets = rows.slice(0, 6).map((r) => String(r.number).trim());
+      const got = await Promise.all(targets.map((n) => fetchTrainClasses(n, date, from, to)));
+      if (!live) return;
+      const built = targets
+        .map((n, i) => ({ trainNumber: n, trainName: rows.find((r) => String(r.number).trim() === n)?.name ?? "", classes: got[i] ?? [] }))
+        .filter((b) => b.classes.length > 0);
+      if (built.length) {
+        setBoard(built);
+        setBoardNote("Route board nahi aayi thi — har train ka apna board laaya gaya (asli data).");
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [board, rows, date, from, to]);
 
   /* ── 24 Sep 2026 (user: "card sirf single class hi show kar rha" — Swarn Shatabdi ke CC aur EC
    * dono available the, card me sirf ek dikhi): route board kuch classes "UNKNOWN" ya missing deta
@@ -275,7 +303,18 @@ export function SeatFinder({
 
       {loading && <div className="sf-loading">Live seat data aa raha hai…</div>}
 
-      {!loading && (
+      {/* Board poori tarah khaali = provider busy. Saaf batao + ↻ (28 trains "data nahi aayi" nahi). */}
+      {!loading && board !== null && board.length === 0 && (
+        <div className="sf-empty">
+          <b>Live board abhi nahi aa payi (provider busy).</b> Har train ka data alag se check kar sakte ho —
+          <span className="sf-empty-chips">
+            <button className="sf-chip" onClick={() => setReload((v) => v + 1)}>↻ Dobara try karo</button>
+          </span>
+        </div>
+      )}
+      {boardNote && <div className="sf-foot muted" style={{ background: "none", border: 0 }}>{boardNote}</div>}
+
+      {!loading && (board?.length ?? 0) > 0 && (
         <>
           <div className="sf-sec">
             <p className="sf-head">
