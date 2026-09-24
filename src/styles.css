@@ -2110,3 +2110,49 @@ table.traintable {
 .jx-pagecard-connect .jx-pagecard-txt strong{color:#0b3b66;font-size:15.5px}
 .jx-pagecard-connect .jx-pagecard-badge{background:#2563eb;color:#fff}
 .jx-pagecard-connect .jx-pagecard-go{color:#1d4ed8}
+
+/* ── 24 Sep 2026: Seat Finder card (chat ke andar) ─────────────────────
+ * ConfirmTkt ke AI Seat Finder jaisa flow: "2A mein seats hai?" → seat wali trains upar,
+ * WL wali neeche + chips (confirmed-only / class / time). Data: live route board (server par
+ * pehle se maujood). Sirf presentation — koi AI/API/architecture change nahi. */
+.sf { margin-top: 10px; border: 1px solid var(--line); border-radius: 16px; overflow: hidden; background: var(--card); box-shadow: var(--shadow); }
+.sf-top { display: flex; gap: 9px; align-items: center; padding: 11px 13px; background: linear-gradient(135deg, var(--navy), var(--navy-2)); color: #fff; }
+.sf-ic { width: 26px; height: 26px; border-radius: 9px; background: var(--green); display: grid; place-items: center; font-size: 14px; }
+.sf-top strong { font-size: 13.5px; display: block; }
+.sf-sub { display: block; font-size: 11px; color: #c9d4e4; }
+.sf-chips { display: flex; gap: 7px; flex-wrap: wrap; align-items: center; padding: 10px 12px; border-bottom: 1px solid var(--line); background: #fbf9f5; }
+.sf-chip { font-size: 11.5px; font-weight: 600; border: 1px solid var(--line); background: #fff; color: var(--ink); border-radius: 999px; padding: 5px 11px; display: inline-flex; gap: 5px; align-items: center; }
+.sf-chip.on { background: var(--green); border-color: var(--green); color: #fff; }
+.sf-chip.sel { background: var(--navy); border-color: var(--navy); color: #fff; }
+.sf-chip.on-time { background: var(--amber); border-color: var(--amber); color: #fff; }
+.sf-select { appearance: none; padding-right: 20px; background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%); background-position: calc(100% - 12px) 50%, calc(100% - 8px) 50%; background-size: 4px 4px, 4px 4px; background-repeat: no-repeat; }
+.sf-loading { padding: 12px 13px 14px; font-size: 12.5px; color: var(--muted); }
+.sf-sec { padding: 10px 12px 4px; }
+.sf-sec.wl-sec { border-top: 1px dashed var(--line); background: #fbf9f5; }
+.sf-head { display: flex; gap: 8px; align-items: center; margin: 0 0 8px; font-size: 12.5px; font-weight: 700; }
+.sf-count { font-weight: 600; color: var(--muted); font-size: 11.5px; }
+.sf-tag { border-radius: 999px; font-size: 10.5px; font-weight: 700; padding: 2px 8px; }
+.sf-tag.seat { background: var(--green-soft); color: var(--green); border: 1px solid #bfe3d1; }
+.sf-tag.wl { background: var(--amber-soft); color: var(--amber); border: 1px solid #f0d8b4; }
+.sf-row { display: block; width: 100%; text-align: left; border: 1px solid var(--line); border-radius: 13px; padding: 9px 11px; margin: 0 0 8px; background: #fff; }
+.sf-row.seat { border-left: 4px solid var(--green); }
+.sf-row.wl { border-left: 4px solid var(--amber); background: #fffdf9; }
+.sf-l1 { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+.sf-l1 strong { font-size: 13px; }
+.sf-tname { font-size: 12.5px; color: var(--muted); }
+.sf-fare { font-weight: 700; font-size: 13px; color: var(--navy); white-space: nowrap; }
+.sf-l2 { display: flex; gap: 9px; align-items: center; flex-wrap: wrap; margin-top: 5px; font-size: 11.5px; color: var(--muted); }
+.sf-time { color: var(--ink); font-weight: 600; }
+.sf-cls { border: 1px solid var(--line); border-radius: 6px; padding: 0 5px; font-weight: 600; }
+.sf-badge { font-size: 11px; font-weight: 700; border-radius: 8px; padding: 2px 8px; }
+.sf-badge.avl { background: var(--green-soft); color: var(--green); }
+.sf-badge.rac { background: #e8f0ff; color: #1d4ed8; }
+.sf-badge.wl { background: var(--amber-soft); color: var(--amber); }
+.sf-badge.na { background: var(--red-soft); color: var(--red); }
+.sf-go { margin-left: auto; font-size: 11.5px; font-weight: 700; color: #fff; background: var(--saffron); border-radius: 9px; padding: 4px 10px; }
+.sf-more { font-size: 11.5px; font-weight: 600; color: var(--saffron); padding: 2px 0 8px; }
+.sf-empty { background: var(--amber-soft); border: 1px solid #f0d8b4; border-radius: 12px; padding: 10px 12px; font-size: 12.5px; color: #7c3f06; margin: 0 0 8px; }
+.sf-empty b { color: #5c2f04; }
+.sf-empty-chips { display: flex; gap: 7px; flex-wrap: wrap; margin-top: 8px; }
+.sf-foot { padding: 8px 13px 12px; font-size: 11px; color: var(--muted); border-top: 1px dashed var(--line); background: #fbf9f5; }
+.sf-foot b { color: var(--ink); }

@@ -949,8 +949,15 @@ export async function runAutonomousAgent(req: AutoAgentRequest): Promise<AutoAge
 
   function finish(ungrounded: string | null, issues: string[]): AutoAgentResponse {
     const latencyMs = Date.now() - startedAll;
-    if (reply) {
-      return base({ ok: true, reply: hideToolNames(toPlainText(reply)), source: "ai", grounded: true, toolsUsed, modelUsed, protocol, rounds, latencyMs, failureReason: null });
+    /* 24 Sep 2026 (user: "lamba sawaal par kabhi-kabhi jawab KHAALI aata hai — theek kar do"):
+     * model kabhi aisa text deta hai jo plain-text scrub ke baad khaali bach jaata hai (sirf markdown
+     * table separators / backticks). Pehle `if (reply)` sirf RAW truthiness dekhta tha, isliye
+     * ok:true + reply:"" chala jaata tha aur chat me ek BLANK bubble aata tha. Ab scrub ke baad
+     * dekhte hain: khaali hai to no-reply maana jaata hai → evidence summary / honest line.
+     * (Ye sirf output hygiene hai — AI ka sochna/tool-choice/seat-search logic waise ka waisa.) */
+    const clean = reply ? toPlainText(hideToolNames(reply)).trim() : "";
+    if (clean) {
+      return base({ ok: true, reply: clean, source: "ai", grounded: true, toolsUsed, modelUsed, protocol, rounds, latencyMs, failureReason: null });
     }
     // Model failed (guard / timeout / error) — fall back to a deterministic summary of REAL tool output.
     const summary = evidenceSummary(results);

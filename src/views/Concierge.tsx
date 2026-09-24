@@ -11,6 +11,8 @@ import { addDays, availabilityLabel, formatShortDate, inr, newId, todayYmd } fro
 import { BERTH_BY_CLASS, CLASS_LABELS, isBookable, type ClassAvailability, type ClassCode, type Passenger, type Station, type TrainResult } from "../types";
 import type { AgentTrainTable } from "../ai/agent";
 import { JourneyOptions } from "../components/JourneyOptions";
+import { SeatFinder } from "../components/SeatFinder";
+import { detectSeatIntent, type SeatIntent } from "../seatfinder";
 import { AlternativesCard } from "../components/AlternativesCard";
 import { TrainPicker } from "../components/TrainPicker";
 
@@ -30,6 +32,13 @@ import { matchOfferedStation } from "../ai/stationPick";
 import { onUtterance } from "../conversation/bus";
 
 const PROBE_CLASSES: ClassCode[] = ["SL", "3A", "2A", "1A", "CC", "2S"];
+
+/* 24 Sep 2026 (user: "kabhi jawab KHAALI aa jaata hai — theek karo"): chat me BLANK bubble kabhi na aaye.
+ * AI kabhi aisa text deta hai jo scrub ke baad khaali bachta hai, aur legacy path me bhi text khaali
+ * ho sakta hai. Aise waqt par saaf Hinglish line (guess bilkul nahi). —— sirf display hygiene,
+ * AI logic / seat-search logic / aaj ke fixes ko chhua nahi gaya. */
+const EMPTY_REPLY_LINE = "Jawab is baar khaali aa gaya (live data ya AI se kuch nahi mila) — main andaza nahi lagaunga. Dobara bhejo ya thodi der baad try karo.";
+const CARDS_ONLY_LINE = "Data neeche hai (real provider se) — AI ki line is baar nahi aa payi.";
 
 function probeClassRows(): ClassAvailability[] {
   return PROBE_CLASSES.map((code) => ({
@@ -187,6 +196,11 @@ export function Concierge() {
     dateProvided: state.dateProvided,
   });
   const handleTextRef = useRef<(text: string) => void>(() => undefined);
+  /* 24 Sep 2026 (user: "2A mein seats hai?" → ConfirmTkt jaisa filter + "bolke poochhe to?"):
+   * seat/class intent CLIENT-side pakadte hain; us turn ke train table par Seat Finder card lagta hai.
+   * Voice se aaya turn ho to jawab ek line me bol bhi dete hain. AI/server/provider ko chhua nahi gaya. */
+  const viaVoiceRef = useRef(false);
+  const [seatFind, setSeatFind] = useState<{ intent: SeatIntent; viaVoice: boolean } | null>(null);
   const lastFactTrainRef = useRef<string | null>(null);
   /** Last server-side AI agent context — sent back each turn so multi-turn state survives.
    * Round-8: persisted memory se initialize — refresh par bhi train/topic yaad. */
@@ -205,6 +219,7 @@ export function Concierge() {
   /* Round-18m-32: manual-commit voice — bolo → screen par live dikhe → OK dabao tab bheje (auto-send band). */
   const voice = useVoiceInput(
     (text) => {
+      viaVoiceRef.current = true; /* Seat Finder ko pata chale ki sawaal bola gaya */
       handleTextRef.current(text);
     },
     (msg) => {
@@ -779,6 +794,14 @@ export function Concierge() {
     if (asUser) {
       setMessages((m) => [...m, { id: newId(), role: "user", text: trimmed }]);
     }
+    /* Seat Finder: "2A mein seats hai?" jaisa sawaal → jo train table aayegi usme seat card lagega.
+     * Naya sawaal bina seat-intent ke ho to card hat jaata hai (purani table par bhi). */
+    {
+      const si = detectSeatIntent(trimmed);
+      const viaVoiceTurn = viaVoiceRef.current;
+      viaVoiceRef.current = false;
+      setSeatFind(si.wants ? { intent: si, viaVoice: viaVoiceTurn } : null);
+    }
     const userDateKnown = Boolean(state.trains.length || state.selectedTrain || state.previewFare);
     let extraction: NluResult | undefined;
     setThinking(true);
@@ -922,7 +945,12 @@ export function Concierge() {
           const tableBlock: Block[] | undefined = blocks.length ? blocks : undefined;
           setMessages((m) => [
             ...m,
-            { id: newId(), role: "assistant", text: agentRes.reply! + traceLine, blocks: tableBlock },
+            {
+              id: newId(),
+              role: "assistant",
+              text: String(agentRes.reply ?? "").trim() ? `${agentRes.reply}${traceLine}` : CARDS_ONLY_LINE,
+              blocks: tableBlock,
+            },
           ]);
           if (agentRes.interrupt && agentRes.resumeText) {
             if (agentRes.resumeAsk) setLastAsked(agentRes.resumeAsk);
@@ -1025,7 +1053,15 @@ export function Concierge() {
       extraction,
       lastFactTrain: lastFactTrainRef.current ?? undefined,
     });
-    setMessages((m) => [...m, { id: newId(), role: "assistant", text: turn.text, blocks: turn.blocks }]);
+    setMessages((m) => [
+      ...m,
+      {
+        id: newId(),
+        role: "assistant",
+        text: String(turn.text ?? "").trim() ? turn.text : turn.blocks?.length ? CARDS_ONLY_LINE : EMPTY_REPLY_LINE,
+        blocks: turn.blocks,
+      },
+    ]);
     await applyTurn(turn, trimmed);
     if (turn.goReview) pendingFare.current = true;
     const stillPick = stationPickRef.current;
@@ -1503,6 +1539,7 @@ export function Concierge() {
                 onWallet={() => go("wallet")}
                 onBookings={() => go("bookings")}
                 onOpenBoard={(from, to, date) => void openBoardFor(from, to, date)}
+                seatFinder={seatFind}
               />
             ))}
           </article>
@@ -1694,6 +1731,7 @@ function BlockView({
   onWallet,
   onBookings,
   onOpenBoard,
+  seatFinder,
 }: {
   block: Block;
   state: ReturnType<typeof useBooking>["state"];
@@ -1712,10 +1750,19 @@ function BlockView({
   onBookings: () => void;
   /** Round-18e: explicit "Sabhi trains · Book" CTA from BEST FOR YOU card → TrainBoard. */
   onOpenBoard?: (from: string, to: string, date: string, trainNumber: string | null) => void;
+  /* Seat Finder: us turn ka seat/class intent (Concierge state se aata hai — AI/server untouched). */
+  seatFinder?: { intent: SeatIntent; viaVoice: boolean } | null;
 }) {
   const { updatePassenger } = useBooking();
   if (block.type === "traintable") {
-    return <TrainTableView table={block.table} />;
+    return (
+      <TrainTableView
+        table={block.table}
+        seatFinder={
+          seatFinder ? { intent: seatFinder.intent, viaVoice: seatFinder.viaVoice, onChip } : undefined
+        }
+      />
+    );
   }
   if (block.type === "choice") {
     return <ChoiceDropdown choice={block.choice} onPick={(value) => onChip(block.choice.sendTemplate.replace("{value}", value))} />;
@@ -2027,7 +2074,13 @@ function TrainMini({
  * Chat-text bullet list confusing thi — ab search results proper <table>
  * mein aate hain: train, nikalne/pahunchne ka time, duration, classes.
  * Sabse fast row ⚡ ke saath highlight. Data 100% server tool evidence se. */
-function TrainTableView({ table }: { table: AgentTrainTable }) {
+function TrainTableView({
+  table,
+  seatFinder,
+}: {
+  table: AgentTrainTable;
+  seatFinder?: { intent: SeatIntent; viaVoice: boolean; onChip: (text: string) => void };
+}) {
   const rows = table.rows ?? [];
   const day = (n: number) => (n > 0 ? `+${n}d` : "");
   return (
@@ -2072,6 +2125,17 @@ function TrainTableView({ table }: { table: AgentTrainTable }) {
         </table>
       </div>
       <div className="traintable-foot muted">Real railway data · koi guess nahi</div>
+      {seatFinder && (
+        <SeatFinder
+          from={table.from}
+          to={table.to}
+          date={table.date}
+          rows={rows}
+          intent={seatFinder.intent}
+          speak={seatFinder.viaVoice}
+          onChip={seatFinder.onChip}
+        />
+      )}
     </div>
   );
 }

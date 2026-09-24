@@ -42,7 +42,10 @@ describe("Round-18e UI guard (source-level)", () => {
 describe("Round-18f — regression guards from real-browser E2E", () => {
   it("BlockView receives onOpenBoard (was ReferenceError → blank reply after date)", () => {
     const c = readFileSync("src/views/Concierge.tsx", "utf8");
-    expect(c).toMatch(/onBookings,\n\s*onOpenBoard,\n\}: \{/);
+    /* 24 Sep 2026: BlockView ke destructure me naya prop (seatFinder — Seat Finder card) add hua,
+     * isliye guard ko "onOpenBoard ke baad aage koi bhi props, phir }: {" tak allow karta hai.
+     * Asli niyat wahi hai: onOpenBoard destructure me maujood ho (ReferenceError dobara na aaye). */
+    expect(c).toMatch(/onBookings,\n\s*onOpenBoard,[\s\S]{0,120}?\n\}: \{/);
     // openBoardFor must be defined at component scope, not nested inside handleText
     const idxOpen = c.indexOf("async function openBoardFor(");
     const idxHandle = c.indexOf("async function handleText(");
