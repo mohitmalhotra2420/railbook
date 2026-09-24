@@ -76,3 +76,19 @@ Agar model jawab na de aur seat intent ho → deterministic seat reply (`source:
 **APK:** v1.4.3 hi chalega — app WebView me live site (`railbook-gegs.onrender.com`) kholta hai, isliye ye teeno fix app me apne aap aa gaye. Naya APK chahiye to bolo (v1.4.4 bump kar denge).
 
 **Tests:** 90 files / **925 PASS** (`npm run build` clean).
+
+---
+
+## 7. Round-15.2 — naye screenshots (build `b2a7b55`) ke fix — commit `b8f510e` (LIVE)
+
+| Screenshot | Kya dikha | Asli wajah | Fix |
+|---|---|---|---|
+| 1 & 4 | Seat Finder card me **SAARI 28 trains "data nahi aayi"**, SEAT 0 rows, WAITLIST 0 rows | Us waqt **route board call khaali aayi** thi (provider busy/rate-limit — hamare 6-parallel load test me bhi ek baar `http_429` mila). Card khaali board par har train ko "data nahi aayi" list kar deta tha | `fetchRouteBoard` **ek baar khud retry** karta hai, FAIL **cache nahi** hota; board poora khaali ho to card saaf kehta hai **"Live board abhi nahi aa payi (provider busy)" + ↻ Dobara try karo** (28-row confusion nahi). Saath me pehle **6 trains ka per-train board** khud try hota hai taaki asli data dikhe |
+| 2 | "Mujhe kal ludhiana se beas ki 2A ki seats dikhana" → **journey plan card** dikha, seat jawab nahi | Seat line reply me **thi**, par journey card wale message me AI text **"AI note — tap karo"** me collapse ho jata hai → jawab chhup gaya | Seat line (💺 …) ab **card ke UPAR hamesha** dikhti hai (baaki text pehle jaisa note me) |
+| 4 & 6 | "AC trains dikhao" → 2S/SL bhi | (round-15.1 me theek) ab AC = 1A/2A/3A/3E/CC/EC; **❄️ AC** chip live hai | — |
+| — | 2A poochhne par **WL ka pata hi nahi chalta tha** | `onlyAvailable` WL rows ko hata deta tha → line "koi seat wali train nahi mili" keh kar chup ho jaati thi | Ab WL rows alag se nikaal kar line: **"💺 2A me abhi koi AVAILABLE/RAC seat nahi — WL wali 13 trains hain: 18103 2A WL 1 ₹725 · 11057 2A WL 1 ₹725 · 12483 2A WL 5 ₹770. Confirm% hum nahi dete…"** (live verified) |
+
+**Tests:** 90 files / **928 PASS**.
+
+### "ConfirmTkt seconds me kaise?" (user sawaal)
+ConfirmTkt apna **data pipeline cache** rakhta hai (unke paas apna scraping/DB layer hai) + parallel queries, isliye instant lagta hai. Hum **live providers** (railyatri / ConfirmTkt web / erail) se per-train data laate hain — isliye kabhi provider busy hone par slow/empty milta hai (jaise screenshot 1 me). Isi liye humne retry + honest "board nahi aayi" state + per-train fallback add kiya — **jhooth nahi, dheema sahi**.
