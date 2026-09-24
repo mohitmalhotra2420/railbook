@@ -97,6 +97,12 @@ export interface NluResult {
   unresolvedTo?: string;
   /** COMPARE_TRAINS: dono (ya sab) bole gaye train numbers (2026-09-06). */
   compareNumbers?: string[];
+  /* 24 Sep 2026: seat intent ko SERVER par samajhna (client layer fallback rahe).
+   * Field additive hain — jo consumer inhe na padhe uske liye kuch nahi badalta. */
+  seatIntent?: boolean;
+  onlyAvailable?: boolean;
+  seatSortBy?: "fastest" | "cheapest" | null;
+  seatAfterMinute?: number | null;
 }
 
 /* Round-11: departure-question cue — "depart kar gyi", "nikal chuki",

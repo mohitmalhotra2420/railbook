@@ -238,6 +238,105 @@ export function buildSeatRows(
   return { seat, wl, missingClass };
 }
 
+/* ── HAR train × HAR class (24 Sep 2026) ──────────────────────────────
+ * User: "Confirm button ko replace karke Available kro — Available pe click kre to Available + RAC
+ * dono dikhao; aur 'Sabhi trains' pe click kre to sabhi dikhao, including all classes jo bhi us
+ * particular train me hain. Bas kuch bhi fake na ho — sab data real ho."
+ *
+ * buildSeatRows() ek train ki sirf EK class dikhata hai (class chip wali ya sabse achhi).
+ * Ye function do modes deta hai:
+ *   mode "avail" → sirf AVAILABLE + RAC rows (dono me seat pakki hone ke kareeb).
+ *   mode "all"   → har train ki HAR class, uski REAL status ke saath (WL / N-A / unknown) +
+ *                  jinki board row hi nahi aayi wo `noData` me — unhe "seat nahi" NAHI maana.
+ * Sab kuch live board se — koi guess, koi banaya hua row nahi. */
+export type SeatMode = "all" | "avail";
+
+export function buildAllClassRows(
+  searchRows: SeatSearchRow[],
+  boardRows: BoardTrainRow[],
+  classCode: ClassCode | null,
+  mode: SeatMode = "all",
+): { seat: SeatRow[]; wl: SeatRow[]; noData: SeatRow[]; missingClass: number } {
+  const byNumber = new Map<string, BoardTrainRow>();
+  for (const b of boardRows) byNumber.set(String(b.trainNumber ?? "").trim(), b);
+  const seen = new Set<string>();
+  const seat: SeatRow[] = [];
+  const wl: SeatRow[] = [];
+  const noData: SeatRow[] = [];
+  let missingClass = 0;
+
+  const codeOf = (c: BoardClassRow) => String(c.classCode ?? c.code ?? "").trim().toUpperCase();
+  const rowsOf = (b: BoardTrainRow): BoardClassRow[] => {
+    const all = (b.classes ?? []).filter((c) => codeOf(c));
+    if (classCode) return all.filter((c) => codeOf(c) === classCode);
+    return all; /* "Sabhi trains" = har class, chahe status UNKNOWN ho — real row hi dikhega. */
+  };
+
+  const push = (t: SeatSearchRow | null, b: BoardTrainRow, c: BoardClassRow, key: string) => {
+    const status = String(c.status ?? "UNKNOWN").toUpperCase();
+    const row: SeatRow = {
+      number: key,
+      name: String(b.trainName ?? t?.name ?? ""),
+      departure: t?.departure ?? null,
+      arrival: t?.arrival ?? null,
+      durationLabel: t?.durationLabel ?? null,
+      classCode: (codeOf(c) as ClassCode) || "—",
+      status,
+      seats: num(c.seats),
+      rac: num(c.rac),
+      waitlist: num(c.waitlist),
+      fare: num(c.fare),
+      seat: status === "AVAILABLE" || status === "RAC",
+      timesKnown: Boolean(t),
+      source: c.source ?? null,
+    };
+    if (row.seat) seat.push(row);
+    else if (mode === "all") wl.push(row);
+  };
+
+  for (const t of searchRows) {
+    const key = String(t.number).trim();
+    const b = byNumber.get(key);
+    if (!b) {
+      /* Board me row hi nahi aayi (jaise 22429 / 14617) — "seat nahi" nahi, "data nahi aayi". */
+      if (mode === "all") {
+        noData.push({
+          number: key, name: String(t.name ?? ""), departure: t.departure ?? null, arrival: t.arrival ?? null,
+          durationLabel: t.durationLabel ?? null, classCode: "—", status: "NO_DATA", seats: null, rac: null,
+          waitlist: null, fare: null, seat: false, timesKnown: true, source: null,
+        });
+      }
+      continue;
+    }
+    seen.add(key);
+    const rows = rowsOf(b);
+    if (!rows.length) {
+      if (classCode) missingClass += 1;
+      continue;
+    }
+    for (const c of rows) push(t, b, c, key);
+  }
+  /* Board par hain par search list me nahi (times "—") — user ne kaha inhe bhi dikhao. */
+  for (const [key, b] of byNumber) {
+    if (seen.has(key)) continue;
+    for (const c of rowsOf(b)) push(null, b, c, key);
+  }
+
+  const depMin = (r: SeatRow) => {
+    const m = /^(\d{1,2}):(\d{2})/.exec(r.departure ?? "");
+    return m ? Number(m[1]) * 60 + Number(m[2]) : 9e9;
+  };
+  seat.sort((a, b) => statusRank(a.status) - statusRank(b.status) || (b.seats ?? b.rac ?? 0) - (a.seats ?? a.rac ?? 0) || depMin(a) - depMin(b));
+  wl.sort((a, b) => statusRank(a.status) - statusRank(b.status) || (a.waitlist ?? 9e9) - (b.waitlist ?? 9e9) || depMin(a) - depMin(b));
+  noData.sort((a, b) => depMin(a) - depMin(b));
+  return { seat, wl, noData, missingClass };
+}
+
+/** Kitni alag trains hain (rows me ek hi train ki kai class ho sakti hain). */
+export function uniqueTrainCount(rows: SeatRow[]): number {
+  return new Set(rows.map((r) => r.number)).size;
+}
+
 /** Filter (user ke chips) — sab client-side, koi naya server call nahi. */
 export function filterSeatRows(
   rows: SeatRow[],

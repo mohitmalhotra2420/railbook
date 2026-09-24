@@ -4,7 +4,7 @@
  * merge karke "seat upar / WL neeche" dikhati hai + chips (confirmed-only / class / time).
  * Sab client-side; AI logic, tools, API, architecture ko chhua nahi gaya. */
 import { describe, expect, it } from "vitest";
-import { afterMinuteFromText, buildSeatRows, classFromText, detectSeatIntent, filterSeatRows, seatSummaryLine } from "../src/seatfinder";
+import { afterMinuteFromText, buildAllClassRows, buildSeatRows, classFromText, detectSeatIntent, filterSeatRows, seatSummaryLine, uniqueTrainCount } from "../src/seatfinder";
 
 const search = (n: string, dep: string, arr: string, dur: string) => ({
   number: n,
@@ -165,5 +165,58 @@ describe("Seat Finder — GENERIC: 2A par hardcode nahi (user: 'do not specific 
     const { seat } = buildSeatRows(rows, b, "2A");
     expect(filterSeatRows(seat, { cheapest: true }).map((r) => r.number)).toEqual(["B", "C", "A"]);
     expect(filterSeatRows(seat, { earliest: true })[0].number).toBe("B");
+  });
+});
+
+describe("Seat Finder — Available / Sabhi trains (24 Sep user: 'all classes dikhao, kuch fake na ho')", () => {
+  const rows = [search("11078", "04:30", "11:15", "6h 45m"), search("20986", "00:40", "05:55", "5h 15m"), search("14617", "14:01", "17:05", "3h 04m")];
+  const b = [
+    board("11078", [
+      { code: "2A", status: "AVAILABLE", seats: 29, fare: 825 },
+      { code: "3A", status: "WAITLIST", waitlist: 12, fare: 585 },
+      { code: "SL", status: "NOT_AVAILABLE", fare: 285 },
+    ]),
+    board("20986", [{ code: "2A", status: "RAC", rac: 9, fare: 890 }]),
+  ];
+
+  it("'Sabhi trains': har train ki HAR class — AVL/RAC upar, WL/N-A neeche (real rows, koi banaya hua nahi)", () => {
+    const all = buildAllClassRows(rows, b, null, "all");
+    expect(all.seat.map((r) => `${r.number}-${r.classCode}`)).toEqual(["11078-2A", "20986-2A"]); /* AVL pehle, phir RAC */
+    expect(all.wl.map((r) => `${r.number}-${r.classCode}`)).toEqual(["11078-3A", "11078-SL"]); /* WL pehle, phir N/A */
+    expect(all.wl[0].waitlist).toBe(12);
+    expect(all.wl[1].status).toBe("NOT_AVAILABLE");
+  });
+
+  it("'Available': sirf AVAILABLE + RAC (dono) — WL/N-A list bilkul khaali", () => {
+    const av = buildAllClassRows(rows, b, null, "avail");
+    expect(av.seat.map((r) => `${r.number}-${r.classCode}`)).toEqual(["11078-2A", "20986-2A"]);
+    expect(av.wl).toEqual([]);
+    expect(av.seat.every((r) => r.status === "AVAILABLE" || r.status === "RAC")).toBe(true);
+  });
+
+  it("class chip: sirf wahi class; jin trains me wo class hi nahi unki ginti alag", () => {
+    const two = buildAllClassRows(rows, b, "2A", "all");
+    expect(two.seat.map((r) => `${r.number}-${r.classCode}`)).toEqual(["11078-2A", "20986-2A"]);
+    expect(two.missingClass).toBe(0);
+    const three = buildAllClassRows(rows, b, "3A", "all");
+    expect(three.seat).toEqual([]);
+    expect(three.wl.map((r) => `${r.number}-${r.classCode}`)).toEqual(["11078-3A"]);
+    expect(three.missingClass).toBe(1); /* 20986 me 3A class hi nahi */
+  });
+
+  it("jis train ka board data hi nahi aaya → 'seat nahi' nahi, alag 'data nahi aayi' list", () => {
+    const all = buildAllClassRows(rows, b, null, "all");
+    expect(all.noData.map((r) => r.number)).toEqual(["14617"]);
+    expect(all.noData[0].status).toBe("NO_DATA");
+    expect(all.noData[0].departure).toBe("14:01"); /* times search list se — real */
+    expect(all.noData[0].timesKnown).toBe(true);
+    const av = buildAllClassRows(rows, b, null, "avail");
+    expect(av.noData).toEqual([]);
+  });
+
+  it("count trains ka hota hai, rows ka nahi (ek train ki kai class ho sakti hain)", () => {
+    const all = buildAllClassRows(rows, b, null, "all");
+    expect(all.seat.length + all.wl.length).toBe(4);
+    expect(uniqueTrainCount([...all.seat, ...all.wl])).toBe(2);
   });
 });

@@ -7,6 +7,7 @@ import type { Extraction } from "./schema.js";
 import { isOutOfDomain } from "./domain.js";
 import { routeRailwayIntent } from "./toolRoute.js";
 import { routedStationSearch, type StationSearchResult } from "../railway/router.js";
+import { parseSeatIntent } from "./seatIntent.js";
 
 export interface UnderstandRequest {
   text: string;
@@ -187,13 +188,34 @@ async function resolveUnresolvedStations(nlu: NluResult): Promise<NluResult> {
   return nlu;
 }
 
+/** 24 Sep 2026 (user: "seat intent questions AI khud samjhe, client layer fallback rahe"):
+ *  LLM path chahe deterministic path — dono par seat slots lagte hain. Additive hai: jo
+ *  consumer in fields ko ignore karta hai uske liye kuch nahi badalta. */
+function withSeatSlots(nlu: NluResult, text: string): NluResult {
+  const s = parseSeatIntent(text);
+  const anySlot = s.seatIntent || s.classCodes.length > 0 || s.sortBy != null || s.departAfterMinute != null || s.quota != null;
+  if (!anySlot) return nlu;
+  return {
+    ...nlu,
+    classCodes: nlu.classCodes?.length ? nlu.classCodes : s.classCodes.length ? (s.classCodes as NluResult["classCodes"]) : nlu.classCodes,
+    confirmedOnly: nlu.confirmedOnly ?? (s.confirmedOnly ? true : undefined),
+    seatIntent: s.seatIntent || undefined,
+    onlyAvailable: s.seatIntent || undefined,
+    seatSortBy: s.sortBy,
+    seatAfterMinute: s.departAfterMinute,
+    afterHour: nlu.afterHour ?? (s.departAfterMinute != null ? Math.floor(s.departAfterMinute / 60) : undefined),
+    quota: nlu.quota ?? s.quota ?? undefined,
+  };
+}
+
 function pack(
   nlu: NluResult,
   known: KnownSlots,
   extra: Partial<UnderstandResponse> & Pick<UnderstandResponse, "source">,
+  text = "",
 ): UnderstandResponse {
   return {
-    nlu,
+    nlu: text ? withSeatSlots(nlu, text) : nlu,
     missingFields: missingOf(nlu, known),
     modelUsed: extra.modelUsed ?? null,
     provider: extra.provider ?? null,
@@ -216,15 +238,15 @@ export async function runUnderstand(req: UnderstandRequest): Promise<UnderstandR
       hasBookingContext: Boolean(known.from || known.to || known.date || lastAsked),
     })
   ) {
-    return pack({ intent: "OUT_OF_DOMAIN" }, known, { source: "nlu", failureReason: "out_of_domain" });
+    return pack({ intent: "OUT_OF_DOMAIN" }, known, { source: "nlu", failureReason: "out_of_domain" }, req.text);
   }
 
   const deterministic = understand(req.text, { now, lastAsked, known });
   if (FAST_PATH.has(deterministic.intent) || (lastAsked === "trainNumber" && deterministic.trainNumber)) {
-    return pack(deterministic, known, { source: "nlu", failureReason: "fast_path" });
+    return pack(deterministic, known, { source: "nlu", failureReason: "fast_path" }, req.text);
   }
   if (lastAsked === "passengers" && deterministic.passengerCount) {
-    return pack(deterministic, known, { source: "nlu", failureReason: "fast_path" });
+    return pack(deterministic, known, { source: "nlu", failureReason: "fast_path" }, req.text);
   }
   const destOnlyCluster =
     Boolean(deterministic.unresolvedTo) &&
@@ -233,7 +255,7 @@ export async function runUnderstand(req: UnderstandRequest): Promise<UnderstandR
     /jana hai|jaana hai|जाना है/.test(req.text) &&
     !/(?:से|\bse\b|\bfrom\b)/.test(req.text);
   if (destOnlyCluster) {
-    return pack(deterministic, known, { source: "nlu", failureReason: "fast_path" });
+    return pack(deterministic, known, { source: "nlu", failureReason: "fast_path" }, req.text);
   }
 
   const llmInput = {
@@ -274,7 +296,7 @@ export async function runUnderstand(req: UnderstandRequest): Promise<UnderstandR
         latencyMs: llm.latencyMs,
         failureReason: null,
         attempts: llm.attempts,
-      });
+      }, req.text);
     }
   }
 
@@ -286,7 +308,7 @@ export async function runUnderstand(req: UnderstandRequest): Promise<UnderstandR
     latencyMs: llm.latencyMs,
     failureReason: llm.failureReason ?? "ai_unusable",
     attempts: llm.attempts,
-  });
+  }, req.text);
 }
 
 function missingOf(nlu: NluResult, known: KnownSlots): string[] {

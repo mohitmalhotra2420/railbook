@@ -2156,3 +2156,33 @@ table.traintable {
 .sf-empty-chips { display: flex; gap: 7px; flex-wrap: wrap; margin-top: 8px; }
 .sf-foot { padding: 8px 13px 12px; font-size: 11px; color: var(--muted); border-top: 1px dashed var(--line); background: #fbf9f5; }
 .sf-foot b { color: var(--ink); }
+/* 24 Sep 2026 (user: "Available / Sabhi trains — kuch bhi fake na ho, sab data real ho") */
+.sf-row.nodata { border-left: 4px solid #c9c2b6; background: #fbfaf7; }
+.sf-tag.nodata { background: #eef1f6; color: #4b5563; border: 1px solid #d5dbe5; }
+.sf-sec.nodata-sec { border-top: 1px dashed var(--line); background: #fbfaf7; }
+
+/* ── 24 Sep 2026: "bolne wala" sheet (user: ConfirmTkt ka Listening screen jaisa) ─────────────
+ * Live transcript + quick chips + bada mic + ✍️ Type + ✕. Bhejna OK par (auto-send nahi).
+ * Sirf UI — AI/server/API ko chhua nahi. */
+.vs-scrim{position:fixed;inset:0;background:rgba(11,31,58,.45);display:flex;align-items:flex-end;justify-content:center;z-index:60}
+.vs-sheet{width:100%;max-width:520px;margin:0 auto;background:linear-gradient(180deg,#fff,#fbf9f5);border-radius:22px 22px 0 0;padding:14px 16px calc(18px + var(--safe-b));box-shadow:0 -18px 50px rgba(11,31,58,.28);animation:vs-up .18s ease-out}
+@keyframes vs-up{from{transform:translateY(18px);opacity:.6}to{transform:none;opacity:1}}
+.vs-head{display:flex;align-items:center;gap:10px}
+.vs-brand{font-weight:800;font-size:14px;color:var(--navy)}
+.vs-live{font-size:11.5px;font-weight:700;color:var(--green);background:var(--green-soft);border:1px solid #bfe3d1;border-radius:999px;padding:2px 9px}
+.vs-x{margin-left:auto;border:0;background:#eef1f6;color:#4b5563;width:30px;height:30px;border-radius:50%;font-size:14px;font-weight:700;cursor:pointer}
+.vs-sugg{display:flex;gap:7px;overflow-x:auto;padding:10px 0 4px}
+.vs-chip{flex:none;font-size:12px;font-weight:700;border:1px solid var(--line);background:#fff;color:var(--navy);border-radius:999px;padding:7px 12px;cursor:pointer}
+.vs-transcript{margin:6px 0 2px;background:#eef1f6;border-radius:16px;padding:11px 13px;font-size:13.5px;line-height:1.45;color:var(--ink);min-height:44px}
+.vs-transcript.empty{color:var(--muted);font-style:italic}
+.vs-micwrap{position:relative;display:grid;place-items:center;padding:16px 0 6px}
+.vs-ring{position:absolute;width:104px;height:104px;border-radius:50%;background:radial-gradient(circle at 30% 30%,#ffd166,#f4820a 55%,#d1471f);opacity:.28;transition:transform .12s ease-out}
+.vs-ring.live{opacity:.42}
+.vs-mic{position:relative;width:84px;height:84px;border-radius:50%;border:0;color:#fff;background:radial-gradient(circle at 30% 30%,#ffcf5c,#f4820a 55%,#c2410c);box-shadow:0 10px 24px rgba(196,78,29,.35);display:grid;place-items:center;cursor:pointer}
+.vs-mic.live{background:radial-gradient(circle at 30% 30%,#7ee0a8,#0d6b43 60%,#084c2f)}
+.vs-state{text-align:center;font-size:12px;color:var(--muted);padding:6px 0 2px}
+.vs-actions{display:flex;align-items:center;gap:9px;margin-top:8px}
+.vs-key{border:1px solid var(--line);background:#fff;border-radius:12px;padding:10px 14px;font-weight:700;font-size:13px;color:var(--navy);cursor:pointer}
+.vs-ok{flex:1;border:0;border-radius:12px;padding:12px;font-weight:800;font-size:14px;color:#fff;background:var(--green);box-shadow:0 8px 18px rgba(13,107,67,.25);cursor:pointer}
+.vs-ok:disabled{background:#c9d2cc;box-shadow:none;cursor:default}
+.vs-close{border:1px solid var(--line);background:#fff;border-radius:12px;padding:10px 14px;font-weight:700;color:#4b5563;cursor:pointer}

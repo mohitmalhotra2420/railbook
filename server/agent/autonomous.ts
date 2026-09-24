@@ -27,6 +27,10 @@ import { isForbiddenMoneyTool } from "./context.js";
 import { livePositionLabel } from "./tools.js";
 import { runAutoTool, type AutoToolResult } from "./autoTools.js";
 import { AUTO_TOOLS, AUTO_TOOL_NAMES } from "./toolSpecs.js";
+/* 24 Sep 2026 (user): seat intent server par samajhna — client layer fallback rahe.
+ * Koi tool/API/journey change nahi: bas bhasha padhna + maujooda live board par filter. */
+import { parseSeatIntent } from "../understand/seatIntent.js";
+import { seatFilterFor, type SeatFilterRow } from "./seatFilter.js";
 
 // ────────────────────────────────────────────────────────────────────────────
 // Public types
@@ -122,7 +126,20 @@ export interface AutoAgentResponse {
   llmMs: number[];
   failureReason: string | null;
   confirmBook: false;
+  /** 24 Sep 2026: seat-intent turn tha to server ka filter (asli live-board rows).
+   *  Client apna card isse bhar sakta hai; ye na ho to client layer (fallback) chalta hai. */
+  seatFilter?: {
+    classCodes: string[];
+    sortBy: "fastest" | "cheapest" | null;
+    departAfterMinute: number | null;
+    line: string;
+    rows: SeatFilterRow[];
+    wlRows: SeatFilterRow[];
+    source: string | null;
+  } | null;
 }
+
+type SeatBlock = { line: string; payload: NonNullable<AutoAgentResponse["seatFilter"]> };
 
 // ────────────────────────────────────────────────────────────────────────────
 // Config
@@ -795,6 +812,45 @@ export async function runAutonomousAgent(req: AutoAgentRequest): Promise<AutoAge
 
   mergeDeterministicSlots(state, text, now);
 
+  /* ── Seat intent (server) ─────────────────────────────────────────────────
+   * User: "seat intent questions AI khud samjhe and filter kare… baaki AI ka search karne ka way,
+   * tools calling ka way, API calling ka way, alternatives/connecting journeys ka logic mat
+   * change karna." Isliye yahan SIRF: (a) bhasha padhna, (b) maujooda live route-board par
+   * filter, (c) jawab me asli numbers wali line. Tools/registry/engine ko chhua nahi gaya.
+   * SEAT_FILTER_SERVER=0 → ye poora block skip (behaviour aaj jaisa; client layer chalta rahega). */
+  const seatSlots = env.seatFilterServer ? parseSeatIntent(text) : null;
+
+  /* Seat filter: ek hi board call, memoised — sirf jab user ne seat/class/time ki baat ki ho.
+   * (Declaration yahan upar hai: finish() har return path se pehle chalta hai.) */
+  let seatMemo: SeatBlock | null | undefined;
+  async function seatBlock(): Promise<SeatBlock | null> {
+    if (!seatSlots || !seatSlots.seatIntent) return null;
+    if (seatMemo !== undefined) return seatMemo;
+    const from = state.origin?.code ?? state.lastSearch?.from ?? null;
+    const to = state.destination?.code ?? state.lastSearch?.to ?? null;
+    const date = state.date ?? state.lastSearch?.date ?? today;
+    if (!from || !to) {
+      seatMemo = null;
+      return null;
+    }
+    const res = await seatFilterFor({ from, to, date, slots: seatSlots }).catch(() => null);
+    seatMemo = res
+      ? {
+          line: res.line,
+          payload: {
+            classCodes: seatSlots.classCodes,
+            sortBy: seatSlots.sortBy,
+            departAfterMinute: seatSlots.departAfterMinute,
+            line: res.line,
+            rows: res.rows,
+            wlRows: res.wlRows,
+            source: res.source,
+          },
+        }
+      : null;
+    return seatMemo;
+  }
+
   const history = (req.history ?? [])
     .filter((h) => h && (h.role === "user" || h.role === "assistant") && typeof h.content === "string" && h.content.trim())
     .slice(-MAX_HISTORY)
@@ -947,7 +1003,7 @@ export async function runAutonomousAgent(req: AutoAgentRequest): Promise<AutoAge
 
   return finish(null, []);
 
-  function finish(ungrounded: string | null, issues: string[]): AutoAgentResponse {
+  async function finish(ungrounded: string | null, issues: string[]): Promise<AutoAgentResponse> {
     const latencyMs = Date.now() - startedAll;
     /* 24 Sep 2026 (user: "lamba sawaal par kabhi-kabhi jawab KHAALI aata hai — theek kar do"):
      * model kabhi aisa text deta hai jo plain-text scrub ke baad khaali bach jaata hai (sirf markdown
@@ -956,8 +1012,39 @@ export async function runAutonomousAgent(req: AutoAgentRequest): Promise<AutoAge
      * dekhte hain: khaali hai to no-reply maana jaata hai → evidence summary / honest line.
      * (Ye sirf output hygiene hai — AI ka sochna/tool-choice/seat-search logic waise ka waisa.) */
     const clean = reply ? toPlainText(hideToolNames(reply)).trim() : "";
+    const seat = await seatBlock();
     if (clean) {
-      return base({ ok: true, reply: clean, source: "ai", grounded: true, toolsUsed, modelUsed, protocol, rounds, latencyMs, failureReason: null });
+      /* Seat-intent turn par AI ke jawab ke saath asli board se filtered line (koi naya claim nahi). */
+      return base({
+        ok: true,
+        reply: seat ? `${clean}\n\n${seat.line}` : clean,
+        source: "ai",
+        grounded: true,
+        toolsUsed,
+        modelUsed,
+        protocol,
+        rounds,
+        latencyMs,
+        failureReason: null,
+        seatFilter: seat?.payload ?? null,
+      });
+    }
+    /* Model se jawab nahi mila par seat intent tha → honest, deterministic seat jawab (khaali bubble nahi). */
+    if (seat) {
+      return base({
+        ok: true,
+        reply: seat.line,
+        source: "evidence",
+        grounded: true,
+        groundingIssues: issues,
+        toolsUsed,
+        modelUsed,
+        protocol,
+        rounds,
+        latencyMs,
+        failureReason: failureReason ?? "seat_filter",
+        seatFilter: seat.payload,
+      });
     }
     // Model failed (guard / timeout / error) — fall back to a deterministic summary of REAL tool output.
     const summary = evidenceSummary(results);

@@ -51,6 +51,13 @@ export const env = {
   walletInitial: Number(process.env.WALLET_INITIAL_BALANCE ?? 5000),
   serviceFee: Number(process.env.SERVICE_FEE_INR ?? 25),
   mockForceFail: process.env.MOCK_FORCE_FAIL === "true",
+  /** 24 Sep 2026 (user: "seat intent questions AI khud samjhe aur filter kare, client layer fallback rahe").
+   *  Server-side seat filter DEFAULT ON. SEAT_FILTER_SERVER=0 karo to behaviour aaj jaisa
+   *  (sirf client layer) — koi code revert nahi chahiye. */
+  get seatFilterServer() {
+    const v = (process.env.SEAT_FILTER_SERVER ?? "1").trim().toLowerCase();
+    return !(v === "0" || v === "false" || v === "off");
+  },
   /** NVIDIA NIM — never log these values. */
   get nvidiaApiKey() {
     return (process.env.NVIDIA_API_KEY ?? "").trim();

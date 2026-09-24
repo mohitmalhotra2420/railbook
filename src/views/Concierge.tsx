@@ -12,7 +12,8 @@ import { BERTH_BY_CLASS, CLASS_LABELS, isBookable, type ClassAvailability, type 
 import type { AgentTrainTable } from "../ai/agent";
 import { JourneyOptions } from "../components/JourneyOptions";
 import { SeatFinder } from "../components/SeatFinder";
-import { detectSeatIntent, type SeatIntent } from "../seatfinder";
+import { detectSeatIntent, type SeatIntent, type SeatSearchRow } from "../seatfinder";
+import { VoiceSheet, type VoiceSuggestion } from "../components/VoiceSheet";
 import { AlternativesCard } from "../components/AlternativesCard";
 import { TrainPicker } from "../components/TrainPicker";
 
@@ -201,6 +202,15 @@ export function Concierge() {
    * Voice se aaya turn ho to jawab ek line me bol bhi dete hain. AI/server/provider ko chhua nahi gaya. */
   const viaVoiceRef = useRef(false);
   const [seatFind, setSeatFind] = useState<{ intent: SeatIntent; viaVoice: boolean } | null>(null);
+  /* 24 Sep 2026 (user: ConfirmTkt jaisa "bolne wala" screen): mic dabate hi sheet khulta hai —
+   * jo bola wo live likha jata hai, chips se ek tap me sawaal, OK par bhejta hai. */
+  const [voiceSheet, setVoiceSheet] = useState(false);
+  const VOICE_CHIPS: VoiceSuggestion[] = [
+    { id: "confirmed", label: "Get Confirmed Ticket", text: "sirf confirmed seat wali trains dikhao" },
+    { id: "ac", label: "AC Trains", text: "AC trains dikhao" },
+    { id: "seat2a", label: "2A me seat?", text: "2A me seat hai?" },
+    { id: "alt", label: "Best Alternatives", text: "best alternatives dikhao" },
+  ];
   const lastFactTrainRef = useRef<string | null>(null);
   /** Last server-side AI agent context — sent back each turn so multi-turn state survives.
    * Round-8: persisted memory se initialize — refresh par bhi train/topic yaad. */
@@ -794,13 +804,14 @@ export function Concierge() {
     if (asUser) {
       setMessages((m) => [...m, { id: newId(), role: "user", text: trimmed }]);
     }
-    /* Seat Finder: "2A mein seats hai?" jaisa sawaal → jo train table aayegi usme seat card lagega.
-     * Naya sawaal bina seat-intent ke ho to card hat jaata hai (purani table par bhi). */
+    /* Seat Finder: 24 Sep 2026 (user: "hamesha dikhe jab bhi trains ki list aaye") — intent
+     * har turn par set hota hai (seat sawaal ho ya na ho); jo bhi class/time/sort user ne
+     * bola wahi card ke chips ka default ban jata hai. AI/server ko chhua nahi. */
     {
       const si = detectSeatIntent(trimmed);
       const viaVoiceTurn = viaVoiceRef.current;
       viaVoiceRef.current = false;
-      setSeatFind(si.wants ? { intent: si, viaVoice: viaVoiceTurn } : null);
+      setSeatFind({ intent: si, viaVoice: viaVoiceTurn });
     }
     const userDateKnown = Boolean(state.trains.length || state.selectedTrain || state.previewFare);
     let extraction: NluResult | undefined;
@@ -1265,7 +1276,13 @@ export function Concierge() {
   async function onMicTap(e: MouseEvent<HTMLButtonElement>) {
     e.preventDefault();
     e.stopPropagation();
-    if (voice.listening) { voice.commit(); return; } // doosra tap = OK
+    if (voice.listening) {
+      /* doosra tap = OK (aur sheet band) */
+      voice.commit();
+      setVoiceSheet(false);
+      return;
+    }
+    setVoiceSheet(true); /* ConfirmTkt jaisa "bolne wala" screen — bolo, live likha jaye */
     await voice.start();
   }
 
@@ -1561,21 +1578,34 @@ export function Concierge() {
         )}
       </div>
 
-      {(voice.listening || voice.interim) && (
-        <div className={`voice-panel ${voice.listening ? "live" : "done"}`} role="status" aria-live="polite">
-          <div className="voice-head">
-            <span className="voice-dot" aria-hidden />
-            <strong>{voice.listening ? "Main sun raha hoon…" : "Sun liya — bhejein?"}</strong>
-            <span className="voice-sub">{voice.listening ? "Bol kar khatam ho jaaye to OK dabao" : "OK = bhejo · ✕ = hatao"}</span>
-          </div>
-          <VoiceWave level={voice.level} live={voice.listening} />
-          <div className="voice-text">{voice.interim || <span className="voice-placeholder">… boliye, yahan likhta jaaunga</span>}</div>
-          <div className="voice-actions">
-            <button type="button" className="voice-cancel" onClick={() => voice.cancel()} aria-label="Cancel">✕ Hatao</button>
-            <button type="button" className="voice-ok" onClick={() => voice.commit()} disabled={!voice.interim.trim()} aria-label="OK — send">OK ✓ Bhejo</button>
-          </div>
-        </div>
-      )}
+      {/* 24 Sep 2026 (user: "hum bhi esa kuch bolne wala show karein?") — ConfirmTkt jaisa sheet:
+          live transcript + quick chips + bada mic + ✍️ Type + ✕. Bhejna OK par (auto-send nahi). */}
+      <VoiceSheet
+        open={voiceSheet}
+        listening={voice.listening}
+        interim={voice.interim}
+        level={voice.level}
+        status={voice.status}
+        suggestions={VOICE_CHIPS}
+        onOk={() => {
+          voice.commit();
+          setVoiceSheet(false);
+        }}
+        onCancel={() => {
+          voice.cancel();
+          setVoiceSheet(false);
+        }}
+        onType={() => {
+          setVoiceSheet(false);
+          voice.cancel();
+          setTimeout(() => document.querySelector<HTMLInputElement>(".composer input")?.focus(), 60);
+        }}
+        onPick={(t) => {
+          setVoiceSheet(false);
+          voice.cancel();
+          void handleText(t);
+        }}
+      />
       <form
         className="composer"
         onSubmit={(e) => {
@@ -1785,7 +1815,26 @@ function BlockView({
     );
   }
   if (block.type === "journey") {
+    /* 24 Sep 2026 (user: "Seat Finder plan card par bhi lage, aur hamesha dikhe"): plan ke
+     * direct trains se hi Seat Finder ke rows bante hain — server/AI/API ko chhua nahi. */
+    const planRows: SeatSearchRow[] = [];
+    const seenPlanTrains = new Set<string>();
+    for (const o of block.plan.routeOptions ?? []) {
+      if (o.changes !== 0) continue;
+      const tn = String(o.trainNumbers?.[0] ?? "");
+      if (!tn || seenPlanTrains.has(tn)) continue;
+      seenPlanTrains.add(tn);
+      planRows.push({
+        number: tn,
+        name: String(o.trainNames?.[0] ?? ""),
+        departure: o.departure ?? null,
+        arrival: o.arrival ?? null,
+        durationLabel: o.durationLabel ?? null,
+        arrivalDayOffset: o.arrivalDayOffset ?? null,
+      });
+    }
     return (
+      <>
       <JourneyOptions
         plan={block.plan}
         onPickTrain={(n) => onChip(`${n} ki seat availability ${block.plan.query.travelClass ? block.plan.query.travelClass + " " : ""}${block.plan.query.date} ko ${block.plan.query.from} se ${block.plan.query.to}`)}
@@ -1798,6 +1847,18 @@ function BlockView({
         onPickStations={(f, t) => onChip(`${f} se ${t} ${block.plan.query.date} ki trains dikhao`)}
         onOpenBoard={onOpenBoard ? () => onOpenBoard(block.plan.query.from, block.plan.query.to, block.plan.query.date, block.plan.best?.trainNumbers[0] ?? null) : undefined}
       />
+      {seatFinder && planRows.length > 0 && (
+        <SeatFinder
+          from={block.plan.query.from}
+          to={block.plan.query.to}
+          date={block.plan.query.date}
+          rows={planRows}
+          intent={seatFinder.intent}
+          speak={seatFinder.viaVoice}
+          onChip={onChip}
+        />
+      )}
+      </>
     );
   }
   if (block.type === "chips") {
