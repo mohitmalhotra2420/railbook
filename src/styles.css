@@ -2200,3 +2200,10 @@ table.traintable {
   font-weight: 650;
   line-height: 1.5;
 }
+
+/* Round-19d — card ki direct list par time-window bar (user: "card filter karo, connecting waisa hi") */
+.jx-windowbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:#f2f7fd;border:1px solid #d6e2f0;border-radius:11px;padding:8px 11px;margin:8px 0;font-size:12.5px;color:#1f3a5f}
+.jx-windowbar-ic{display:inline-flex}
+.jx-windowbar-txt{flex:1 1 auto;min-width:180px}
+.jx-windowbar-btn{margin-left:auto;background:#fff;border:1px solid #c7d7ea;color:#123a63;border-radius:999px;padding:4px 11px;font-size:11.5px;font-weight:800;cursor:pointer;white-space:nowrap}
+.jx-windowbar-btn:hover{background:#eaf2fb}

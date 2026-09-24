@@ -415,6 +415,19 @@ export function uniqueTrainCount(rows: SeatRow[]): number {
 }
 
 /** Filter (user ke chips) — sab client-side, koi naya server call nahi. */
+/** Minute-of-day time-window match (server `inTimeWindow` ka mirror). JourneyOptions ki DIRECT list
+ *  bhi isi par filter hoti hai (Round-19d, user: "card filter karo lekin connecting/alternatives waisa hi"). */
+export function departureInWindow(departure: string | null | undefined, afterMin: number | null, beforeMin: number | null): boolean {
+  if (afterMin == null && beforeMin == null) return true;
+  const m = /^(\d{1,2}):(\d{2})/.exec(String(departure ?? ""));
+  if (!m) return false;
+  const dep = Number(m[1]) * 60 + Number(m[2]);
+  if (afterMin != null && beforeMin != null)
+    return beforeMin < afterMin ? dep >= afterMin || dep <= beforeMin : dep >= afterMin && dep <= beforeMin;
+  if (afterMin != null) return dep >= afterMin;
+  return dep <= (beforeMin as number);
+}
+
 export function filterSeatRows(
   rows: SeatRow[],
   opts: { confirmedOnly?: boolean; afterMin?: number | null; beforeMin?: number | null; earliest?: boolean; cheapest?: boolean },
@@ -423,16 +436,7 @@ export function filterSeatRows(
   if (opts.confirmedOnly) out = out.filter((r) => r.seat);
   const after = opts.afterMin ?? null;
   const before = opts.beforeMin ?? null;
-  if (after != null || before != null) {
-    out = out.filter((r) => {
-      const m = /^(\d{1,2}):(\d{2})/.exec(r.departure ?? "");
-      if (!m) return false;
-      const dep = Number(m[1]) * 60 + Number(m[2]);
-      if (after != null && before != null) return before < after ? dep >= after || dep <= before : dep >= after && dep <= before;
-      if (after != null) return dep >= after;
-      return dep <= (before as number);
-    });
-  }
+  if (after != null || before != null) out = out.filter((r) => departureInWindow(r.departure, after, before));
   if (opts.cheapest) {
     /* "low fare" — sasta pehle (fare na ho to sabse neeche). */
     out.sort((a, b) => (a.fare ?? Number.POSITIVE_INFINITY) - (b.fare ?? Number.POSITIVE_INFINITY));

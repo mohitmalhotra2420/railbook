@@ -238,3 +238,15 @@ Iska matlab: route board dono direction me galat ho sakta hai. `Seat Finder Avai
 → **ab** 4 rows: `12926 3A AVL 23 ₹915 (09:40)` · `12926 SL AVL 8 ₹360` · `12926 2A AVL 5 ₹1,270` · `11058 2A AVL 1 ₹1,210` — aur wo purani `11078 AVL 8` row nikal gayi (per-train fresh: N/A).
 
 Tests: `tests/seat-finder.test.ts` (naye 2), `tests/seat-finder-card.test.tsx` (naya 1 — "Available" tap → per-train verify → AVL rows). Kul **92 files / 960 tests PASS**.
+
+### 9.8 Round-19d — card ki **direct** list bhi window se filter (connecting/alternatives untouched)
+
+User: *"Card filter karo lekin connecting/alternatives mein change na aayein wo waisa hi rahe."*
+
+- **Sirf direct trains (0 change)** par filter — `JourneyOptions` me naya prop `window={afterMin, beforeMin, label}` (Concierge `seatFind.intent` se aata hai; matlab user ke apne shabdon se).
+- Filter **client-side dikhane par** hai: plan/engine/AI ka data waisa hi rehta hai — isliye connecting, alternatives, ticket tricks, doosri dates, hub-leg lists **bilkul waise** dikhte hain (un par filter lagta hi nahi).
+- Hero: agar AI ka pick direct tha aur window ke bahar (jaise "subah" poochne par 16:50 Shatabdi), to hero **window ka best direct** ban jata hai aur header "Window ke hisaab se · <label>" dikhata hai.
+- Window bar + chip: "🕒 Subah (04:00–12:00) — direct trains sirf isi window ki (N mili)" + **"Sabhi N direct dikhao"** (ek tap me poori list wapas). Window me koi direct na ho to list khaali nahi hoti — saaf note + poori list.
+- Window na bole to kuch nahi badalta (koi default filter nahi).
+- Naya: `departureInWindow()` (`src/seatfinder.ts`, server `inTimeWindow` ka mirror — same windows, raat me wrap); `filterSeatRows` bhi wahi helper use karta hai.
+- Test: `tests/round19d-card-window.test.tsx` (4). Kul **93 files / 964 tests PASS**; `npm run build` OK; server tsc clean.

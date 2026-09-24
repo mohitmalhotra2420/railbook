@@ -1888,6 +1888,14 @@ function BlockView({
         onPickDate={(d) => onChip(`${block.plan.query.from} se ${block.plan.query.to} ${d} ki trains dikhao`)}
         onPickStations={(f, t) => onChip(`${f} se ${t} ${block.plan.query.date} ki trains dikhao`)}
         onOpenBoard={onOpenBoard ? () => onOpenBoard(block.plan.query.from, block.plan.query.to, block.plan.query.date, block.plan.best?.trainNumbers[0] ?? null) : undefined}
+        /* Round-19d (user: "Card filter karo lekin connecting/alternatives mein change na aayein"):
+         * user ne time window bola ho ("kal subah") to card ki DIRECT list usi window ki — connecting,
+         * alternatives, dates ka data/logic waisa hi rehta hai. Filter client-side hai (plan untouched). */
+        window={
+          seatFinder && (seatFinder.intent.afterMin != null || seatFinder.intent.beforeMin != null)
+            ? { afterMin: seatFinder.intent.afterMin, beforeMin: seatFinder.intent.beforeMin, label: seatFinder.intent.windowLabel }
+            : null
+        }
       />
       {seatFinder && planRows.length > 0 && (
         <SeatFinder

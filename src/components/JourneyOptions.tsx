@@ -12,6 +12,7 @@ import { useEffect, useState } from "react";
 import type { AgentConnection, AgentJourneyPlan, AgentRouteLeg, AgentRouteOption } from "../ai/agent";
 import type { JSX, ReactNode } from "react";
 import { addDays, formatShortDate, inr } from "../format";
+import { departureInWindow } from "../seatfinder";
 
 function dayTag(n: number): string {
   return n > 0 ? ` +${n}d` : "";
@@ -374,6 +375,7 @@ export function JourneyOptions({
   onPickStations,
   onOpenBoard,
   initialPage = null,
+  window: win = null,
 }: {
   plan: AgentJourneyPlan;
   onPickTrain?: (trainNumber: string) => void;
@@ -390,6 +392,11 @@ export function JourneyOptions({
   onOpenBoard?: () => void;  /** 24 Sep 2026 (user): "alternative trains ka alag page ho, leg 1/leg 2 ka alag page" —
    *  ye prop sirf preview/demo ke liye page khula hua dikhata hai (app flow wahi rehta hai). */
   initialPage?: "direct" | "alt" | "connect" | null;
+  /** Round-19d (24 Sep, user: "Card filter karo lekin connecting/alternatives mein change na aayein"):
+   *  user ne "subah/dopahar/shaam/raat" ya "X se pehle" bola ho to DIRECT trains ki list (aur hero,
+   *  agar wahi direct hai) sirf usi window ki dikhe. Connecting/alternatives/dates ka poora logic aur
+   *  data waisa hi rehta hai — sirf dikhane par filter, plan/engine ko chhua nahi. */
+  window?: { afterMin: number | null; beforeMin: number | null; label: string | null } | null;
 }) {
   const [tab, setTab] = useState<Tab | null>(null);
   const [whyOpen, setWhyOpen] = useState(true);
@@ -450,6 +457,12 @@ export function JourneyOptions({
   }, [needKey, plan.query.from, plan.query.to, plan.query.date]);
   const best = plan.best;
   const direct = plan.routeOptions.filter((o) => o.changes === 0);
+  /* Round-19d: window filter SIRF direct trains par (0 change). Connecting/alternatives untouched. */
+  const winOn = Boolean(win && (win.afterMin != null || win.beforeMin != null));
+  const [showAllDirect, setShowAllDirect] = useState(false);
+  const directInWindow = winOn ? direct.filter((o) => departureInWindow(o.departure, win!.afterMin, win!.beforeMin)) : direct;
+  /* Window me koi direct hi na mile to list khaali karne ka matlab nahi — poori list + saaf note. */
+  const directShown = winOn && !showAllDirect && directInWindow.length > 0 ? directInWindow : direct;
   const connections = plan.connections.length ? plan.connections : plan.recovery?.connecting ?? [];
   const altDates = plan.alternativeDates.filter((d) => d.count > 0);
   const rec = plan.recovery;
@@ -477,9 +490,14 @@ export function JourneyOptions({
   /* Round-18m-30e: hero SIRF tab jab `best` wahi option ho jo AI ne chuna (same trains) — warna AI verdict
    * "via NDLS" aur hero "DIRECT WL 74" jaisa mismatch ho jaata hai. Connecting pick → hero = wahi connecting option. */
   const sameTrains = (a: string[] | undefined, b: string[] | undefined) => !!a && !!b && a.join("+") === b.join("+");
-  const heroDirect = aiRec
+  const heroDirectRaw = aiRec
     ? ((aiRec.kind === "direct" || aiRec.kind === "connecting") && best && sameTrains(best.trainNumbers, aiRec.trainNumbers) ? best : null)
     : !plan.directUnavailable && !bfeHero ? best : null;
+  /* Round-19d: window laga ho aur hero (direct) us window ke bahar ho → window ka best direct hero banega.
+   * Window me koi direct na mile to purana hero jaisa hai (kuch chhupana nahi). */
+  const heroSwapped = Boolean(winOn && !showAllDirect && heroDirectRaw && heroDirectRaw.changes === 0 &&
+    !departureInWindow(heroDirectRaw.departure, win!.afterMin, win!.beforeMin) && directInWindow.length > 0);
+  const heroDirect = heroSwapped ? directInWindow[0] : heroDirectRaw;
   const decidedBy = plan.decision?.source === "ai" ? "AI" : null;
   const asOf = timeLabel(plan.provenance?.retrievedAt);
   const why = plan.whyPoints && plan.whyPoints.length ? plan.whyPoints : plan.summary ? [plan.summary] : [];
@@ -532,8 +550,8 @@ export function JourneyOptions({
    * audit list — HAR direct train ka poora class board (AVL/RAC/WL/N-A, stale ⚠), aur
    * jo train probe nahi hui usko saaf "seat data nahi aayi" — "seat nahi" nahi. */
   const rowsFor = (o: AgentRouteOption): AvailLike[] => liveRows[o.trainNumbers[0]] ?? (o.classOptions ?? []);
-  const probedDirect = direct.filter((o) => (rowsFor(o).length > 0 ? true : o.probed));
-  const unprobedDirect = direct.filter((o) => rowsFor(o).length === 0 && !o.probed && !liveNotes[o.trainNumbers[0]]);
+  const probedDirect = directShown.filter((o) => (rowsFor(o).length > 0 ? true : o.probed));
+  const unprobedDirect = directShown.filter((o) => rowsFor(o).length === 0 && !o.probed && !liveNotes[o.trainNumbers[0]]);
   /* Round-18m-30f: AI ne direct nahi chuna (sab WL) → board default collapsed, ek-line summary; tap = poora board. */
   const recKind = plan.decision?.recommended?.kind ?? (bfeHero ? "bfe" : best && best.changes > 0 ? "connecting" : "direct");
   const [boardOpen, setBoardOpen] = useState<boolean>(() => recKind === "direct" && !plan.directUnavailable);
@@ -544,14 +562,35 @@ export function JourneyOptions({
   /* 24 Sep 2026 (user: "alternative trains ka alag page, leg 1/leg 2 ka alag page banao,
    * front chat me sirf header rahe"): poora detail ab alag page par. */
   const [page, setPage] = useState<"direct" | "alt" | "connect" | null>(initialPage ?? null);
+  /* Naya sawaal / naya window → purana "sabhi dikhao" reset (warna filter chup-chaap off reh jata). */
+  useEffect(() => {
+    setShowAllDirect(false);
+  }, [winOn, win?.afterMin ?? null, win?.beforeMin ?? null]);
+  const windowBar = winOn && direct.length > 0 && (
+    <div className="jx-windowbar">
+      <span className="jx-windowbar-ic">{IC.clock}</span>
+      <span className="jx-windowbar-txt">
+        <strong>{win?.label ?? "Time window"}</strong> — {directInWindow.length
+          ? `direct trains sirf isi window ki (${directInWindow.length} mili)`
+          : "is window me koi seedha train nahi mila — neeche poori direct list"}
+        {directInWindow.length > 0 && !showAllDirect && heroSwapped ? " · AI ke pick ke bajaye window ka best upar" : ""}
+      </span>
+      {directInWindow.length > 0 && (
+        <button type="button" className="jx-windowbar-btn" onClick={() => setShowAllDirect((v) => !v)}>
+          {showAllDirect ? `Sirf ${win?.label ?? "window"} dikhao` : `Sabhi ${direct.length} direct dikhao`}
+        </button>
+      )}
+    </div>
+  );
   const seatBoard = direct.length > 0 && (
-    <Section ic={IC.train} title={`Direct trains ${plan.query.from}→${plan.query.to}`} badge={`${probedDirect.length}/${direct.length} seat-checked`} foot={unprobedDirect.length ? `${unprobedDirect.map((o) => o.trainNumbers[0]).join(", ")}: seat data provider se nahi aayi — inhe "seat nahi" nahi maana; Refresh seats se dobara check karo.` : "Har direct train ki har class ka status upar hai — RAC bhi booking option hai (berth chart ke baad)."}>
+    <Section ic={IC.train} title={`Direct trains ${plan.query.from}→${plan.query.to}`} badge={`${probedDirect.length}/${directShown.length} seat-checked`} foot={unprobedDirect.length ? `${unprobedDirect.map((o) => o.trainNumbers[0]).join(", ")}: seat data provider se nahi aayi — inhe "seat nahi" nahi maana; Refresh seats se dobara check karo.` : "Har direct train ki har class ka status upar hai — RAC bhi booking option hai (berth chart ke baad)."}>
       <div className="jx-sb-rowhead">
-        <button type="button" className="jx-why-head jx-sb-toggle" onClick={() => setBoardOpen((v) => !v)}>{boardOpen ? "Hide" : "Show"} {direct.length} trains · har class ka seat status{!boardOpen && plan.directUnavailable ? " · sab WL/N-A" : ""} <span className={`jx-caret${boardOpen ? " open" : ""}`} /></button>
+        <button type="button" className="jx-why-head jx-sb-toggle" onClick={() => setBoardOpen((v) => !v)}>{boardOpen ? "Hide" : "Show"} {directShown.length} trains · har class ka seat status{!boardOpen && plan.directUnavailable ? " · sab WL/N-A" : ""} <span className={`jx-caret${boardOpen ? " open" : ""}`} /></button>
         {/* Direct trains ka apna page — entry yahi (neeche duplicate card nahi). */}
         <button type="button" className="jx-sb-pagechip" onClick={() => setPage("direct")}>Poora page {IC.chev}</button>
       </div>
-      {boardOpen && (showAllTrains ? [...direct] : [...direct].slice(0, 5)).sort((a, b) => (a.departure ?? "").localeCompare(b.departure ?? "")).map((o) => (
+      {windowBar}
+      {boardOpen && (showAllTrains ? [...directShown] : [...directShown].slice(0, 5)).sort((a, b) => (a.departure ?? "").localeCompare(b.departure ?? "")).map((o) => (
         <div key={o.trainNumbers[0]} className="jx-sb-row">
           <button type="button" className="jx-sb-head" onClick={pick ? () => pick(o) : undefined}><span className="jx-no">{o.trainNumbers[0]}</span> <span className="jx-name">{o.trainNames[0]}</span> <span className="jx-sub">{o.departure}→{o.arrival}{dateTag(baseDate, o.arrivalDayOffset)} · {o.durationLabel ?? ""}</span>{aiRec?.kind === "direct" && aiRec.trainNumbers[0] === o.trainNumbers[0] && <span className="jx-sb-pick">{IC.star} AI pick</span>}</button>
           {rowsFor(o).length ? <ClassRow label="" rows={rowsFor(o)} onPick={onPickClass ? (r) => onPickClass({ trainNumber: o.trainNumbers[0], classCode: r.classCode, from: o.origin, to: o.destination }) : undefined} /> : liveNotes[o.trainNumbers[0]] ? <span className="jx-sub">{liveNotes[o.trainNumbers[0]]}</span> : <button type="button" className="jx-sub jx-linkbtn" onClick={onPickClass ? () => onPickClass({ trainNumber: o.trainNumbers[0], classCode: "", from: o.origin, to: o.destination }) : undefined}>{o.probed ? "Koi class data nahi" : "Seat data provider se nahi aayi"} · ↻ check karo</button>}
@@ -582,9 +621,9 @@ export function JourneyOptions({
       {/* 24 Sep 2026 (user: "har direct train ke neeche mat likho — sirf last train ke baad likhna hai"):
        * pehle ye button map ke ANDAR tha, to har train ke neeche repeat ho raha tha. Ab list ke
        * ekdum aant me, sirf ek baar. */}
-      {boardOpen && direct.length > 5 && (
+      {boardOpen && directShown.length > 5 && (
         <button type="button" className="jx-more-trains" onClick={() => setShowAllTrains((v) => !v)}>
-          {showAllTrains ? "Sirf pehli 5 trains dikhao" : `Sabhi ${direct.length} trains dikhao`} <span className={`jx-caret${showAllTrains ? " open" : ""}`} />
+          {showAllTrains ? "Sirf pehli 5 trains dikhao" : `Sabhi ${directShown.length} trains dikhao`} <span className={`jx-caret${showAllTrains ? " open" : ""}`} />
         </button>
       )}
     </Section>
@@ -730,7 +769,7 @@ export function JourneyOptions({
           <span className="jx-pill">{IC.cal} {formatShortDate(plan.query.date)}</span>
           {pax ? <span className="jx-pill">{IC.users} {pax} passenger{pax > 1 ? "s" : ""}</span> : <span className="jx-pill jx-pill-warn">{IC.users} passengers? — batao, seats usi hisaab se</span>}
           {plan.query.travelClass && <span className="jx-pill">{plan.query.travelClass}</span>}
-          <span className="jx-pill">{IC.train} {direct.length} direct</span>
+          <span className="jx-pill">{IC.train} {directShown.length} direct{winOn && !showAllDirect && directInWindow.length !== direct.length ? ` (${win?.label ?? "window"})` : ""}</span>
           {direct.length > 0 && (
             <span className={`jx-pill ${seatTrainCount > 0 ? "jx-pill-ok" : "jx-pill-warn"}`}>
               {IC.check} {seatTrainCount > 0 ? `${seatTrainCount} me seat` : "seat kisi me nahi"}
@@ -872,7 +911,7 @@ export function JourneyOptions({
         <section className="jx-hero">
           <div className="jx-hero-head">
             <span className="jx-hero-star">{IC.star}</span>
-            <span className="jx-hero-title">{decidedBy ? "AI Recommended" : "Recommended"} · {heroDirect.changes ? `${heroDirect.changes} change` : "Direct"}</span>
+            <span className="jx-hero-title">{heroSwapped ? "Window ke hisaab se" : decidedBy ? "AI Recommended" : "Recommended"} · {heroDirect.changes ? `${heroDirect.changes} change` : "Direct"}{heroSwapped ? ` · ${win?.label ?? ""}` : ""}</span>
             <button type="button" className="jx-why-btn" onClick={() => setWhyOpen((v) => !v)}>Why this? <span className={`jx-caret${whyOpen ? " open" : ""}`} /></button>
           </div>
           <div className="jx-hero-train">
@@ -1007,10 +1046,10 @@ export function JourneyOptions({
           <div className="jx-page-head">
             <button type="button" className="jx-page-back" onClick={() => setPage(null)}>{IC.back} Wapas</button>
             <div className="jx-page-title">
-              <strong>{page === "direct" ? `Direct trains · ${direct.length}` : page === "alt" ? `Alternative trains · ${altCount}` : "Connecting · Leg 1 → Leg 2"}</strong>
+              <strong>{page === "direct" ? `Direct trains · ${directShown.length}` : page === "alt" ? `Alternative trains · ${altCount}` : "Connecting · Leg 1 → Leg 2"}</strong>
               <span className="jx-page-sub">
                 {`${plan.query.from} → ${plan.query.to} · ${formatShortDate(plan.query.date)}`}
-                {page === "direct" ? ` · ${probedDirect.length}/${direct.length} seat-checked` : page === "alt" ? " · jo direct list me nahi mila" : hubs.length ? ` · ${hubSummary}` : ` · ${connections.length} option`}
+                {page === "direct" ? ` · ${probedDirect.length}/${directShown.length} seat-checked` : page === "alt" ? " · jo direct list me nahi mila" : hubs.length ? ` · ${hubSummary}` : ` · ${connections.length} option`}
               </span>
             </div>
           </div>
