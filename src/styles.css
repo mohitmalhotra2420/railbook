@@ -2207,3 +2207,21 @@ table.traintable {
 .jx-windowbar-txt{flex:1 1 auto;min-width:180px}
 .jx-windowbar-btn{margin-left:auto;background:#fff;border:1px solid #c7d7ea;color:#123a63;border-radius:999px;padding:4px 11px;font-size:11.5px;font-weight:800;cursor:pointer;white-space:nowrap}
 .jx-windowbar-btn:hover{background:#eaf2fb}
+
+/* Round-19e (24 Sep, user: "upar card mein classes available mein sabhi dikh nhi rhi jabki neeche
+ * classes zyada hai"): Seat Finder ab TRAIN-wise blocks dikhata hai — ek train ke SAARI classes ek
+ * saath chips me (upar wale journey card jaisa). Koi class chhupni nahi chahiye. */
+.sf-group { border: 1px solid var(--line); border-radius: 14px; padding: 9px 11px; margin: 0 0 9px; background: #fff; }
+.sf-group.seat { border-left: 4px solid var(--green); }
+.sf-group.wl { border-left: 4px solid var(--amber); background: #fffdf9; }
+.sf-group.nodata { border-left: 4px solid #b91c1c; background: #fffafa; }
+.sf-group-h { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.sf-group-t strong { font-size: 13px; }
+.sf-group-meta { font-size: 11.5px; color: var(--muted); }
+.sf-group-n { color: #0d4a2f; font-weight: 700; }
+.sf-group-c { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; align-items: center; }
+.sf-cchip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); background: #fff; border-radius: 10px; padding: 4px 9px; cursor: pointer; font-size: 12px; }
+.sf-cchip:hover { background: #f6f9ff; border-color: #c8d8ee; }
+.sf-cchip .sf-cls { background: #f1f4f8; border-radius: 6px; padding: 1px 6px; font-weight: 800; color: #22304a; font-size: 11.5px; }
+.sf-cchip .sf-cfare { color: #374151; font-weight: 700; font-size: 11.5px; }
+.sf-cfrom { font-size: 11px; color: var(--muted); margin-left: 2px; }

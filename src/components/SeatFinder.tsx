@@ -53,6 +53,18 @@ const TIME_OPTIONS: { after: number | null; before: number | null; label: string
 ];
 const timeKey = (after: number | null, before: number | null) => `${after ?? ""}-${before ?? ""}`;
 
+/** Rows ko train-wise group karo (order wahi rehta hai jo filter/sort ne diya). */
+function groupByTrain(rows: SeatRow[]): SeatRow[][] {
+  const map = new Map<string, SeatRow[]>();
+  for (const r of rows) {
+    const k = `${r.number}|${r.departure ?? ""}`;
+    const arr = map.get(k) ?? [];
+    arr.push(r);
+    map.set(k, arr);
+  }
+  return [...map.values()];
+}
+
 function statusBadge(r: SeatRow) {
   if (r.status === "AVAILABLE") return <span className="sf-badge avl">AVL {r.seats ?? "—"}</span>;
   if (r.status === "RAC") return <span className="sf-badge rac">RAC {r.rac ?? "—"}</span>;
@@ -60,6 +72,47 @@ function statusBadge(r: SeatRow) {
   if (r.status === "UNKNOWN") return <span className="sf-badge na">status nahi mila</span>;
   if (r.status === "NO_DATA") return <span className="sf-badge na">data nahi aayi</span>;
   return <span className="sf-badge na">N/A (Regret)</span>;
+}
+
+
+/** Round-19e (24 Sep, user screenshot: "upar card mein classes available mein sabhi dikh nhi rhi jabki
+ *  neeche classes zyada hai"): pehle har class ki apni row thi aur pehli 6 rows ke baad "aur rows dekho"
+ *  chhupa deta tha — isliye ek train ki kuch classes dikhti hi nahi thi. Ab har train ka ek block hai
+ *  jisme uski SAARI classes (AVL/RAC ya WL/N-A, jaisa section) chips me ek saath — bilkul upar wale
+ *  card jaisa. Data wahi (per-train board), koi naya source nahi. */
+function TrainGroup({ rows, onPick }: { rows: SeatRow[]; onPick?: (r: SeatRow) => void }) {
+  const g = rows[0];
+  const fares = rows.map((r) => r.fare).filter((f): f is number => typeof f === "number");
+  const tone = g.seat ? "seat" : g.status === "NO_DATA" || g.status === "UNKNOWN" ? "nodata" : "wl";
+  return (
+    <div className={`sf-group ${tone}`}>
+      <div className="sf-group-h">
+        <span className="sf-group-t">
+          <strong>{g.number}</strong> <span className="sf-tname">{g.name}</span>
+        </span>
+        <span className="sf-group-meta">
+          {g.departure && g.arrival ? `${g.departure} → ${g.arrival}` : "time list me nahi"}
+          {rows.length > 1 && <span className="sf-group-n"> · {rows.length} classes</span>}
+        </span>
+      </div>
+      <div className="sf-group-c">
+        {rows.map((r) => (
+          <button
+            key={`${r.number}-${r.classCode}`}
+            type="button"
+            className="sf-cchip"
+            onClick={() => onPick?.(r)}
+            title={r.fare ? `${r.classCode} · ${inr(r.fare)} — tap karke fresh check` : `${r.classCode} — tap karke fresh check`}
+          >
+            <span className="sf-cls">{r.classCode}</span>
+            {statusBadge(r)}
+            {r.fare ? <span className="sf-cfare">{inr(r.fare)}</span> : null}
+          </button>
+        ))}
+        {fares.length > 1 && <span className="sf-cfrom">from {inr(Math.min(...fares))}</span>}
+      </div>
+    </div>
+  );
 }
 
 function Row({ r, onPick }: { r: SeatRow; onPick?: (r: SeatRow) => void }) {
@@ -251,8 +304,11 @@ export function SeatFinder({
 
   const pickUtter = (r: SeatRow) =>
     `${r.number} ki seat availability ${r.classCode !== "—" ? r.classCode + " " : ""}${date} ko ${from} se ${to}`;
-  const seatShown = showAllSeat ? seat : seat.slice(0, 6);
-  const wlShown = showAllWl ? wl : wl.slice(0, 4);
+  const seatGroups = groupByTrain(seat);
+  const wlGroups = groupByTrain(wl);
+  /* Round-19e: pehle 6 rows ke baad chhupte the (ek train ki kuch classes gayab). Ab TRAIN-wise cap. */
+  const seatShown = showAllSeat ? seatGroups : seatGroups.slice(0, 8);
+  const wlShown = showAllWl ? wlGroups : wlGroups.slice(0, 4);
   const noDataShown = showAllNoData ? noData : noData.slice(0, 3);
   const seatTrains = uniqueTrainCount(seat);
   const wlTrains = uniqueTrainCount(wl);
@@ -363,7 +419,7 @@ export function SeatFinder({
           <div className="sf-sec">
             <p className="sf-head">
               <span className="sf-tag seat">SEAT</span> Seat mil jayegi (AVL / RAC){" "}
-              <span className="sf-count">· {seatTrains} trains · {seat.length} rows</span>
+              <span className="sf-count">· {seatTrains} trains · {seat.length} classes</span>
             </p>
             {seat.length === 0 && (
               <div className="sf-empty">
@@ -406,12 +462,12 @@ export function SeatFinder({
                 )}
               </div>
             )}
-            {seatShown.map((r) => (
-              <Row key={`${r.number}-${r.classCode}`} r={r} onPick={(x) => onChip(pickUtter(x))} />
+            {seatShown.map((g) => (
+              <TrainGroup key={`${g[0].number}-${g[0].departure ?? ""}`} rows={g} onPick={(x) => onChip(pickUtter(x))} />
             ))}
-            {seat.length > 6 && (
+            {seatGroups.length > 8 && (
               <button className="sf-more" onClick={() => setShowAllSeat((v) => !v)}>
-                {showAllSeat ? "Kam dikhao ‹" : `${seat.length - 6} aur rows dekho ›`}
+                {showAllSeat ? "Kam dikhao ‹" : `aur ${seatGroups.length - 8} trains dekho ›`}
               </button>
             )}
           </div>
@@ -420,15 +476,15 @@ export function SeatFinder({
             <div className="sf-sec wl-sec">
               <p className="sf-head">
                 <span className="sf-tag wl">WAITLIST / N-A</span> Seat pakki nahi{" "}
-                <span className="sf-count">· {wlTrains} trains · {wl.length} rows</span>
+                <span className="sf-count">· {wlTrains} trains · {wl.length} classes</span>
               </p>
               {wl.length === 0 && <div className="sf-empty">Is filter me WL wali bhi koi nahi.</div>}
-              {wlShown.map((r) => (
-                <Row key={`${r.number}-${r.classCode}`} r={r} onPick={(x) => onChip(pickUtter(x))} />
+              {wlShown.map((g) => (
+                <TrainGroup key={`${g[0].number}-${g[0].departure ?? ""}-wl`} rows={g} onPick={(x) => onChip(pickUtter(x))} />
               ))}
-              {wl.length > 4 && (
+              {wlGroups.length > 4 && (
                 <button className="sf-more" onClick={() => setShowAllWl((v) => !v)}>
-                  {showAllWl ? "Kam dikhao ‹" : `aur ${wl.length - 4} WL rows dekho ›`}
+                  {showAllWl ? "Kam dikhao ‹" : `aur ${wlGroups.length - 4} WL trains dekho ›`}
                 </button>
               )}
             </div>

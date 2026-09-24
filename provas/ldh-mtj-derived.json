@@ -1,0 +1,978 @@
+{
+ "at": "2026-09-24T18:48:51Z",
+ "card": [
+  {
+   "n": "12926",
+   "name": "PASCHIM EXPRESS",
+   "dep": "09:40",
+   "arr": "19:10",
+   "dur": "9h 30m",
+   "classes": [
+    {
+     "c": "3A",
+     "st": "AVAILABLE",
+     "seats": 23,
+     "rac": null,
+     "wl": null,
+     "fare": 915
+    },
+    {
+     "c": "SL",
+     "st": "AVAILABLE",
+     "seats": 8,
+     "rac": null,
+     "wl": null,
+     "fare": 360
+    },
+    {
+     "c": "2A",
+     "st": "AVAILABLE",
+     "seats": 5,
+     "rac": null,
+     "wl": null,
+     "fare": 1270
+    },
+    {
+     "c": "1A",
+     "st": "NOT_AVAILABLE",
+     "seats": 0,
+     "rac": null,
+     "wl": null,
+     "fare": null
+    }
+   ]
+  },
+  {
+   "n": "11058",
+   "name": "ASR CSMT EXP",
+   "dep": "11:40",
+   "arr": "22:50",
+   "dur": "11h 10m",
+   "classes": [
+    {
+     "c": "2A",
+     "st": "AVAILABLE",
+     "seats": 1,
+     "rac": null,
+     "wl": null,
+     "fare": 1210
+    },
+    {
+     "c": "SL",
+     "st": "NOT_AVAILABLE",
+     "seats": 0,
+     "rac": null,
+     "wl": null,
+     "fare": null
+    },
+    {
+     "c": "3E",
+     "st": "NOT_AVAILABLE",
+     "seats": 0,
+     "rac": null,
+     "wl": null,
+     "fare": null
+    }
+   ]
+  },
+  {
+   "n": "12904",
+   "name": "GOLDEN TEMPLE M",
+   "dep": "21:10",
+   "arr": "05:45",
+   "dur": "8h 35m",
+   "classes": [
+    {
+     "c": "SL",
+     "st": "WAITLIST",
+     "seats": null,
+     "rac": null,
+     "wl": 104,
+     "fare": 360
+    },
+    {
+     "c": "3A",
+     "st": "WAITLIST",
+     "seats": null,
+     "rac": null,
+     "wl": 60,
+     "fare": 915
+    },
+    {
+     "c": "2A",
+     "st": "WAITLIST",
+     "seats": null,
+     "rac": null,
+     "wl": 19,
+     "fare": 1270
+    },
+    {
+     "c": "1A",
+     "st": "WAITLIST",
+     "seats": null,
+     "rac": null,
+     "wl": 4,
+     "fare": 2095
+    }
+   ]
+  },
+  {
+   "n": "18238",
+   "name": "CHHATISGARH EXP",
+   "dep": "18:43",
+   "arr": "06:25",
+   "dur": "11h 42m",
+   "classes": [
+    {
+     "c": "SL",
+     "st": "WAITLIST",
+     "seats": null,
+     "rac": null,
+     "wl": 54,
+     "fare": 330
+    },
+    {
+     "c": "3E",
+     "st": "WAITLIST",
+     "seats": null,
+     "rac": null,
+     "wl": 11,
+     "fare": 800
+    },
+    {
+     "c": "3A",
+     "st": "WAITLIST",
+     "seats": null,
+     "rac": null,
+     "wl": 20,
+     "fare": 865
+    },
+    {
+     "c": "2A",
+     "st": "WAITLIST",
+     "seats": null,
+     "rac": null,
+     "wl": 9,
+     "fare": 1225
+    },
+    {
+     "c": "1A",
+     "st": "WAITLIST",
+     "seats": null,
+     "rac": null,
+     "wl": 4,
+     "fare": 2020
+    }
+   ]
+  },
+  {
+   "n": "12716",
+   "name": "SACHKHAND EXP",
+   "dep": "07:45",
+   "arr": "14:31",
+   "dur": "6h 46m",
+   "classes": [
+    {
+     "c": "SL",
+     "st": "NOT_AVAILABLE",
+     "seats": 0,
+     "rac": null,
+     "wl": null,
+     "fare": null
+    },
+    {
+     "c": "1A",
+     "st": "NOT_AVAILABLE",
+     "seats": 0,
+     "rac": null,
+     "wl": null,
+     "fare": null
+    },
+    {
+     "c": "2A",
+     "st": "NOT_AVAILABLE",
+     "seats": 0,
+     "rac": null,
+     "wl": null,
+     "fare": null
+    },
+    {
+     "c": "3A",
+     "st": "NOT_AVAILABLE",
+     "seats": 0,
+     "rac": null,
+     "wl": null,
+     "fare": null
+    }
+   ]
+  },
+  {
+   "n": "12472",
+   "name": "SWARAJ EXPRESS",
+   "dep": "16:30",
+   "arr": "23:20",
+   "dur": "6h 50m",
+   "classes": [
+    {
+     "c": "SL",
+     "st": "NOT_AVAILABLE",
+     "seats": 0,
+     "rac": null,
+     "wl": null,
+     "fare": null
+    },
+    {
+     "c": "1A",
+     "st": "NOT_AVAILABLE",
+     "seats": 0,
+     "rac": null,
+     "wl": null,
+     "fare": null
+    },
+    {
+     "c": "2A",
+     "st": "NOT_AVAILABLE",
+     "seats": 0,
+     "rac": null,
+     "wl": null,
+     "fare": null
+    },
+    {
+     "c": "3A",
+     "st": "NOT_AVAILABLE",
+     "seats": 0,
+     "rac": null,
+     "wl": null,
+     "fare": null
+    },
+    {
+     "c": "3E",
+     "st": "NOT_AVAILABLE",
+     "seats": 0,
+     "rac": null,
+     "wl": null,
+     "fare": null
+    }
+   ]
+  },
+  {
+   "n": "20986",
+   "name": "MCTM KOTA EXP",
+   "dep": "00:40",
+   "arr": "07:55",
+   "dur": "7h 15m",
+   "classes": [
+    {
+     "c": "SL",
+     "st": "NOT_AVAILABLE",
+     "seats": 0,
+     "rac": null,
+     "wl": null,
+     "fare": null
+    },
+    {
+     "c": "1A",
+     "st": "NOT_AVAILABLE",
+     "seats": 0,
+     "rac": null,
+     "wl": null,
+     "fare": null
+    },
+    {
+     "c": "2A",
+     "st": "NOT_AVAILABLE",
+     "seats": 0,
+     "rac": null,
+     "wl": null,
+     "fare": null
+    },
+    {
+     "c": "3A",
+     "st": "NOT_AVAILABLE",
+     "seats": 0,
+     "rac": null,
+     "wl": null,
+     "fare": null
+    },
+    {
+     "c": "3E",
+     "st": "NOT_AVAILABLE",
+     "seats": 0,
+     "rac": null,
+     "wl": null,
+     "fare": null
+    }
+   ]
+  },
+  {
+   "n": "12920",
+   "name": "MALWA EXPRESS",
+   "dep": "15:15",
+   "arr": "22:38",
+   "dur": "7h 23m",
+   "classes": [
+    {
+     "c": "SL",
+     "st": "NOT_AVAILABLE",
+     "seats": 0,
+     "rac": null,
+     "wl": null,
+     "fare": null
+    },
+    {
+     "c": "1A",
+     "st": "NOT_AVAILABLE",
+     "seats": 0,
+     "rac": null,
+     "wl": null,
+     "fare": null
+    },
+    {
+     "c": "2A",
+     "st": "NOT_AVAILABLE",
+     "seats": 0,
+     "rac": null,
+     "wl": null,
+     "fare": null
+    },
+    {
+     "c": "3A",
+     "st": "NOT_AVAILABLE",
+     "seats": 0,
+     "rac": null,
+     "wl": null,
+     "fare": null
+    },
+    {
+     "c": "3E",
+     "st": "NOT_AVAILABLE",
+     "seats": 0,
+     "rac": null,
+     "wl": null,
+     "fare": null
+    }
+   ]
+  },
+  {
+   "n": "11906",
+   "name": "HSX AGC EXP",
+   "dep": "00:55",
+   "arr": "09:23",
+   "dur": "8h 28m",
+   "classes": [
+    {
+     "c": "SL",
+     "st": "NOT_AVAILABLE",
+     "seats": 0,
+     "rac": null,
+     "wl": null,
+     "fare": null
+    },
+    {
+     "c": "2A",
+     "st": "NOT_AVAILABLE",
+     "seats": 0,
+     "rac": null,
+     "wl": null,
+     "fare": null
+    },
+    {
+     "c": "3A",
+     "st": "NOT_AVAILABLE",
+     "seats": 0,
+     "rac": null,
+     "wl": null,
+     "fare": null
+    },
+    {
+     "c": "3E",
+     "st": "NOT_AVAILABLE",
+     "seats": 0,
+     "rac": null,
+     "wl": null,
+     "fare": null
+    }
+   ]
+  },
+  {
+   "n": "11078",
+   "name": "JHELUM EXPRESS",
+   "dep": "04:30",
+   "arr": "13:15",
+   "dur": "8h 45m",
+   "classes": [
+    {
+     "c": "SL",
+     "st": "NOT_AVAILABLE",
+     "seats": 0,
+     "rac": null,
+     "wl": null,
+     "fare": null
+    },
+    {
+     "c": "2A",
+     "st": "NOT_AVAILABLE",
+     "seats": 0,
+     "rac": null,
+     "wl": null,
+     "fare": null
+    },
+    {
+     "c": "3A",
+     "st": "NOT_AVAILABLE",
+     "seats": 0,
+     "rac": null,
+     "wl": null,
+     "fare": null
+    }
+   ]
+  }
+ ],
+ "availableWithCard": [
+  {
+   "n": "12926",
+   "name": "PASCHIM EXPRESS",
+   "c": "3A",
+   "st": "AVAILABLE",
+   "seats": 23,
+   "rac": null,
+   "wl": null,
+   "fare": 915,
+   "dep": "09:40",
+   "arr": "19:10"
+  },
+  {
+   "n": "12926",
+   "name": "PASCHIM EXPRESS",
+   "c": "SL",
+   "st": "AVAILABLE",
+   "seats": 8,
+   "rac": null,
+   "wl": null,
+   "fare": 360,
+   "dep": "09:40",
+   "arr": "19:10"
+  },
+  {
+   "n": "12926",
+   "name": "PASCHIM EXPRESS",
+   "c": "2A",
+   "st": "AVAILABLE",
+   "seats": 5,
+   "rac": null,
+   "wl": null,
+   "fare": 1270,
+   "dep": "09:40",
+   "arr": "19:10"
+  },
+  {
+   "n": "11058",
+   "name": "ASR CSMT EXP",
+   "c": "2A",
+   "st": "AVAILABLE",
+   "seats": 1,
+   "rac": null,
+   "wl": null,
+   "fare": 1210,
+   "dep": "11:40",
+   "arr": "22:50"
+  }
+ ],
+ "wlWithCard": [
+  {
+   "n": "18238",
+   "name": "CHHATISGARH EXP",
+   "c": "1A",
+   "st": "WAITLIST",
+   "seats": null,
+   "rac": null,
+   "wl": 4,
+   "fare": 2020,
+   "dep": "18:43",
+   "arr": "06:25"
+  },
+  {
+   "n": "12904",
+   "name": "GOLDEN TEMPLE M",
+   "c": "1A",
+   "st": "WAITLIST",
+   "seats": null,
+   "rac": null,
+   "wl": 4,
+   "fare": 2095,
+   "dep": "21:10",
+   "arr": "05:45"
+  },
+  {
+   "n": "18238",
+   "name": "CHHATISGARH EXP",
+   "c": "2A",
+   "st": "WAITLIST",
+   "seats": null,
+   "rac": null,
+   "wl": 9,
+   "fare": 1225,
+   "dep": "18:43",
+   "arr": "06:25"
+  },
+  {
+   "n": "18238",
+   "name": "CHHATISGARH EXP",
+   "c": "3E",
+   "st": "WAITLIST",
+   "seats": null,
+   "rac": null,
+   "wl": 11,
+   "fare": 800,
+   "dep": "18:43",
+   "arr": "06:25"
+  },
+  {
+   "n": "12904",
+   "name": "GOLDEN TEMPLE M",
+   "c": "2A",
+   "st": "WAITLIST",
+   "seats": null,
+   "rac": null,
+   "wl": 19,
+   "fare": 1270,
+   "dep": "21:10",
+   "arr": "05:45"
+  },
+  {
+   "n": "18238",
+   "name": "CHHATISGARH EXP",
+   "c": "3A",
+   "st": "WAITLIST",
+   "seats": null,
+   "rac": null,
+   "wl": 20,
+   "fare": 865,
+   "dep": "18:43",
+   "arr": "06:25"
+  },
+  {
+   "n": "18238",
+   "name": "CHHATISGARH EXP",
+   "c": "SL",
+   "st": "WAITLIST",
+   "seats": null,
+   "rac": null,
+   "wl": 54,
+   "fare": 330,
+   "dep": "18:43",
+   "arr": "06:25"
+  },
+  {
+   "n": "12904",
+   "name": "GOLDEN TEMPLE M",
+   "c": "3A",
+   "st": "WAITLIST",
+   "seats": null,
+   "rac": null,
+   "wl": 60,
+   "fare": 915,
+   "dep": "21:10",
+   "arr": "05:45"
+  },
+  {
+   "n": "12904",
+   "name": "GOLDEN TEMPLE M",
+   "c": "SL",
+   "st": "WAITLIST",
+   "seats": null,
+   "rac": null,
+   "wl": 104,
+   "fare": 360,
+   "dep": "21:10",
+   "arr": "05:45"
+  },
+  {
+   "n": "20986",
+   "name": "MCTM KOTA EXP",
+   "c": "SL",
+   "st": "NOT_AVAILABLE",
+   "seats": 0,
+   "rac": null,
+   "wl": null,
+   "fare": null,
+   "dep": "00:40",
+   "arr": "07:55"
+  },
+  {
+   "n": "20986",
+   "name": "MCTM KOTA EXP",
+   "c": "1A",
+   "st": "NOT_AVAILABLE",
+   "seats": 0,
+   "rac": null,
+   "wl": null,
+   "fare": null,
+   "dep": "00:40",
+   "arr": "07:55"
+  },
+  {
+   "n": "20986",
+   "name": "MCTM KOTA EXP",
+   "c": "2A",
+   "st": "NOT_AVAILABLE",
+   "seats": 0,
+   "rac": null,
+   "wl": null,
+   "fare": null,
+   "dep": "00:40",
+   "arr": "07:55"
+  },
+  {
+   "n": "20986",
+   "name": "MCTM KOTA EXP",
+   "c": "3A",
+   "st": "NOT_AVAILABLE",
+   "seats": 0,
+   "rac": null,
+   "wl": null,
+   "fare": null,
+   "dep": "00:40",
+   "arr": "07:55"
+  },
+  {
+   "n": "20986",
+   "name": "MCTM KOTA EXP",
+   "c": "3E",
+   "st": "NOT_AVAILABLE",
+   "seats": 0,
+   "rac": null,
+   "wl": null,
+   "fare": null,
+   "dep": "00:40",
+   "arr": "07:55"
+  },
+  {
+   "n": "11906",
+   "name": "HSX AGC EXP",
+   "c": "SL",
+   "st": "NOT_AVAILABLE",
+   "seats": 0,
+   "rac": null,
+   "wl": null,
+   "fare": null,
+   "dep": "00:55",
+   "arr": "09:23"
+  },
+  {
+   "n": "11906",
+   "name": "HSX AGC EXP",
+   "c": "2A",
+   "st": "NOT_AVAILABLE",
+   "seats": 0,
+   "rac": null,
+   "wl": null,
+   "fare": null,
+   "dep": "00:55",
+   "arr": "09:23"
+  },
+  {
+   "n": "11906",
+   "name": "HSX AGC EXP",
+   "c": "3A",
+   "st": "NOT_AVAILABLE",
+   "seats": 0,
+   "rac": null,
+   "wl": null,
+   "fare": null,
+   "dep": "00:55",
+   "arr": "09:23"
+  },
+  {
+   "n": "11906",
+   "name": "HSX AGC EXP",
+   "c": "3E",
+   "st": "NOT_AVAILABLE",
+   "seats": 0,
+   "rac": null,
+   "wl": null,
+   "fare": null,
+   "dep": "00:55",
+   "arr": "09:23"
+  },
+  {
+   "n": "11078",
+   "name": "JHELUM EXPRESS",
+   "c": "SL",
+   "st": "NOT_AVAILABLE",
+   "seats": 0,
+   "rac": null,
+   "wl": null,
+   "fare": null,
+   "dep": "04:30",
+   "arr": "13:15"
+  },
+  {
+   "n": "11078",
+   "name": "JHELUM EXPRESS",
+   "c": "2A",
+   "st": "NOT_AVAILABLE",
+   "seats": 0,
+   "rac": null,
+   "wl": null,
+   "fare": null,
+   "dep": "04:30",
+   "arr": "13:15"
+  },
+  {
+   "n": "11078",
+   "name": "JHELUM EXPRESS",
+   "c": "3A",
+   "st": "NOT_AVAILABLE",
+   "seats": 0,
+   "rac": null,
+   "wl": null,
+   "fare": null,
+   "dep": "04:30",
+   "arr": "13:15"
+  },
+  {
+   "n": "12716",
+   "name": "SACHKHAND EXP",
+   "c": "SL",
+   "st": "NOT_AVAILABLE",
+   "seats": 0,
+   "rac": null,
+   "wl": null,
+   "fare": null,
+   "dep": "07:45",
+   "arr": "14:31"
+  },
+  {
+   "n": "12716",
+   "name": "SACHKHAND EXP",
+   "c": "1A",
+   "st": "NOT_AVAILABLE",
+   "seats": 0,
+   "rac": null,
+   "wl": null,
+   "fare": null,
+   "dep": "07:45",
+   "arr": "14:31"
+  },
+  {
+   "n": "12716",
+   "name": "SACHKHAND EXP",
+   "c": "2A",
+   "st": "NOT_AVAILABLE",
+   "seats": 0,
+   "rac": null,
+   "wl": null,
+   "fare": null,
+   "dep": "07:45",
+   "arr": "14:31"
+  },
+  {
+   "n": "12716",
+   "name": "SACHKHAND EXP",
+   "c": "3A",
+   "st": "NOT_AVAILABLE",
+   "seats": 0,
+   "rac": null,
+   "wl": null,
+   "fare": null,
+   "dep": "07:45",
+   "arr": "14:31"
+  },
+  {
+   "n": "12926",
+   "name": "PASCHIM EXPRESS",
+   "c": "1A",
+   "st": "NOT_AVAILABLE",
+   "seats": 0,
+   "rac": null,
+   "wl": null,
+   "fare": null,
+   "dep": "09:40",
+   "arr": "19:10"
+  },
+  {
+   "n": "11058",
+   "name": "ASR CSMT EXP",
+   "c": "SL",
+   "st": "NOT_AVAILABLE",
+   "seats": 0,
+   "rac": null,
+   "wl": null,
+   "fare": null,
+   "dep": "11:40",
+   "arr": "22:50"
+  },
+  {
+   "n": "11058",
+   "name": "ASR CSMT EXP",
+   "c": "3E",
+   "st": "NOT_AVAILABLE",
+   "seats": 0,
+   "rac": null,
+   "wl": null,
+   "fare": null,
+   "dep": "11:40",
+   "arr": "22:50"
+  },
+  {
+   "n": "12920",
+   "name": "MALWA EXPRESS",
+   "c": "SL",
+   "st": "NOT_AVAILABLE",
+   "seats": 0,
+   "rac": null,
+   "wl": null,
+   "fare": null,
+   "dep": "15:15",
+   "arr": "22:38"
+  },
+  {
+   "n": "12920",
+   "name": "MALWA EXPRESS",
+   "c": "1A",
+   "st": "NOT_AVAILABLE",
+   "seats": 0,
+   "rac": null,
+   "wl": null,
+   "fare": null,
+   "dep": "15:15",
+   "arr": "22:38"
+  },
+  {
+   "n": "12920",
+   "name": "MALWA EXPRESS",
+   "c": "2A",
+   "st": "NOT_AVAILABLE",
+   "seats": 0,
+   "rac": null,
+   "wl": null,
+   "fare": null,
+   "dep": "15:15",
+   "arr": "22:38"
+  },
+  {
+   "n": "12920",
+   "name": "MALWA EXPRESS",
+   "c": "3A",
+   "st": "NOT_AVAILABLE",
+   "seats": 0,
+   "rac": null,
+   "wl": null,
+   "fare": null,
+   "dep": "15:15",
+   "arr": "22:38"
+  },
+  {
+   "n": "12920",
+   "name": "MALWA EXPRESS",
+   "c": "3E",
+   "st": "NOT_AVAILABLE",
+   "seats": 0,
+   "rac": null,
+   "wl": null,
+   "fare": null,
+   "dep": "15:15",
+   "arr": "22:38"
+  },
+  {
+   "n": "12472",
+   "name": "SWARAJ EXPRESS",
+   "c": "SL",
+   "st": "NOT_AVAILABLE",
+   "seats": 0,
+   "rac": null,
+   "wl": null,
+   "fare": null,
+   "dep": "16:30",
+   "arr": "23:20"
+  },
+  {
+   "n": "12472",
+   "name": "SWARAJ EXPRESS",
+   "c": "1A",
+   "st": "NOT_AVAILABLE",
+   "seats": 0,
+   "rac": null,
+   "wl": null,
+   "fare": null,
+   "dep": "16:30",
+   "arr": "23:20"
+  },
+  {
+   "n": "12472",
+   "name": "SWARAJ EXPRESS",
+   "c": "2A",
+   "st": "NOT_AVAILABLE",
+   "seats": 0,
+   "rac": null,
+   "wl": null,
+   "fare": null,
+   "dep": "16:30",
+   "arr": "23:20"
+  },
+  {
+   "n": "12472",
+   "name": "SWARAJ EXPRESS",
+   "c": "3A",
+   "st": "NOT_AVAILABLE",
+   "seats": 0,
+   "rac": null,
+   "wl": null,
+   "fare": null,
+   "dep": "16:30",
+   "arr": "23:20"
+  },
+  {
+   "n": "12472",
+   "name": "SWARAJ EXPRESS",
+   "c": "3E",
+   "st": "NOT_AVAILABLE",
+   "seats": 0,
+   "rac": null,
+   "wl": null,
+   "fare": null,
+   "dep": "16:30",
+   "arr": "23:20"
+  }
+ ],
+ "noData": [],
+ "availableBoardOnly": [
+  {
+   "n": "11078",
+   "name": "JHELUM EXPRESS",
+   "c": "3A",
+   "st": "AVAILABLE",
+   "seats": 8,
+   "rac": null,
+   "wl": null,
+   "fare": 760,
+   "dep": "04:30",
+   "arr": "13:15"
+  },
+  {
+   "n": "11058",
+   "name": "ASR CSMT EXP",
+   "c": "3E",
+   "st": "RAC",
+   "seats": null,
+   "rac": 42,
+   "wl": null,
+   "fare": 785,
+   "dep": "11:40",
+   "arr": "22:50"
+  },
+  {
+   "n": "11058",
+   "name": "ASR CSMT EXP",
+   "c": "2A",
+   "st": "RAC",
+   "seats": null,
+   "rac": 6,
+   "wl": null,
+   "fare": 1210,
+   "dep": "11:40",
+   "arr": "22:50"
+  }
+ ]
+}

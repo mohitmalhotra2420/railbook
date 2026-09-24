@@ -250,3 +250,21 @@ User: *"Card filter karo lekin connecting/alternatives mein change na aayein wo 
 - Window na bole to kuch nahi badalta (koi default filter nahi).
 - Naya: `departureInWindow()` (`src/seatfinder.ts`, server `inTimeWindow` ka mirror — same windows, raat me wrap); `filterSeatRows` bhi wahi helper use karta hai.
 - Test: `tests/round19d-card-window.test.tsx` (4). Kul **93 files / 964 tests PASS**; `npm run build` OK; server tsc clean.
+
+### 9.9 Round-19e — Seat Finder **train-wise** (har train ki saari classes ek saath) + preview ki galti
+
+User (screenshot ke saath): *"upar card mein classes available mein sabhi dikh nhi rhi jabh ki neeche classes zyada hai"*.
+
+**Do cheezein nikli:**
+
+1. **Mere preview ki galti:** us preview me **upar wale panel ke numbers haath se likhe the** (ek purane snapshot se) aur neeche wala card doosre payload ka tha — isliye `11078 3A AVL 7` upar aur `AVL 8` neeche dikh raha tha. Ab har preview **ek hi asli payload** se banta hai (`provas/ldh-mtj-real.json`, live server se).
+2. **UI ki asli kami:** Seat Finder me har class ki apni row thi aur **6 rows ke baad "aur rows dekho"** — lambi list me train ki kuch classes pehli nazar me chhup jaati thi.
+
+**Fix (client-only, data/AI/API untouched):**
+
+- `SeatFinder.tsx` me naya `TrainGroup` — **ek train = ek block**, uske andar uski **saari classes chips** me (card jaisa): `12926 PASCHIM EXPRESS · 3A AVL 23 ₹915 · SL AVL 8 ₹360 · 2A AVL 5 ₹1,270`.
+- Limit ab **trains** par hai (seat 8, WL 4 — "aur N trains dekho"), **classes par kabhi nahi**.
+- "Available" tab = AVL/RAC chips (uss class ke liye aapka hi rule: *"Available pe click kre to Available + RAC dikhao"*); WL/N-A chips apne train ke block me **"🚆 Sabhi trains"** me — wahan bhi train-wise.
+- Verify (asli payload, client ke apne functions se): **10/10 trains** me jitni AVAILABLE/RAC classes card me hain, utni hi Seat Finder me aati hain; ek bhi class chhupti nahi.
+
+**Bonus (flaky test jo raat 12 baje toota):** `tests/route-board-live-enrich.test.ts` me date `2026-09-24` hardcoded thi; IST me 25 Sep hote hi wo "beet chuki" ho gayi aur live probe (jo past journey-date par **jaan-boojh kar** null deta hai) test ko gira raha tha. Ab date IST-today se aati hai. Kul **93 files / 967 tests PASS**.

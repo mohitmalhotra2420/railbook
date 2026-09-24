@@ -312,3 +312,77 @@ describe("Seat Finder — purana route board vs fresh per-train board (Round-19c
     expect(screen.queryByText("WL 14")).toBeNull();
   });
 });
+
+/* ── Round-19e (24 Sep, user screenshot: "upar card mein classes available mein sabhi dikh nhi rhi jabki
+ * neeche classes zyada hai"): pehle har class apni row thi aur 6 rows ke baad "aur rows dekho" — isliye
+ * train ki kuch classes pehli nazar me gayab thi. Ab har train ka ek block hai jisme uski SAARI classes
+ * ek saath (upar wale card jaisa), aur koi class 6-row cap me chhupti nahi. ────────────────────────── */
+const manyTrains = [
+  { number: "14719", name: "BKN ASR EXP", departure: "04:25", arrival: "06:06", durationLabel: "1h 41m", arrivalDayOffset: 0 },
+  { number: "14631", name: "DDN ASR EXPRESS", departure: "04:46", arrival: "06:30", durationLabel: "1h 44m", arrivalDayOffset: 0 },
+  { number: "12029", name: "SWARN SHATABDI", departure: "11:11", arrival: "12:38", durationLabel: "1h 27m", arrivalDayOffset: 0 },
+  { number: "12053", name: "JANSHATABDI", departure: "15:40", arrival: "17:05", durationLabel: "1h 25m", arrivalDayOffset: 0 },
+];
+const manyBoard = [
+  { trainNumber: "14719", trainName: "BKN ASR EXP", classes: [
+    { classCode: "3A", code: "3A", status: "AVAILABLE", seats: 306, rac: null, waitlist: null, fare: 520, source: "web_railyatri" },
+    { classCode: "2A", code: "2A", status: "AVAILABLE", seats: 84, rac: null, waitlist: null, fare: 725, source: "web_railyatri" },
+    { classCode: "SL", code: "SL", status: "AVAILABLE", seats: 287, rac: null, waitlist: null, fare: 150, source: "web_railyatri" },
+    { classCode: "1A", code: "1A", status: "NOT_AVAILABLE", seats: null, rac: null, waitlist: null, fare: null, source: "web_railyatri" },
+  ] },
+  { trainNumber: "14631", trainName: "DDN ASR EXPRESS", classes: [{ classCode: "SL", code: "SL", status: "AVAILABLE", seats: 154, rac: null, waitlist: null, fare: 150, source: "web_railyatri" }] },
+  { trainNumber: "12029", trainName: "SWARN SHATABDI", classes: [
+    { classCode: "CC", code: "CC", status: "AVAILABLE", seats: 86, rac: null, waitlist: null, fare: 345, source: "web_railyatri" },
+    { classCode: "EC", code: "EC", status: "AVAILABLE", seats: 4, rac: null, waitlist: null, fare: 660, source: "web_railyatri" },
+  ] },
+  { trainNumber: "12053", trainName: "JANSHATABDI", classes: [{ classCode: "2S", code: "2S", status: "AVAILABLE", seats: 852, rac: null, waitlist: null, fare: 90, source: "web_railyatri" }] },
+];
+
+describe("Seat Finder — train-wise blocks, koi class chhupti nahi (Round-19e)", () => {
+  const stub = () => {
+    (globalThis as unknown as { fetch: unknown }).fetch = vi.fn(async () => ({ ok: true, json: async () => ({ trains: manyBoard }) }));
+  };
+  const blockOf = (container: HTMLElement, train: string) =>
+    [...container.querySelectorAll(".sf-group")].find((g) => g.textContent?.includes(train));
+
+  it("ek train ki saari AVAILABLE classes ek hi block me (14719: 3A + 2A + SL) — 'Available' tab", async () => {
+    stub();
+    const { container } = render(
+      <SeatFinder from="AAAR" to="BBBR" date="2026-09-25" rows={manyTrains} intent={intent({ confirmedOnly: true })} onChip={() => {}} />,
+    );
+    await waitFor(() => expect(screen.getByText("AVL 306")).toBeTruthy());
+    const block = blockOf(container, "14719")!;
+    for (const t of ["AVL 306", "AVL 84", "AVL 287"]) expect(block.textContent).toContain(t); /* teeno classes ek saath */
+    expect(block.textContent).toContain("3 classes");
+    /* Available tab = sirf AVL/RAC (1A N/A yahan nahi — wo "Sabhi trains" me, apni jagah) */
+    expect(block.textContent).not.toContain("1A");
+  });
+
+  it("'Sabhi trains' me ek train ki har class dikhti hai — available upar block me, WL/N-A neeche uske apne block me", async () => {
+    stub();
+    const { container } = render(
+      <SeatFinder from="AAAT" to="BBBT" date="2026-09-25" rows={manyTrains} intent={intent()} onChip={() => {}} />,
+    );
+    await waitFor(() => expect(screen.getByText("AVL 306")).toBeTruthy());
+    /* seat block: 3 available classes */
+    const seatBlocks = [...container.querySelectorAll(".sf-group.seat")];
+    const seat14719 = seatBlocks.find((g) => g.textContent?.includes("14719"))!;
+    expect(seat14719.textContent).toContain("AVL 84");
+    /* WL/N-A section bhi train-wise: 14719 ka 1A N/A uske block me */
+    await waitFor(() => expect(container.querySelectorAll(".sf-group.wl").length).toBeGreaterThan(0));
+    const wl14719 = [...container.querySelectorAll(".sf-group.wl")].find((g) => g.textContent?.includes("14719"));
+    expect(wl14719?.textContent).toContain("1A");
+    expect([...(container.querySelectorAll(".sf-group.seat, .sf-group.wl"))].length).toBeGreaterThanOrEqual(5);
+  });
+
+  it("7+ available classes hone par bhi koi chip chhupti nahi (purana 6-row cap gaya)", async () => {
+    stub();
+    const { container } = render(
+      <SeatFinder from="AAAS" to="BBBS" date="2026-09-25" rows={manyTrains} intent={intent({ confirmedOnly: true })} onChip={() => {}} />,
+    );
+    await waitFor(() => expect(screen.getByText("AVL 852")).toBeTruthy());
+    for (const t of ["AVL 306", "AVL 84", "AVL 287", "AVL 154", "AVL 86", "AVL 4", "AVL 852"]) expect(screen.getByText(t)).toBeTruthy();
+    expect(container.querySelectorAll(".sf-group").length).toBe(4); /* chaaron trains, bina tap */
+    expect(container.textContent).not.toMatch(/aur \d+ rows dekho/);
+  });
+});

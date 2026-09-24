@@ -19,7 +19,10 @@ import { setProvider } from "../server/providers/index";
 import { setRailcoreFetch } from "../server/railway/railcore";
 import { setRailkitSdk } from "../server/railway/railkit";
 
-const DATE = "2026-09-24";
+/* 25 Sep 2026: date hardcoded thi — IST me raat 12 bajte hi wo "beet chuki" ban jaati thi aur
+ * live probe (jo past journey-date par jaan-boojh kar null deta hai) test ko gira deta tha.
+ * Ab IST-today hi liya jaata hai — test ka iraada (aaj ki journey date par live row bharni hai) wahi. */
+const DATE = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
 const OLD = new Date(Date.now() - 17 * 3600 * 1000).toISOString(); // 17 ghante purana (CT)
 
 /** ConfirmTkt board: 3A ka data hi nahi (UNKNOWN), SL 17 ghante purana, ek train cancelled. */
