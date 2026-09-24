@@ -268,3 +268,15 @@ User (screenshot ke saath): *"upar card mein classes available mein sabhi dikh n
 - Verify (asli payload, client ke apne functions se): **10/10 trains** me jitni AVAILABLE/RAC classes card me hain, utni hi Seat Finder me aati hain; ek bhi class chhupti nahi.
 
 **Bonus (flaky test jo raat 12 baje toota):** `tests/route-board-live-enrich.test.ts` me date `2026-09-24` hardcoded thi; IST me 25 Sep hote hi wo "beet chuki" ho gayi aur live probe (jo past journey-date par **jaan-boojh kar** null deta hai) test ko gira raha tha. Ab date IST-today se aati hai. Kul **93 files / 967 tests PASS**.
+
+### 9.10 Round-19f — "Available" me bhi **poora card** (koi train/class chhupti nahi)
+
+User ne wahi shikayat dobara screenshot ke saath bheji: *"upar card mein classes available mein sabhi dikh nhi rhi jabki neeche classes zyada hai"* — us screenshot me upar **Seat Finder** tha aur neeche **journey card**, aur dono ke numbers/classes alag the.
+
+Ab Seat Finder ki "✅ Available" list bhi wahi poora sach dikhati hai jo upar card dikhata hai:
+
+- **Pehle:** Available = sirf AVL/RAC classes, aur baaki trains (jinke kisi class me seat nahi) list me aate hi nahi the — isliye upar card me 10 trains x 4-5 classes, neeche 2 trains dikhte the.
+- **Ab:** har train ka ek **block** aur us block me uski **SAARI classes** — seat wali **rangdar** chips (AVL/RAC + fare), baaki (WL/N-A) **halki** chips (tap par fresh check phir bhi chalta hai). Aur jinke kisi class me seat nahi, wo trains **"SEAT NAHI"** heading ke neeche, apni saari classes ke saath (halki). Cap sirf **trains** par (8 seat / 8 no-seat), classes par kabhi nahi.
+- **Verification (asli payload se, component ka asli render):** LDH -> MTJ · 25 Sep par Seat Finder me **10/10 trains** aur unki **saari classes** (12926: 3A AVL 23 · SL AVL 8 · 2A AVL 5 · 1A N/A) — upar wale card se bilkul match.
+- Seat Finder ke andar build ab hamesha "all" (WL/N-A rows bhi banti hain); section-level gating UI me — "Sabhi trains" me WL **section** alag, "Available" me WL/N-A chips usi train ke block me halki.
+- Tests: `tests/seat-finder-card.test.tsx` (18) — Available me saari classes + halki chips, "SEAT NAHI" section. Kul **93 files / 969 tests PASS**.

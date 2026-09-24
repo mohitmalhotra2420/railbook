@@ -63,7 +63,7 @@ describe("Seat Finder card (jsdom)", () => {
     expect(screen.getByText("RAC 9")).toBeTruthy();
     /* WL neeche */
     expect(screen.getByText(/Seat pakki nahi/)).toBeTruthy();
-    expect(screen.getByText("WL 12")).toBeTruthy();
+    expect(screen.getAllByText("WL 12").length).toBeGreaterThan(0);
     /* 14617 ka board data nahi aaya → "seat nahi" nahi, alag list */
     expect(screen.getByText(/Seat data provider se nahi aayi/)).toBeTruthy();
     expect(screen.getByText(/data nahi aayi/)).toBeTruthy();
@@ -74,19 +74,23 @@ describe("Seat Finder card (jsdom)", () => {
     await waitFor(() => expect(screen.getByText(/Seat pakki nahi/)).toBeTruthy());
 
     fireEvent.click(screen.getByText("✅ Available"));
+    /* WL ka apna SECTION hat jata hai (Available = AVL + RAC) */
     await waitFor(() => expect(screen.queryByText(/Seat pakki nahi/)).toBeNull());
     expect(screen.getByText("AVL 29")).toBeTruthy(); /* AVL */
     expect(screen.getByText("RAC 9")).toBeTruthy(); /* RAC bhi — user ne kaha dono */
-    expect(screen.queryByText("WL 12")).toBeNull(); /* WL nahi */
+    /* Round-19f (user: "upar card me classes available me sabhi dikh nhi rhi jabki neeche zyada hai"):
+     * us train ki WL/N-A class bhi block me HALKI (off) dikhti hai — chhupti nahi. */
+    const off = [...document.querySelectorAll(".sf-cchip.off")].map((c) => c.textContent ?? "");
+    expect(off.some((t) => t.includes("WL 12"))).toBe(true);
 
     fireEvent.click(screen.getByText("🚆 Sabhi trains"));
     await waitFor(() => expect(screen.getByText(/Seat pakki nahi/)).toBeTruthy());
-    expect(screen.getByText("WL 12")).toBeTruthy();
+    expect(screen.getAllByText("WL 12").length).toBeGreaterThan(0);
   });
 
   it("class chip (2A) sirf us class ki rows dikhata hai — 3A WL row hat jati hai", async () => {
     render(<SeatFinder from="AAAD" to="BBBD" date="2026-09-25" rows={search} intent={intent()} onChip={() => {}} />);
-    await waitFor(() => expect(screen.getByText("WL 12")).toBeTruthy());
+    await waitFor(() => expect(screen.getAllByText("WL 12").length).toBeGreaterThan(0));
     fireEvent.click(screen.getAllByRole("button", { name: "2A" })[0]);
     await waitFor(() => expect(screen.queryByText("WL 12")).toBeNull());
     expect(screen.getByText("AVL 29")).toBeTruthy();
@@ -353,9 +357,18 @@ describe("Seat Finder — train-wise blocks, koi class chhupti nahi (Round-19e)"
     await waitFor(() => expect(screen.getByText("AVL 306")).toBeTruthy());
     const block = blockOf(container, "14719")!;
     for (const t of ["AVL 306", "AVL 84", "AVL 287"]) expect(block.textContent).toContain(t); /* teeno classes ek saath */
-    expect(block.textContent).toContain("3 classes");
-    /* Available tab = sirf AVL/RAC (1A N/A yahan nahi — wo "Sabhi trains" me, apni jagah) */
-    expect(block.textContent).not.toContain("1A");
+    expect(block.textContent).toContain("4 classes"); /* saari classes is train ki */
+    expect(block.textContent).toContain("3 me seat");
+    /* Round-19f: Available tab me bhi train ki SAARI classes dikhti hain — jo seat nahi wali (1A N/A)
+     * wo HALKI (off) chip me, koi class chhupti nahi (user ki baar-baar wali shikayat ka fix). */
+    const chips = [...(block.querySelectorAll(".sf-cchip"))];
+    expect(chips.length).toBe(4);
+    const off = chips.filter((c) => c.classList.contains("off")).map((c) => c.textContent ?? "");
+    expect(off.length).toBe(1);
+    expect(off[0]).toContain("1A");
+    const on = chips.filter((c) => !c.classList.contains("off")).map((c) => c.textContent ?? "");
+    expect(on.length).toBe(3);
+    for (const t of ["AVL 306", "AVL 84", "AVL 287"]) expect(on.join(" | ")).toContain(t);
   });
 
   it("'Sabhi trains' me ek train ki har class dikhti hai — available upar block me, WL/N-A neeche uske apne block me", async () => {
@@ -384,5 +397,52 @@ describe("Seat Finder — train-wise blocks, koi class chhupti nahi (Round-19e)"
     for (const t of ["AVL 306", "AVL 84", "AVL 287", "AVL 154", "AVL 86", "AVL 4", "AVL 852"]) expect(screen.getByText(t)).toBeTruthy();
     expect(container.querySelectorAll(".sf-group").length).toBe(4); /* chaaron trains, bina tap */
     expect(container.textContent).not.toMatch(/aur \d+ rows dekho/);
+  });
+});
+
+/* ── Round-19f (user baar-baar, screenshot ke saath: "upar card me classes available me sabhi dikh nhi
+ * rhi jabki neeche zyada hai"): ab Available tab me bhi POORA sach dikhta hai —
+ *   • seat wali train ke block me uski SAARI classes (seat wale rangdar, baaki halki),
+ *   • aur jin trains me koi available class nahi, wo bhi apne block me (saari classes halki) —
+ *     alag "SEAT NAHI" heading ke saath.
+ * Isliye upar wale journey card se train/class count match karta hai; kuch bhi chhupa nahi. ─────── */
+describe("Seat Finder — Available tab me poora card (Round-19f)", () => {
+  it("seat na wali trains bhi dikhti hain (SEAT NAHI section) — koi train/class chhupti nahi", async () => {
+    (globalThis as unknown as { fetch: unknown }).fetch = vi.fn(async () => ({ ok: true, json: async () => ({ trains: manyBoard }) }));
+    const { container } = render(
+      <SeatFinder from="AAAU" to="BBBU" date="2026-09-25" rows={manyTrains} intent={intent({ confirmedOnly: true })} onChip={() => {}} />,
+    );
+    await waitFor(() => expect(screen.getByText("AVL 306")).toBeTruthy());
+    /* manyBoard me saari trains me seat hai — isliye SEAT NAHI section nahi hona chahiye */
+    expect(screen.queryByText(/in trains me koi AVAILABLE \/ RAC class nahi/)).toBeNull();
+  });
+
+  it("jab koi train me seat nahi: wo train apni saari classes ke saath halki dikhti hai (alag heading)", async () => {
+    const board = [
+      { trainNumber: "14719", trainName: "BKN ASR EXP", classes: [
+        { classCode: "2A", code: "2A", status: "AVAILABLE", seats: 84, rac: null, waitlist: null, fare: 725, source: "web_railyatri" },
+      ] },
+      { trainNumber: "14631", trainName: "DDN ASR EXPRESS", classes: [
+        { classCode: "SL", code: "SL", status: "WAITLIST", seats: null, rac: null, waitlist: 37, fare: 150, source: "web_railyatri" },
+        { classCode: "3A", code: "3A", status: "NOT_AVAILABLE", seats: null, rac: null, waitlist: null, fare: null, source: "web_railyatri" },
+      ] },
+    ];
+    (globalThis as unknown as { fetch: unknown }).fetch = vi.fn(async () => ({ ok: true, json: async () => ({ trains: board }) }));
+    const { container } = render(
+      <SeatFinder from="AAAV" to="BBBV" date="2026-09-25" rows={manyTrains.slice(0, 2)} intent={intent({ confirmedOnly: true })} onChip={() => {}} />,
+    );
+    await waitFor(() => expect(screen.getByText("AVL 84")).toBeTruthy());
+    /* heading + us train ke block me SL(WAITLIST) aur 3A(N-A) dono halki chips */
+    expect(screen.getByText(/in trains me koi AVAILABLE \/ RAC class nahi/)).toBeTruthy();
+    const groups = [...container.querySelectorAll(".sf-group")];
+    const wlTrain = groups.find((g) => g.textContent?.includes("14631"))!;
+    expect(wlTrain.textContent).toContain("WL 37");
+    expect(wlTrain.textContent).toContain("N/A");
+    const off = [...wlTrain.querySelectorAll(".sf-cchip")];
+    expect(off.length).toBe(2);
+    expect(off.every((c) => c.classList.contains("off"))).toBe(true); /* saari halki — seat nahi maani jaati */
+    /* seat wali train ke block me bhi uski saari classes (2A rangdar) */
+    const seatTrain = groups.find((g) => g.textContent?.includes("14719"))!;
+    expect([...seatTrain.querySelectorAll(".sf-cchip:not(.off)")].length).toBe(1);
   });
 });

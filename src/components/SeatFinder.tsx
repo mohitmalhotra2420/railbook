@@ -82,8 +82,9 @@ function statusBadge(r: SeatRow) {
  *  card jaisa. Data wahi (per-train board), koi naya source nahi. */
 function TrainGroup({ rows, onPick }: { rows: SeatRow[]; onPick?: (r: SeatRow) => void }) {
   const g = rows[0];
-  const fares = rows.map((r) => r.fare).filter((f): f is number => typeof f === "number");
-  const tone = g.seat ? "seat" : g.status === "NO_DATA" || g.status === "UNKNOWN" ? "nodata" : "wl";
+  const fares = rows.filter((r) => r.seat).map((r) => r.fare).filter((f): f is number => typeof f === "number");
+  const seats = rows.filter((r) => r.seat);
+  const tone = seats.length ? "seat" : g.status === "NO_DATA" || g.status === "UNKNOWN" ? "nodata" : "wl";
   return (
     <div className={`sf-group ${tone}`}>
       <div className="sf-group-h">
@@ -92,7 +93,10 @@ function TrainGroup({ rows, onPick }: { rows: SeatRow[]; onPick?: (r: SeatRow) =
         </span>
         <span className="sf-group-meta">
           {g.departure && g.arrival ? `${g.departure} → ${g.arrival}` : "time list me nahi"}
-          {rows.length > 1 && <span className="sf-group-n"> · {rows.length} classes</span>}
+          {/* Round-19f (user baar-baar: "upar card me classes available me sabhi dikh nhi rhi jabki
+              neeche zyada hai"): ek train ki SAARI classes yahan dikhti hain — seat wali rangdar,
+              WL/N-A halki (dimmed). Koi class chhupti nahi. */}
+          {rows.length > 1 && <span className="sf-group-n"> · {rows.length} classes{seats.length ? ` (${seats.length} me seat)` : ""}</span>}
         </span>
       </div>
       <div className="sf-group-c">
@@ -100,9 +104,13 @@ function TrainGroup({ rows, onPick }: { rows: SeatRow[]; onPick?: (r: SeatRow) =
           <button
             key={`${r.number}-${r.classCode}`}
             type="button"
-            className="sf-cchip"
+            className={`sf-cchip${r.seat ? "" : " off"}`}
             onClick={() => onPick?.(r)}
-            title={r.fare ? `${r.classCode} · ${inr(r.fare)} — tap karke fresh check` : `${r.classCode} — tap karke fresh check`}
+            title={
+              r.seat
+                ? `${r.classCode}${r.fare ? ` · ${inr(r.fare)}` : ""} — tap karke fresh check`
+                : `${r.classCode} abhi bookable nahi (WL/N-A) — tap karke fresh check`
+            }
           >
             <span className="sf-cls">{r.classCode}</span>
             {statusBadge(r)}
@@ -172,6 +180,8 @@ export function SeatFinder({
   const [earliest, setEarliest] = useState(intent.earliest);
   const [cheapest, setCheapest] = useState(intent.cheapest);
   const [showAllSeat, setShowAllSeat] = useState(false);
+  /* Round-19f: Available tab me "seat hi nahi" wali trains ka apna cap (koi train/class na chhupe). */
+  const [showAllOff, setShowAllOff] = useState(false);
   const [showAllWl, setShowAllWl] = useState(false);
   const [showAllNoData, setShowAllNoData] = useState(false);
   const spokenRef = useRef(false);
@@ -274,19 +284,24 @@ export function SeatFinder({
     });
   }, [board, cardBoard, extraBoards, verifiedBoards]);
 
+  /* Round-19f: build hamesha "all" mode me — WL/N-A rows bhi banti hain (Available tab ke block me
+   * halki chips ke liye). Section-level gating UI me hai: WL section sirf "Sabhi trains" me dikhta hai. */
   const merged = useMemo(
-    () => (board ? buildAllClassRows(rows, boardFull, cls, mode, acOnly) : null),
-    [board, boardFull, rows, cls, mode, acOnly],
+    () => (board ? buildAllClassRows(rows, boardFull, cls, "all", acOnly) : null),
+    [board, boardFull, rows, cls, acOnly],
   );
   const sortOpts = { earliest: earliest && !cheapest, cheapest };
   const seat = useMemo(
     () => (merged ? filterSeatRows(merged.seat, { afterMin, beforeMin, ...sortOpts }) : []),
     [merged, afterMin, beforeMin, earliest, cheapest],
   );
-  const wl = useMemo(
-    () => (merged && mode === "all" ? filterSeatRows(merged.wl, { afterMin, beforeMin, ...sortOpts }) : []),
-    [merged, afterMin, beforeMin, mode, earliest, cheapest],
+  const wlAll = useMemo(
+    () => (merged ? filterSeatRows(merged.wl, { afterMin, beforeMin, ...sortOpts }) : []),
+    [merged, afterMin, beforeMin, earliest, cheapest],
   );
+  /* "Available" tab me bhi har train ki SAARI classes dikhti hain (WL/N-A halki chips me), isliye wl
+   * rows yahan hamesha banti hain — WL SECTION ka render phir bhi sirf "Sabhi trains" me hota hai. */
+  const wl = mode === "all" ? wlAll : [];
   const noData = useMemo(() => (merged && mode === "all" ? merged.noData : []), [merged, mode]);
   const seatIgnoringTime = useMemo(
     () => (merged ? filterSeatRows(merged.seat, sortOpts) : []),
@@ -304,11 +319,23 @@ export function SeatFinder({
 
   const pickUtter = (r: SeatRow) =>
     `${r.number} ki seat availability ${r.classCode !== "—" ? r.classCode + " " : ""}${date} ko ${from} se ${to}`;
-  const seatGroups = groupByTrain(seat);
+  const seatGroupsRaw = groupByTrain(seat);
+  /* Round-19f: seat wali train ke block me uski SAARI classes (WL/N-A bhi, halki) — bilkul upar
+   * wale card jaisa. Isliye "upar kam, neeche zyada" wali shikayat khatam. */
+  const rowsOfTrainAll = (number: string) => [
+    ...(merged?.seat ?? []).filter((r) => r.number === number),
+    ...(merged?.wl ?? []).filter((r) => r.number === number),
+  ];
+  const seatGroups = seatGroupsRaw.map((g) => rowsOfTrainAll(g[0].number));
   const wlGroups = groupByTrain(wl);
+  /* Available tab me: seat wali trains ke baad baaki trains bhi (unki saari classes halki) —
+   * taaki upar wale card se train/class count match kare aur kuch bhi chhupa na lage. */
+  const seatTrainNumbers = new Set(seatGroupsRaw.map((g) => g[0].number));
+  const noSeatGroups = groupByTrain(wlAll.filter((r) => !seatTrainNumbers.has(r.number)));
   /* Round-19e: pehle 6 rows ke baad chhupte the (ek train ki kuch classes gayab). Ab TRAIN-wise cap. */
   const seatShown = showAllSeat ? seatGroups : seatGroups.slice(0, 8);
   const wlShown = showAllWl ? wlGroups : wlGroups.slice(0, 4);
+  const noSeatShown = showAllOff ? noSeatGroups : noSeatGroups.slice(0, 8);
   const noDataShown = showAllNoData ? noData : noData.slice(0, 3);
   const seatTrains = uniqueTrainCount(seat);
   const wlTrains = uniqueTrainCount(wl);
@@ -419,7 +446,11 @@ export function SeatFinder({
           <div className="sf-sec">
             <p className="sf-head">
               <span className="sf-tag seat">SEAT</span> Seat mil jayegi (AVL / RAC){" "}
-              <span className="sf-count">· {seatTrains} trains · {seat.length} classes</span>
+              <span className="sf-count">· {seatTrains} trains · {seat.length} classes me seat
+                {(() => {
+                  const total = seatGroups.reduce((n, g) => n + g.length, 0);
+                  return total > seat.length ? ` + ${total - seat.length} WL/N-A classes halki dikh rahi hain (tap = fresh check)` : "";
+                })()}</span>
             </p>
             {seat.length === 0 && (
               <div className="sf-empty">
@@ -469,6 +500,25 @@ export function SeatFinder({
               <button className="sf-more" onClick={() => setShowAllSeat((v) => !v)}>
                 {showAllSeat ? "Kam dikhao ‹" : `aur ${seatGroups.length - 8} trains dekho ›`}
               </button>
+            )}
+            {/* Round-19f (user baar-baar: "upar card me classes available me sabhi dikh nhi rhi jabki
+                neeche zyada hai"): Available tab me bhi poora sach — jin trains me koi available class
+                nahi, wo bhi apni SAARI classes ke saath (halki chips) neeche dikhti hain. */}
+            {mode === "avail" && noSeatGroups.length > 0 && (
+              <>
+                <p className="sf-head" style={{ marginTop: 14 }}>
+                  <span className="sf-tag wl">SEAT NAHI</span> in trains me koi AVAILABLE / RAC class nahi{" "}
+                  <span className="sf-count">· {uniqueTrainCount(wlAll)} trains · {wlAll.length} classes — poori list, kuch chhupa nahi</span>
+                </p>
+                {noSeatShown.map((g) => (
+                  <TrainGroup key={`off-${g[0].number}-${g[0].departure ?? ""}`} rows={g} onPick={(x) => onChip(pickUtter(x))} />
+                ))}
+                {noSeatGroups.length > 8 && (
+                  <button className="sf-more" onClick={() => setShowAllOff((v) => !v)}>
+                    {showAllOff ? "Kam dikhao ‹" : `aur ${noSeatGroups.length - 8} trains dekho ›`}
+                  </button>
+                )}
+              </>
             )}
           </div>
 
