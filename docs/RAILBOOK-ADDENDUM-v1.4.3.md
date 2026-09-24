@@ -148,3 +148,65 @@ AI ka search karne ka tareeka, tools-aur-API calling ka way, alternatives + conn
 - Kul: **91 files / 939 tests PASS**; `npm run build` clean.
 - Deploy: `dep-daql08m7bikc73fr3dg0` @ `6bbf2a8`. Pehla deploy "live" hua par `/api/version` **purana commit** dikha raha tha (stale build) → **clear-cache redeploy** ke baad `6bbf2a8` confirm.
 - APK: **v1.4.3 hi chalega** — app WebView me live site kholta hai, isliye ye sab app me apne aap aa gaya. Naya APK chahiye to v1.4.4 bump kar denge.
+
+---
+
+## 9. Round-19 — "subah" ka time window, Seat Finder me **saari** AVL classes, seat jawab card ke upar — commits `9d17ba3` + `f3f9090`, deploy `dep-daqm8cbtqb8s73b59dt0` **LIVE**
+
+User ke round-18 screenshots + round-19 note, teen cheezein:
+
+1. **Seat Finder "✅ Available"** me sirf **2 trains / 3 rows** aa rahi thi — jabki usi screen ke **upar wale card** me `12926 2A AVL 5 / 3A AVL 24 / SL AVL 8`, `11078 2A AVL 8` dikh rahi thi ("direct mein bahut si trains available hai lekin neeche seat finder mein avl mein sabhi show nhi kar rhi… sabhi available classes bhi nhi aa rhi").
+2. **"Mujhe kal subha ki trains btana amritsar se ludhiana ki"** → poori din ki list (14:25 / 16:50 / 18:55 bhi). "AI ko kya mera question samajh nahi aaya jo relevant tool call nahi kiya."
+3. Plan/journey card ke saath seat ka jawab **"AI note — tap karo"** ke andar chhup jata tha.
+
+### 9.1 Time window (subah / dopahar / shaam / raat + "X se pehle")
+
+| Shabd | Window |
+|---|---|
+| subah / subha / savere / morning | 04:00–12:00 |
+| dopahar / afternoon | 12:00–17:00 |
+| shaam / evening | 17:00–21:00 |
+| raat / night | 21:00 → 04:00 (wrap) |
+| "12 baje se pehle" / "8 baje se pahle" | upper bound only |
+| "subah 8 se pehle" | 04:00–08:00 (dono bound) |
+| "raat 9 ke baad" | 21:00+ (ghadi jeetti hai) |
+
+- Server: `server/understand/seatIntent.ts` (`TIME_WINDOWS`, `beforeMinute`, `departAfterMinute`, `departBeforeMinute`, `windowLabel`) → `server/agent/seatFilter.ts` (`inTimeWindow`, `pickSeatRows` window + `unknownTime` count, line me "Subah (04:00–12:00)").
+- Tool: `findSeats` me `depart_after` ab **shabd bhi** samajhta hai (`"subah"`, `"raat"`), aur **`depart_before`** naya. Dono engines me same.
+- AI: dono system prompts me **TIME-WINDOW RULE** — "subah/dopahar/shaam/raat" ka sawaal aaya to **pehla tool call FIND_SEATS** ho, aur jawab me sirf usi window ki trains; poora din ki list mat do.
+- Client: `src/seatfinder.ts` me wahi WINDOWS + `beforeMin`, `src/components/SeatFinder.tsx` ke **Time** chip me 🌅 Subah / ☀️ Dopahar / 🌇 Shaam / 🌙 Raat options (auto-select jab user ne window boli ho).
+
+> **Round-19b me ek chhupa bug bhi mila (live verify ke dauraan):** window sirf tab banti thi jab sawaal me **koi digit na ho** — "kal subha **2A** me seat" ka `2A` window ko hata deta tha. Ab sirf asli **clock reading** (`17:00`, `9 baje`) window ko rokta hai; class/train/passenger/date ke digits nahi. Server + client dono me fix (test: `tests/server-seat-intent.test.ts`).
+
+### 9.2 Seat Finder ka data base = **card ke apne per-train rows**
+
+- `Concierge.tsx` plan ke **direct options ke `classOptions`** (jo card me dikhte hain — per-train, har class probed, AVL/RAC/WL) ko Seat Finder ko **`cardBoard`** ke roop me deta hai; `SeatFinder.tsx` unhe **base** banata hai aur route board se sirf **missing** classes/trains jodta hai (`mergeBoardsPreferCard`).
+- Isliye ab **upar card aur neeche Seat Finder ke numbers ek jaise** hain (wahi data), aur jin trains ki poori class-list card me thi wo Available list se gayab nahi hoti.
+- Live proof (LDH → MTJ · 25 Sep, asli board): **pehle** 2 trains / 3 rows (`11078 3A AVL 18 · 11058 3E RAC 42 · 11058 2A RAC 6`) → **ab** 6 rows: `12926 3A AVL 23 ₹915 · 11078 2A AVL 8 ₹1,070 · 12926 SL AVL 8 ₹360 · 11078 3A AVL 7 ₹760 · 12926 2A AVL 5 ₹1,270 · 11058 2A AVL 2 ₹1,210`. Kyun badla: route board (ek call me saare trains) **purana/adhoora** ho sakta hai (12926 ko sab WL batata tha), per-train board fresh hota hai — ab card ka per-train data hi base hai. **Kuch bhi banaya hua nahi.**
+
+### 9.3 Seat jawab card ke neeche nahi chhupta
+
+`server/app.ts`: `hasPlanCard = journey || alternatives` — jab card hai to 💺 seat line **card ke upar** dikhti hai (pehle "AI note" me collapse ho jaati thi). Bina card wale sawaal par purana rule: AI ne khud `FIND_SEATS` chalaya ho to duplicate line nahi.
+
+### 9.4 Live proof (build `f3f9090`, 24 Sep 17:57 UTC)
+
+| Sawaal | AI ka tool | Time | Jawab (asli) |
+|---|---|---|---|
+| Mujhe kal subha ki trains btana amritsar se ludhiana ki | `FIND_SEATS` | 20.0s | Sirf **Subah 04:00–12:00**: `12014 CC AVL 357 ₹510 (04:55)`, `12318 SL AVL 95 ₹180 (05:55)`, `14720 SL AVL 388 ₹150 (08:10)`, `12926 SL AVL 151 ₹180 (07:20)` — 16:50/18:55 **gayab** |
+| Mujhe kal subha **2A** me seat wali trains batao LDH se BEAS | `FIND_SEATS` | 43.8s | `14719 2A AVL 84 ₹725 (04:25)` + "23 trains check ki gayi… 10 trains me ye class hi nahi hai" |
+| Mujhe kal subha ki trains batao LDH se BEAS | `FIND_SEATS` | 62.9s | `14719 3A AVL 306 ₹520 (04:25)`, `14719 SL AVL 287 ₹150`, `14631 SL AVL 154 ₹150 (04:46)`, `12029 CC AVL 86 ₹345 (11:11)` |
+| LDH se BEAS kaise jau kal plan batao (koi window nahi) | `RANK_JOURNEY_OPTIONS` | 198s | Poora plan card (32 options) — jaisa pehle tha, wahi |
+| 2A me seat hai kya (window ke bina) | — (server line) | 6.2s | `💺 2A me abhi koi AVAILABLE/RAC seat nahi — WL wali 13 trains hain…` + "Confirm% nahi dete" |
+
+"Test pass hote to live par kaam kyu nahi karta tha?" — Round-19 me ye bhi theek kiya: pehle tests **hisse** test karte the (filter, parse, UI) par **turn ka assembly** aur **digit-guard** wala path koi test nahi utha raha tha. Ab `tests/round19-seat-line-turn.test.ts` asli `/api/agent` turn ka jawab check karta hai (card + 💺 line, duplicate suppression, AI-fail fallback, window slots).
+
+### 9.5 Jo **nahi** chhua
+
+AI ka search/planning ka tareeka, tools-aur-API calling ka flow, alternatives + connecting journeys ka poora logic, journey ranking — **jaisa tha waisa hi**. Sirf: window padhna (server+client), window wale sawaal par `findSeats` ka prompt + params, aur seat line ka dikhne ka niyam.
+
+### 9.6 Tests / deploy
+
+- Naye/updated: `tests/find-seats-tool.test.ts` (14), `tests/server-seat-intent.test.ts` (21), `tests/seat-finder-card.test.tsx` (12), **`tests/round19-seat-line-turn.test.ts` (naya, 6)**.
+- Kul: **92 files / 957 tests PASS**; `npm run build` OK; server `tsc` clean.
+- Deploy: `dep-daqm06psrm7s73dj27e0` @ `9d17ba3` → `dep-daqm8cbtqb8s73b59dt0` @ `f3f9090` (`/api/version` se confirm).
+- APK: **v1.4.3 hi chalega** (app WebView me live site kholta hai) — ye sab app me apne aap aa gaya. Naya build chahiye to v1.4.4 bump kar denge.
