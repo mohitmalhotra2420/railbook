@@ -4,6 +4,7 @@
  * Nothing is synthesised: when a provider fails the result says so explicitly.
  */
 import { getProvider } from "../providers/index.js";
+import { runFindSeatsTool } from "./seatFinderTool.js";
 import {
   getLastRailwayLog,
   routedCancelled,
@@ -144,6 +145,30 @@ export async function runAutoTool(name: string, rawArgs: unknown): Promise<AutoT
           provider: res.provider,
           latencyMs: Date.now() - started,
           ui: res.needChoice ? { stationChoice: { city: res.city ?? q, stations } } : { stations },
+        };
+      }
+
+      case "findSeats": {
+        /* 24 Sep 2026 (user: "AI sabh handle kare — do not specific to 2A"): AI khud seat sawaal
+         * ka jawab deta hai; ye tool live board + per-train rows deta hai. */
+        const res = await runFindSeatsTool({
+          from: String(args.from ?? args.origin ?? ""),
+          to: String(args.to ?? args.destination ?? ""),
+          date: String(args.date ?? ""),
+          class_code: (args.class_code ?? args.classCode ?? args.classes ?? null) as string | null,
+          only_available: typeof args.only_available === "boolean" ? args.only_available : typeof args.onlyAvailable === "boolean" ? args.onlyAvailable : null,
+          depart_after: (args.depart_after ?? args.afterText ?? args.after ?? null) as string | null,
+          sort_by: (args.sort_by ?? args.sortBy ?? null) as "cheapest" | "fastest" | null,
+          train_numbers: (args.train_numbers ?? args.trainNumbers ?? null) as string | null,
+          quota: (args.quota ?? null) as string | null,
+          passengers: (args.passengers ?? null) as number | null,
+        });
+        return {
+          name: tool,
+          ok: res.ok,
+          payload: res.ok ? (res.data as Record<string, unknown>) : { ok: false, error: res.summary },
+          provider: res.source,
+          latencyMs: Date.now() - started,
         };
       }
 

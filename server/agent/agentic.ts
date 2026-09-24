@@ -15,6 +15,9 @@
  */
 import { z } from "zod";
 import { env } from "../env.js";
+/* 24 Sep 2026 (user: "AI sabh handle kare — do not specific to 2A"): AI khud seat sawaal ka
+ * poora jawab deta hai is tool se (live board + per-train rows). */
+import { FIND_SEATS_DESCRIPTION, FIND_SEATS_PARAMETERS, runFindSeatsTool } from "./seatFinderTool.js";
 import { getProvider } from "../providers/index.js";
 import { todayYmd } from "../util.js";
 import {
@@ -78,7 +81,8 @@ export type AgenticToolName =
   | "FIND_CONNECTIONS"
   | "FIND_ALTERNATIVE_TRAINS"
   | "SEARCH_TRAIN_BY_NUMBER"
-  | "SEARCH_TRAIN_BY_NAME";
+  | "SEARCH_TRAIN_BY_NAME"
+  | "FIND_SEATS";
 
 const APPROVED: readonly AgenticToolName[] = [
   "WEB_SEARCH",
@@ -104,6 +108,7 @@ const APPROVED: readonly AgenticToolName[] = [
   "FIND_ALTERNATIVE_TRAINS",
   "SEARCH_TRAIN_BY_NUMBER",
   "SEARCH_TRAIN_BY_NAME",
+  "FIND_SEATS",
 ];
 
 export type ToolTraceStep = {
@@ -213,6 +218,18 @@ const ArgSchemas = {
     origin: StationRef,
     destination: StationRef,
     date: Ymd,
+  }),
+  FIND_SEATS: z.object({
+    from: z.string().trim().min(2).max(40),
+    to: z.string().trim().min(2).max(40),
+    date: Ymd,
+    class_code: z.string().trim().max(30).nullish(),
+    only_available: z.coerce.boolean().nullish(),
+    depart_after: z.union([z.string().trim().max(30), z.number()]).nullish(),
+    sort_by: z.enum(["cheapest", "fastest"]).nullish(),
+    train_numbers: z.union([z.string().trim().max(60), z.array(z.string().trim().max(10)).max(12)]).nullish(),
+    quota: z.string().regex(/^[A-Za-z]{2}$/).nullish(),
+    passengers: z.coerce.number().int().min(1).max(6).nullish(),
   }),
   GET_TRAIN_INFO: z.object({ train_number: TrainNo }),
   GET_TIMETABLE: z.object({
@@ -415,6 +432,14 @@ export const AGENTIC_TOOLS = [
         },
         required: ["origin", "destination", "date"],
       },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "FIND_SEATS",
+      description: FIND_SEATS_DESCRIPTION,
+      parameters: FIND_SEATS_PARAMETERS as unknown as Record<string, unknown>,
     },
   },
   {
@@ -1622,6 +1647,22 @@ export async function executeApprovedTool(
           { ...live, provenance },
         );
       }
+      case "FIND_SEATS": {
+        /* 24 Sep 2026: AI khud seat sawaal ka jawab deta hai — server sirf live rows laata hai. */
+        const res = await runFindSeatsTool({
+          from: String(a.from ?? ""),
+          to: String(a.to ?? ""),
+          date: String(a.date ?? ""),
+          class_code: (a.class_code as string | undefined) ?? null,
+          only_available: (a.only_available as boolean | undefined) ?? null,
+          depart_after: (a.depart_after as string | number | undefined) ?? null,
+          sort_by: (a.sort_by as "cheapest" | "fastest" | undefined) ?? null,
+          train_numbers: (a.train_numbers as string | string[] | undefined) ?? null,
+          quota: (a.quota as string | undefined) ?? null,
+          passengers: (a.passengers as number | undefined) ?? null,
+        });
+        return res.ok ? okResult(res.source, res.summary, res.data) : failResult(res.source, res.summary, res.data);
+      }
       case "CHECK_AVAILABILITY": {
         const ctx = await resolveTrainRouteDate(a as unknown as { train_number: string; date?: string; origin?: string; destination?: string });
         if (!ctx.origin || !ctx.destination) {
@@ -1953,6 +1994,8 @@ function systemPrompt(
     "Tum RailBook ka railway assistant ho (Hinglish jawab, 2-4 chhoti lines).",
     "Tumhara kaam: user ke sawaal samajhkar APPROVED TOOLS se sachchi railway data laana. Tum khud decide karte ho kaunsa tool chahiye — multi-step allowed hai.",
     /* 24 Sep 2026 (user: "maine mathura jn likha, phir bhi 4 options kyun aaye?"): */
+    /* 24 Sep 2026 (user: "AI sabh handle kare, do not specific to 2A — user kuch bhi pooch sakta hai") */
+    "SEAT RULE: seat/berth/class/availability ka sawaal SAARE trains par (\"2A me kaunsi train me seat hai\", \"AC trains dikhao\", \"sabse sasti seat wali\", \"raat 9 ke baad sleeper me seat\", \"sirf confirmed wali\", \"12029 me seat hai kya\") → PEHLE FIND_SEATS call karo (class_code, only_available, depart_after, sort_by khud set karo) aur uske result se hi jawab do. Seat ke number/status kabhi memory se mat likho. WL ka confirm% kabhi mat batao — sirf WL number. Jawab me top 3-5 trains ek-ek line me (number, naam, class, status+count, fare) aur kitni aur hain batao.",
     "STATION QUERY RULE: user ne station ke saath qualifier likha ho (Jn/Junction/Cantt/Cant/City/Road/Terminal/Central/Halt) to SEARCH_STATIONS me POORA phrase bhejo — \"Mathura Jn\", \"Mathura Cantt\", \"Agra City\". Sirf city (\"Mathura\") mat bhejo — warna bina zaroorat multiple-choice options dikhte hain. Exact station naam mile to options MAT poochho, seedha wahi station use karo.",
     `Aaj ki date (IST): ${todayLabel}.`,
     `Date map (agle 7 din, IST): ${weekdayDateMap(now)}.`,

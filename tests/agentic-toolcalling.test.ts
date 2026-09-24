@@ -250,7 +250,7 @@ function chatResponse(step: ScriptStep) {
 }
 
 describe("agentic tool-calling layer", () => {
-  it("exposes exactly the 23 approved tools (22 railway incl. Round-17/18 journey+picker tools + WEB_SEARCH last-resort)", () => {
+  it("exposes exactly the 24 approved tools (23 railway incl. Round-17/18 journey+picker + FIND_SEATS + WEB_SEARCH last-resort)", () => {
     const names = AGENTIC_TOOLS.map((t) => t.function.name).sort();
     expect(names).toEqual(
       [
@@ -259,6 +259,7 @@ describe("agentic tool-calling layer", () => {
         "FIND_ALTERNATIVE_TRAINS",
         "FIND_CONNECTIONS",
         "FIND_PARTIAL_ROUTE_SEATS",
+        "FIND_SEATS",
         "FIND_VACANT_SEATS",
         "GENERAL_RAILWAY_ANSWER",
         "GET_CANCELLED_TRAINS",

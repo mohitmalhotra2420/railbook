@@ -272,7 +272,14 @@ export function createApp() {
           if (hit.length) seatFilter = { ...seatFilter, rows: [...hit, ...seatFilter.rows.filter((r) => r.number !== askedTrain)] };
         }
       }
-      const seatLine = seatFilter?.line ?? null;
+      /* 24 Sep 2026: agar AI ne KHUD findSeats/FIND_SEATS call karke jawab likha hai to uske upar
+       * duplicate deterministic line nahi lagate (warna do jawab dikhte hain). Tool fail hua ya
+       * call hua hi nahi → purani line hi safety net rehti hai. */
+      const aiUsedSeatTool = Boolean(
+        (result.toolTrace ?? []).some((t) => String((t as { tool?: string }).tool ?? "").toUpperCase() === "FIND_SEATS") ||
+          String(result.tool ?? "").toLowerCase() === "findseats",
+      );
+      const seatLine = aiUsedSeatTool ? null : seatFilter?.line ?? null;
       /* AI ne jawab nahi diya (ya generic "provider se nahi mil" line di) → seat line akele bhi kaafi hai. */
       const aiFailed =
         !result.reply ||
