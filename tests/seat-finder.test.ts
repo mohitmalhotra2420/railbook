@@ -4,7 +4,7 @@
  * merge karke "seat upar / WL neeche" dikhati hai + chips (confirmed-only / class / time).
  * Sab client-side; AI logic, tools, API, architecture ko chhua nahi gaya. */
 import { describe, expect, it } from "vitest";
-import { afterMinuteFromText, buildAllClassRows, buildSeatRows, classFromText, detectSeatIntent, filterSeatRows, mergeClassBoards, seatSummaryLine, trainsNeedingClasses, uniqueTrainCount } from "../src/seatfinder";
+import { afterMinuteFromText, buildAllClassRows, buildSeatRows, classFromText, detectSeatIntent, filterSeatRows, mergeClassBoards, mergeClassBoardsVerified, seatSummaryLine, trainsNeedingClasses, trainsUnverifiedForSeats, uniqueTrainCount } from "../src/seatfinder";
 
 const search = (n: string, dep: string, arr: string, dur: string) => ({
   number: n,
@@ -291,5 +291,46 @@ describe("per-train class board merge (user: 'card sirf single class dikha raha 
     expect(trainsNeedingClasses(board, null, false)).toEqual(["12029", "12497"]);
     expect(trainsNeedingClasses(board, "EC", false)).toEqual(["12029", "12203", "12497"]); /* 12029 ki EC UNKNOWN, baaki me EC hi nahi */
     expect(trainsNeedingClasses(board, null, true)).toEqual(["12029"]); /* EC UNKNOWN hai — dekhna hai */
+  });
+});
+
+/* ── Round-19c (24 Sep, user dobara): "direct mein bahut si trains available hai lekin neeche seat finder
+ * mein avl mein sabhi show nhi kar rhi". Route board purana WL deta hai jabki per-train board par usi
+ * train me seat hoti hai (aur ulta bhi). "Available" tab ke liye aise trains verify hote hain. ────── */
+describe("route board purana ho sakta hai — 'Available' ke liye per-train verify (Round-19c)", () => {
+  const board = [
+    { trainNumber: "12926", classes: [{ classCode: "3A", status: "WAITLIST", waitlist: 14, fare: 915 }, { classCode: "2A", status: "WAITLIST", waitlist: 4, fare: 1270 }] },
+    { trainNumber: "11058", classes: [{ classCode: "2A", status: "RAC", rac: 6, fare: 1210 }] },
+    { trainNumber: "11078", classes: [{ classCode: "3A", status: "NOT_AVAILABLE" }] },
+    { trainNumber: "12716", classes: [] },
+  ];
+  it("jin trains ki koi AVL/RAC row nahi (WL / N-A / khaali) wahi verify hote hain — bound ke saath", () => {
+    expect(trainsUnverifiedForSeats(board, null, false)).toEqual(["12926", "11078"]);
+    expect(trainsUnverifiedForSeats(board, null, false, 1)).toEqual(["12926"]); /* latency bound */
+    expect(trainsUnverifiedForSeats(board, "2A", false)).toEqual(["12926"]); /* 11058 ki 2A RAC hai → wo bahar */
+    expect(trainsUnverifiedForSeats(board, "3E", false)).toEqual([]); /* kisike paas is class ka row hi nahi */
+  });
+
+  it("fresh per-train probe WL/N-A ko asli AVAILABLE se badalta hai; UNKNOWN wapas aaya to base safe", () => {
+    const base = [
+      { classCode: "3A", status: "WAITLIST", waitlist: 14, fare: 915 },
+      { classCode: "2A", status: "WAITLIST", waitlist: 4, fare: 1270 },
+    ];
+    const fresh = [
+      { classCode: "3A", status: "AVAILABLE", seats: 23, fare: 915 },
+      { classCode: "2A", status: "UNKNOWN" }, /* data nahi mila → purani row hi rahegi */
+    ];
+    const out = mergeClassBoardsVerified(base, fresh);
+    const a3 = out.find((c) => c.classCode === "3A");
+    const a2 = out.find((c) => c.classCode === "2A");
+    expect(a3?.status).toBe("AVAILABLE");
+    expect(a3?.seats).toBe(23);
+    expect(a2?.status).toBe("WAITLIST");
+    expect(a2?.waitlist).toBe(4);
+    /* aur missing class add bhi hoti hai (jaise SL) */
+    const withSl = mergeClassBoardsVerified(base, [{ classCode: "SL", status: "AVAILABLE", seats: 8 }]);
+    expect(withSl.map((c) => c.classCode)).toEqual(["3A", "2A", "SL"]);
+    /* purana mergeClassBoards (gaps bharna) waisa hi — maujooda row nahi chhedta */
+    expect(mergeClassBoards(base, [{ classCode: "3A", status: "AVAILABLE", seats: 23 }]).find((c) => c.classCode === "3A")?.status).toBe("WAITLIST");
   });
 });

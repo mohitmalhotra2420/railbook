@@ -210,3 +210,31 @@ AI ka search/planning ka tareeka, tools-aur-API calling ka flow, alternatives + 
 - Kul: **92 files / 957 tests PASS**; `npm run build` OK; server `tsc` clean.
 - Deploy: `dep-daqm06psrm7s73dj27e0` @ `9d17ba3` → `dep-daqm8cbtqb8s73b59dt0` @ `f3f9090` (`/api/version` se confirm).
 - APK: **v1.4.3 hi chalega** (app WebView me live site kholta hai) — ye sab app me apne aap aa gaya. Naya build chahiye to v1.4.4 bump kar denge.
+
+### 9.7 Round-19c — Seat Finder "Available" ab **purane route board** par bharosa nahi karta
+
+User ne dobara wahi baat boli (screenshots ke saath): *"direct mein bahut si trains available hai lekin neeche seat finder mein avl mein sabhi show nhi kar rhi"*.
+
+Do alag surfaces hain, dono me ab sach:
+
+| Surface | Base data | Round-19c ka add |
+|---|---|---|
+| **Plan card ke neeche** (`block.type === "journey"`) | card ke per-train `classOptions` (round-19, `cardBoard`) | — (pehle se fresh) |
+| **Chat ka train table** (`TrainTableView`) | route board (`/api/availability` ek call, saare trains) | **"✅ Available" tap karne par** jo trains route board me koi AVL/RAC row nahi deti, unka **per-train board** (same endpoint jo TrainBoard "Refresh seats" chalata hai) laaya jata hai — max 6 trains, 3 ek saath |
+
+- Naya: `trainsUnverifiedForSeats()` + `mergeClassBoardsVerified()` (`src/seatfinder.ts`). Fresh per-train probe **jeetta hai** (khaali/UNKNOWN wapas aaya to purani row safe); purana `mergeClassBoards` (gaps bharna, maujooda row nahi chhedta) waisa hi hai.
+- Latency: sirf "Available" tap par, max 6 trains → 2 batch. "Sabhi trains" default waisa hi fast.
+
+**Live proof (LDH → MTJ · 25 Sep, 24 Sep 18:02 UTC — user ke screenshot wali route):**
+
+| Source | 12926 PASCHIM EXPRESS 09:40 |
+|---|---|
+| Route board `/api/availability` (ek call, saare trains) | 2A **WL 4** · 3A **WL 14** · SL **WL 68** · 1A WL 1 |
+| Per-train board `/api/availability?trainNumber=12926…` (fresh) | 2A **AVL 5 ₹1,270** · 3A **AVL 23 ₹915** · SL **AVL 8 ₹360** |
+| Usi waqt 11078 JHELUM 3A (ulta case) | route board **AVL 8** · per-train **NOT_AVAILABLE** |
+
+Iska matlab: route board dono direction me galat ho sakta hai. `Seat Finder Available` list ka natija (same payload se, asli client functions se):
+**pehle** 3 rows / 2 trains (`11078 3A AVL 8 ₹760 (04:30)` ← ye actually N/A tha, `11058 3E RAC 42 ₹785`, `11058 2A RAC 6 ₹1,210`)
+→ **ab** 4 rows: `12926 3A AVL 23 ₹915 (09:40)` · `12926 SL AVL 8 ₹360` · `12926 2A AVL 5 ₹1,270` · `11058 2A AVL 1 ₹1,210` — aur wo purani `11078 AVL 8` row nikal gayi (per-train fresh: N/A).
+
+Tests: `tests/seat-finder.test.ts` (naye 2), `tests/seat-finder-card.test.tsx` (naya 1 — "Available" tap → per-train verify → AVL rows). Kul **92 files / 960 tests PASS**.

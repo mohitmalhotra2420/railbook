@@ -23,8 +23,10 @@ import {
   filterSeatRows,
   mergeBoardsPreferCard,
   mergeClassBoards,
+  mergeClassBoardsVerified,
   seatSummaryLine,
   trainsNeedingClasses,
+  trainsUnverifiedForSeats,
   uniqueTrainCount,
   type BoardClassRow,
   type BoardTrainRow,
@@ -120,6 +122,8 @@ export function SeatFinder({
   const [showAllWl, setShowAllWl] = useState(false);
   const [showAllNoData, setShowAllNoData] = useState(false);
   const spokenRef = useRef(false);
+  /* Card ka data maujood hai (plan card ke per-train rows) → fresh hai, dobara probe ki zaroorat nahi. */
+  const cardBase = Boolean(cardBoard && cardBoard.length);
 
   /* ↻ dobara try (user screenshot: board khaali aayi thi aur card me 28 trains "data nahi aayi") */
   const [reload, setReload] = useState(0);
@@ -164,29 +168,41 @@ export function SeatFinder({
    * /api/availability?trainNumber=… jo TrainBoard "Refresh seats" pehle se use karta hai.
    * Sirf asli rows; koi naya endpoint/tool nahi. Max 10 trains, 3 ek saath. */
   const [extraBoards, setExtraBoards] = useState<Record<string, BoardClassRow[]>>({});
+  /* Round-19c: "Available" tab ke liye per-train VERIFY kiye gaye boards (fresh probe jeetta hai). */
+  const [verifiedBoards, setVerifiedBoards] = useState<Record<string, BoardClassRow[]>>({});
   const enrichKey = useRef("");
   const enrichRun = useRef(0);
   useEffect(() => {
     if (!board) return;
-    const key = `${from}>${to}>${date}|${cls ?? ""}|${acOnly ? "ac" : ""}|${mode}|${board.length}`;
+    const key = `${from}>${to}>${date}|${cls ?? ""}|${acOnly ? "ac" : ""}|${mode}|${board.length}|${cardBase ? "card" : "board"}`;
     if (enrichKey.current === key) return;
     enrichKey.current = key;
     const run = ++enrichRun.current;
-    const targets = trainsNeedingClasses(board, cls, acOnly);
+    const needList = trainsNeedingClasses(board, cls, acOnly);
+    /* Card ka data (plan card) pehle se usi turn ke per-train probe se aata hai — tab dobara probe nahi.
+     * Warna "Available" tab par un trains ko per-train verify karo jinki route board me koi seat row nahi
+     * dikh rahi (purana WL data asli AVAILABLE chhupa deta hai). */
+    const staleList = mode === "avail" && !cardBase ? trainsUnverifiedForSeats(board, cls, acOnly) : [];
+    const targets = [...new Set([...staleList, ...needList])].slice(0, 10);
+    const staleSet = new Set(staleList);
     void (async () => {
       const add: Record<string, BoardClassRow[]> = {};
+      const fresh: Record<string, BoardClassRow[]> = {};
       for (let i = 0; i < targets.length; i += 3) {
         const batch = targets.slice(i, i + 3);
         const got = await Promise.all(batch.map((n) => fetchTrainClasses(n, date, from, to)));
         if (run !== enrichRun.current) return;
         batch.forEach((n, idx) => {
-          if (got[idx].length) add[n] = got[idx];
+          if (!got[idx].length) return;
+          if (staleSet.has(n)) fresh[n] = got[idx];
+          else add[n] = got[idx];
         });
       }
-      if (run !== enrichRun.current || !Object.keys(add).length) return;
-      setExtraBoards((cur) => ({ ...cur, ...add }));
+      if (run !== enrichRun.current) return;
+      if (Object.keys(add).length) setExtraBoards((cur) => ({ ...cur, ...add }));
+      if (Object.keys(fresh).length) setVerifiedBoards((cur) => ({ ...cur, ...fresh }));
     })();
-  }, [board, from, to, date, cls, acOnly, mode]);
+  }, [board, from, to, date, cls, acOnly, mode, cardBase]);
 
   /* Route board + per-train board (jahan class missing/UNKNOWN thi) — sab real rows. */
   const boardFull = useMemo(() => {
@@ -194,10 +210,16 @@ export function SeatFinder({
      * hai), phir route board ki wo classes jo card me nahi thi, phir per-train extra rows. */
     const base = cardBoard && cardBoard.length ? mergeBoardsPreferCard(cardBoard, board ?? []) : board ?? [];
     return base.map((b) => {
-      const more = extraBoards[String(b.trainNumber ?? "").trim()];
-      return more ? { ...b, classes: mergeClassBoards(b.classes ?? [], more) } : b;
+      const n = String(b.trainNumber ?? "").trim();
+      let classes = b.classes ?? [];
+      const more = extraBoards[n];
+      if (more) classes = mergeClassBoards(classes, more);
+      /* Round-19c: "Available" tab par jo train per-train verify hui, usme fresh probe hi sach hai. */
+      const fresh = verifiedBoards[n];
+      if (fresh) classes = mergeClassBoardsVerified(classes, fresh);
+      return classes === b.classes ? b : { ...b, classes };
     });
-  }, [board, cardBoard, extraBoards]);
+  }, [board, cardBoard, extraBoards, verifiedBoards]);
 
   const merged = useMemo(
     () => (board ? buildAllClassRows(rows, boardFull, cls, mode, acOnly) : null),
@@ -218,7 +240,7 @@ export function SeatFinder({
     [merged, earliest, cheapest],
   );
   /* cardBoard ho to data pehle se hai — route board ka intezaar nahi. */
-  const hasCard = Boolean(cardBoard && cardBoard.length);
+  const hasCard = cardBase;
   const loading = board === null && !hasCard;
 
   useEffect(() => {

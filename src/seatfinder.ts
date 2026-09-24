@@ -588,6 +588,63 @@ export function mergeBoardsPreferCard(card: BoardTrainRow[], other: BoardTrainRo
 }
 
 /** Kis train ka per-train board laana chahiye (bounded, honest — sirf missing/UNKNOWN ke liye). */
+/** Round-19c (user ne dobara bola: "direct mein bahut si trains available hai lekin neeche seat finder
+ *  mein avl mein sabhi show nhi kar rhi"): route board (ek hi call me saare trains) kuch trains ke liye
+ *  PURANA/adhoora status de sakta hai — 24 Sep LDH→MTJ par usne 12926 ke 2A/3A/SL sab WL bata diya,
+ *  jabki usi train ka per-train board 3A AVL 23 / 2A AVL 5 / SL AVL 8 deta hai (aur ulta bhi hota hai:
+ *  11078 3A board par AVL 8, per-train par N/A). "Available" list ke liye aise trains ko per-train
+ *  verify karo — sirf asli probe se, koi andaza nahi. Card wala path (cardBoard) pehle se fresh hai.
+ *  max = latency ki hadd (2 batch × 3). */
+export function trainsUnverifiedForSeats(
+  board: BoardTrainRow[],
+  classCode: ClassCode | null,
+  acOnly = false,
+  max = 6,
+): string[] {
+  const out: string[] = [];
+  for (const b of board) {
+    const number = String(b.trainNumber ?? "").trim();
+    if (!number) continue;
+    const rows = (b.classes ?? []).filter((c) => {
+      const code = String(c.classCode ?? c.code ?? "").trim().toUpperCase();
+      if (!code) return false;
+      if (classCode) return code === classCode;
+      if (acOnly) return (AC_CLASS_SET as string[]).includes(code);
+      return true;
+    });
+    if (!rows.length) continue; /* class hi nahi / UNKNOWN → trainsNeedingClasses ka kaam */
+    if (rows.some((c) => ["AVAILABLE", "RAC"].includes(String(c.status ?? "").toUpperCase()))) continue;
+    out.push(number);
+    if (out.length >= max) break;
+  }
+  return out;
+}
+
+/** Per-train FRESH probe (same endpoint, usi segment ki query) — jo class wapas aayi usme wahi sach hai.
+ *  Isliye yahan existing row ko replace karte hain (sirf tab nahi jab base UNKNOWN ho): warna route board
+ *  ki purani WL row asli AVAILABLE ko chhupa deti hai. UNKNOWN wapas aaya (data nahi) → base row hi rehti
+ *  hai, kuch gadhta nahi. `mergeClassBoards` (gaps bharna) alag hi rehta hai — purana behaviour nahi chheda. */
+export function mergeClassBoardsVerified(base: BoardClassRow[], extra: BoardClassRow[] | undefined): BoardClassRow[] {
+  if (!extra || !extra.length) return base;
+  const out = base.slice();
+  const codeOf = (c: BoardClassRow) => String(c.classCode ?? c.code ?? "").trim().toUpperCase();
+  const idx = new Map<string, number>();
+  out.forEach((c, i) => idx.set(codeOf(c), i));
+  for (const c of extra) {
+    const code = codeOf(c);
+    if (!code) continue;
+    if (String(c.status ?? "UNKNOWN").toUpperCase() === "UNKNOWN") continue; /* data nahi — base waisa hi */
+    const at = idx.get(code);
+    if (at == null) {
+      idx.set(code, out.length);
+      out.push(c);
+    } else {
+      out[at] = c;
+    }
+  }
+  return out;
+}
+
 export function trainsNeedingClasses(
   board: BoardTrainRow[],
   cls: ClassCode | null,

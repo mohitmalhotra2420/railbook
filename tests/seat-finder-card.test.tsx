@@ -261,3 +261,54 @@ describe("Seat Finder card — card ka data base (Round-19)", () => {
     expect(screen.queryByText("AVL 100")).toBeNull(); /* 16:50 subah nahi */
   });
 });
+
+/* ── Round-19c (24 Sep, user dobara screenshot): "direct mein bahut si trains available hai lekin neeche
+ * seat finder mein avl mein sabhi show nhi kar rhi". Route board 12926 ko sab WL batata hai, par usi
+ * train ka per-train board (wahi endpoint jo TrainBoard "Refresh seats" chalata hai) 3A/2A/SL
+ * AVAILABLE deta hai → "Available" tab par wahi asli rows dikhni chahiye. ───────────────────────── */
+const staleBoard = [
+  {
+    trainNumber: "12926",
+    trainName: "PASCHIM EXPRESS",
+    classes: [
+      { classCode: "3A", code: "3A", status: "WAITLIST", seats: null, rac: null, waitlist: 14, fare: 915, source: "web_confirmtkt" },
+      { classCode: "2A", code: "2A", status: "WAITLIST", seats: null, rac: null, waitlist: 4, fare: 1270, source: "web_confirmtkt" },
+    ],
+  },
+];
+const perTrain12926 = {
+  classes: [
+    { code: "3A", status: "AVAILABLE", seats: 23, rac: null, waitlist: null, fare: 915, source: "web_railyatri" },
+    { code: "2A", status: "AVAILABLE", seats: 5, rac: null, waitlist: null, fare: 1270, source: "web_railyatri" },
+    { code: "SL", status: "AVAILABLE", seats: 8, rac: null, waitlist: null, fare: 360, source: "web_railyatri" },
+  ],
+};
+
+describe("Seat Finder — purana route board vs fresh per-train board (Round-19c)", () => {
+  it("'Available' tab par WL dikhne wali train per-train verify hoke asli AVL rows dikhati hai", async () => {
+    (globalThis as unknown as { fetch: unknown }).fetch = vi.fn(async (url: string) => {
+      if (String(url).includes("trainNumber=")) return { ok: true, json: async () => perTrain12926 };
+      return { ok: true, json: async () => ({ trains: staleBoard }) };
+    });
+    render(
+      <SeatFinder
+        from="AAAQ"
+        to="BBBQ"
+        date="2026-09-25"
+        rows={[{ number: "12926", name: "PASCHIM EXPRESS", departure: "09:40", arrival: "19:10", durationLabel: "9h 30m", arrivalDayOffset: 0 }]}
+        intent={intent()}
+        onChip={() => {}}
+      />,
+    );
+    expect(await screen.findByText("Seat Finder")).toBeTruthy();
+    /* pehle (Sabhi trains): route board ki purani baat — WL */
+    await waitFor(() => expect(screen.getByText("WL 14")).toBeTruthy());
+
+    fireEvent.click(screen.getByText("✅ Available"));
+    /* fresh per-train probe ke baad: asli AVAILABLE rows (aur wo train list me chhupi nahi) */
+    await waitFor(() => expect(screen.getByText("AVL 23")).toBeTruthy(), { timeout: 8000 });
+    expect(screen.getByText("AVL 5")).toBeTruthy();
+    expect(screen.getByText("AVL 8")).toBeTruthy();
+    expect(screen.queryByText("WL 14")).toBeNull();
+  });
+});
