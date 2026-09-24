@@ -68,10 +68,20 @@ const depMin = (r: SeatFilterRow): number => {
 };
 const rank = (s: string) => (s === "AVAILABLE" ? 0 : s === "RAC" ? 1 : s === "WAITLIST" ? 2 : 3);
 
+/** Round-19: time window — "subah" (04:00–12:00), "shaam" (17:00–21:00), "raat" (21:00 → 04:00 wrap),
+ *  ya "X ke baad" / "X se pehle". Sab minute-of-day par, koi andaza nahi. */
+export function inTimeWindow(dep: number, after: number | null, before: number | null): boolean {
+  if (after == null && before == null) return true;
+  if (after != null && before != null) return before < after ? dep >= after || dep <= before : dep >= after && dep <= before;
+  if (after != null) return dep >= after;
+  return dep <= (before as number);
+}
+
 /** Pehle se maujood rows ko filter karna — koi network call nahi, koi guess nahi. */
 export function pickSeatRows(
   trains: SeatBoardTrain[],
-  slots: Pick<SeatIntentSlots, "classCodes" | "onlyAvailable" | "departAfterMinute" | "sortBy">,
+  slots: Pick<SeatIntentSlots, "classCodes" | "onlyAvailable" | "departAfterMinute" | "sortBy"> &
+    Partial<Pick<SeatIntentSlots, "departBeforeMinute">>,
   times?: Map<string, SeatTrainTimes>,
 ): SeatPickResult {
   const wantClass = (slots.classCodes ?? []).map((c) => c.toUpperCase());
@@ -106,16 +116,19 @@ export function pickSeatRows(
         departure: tm?.departure ?? null,
         durationMinutes: num(tm?.durationMinutes),
       };
-      /* "5 baje ke baad": time pata ho to hi filter karo; pata nahi to seat list se hata do (jhooth na bole). */
-      if (slots.departAfterMinute != null && row.departure == null) {
+      /* "5 baje ke baad" / "subah": time pata ho to hi filter karo; pata nahi to seat list se hata do
+       * (jhooth na bole — kitne rows chhoote wo unknownTime me count hote hain). */
+      const hasWindow = slots.departAfterMinute != null || slots.departBeforeMinute != null;
+      if (hasWindow && row.departure == null) {
         unknownTime += 1;
         continue;
       }
+      const inWindow = inTimeWindow(depMin(row), slots.departAfterMinute ?? null, slots.departBeforeMinute ?? null);
       if (isSeat) {
-        if (slots.departAfterMinute != null && depMin(row) < slots.departAfterMinute) continue;
+        if (!inWindow) continue;
         seat.push(row);
       } else {
-        if (slots.departAfterMinute != null && depMin(row) < slots.departAfterMinute) continue;
+        if (!inWindow) continue;
         wl.push(row);
       }
     }
@@ -147,7 +160,8 @@ const fmtRow = (r: SeatFilterRow) => {
 /** AI ke jawab me lagne wali chhoti line — sirf asli board numbers. */
 export function seatSummaryLine(
   pick: SeatPickResult,
-  slots: Pick<SeatIntentSlots, "classCodes" | "classGroup" | "sortBy" | "departAfterMinute">,
+  slots: Pick<SeatIntentSlots, "classCodes" | "classGroup" | "sortBy" | "departAfterMinute"> &
+    Partial<Pick<SeatIntentSlots, "windowLabel">>,
   where: { from: string; to: string },
 ): string {
   const cls =
@@ -157,10 +171,13 @@ export function seatSummaryLine(
         ? slots.classCodes.join("/")
         : "sab class";
   const whenMin = slots.departAfterMinute;
+  /* Round-19: window ("Subah 04:00–12:00") pehle — warna purana "HH:MM ke baad". */
   const when =
-    whenMin == null
-      ? ""
-      : ` (${String(Math.floor(whenMin / 60)).padStart(2, "0")}:${String(whenMin % 60).padStart(2, "0")} ke baad)`;
+    slots.windowLabel
+      ? ` (${slots.windowLabel})`
+      : whenMin == null
+        ? ""
+        : ` (${String(Math.floor(whenMin / 60)).padStart(2, "0")}:${String(whenMin % 60).padStart(2, "0")} ke baad)`;
   const sortNote = slots.sortBy === "cheapest" ? " · sabse sasta pehle" : slots.sortBy === "fastest" ? " · sabse jaldi pehle" : "";
   const head = `${where.from} → ${where.to} · live board`;
 
@@ -205,7 +222,7 @@ export async function seatFilterFor(opts: {
   const board = await routedRouteBoard(from, to, date, []).catch(() => null);
   if (!board || !board.trains.length) return null;
 
-  const needTimes = slots.departAfterMinute != null || slots.sortBy === "fastest";
+  const needTimes = slots.departAfterMinute != null || slots.departBeforeMinute != null || slots.sortBy === "fastest";
   let times: Map<string, SeatTrainTimes> | undefined;
   if (needTimes) {
     try {

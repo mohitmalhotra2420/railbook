@@ -279,7 +279,12 @@ export function createApp() {
         (result.toolTrace ?? []).some((t) => String((t as { tool?: string }).tool ?? "").toUpperCase() === "FIND_SEATS") ||
           String(result.tool ?? "").toLowerCase() === "findseats",
       );
-      const seatLine = aiUsedSeatTool ? null : seatFilter?.line ?? null;
+      /* Round-19 (user: "kal subha ki trains btao" par poori din ki list aa gayi): jab jawab ke saath
+       * journey/plan CARD aata hai, AI ka lamba text card ke andar "AI note" me collapse ho jata hai —
+       * isliye seat line (💺 …) hamesha upar dikhni chahiye. Warna AI ke tool-call wale jawab me
+       * seat ka asli jawab chhup jaata hai. Bina card wale sawaal par purana rule hi (duplicate nahi). */
+      const hasPlanCard = Boolean(result.journey || result.alternatives);
+      const seatLine = aiUsedSeatTool && !hasPlanCard ? null : seatFilter?.line ?? null;
       /* AI ne jawab nahi diya (ya generic "provider se nahi mil" line di) → seat line akele bhi kaafi hai. */
       const aiFailed =
         !result.reply ||

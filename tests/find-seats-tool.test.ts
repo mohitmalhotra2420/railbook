@@ -24,7 +24,7 @@ vi.mock("../server/providers/index.js", () => ({
   getProvider: () => ({ searchTrains: (...a: unknown[]) => searchTrains(...a), name: "mock" }),
 }));
 
-import { classesFromArg, minutesFromArg, runFindSeatsTool } from "../server/agent/seatFinderTool";
+import { classesFromArg, minutesFromArg, runFindSeatsTool, timeWindowFromWord } from "../server/agent/seatFinderTool";
 import { AGENTIC_TOOLS } from "../server/agent/agentic";
 import { AUTO_TOOLS } from "../server/agent/toolSpecs";
 
@@ -160,5 +160,63 @@ describe("runFindSeatsTool — sirf live rows", () => {
     expect(bad.ok).toBe(false);
     const badDate = await runFindSeatsTool({ from: "LDH", to: "BEAS", date: "kal" });
     expect(badDate.ok).toBe(false);
+  });
+});
+
+/* ── Round-19 (24 Sep 2026, user screenshot) ────────────────────────────────────────────────────
+ * "Mujhe kal subha ki trains btana amritsar se ludhiana ki" → poora din ki list aa gayi (16:50,
+ * 18:55 bhi). Ab AI "subah/shaam/raat" jaisa window bhej sakta hai aur tool usi window par filter
+ * karta hai. Sab kuch wahi live board — koi naya endpoint/guess nahi. */
+describe("FIND_SEATS — time window (subah/dopahar/shaam/raat)", () => {
+  it("shabd se window: 'subah' = 04:00–12:00, 'raat' = 21:00 → 04:00 (wrap), ghadi ho to null", () => {
+    expect(timeWindowFromWord("subah")).toEqual({ after: 240, before: 720, label: "Subah (04:00–12:00)" });
+    expect(timeWindowFromWord("सुबह की trains")).toEqual({ after: 240, before: 720, label: "Subah (04:00–12:00)" });
+    expect(timeWindowFromWord("shaam")).toEqual({ after: 1020, before: 1260, label: "Shaam (17:00–21:00)" });
+    expect(timeWindowFromWord("raat")).toEqual({ after: 1260, before: 240, label: "Raat (21:00 ke baad)" });
+    expect(timeWindowFromWord("morning")).toEqual({ after: 240, before: 720, label: "Subah (04:00–12:00)" });
+    expect(timeWindowFromWord("5 baje ke baad")).toBeNull(); /* ghadi — minutesFromArg ka kaam */
+    expect(timeWindowFromWord(null)).toBeNull();
+  });
+
+  it("depart_after='subah' → sirf subah ki trains (shaam ki nahi)", async () => {
+    routeBoard.mockResolvedValue(
+      board([
+        { trainNumber: "12014", trainName: "AMRITSAR SHTABDI", classes: [{ classCode: "CC", status: "AVAILABLE", seats: 410, fare: 490 }] },
+        { trainNumber: "12030", trainName: "SWARN SHATABDI", classes: [{ classCode: "CC", status: "AVAILABLE", seats: 100, fare: 490 }] },
+      ]),
+    );
+    searchTrains.mockResolvedValue([
+      { number: "12014", departure: "04:55", arrival: "06:57", durationMinutes: 122 },
+      { number: "12030", departure: "16:50", arrival: "18:50", durationMinutes: 120 },
+    ]);
+    const res = await runFindSeatsTool({ from: "ASR", to: "LDH", date: "2026-09-25", class_code: "ALL", depart_after: "subah" });
+    const data = res.data as { rows: { number: string }[]; departAfterMinute: number; departBeforeMinute: number };
+    expect(data.rows.map((r) => r.number)).toEqual(["12014"]); /* 16:50 subah nahi hai */
+    expect(data.departAfterMinute).toBe(240);
+    expect(data.departBeforeMinute).toBe(720);
+    expect(res.summary).toContain("Subah (04:00–12:00)");
+  });
+
+  it("raat window wrap karta hai (23:00 bhi, 00:40 bhi) aur '12 baje se pehle' bhi chalta hai", async () => {
+    routeBoard.mockResolvedValue(
+      board([
+        { trainNumber: "1", trainName: "LATE NIGHT", classes: [{ classCode: "SL", status: "AVAILABLE", seats: 5, fare: 300 }] },
+        { trainNumber: "2", trainName: "MIDNIGHT", classes: [{ classCode: "SL", status: "AVAILABLE", seats: 9, fare: 300 }] },
+        { trainNumber: "3", trainName: "MORNING", classes: [{ classCode: "SL", status: "AVAILABLE", seats: 40, fare: 300 }] },
+        { trainNumber: "4", trainName: "NOON", classes: [{ classCode: "SL", status: "AVAILABLE", seats: 50, fare: 300 }] },
+      ]),
+    );
+    searchTrains.mockResolvedValue([
+      { number: "1", departure: "23:05", arrival: "01:00", durationMinutes: 115 },
+      { number: "2", departure: "00:40", arrival: "05:55", durationMinutes: 315 },
+      { number: "3", departure: "07:20", arrival: "09:30", durationMinutes: 130 },
+      { number: "4", departure: "16:50", arrival: "18:50", durationMinutes: 120 },
+    ]);
+    const night = await runFindSeatsTool({ from: "LDH", to: "BEAS", date: "2026-09-25", depart_after: "raat" });
+    /* wrap window: 23:05 aur 00:40 dono andar (sort purana hi — ghadi ke hisaab se). */
+    expect((night.data as { rows: { number: string }[] }).rows.map((r) => r.number).sort()).toEqual(["1", "2"]);
+    const before = await runFindSeatsTool({ from: "LDH", to: "BEAS", date: "2026-09-25", depart_before: "12:00" });
+    /* 12:00 se pehle: 07:20 (40 seats) aur 00:40 (9 seats) — 16:50 baahar. Sort purana: zyada seat pehle. */
+    expect((before.data as { rows: { number: string }[] }).rows.map((r) => r.number)).toEqual(["3", "2"]);
   });
 });

@@ -18,6 +18,7 @@ import { env } from "../env.js";
 /* 24 Sep 2026 (user: "AI sabh handle kare — do not specific to 2A"): AI khud seat sawaal ka
  * poora jawab deta hai is tool se (live board + per-train rows). */
 import { FIND_SEATS_DESCRIPTION, FIND_SEATS_PARAMETERS, runFindSeatsTool } from "./seatFinderTool.js";
+import { parseSeatIntent } from "../understand/seatIntent.js";
 import { getProvider } from "../providers/index.js";
 import { todayYmd } from "../util.js";
 import {
@@ -226,6 +227,7 @@ const ArgSchemas = {
     class_code: z.string().trim().max(30).nullish(),
     only_available: z.coerce.boolean().nullish(),
     depart_after: z.union([z.string().trim().max(30), z.number()]).nullish(),
+    depart_before: z.union([z.string().trim().max(30), z.number()]).nullish(),
     sort_by: z.enum(["cheapest", "fastest"]).nullish(),
     train_numbers: z.union([z.string().trim().max(60), z.array(z.string().trim().max(10)).max(12)]).nullish(),
     quota: z.string().regex(/^[A-Za-z]{2}$/).nullish(),
@@ -1656,6 +1658,7 @@ export async function executeApprovedTool(
           class_code: (a.class_code as string | undefined) ?? null,
           only_available: (a.only_available as boolean | undefined) ?? null,
           depart_after: (a.depart_after as string | number | undefined) ?? null,
+          depart_before: (a.depart_before as string | number | undefined) ?? null,
           sort_by: (a.sort_by as "cheapest" | "fastest" | undefined) ?? null,
           train_numbers: (a.train_numbers as string | string[] | undefined) ?? null,
           quota: (a.quota as string | undefined) ?? null,
@@ -1971,7 +1974,21 @@ function systemPrompt(
   dateHint: { kind: "date"; date: string } | { kind: "ambiguous"; options: { date: string; label: string }[] } | null,
   history: AgenticHistoryTurn[] = [],
   statusDate: string | undefined = undefined,
+  userText = "",
 ): string {
+  /* Round-19 (user: "AI ko mera question samajh nahi aaya jo usme relevant tool call nahi kiya"):
+   * "kal subha ki trains batao" jaisa sawaal aane par server khud text se window padh kar model ko
+   * saaf hint deta hai ki PEHLA tool call FIND_SEATS ho (window ke saath) — warna model poori din ki
+   * list ka jawab de deta tha. Ye sirf ek hint line hai (koi naya tool/nahi, koi planner change nahi). */
+  const seatSlots = parseSeatIntent(userText);
+  const seatWindowHint =
+    seatSlots.windowLabel && seatSlots.seatIntent
+      ? `SEAT-WINDOW HINT (server ne user ke text se padha): is sawaal me time window hai — "${seatSlots.windowLabel}"` +
+        (seatSlots.classCodes.length ? `, class: ${seatSlots.classCodes.join("/")}` : "") +
+        `. Pehla tool call FIND_SEATS hona chahiye — depart_after="${seatSlots.departAfterMinute != null ? "subah" : ""}" jaisa window bhejo (ya exact minute ${seatSlots.departAfterMinute ?? "-"})` +
+        (seatSlots.departBeforeMinute != null ? ` aur depart_before="${String(Math.floor(seatSlots.departBeforeMinute / 60)).padStart(2, "0")}:${String(seatSlots.departBeforeMinute % 60).padStart(2, "0")}"` : "") +
+        `. Jawab me sirf isi window ki trains (poori din ki list nahi) aur window ka label likho.`
+      : null;
   const hintLine =
     dateHint?.kind === "date"
       ? `Deterministic date resolver (IST): user ke text se date=${dateHint.date} resolve hui — FINAL, yahi use karo.`
@@ -1996,10 +2013,12 @@ function systemPrompt(
     /* 24 Sep 2026 (user: "maine mathura jn likha, phir bhi 4 options kyun aaye?"): */
     /* 24 Sep 2026 (user: "AI sabh handle kare, do not specific to 2A — user kuch bhi pooch sakta hai") */
     "SEAT RULE: seat/berth/class/availability ka sawaal SAARE trains par (\"2A me kaunsi train me seat hai\", \"AC trains dikhao\", \"sabse sasti seat wali\", \"raat 9 ke baad sleeper me seat\", \"sirf confirmed wali\", \"12029 me seat hai kya\") → PEHLE FIND_SEATS call karo (class_code, only_available, depart_after, sort_by khud set karo) aur uske result se hi jawab do. Seat ke number/status kabhi memory se mat likho. WL ka confirm% kabhi mat batao — sirf WL number. Jawab me top 3-5 trains ek-ek line me (number, naam, class, status+count, fare) aur kitni aur hain batao.",
+    "TIME-WINDOW RULE: user ne waqt bataya ho (subah/subha/morning, dopahar/afternoon, shaam/evening, raat/night, \"9 baje ke baad\", \"12 baje se pehle\") aur trains/seat poochhe ho (\"kal subha ki trains batao\", \"shaam ko kaunsi gaadi\") → FIND_SEATS me wahi window bhejo (depart_after = 'subah'/'shaam'/..., depart_before = '12:00' jaisa) aur jawab me SIRF usi window ki trains batao. Poora din ki list ya \"22 trains\" jaisa jawab us sawaal ka jawab NAHI hai — aur ye kabhi mat maan lo ki subah ka matlab sab trains hain. Window ka label bhi likho (jaise \"subah 04:00–12:00\").",
     "STATION QUERY RULE: user ne station ke saath qualifier likha ho (Jn/Junction/Cantt/Cant/City/Road/Terminal/Central/Halt) to SEARCH_STATIONS me POORA phrase bhejo — \"Mathura Jn\", \"Mathura Cantt\", \"Agra City\". Sirf city (\"Mathura\") mat bhejo — warna bina zaroorat multiple-choice options dikhte hain. Exact station naam mile to options MAT poochho, seedha wahi station use karo.",
     `Aaj ki date (IST): ${todayLabel}.`,
     `Date map (agle 7 din, IST): ${weekdayDateMap(now)}.`,
     hintLine,
+    ...(seatWindowHint ? [seatWindowHint] : []),
     statusDateLine,
     known.origin || known.destination || known.date || known.trainNumber || known.classCode || known.passengers
       ? `Known context (inhi par continue karo, dobara mat poochho): origin=${known.origin ?? "-"}, destination=${known.destination ?? "-"}, date=${known.date ?? "-"}, train=${known.trainNumber ?? "-"}, class=${known.classCode ?? "-"}, passengers=${known.passengers ?? "-"}.${
@@ -2525,6 +2544,7 @@ export async function runAgenticTurn(input: {
         dateHint,
         historyTurns,
         statusDate,
+        input.text,
       ),
     },
     ...historyTurns,

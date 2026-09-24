@@ -16,6 +16,8 @@ const intent = (over: Partial<SeatIntent> = {}): SeatIntent => ({
   acOnly: false,
   confirmedOnly: false,
   afterMin: null,
+  beforeMin: null,
+  windowLabel: null,
   earliest: false,
   cheapest: false,
   ...over,
@@ -180,5 +182,82 @@ describe("Seat Finder card — board fail hone par", () => {
     render(<SeatFinder from="AAAA" to="BBBB" date="2026-09-26" rows={rows} intent={intent()} onChip={() => {}} />);
     fireEvent.click(await screen.findByText("↻ Dobara try karo", {}, { timeout: 5000 }));
     await waitFor(() => expect(screen.getByText("AVL 29")).toBeTruthy());
+  });
+});
+
+/* ── Round-19 (24 Sep 2026, user screenshots) ───────────────────────────────────────────────────
+ * 1) "direct mein bahut si trains available hai lekin neeche seat finder mein avl mein sabhi show
+ *     nhi kar rhi and sabhi available classes bhi nhi aa rhi" — Seat Finder sirf route board dekhta
+ *     tha (jo 12926 ko WL bata deta hai) jabki upar wala card per-train board se AVL dikhata hai.
+ *     Ab card ke apne per-train rows (classOptions) base hain → numbers wahi, saari classes dikhti hain.
+ * 2) "kal subha ki trains btao" → poori din ki list — ab window ("subah") ka filter chalta hai.  */
+const cardRows = [
+  { trainNumber: "11078", trainName: "JHELUM EXPRESS", classes: [
+    { classCode: "3A", status: "AVAILABLE", seats: 8, rac: null, waitlist: null, fare: 760, source: "web_railyatri" },
+    { classCode: "2A", status: "AVAILABLE", seats: 8, rac: null, waitlist: null, fare: 1070, source: "web_railyatri" },
+    { classCode: "SL", status: "NOT_AVAILABLE", seats: null, rac: null, waitlist: null, fare: 290, source: "web_railyatri" },
+  ] },
+  { trainNumber: "12926", trainName: "PASCHIM EXPRESS", classes: [
+    { classCode: "2A", status: "AVAILABLE", seats: 5, rac: null, waitlist: null, fare: 1270, source: "web_railyatri" },
+    { classCode: "3A", status: "AVAILABLE", seats: 23, rac: null, waitlist: null, fare: 915, source: "web_railyatri" },
+    { classCode: "SL", status: "AVAILABLE", seats: 8, rac: null, waitlist: null, fare: 360, source: "web_railyatri" },
+  ] },
+];
+/* Route board purani/adhoori baat karta hai: 12926 "WL" — par card me AVL hai (asli per-train data). */
+const staleRouteBoard = [
+  { trainNumber: "11078", trainName: "JHELUM EXPRESS", classes: [
+    { classCode: "3A", status: "AVAILABLE", seats: 18, rac: null, waitlist: null, fare: 760, source: "web_confirmtkt" },
+  ] },
+  { trainNumber: "12926", trainName: "PASCHIM EXPRESS", classes: [
+    { classCode: "2A", status: "WAITLIST", seats: null, rac: null, waitlist: 4, fare: 1270, source: "web_confirmtkt" },
+  ] },
+];
+const cardSearch = [
+  { number: "11078", name: "JHELUM EXPRESS", departure: "04:30", arrival: "13:15", durationLabel: "8h 45m", arrivalDayOffset: 0 },
+  { number: "12926", name: "PASCHIM EXPRESS", departure: "09:40", arrival: "19:10", durationLabel: "9h 30m", arrivalDayOffset: 0 },
+];
+
+describe("Seat Finder card — card ka data base (Round-19)", () => {
+  it("card ke per-train rows Available me saari classes dikhate hain (12926 bhi, jo route board me WL thi)", async () => {
+    (globalThis as unknown as { fetch: unknown }).fetch = vi.fn(async () => ({ ok: true, json: async () => ({ trains: staleRouteBoard }) }));
+    render(
+      <SeatFinder from="LDH" to="MTJ" date="2026-09-27" rows={cardSearch} cardBoard={cardRows} intent={intent({ confirmedOnly: true })} onChip={() => {}} />,
+    );
+    expect(await screen.findByText("Seat Finder")).toBeTruthy();
+    /* card ke numbers hi dikhein (route board ka 18 nahi) */
+    await waitFor(() => expect(screen.getAllByText("AVL 8").length).toBeGreaterThan(0));
+    expect(screen.queryByText("AVL 18")).toBeNull(); /* route board ka purana number nahi */
+    /* 12926 ki 2A/3A/SL — teeno AVL rows */
+    expect(screen.getAllByText(/AVL 5/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/AVL 23/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/AVL 8/).length).toBeGreaterThan(0);
+    /* footer batata hai ki data card ka hi hai */
+    expect(screen.getByText(/upar wale card ka hi per-train board/)).toBeTruthy();
+  });
+
+  it("'subah' window → sirf subah ki trains (16:50 wali nahi), label bhi dikhta hai", async () => {
+    const rows = [
+      { number: "12014", name: "AMRITSAR SHTABDI", departure: "04:55", arrival: "06:57", durationLabel: "2h 02m", arrivalDayOffset: 0 },
+      { number: "12030", name: "SWARN SHATABDI", departure: "16:50", arrival: "18:50", durationLabel: "2h", arrivalDayOffset: 0 },
+    ];
+    const board = [
+      { trainNumber: "12014", trainName: "AMRITSAR SHTABDI", classes: [{ classCode: "CC", status: "AVAILABLE", seats: 410, rac: null, waitlist: null, fare: 490, source: "web_railyatri" }] },
+      { trainNumber: "12030", trainName: "SWARN SHATABDI", classes: [{ classCode: "CC", status: "AVAILABLE", seats: 100, rac: null, waitlist: null, fare: 490, source: "web_railyatri" }] },
+    ];
+    (globalThis as unknown as { fetch: unknown }).fetch = vi.fn(async () => ({ ok: true, json: async () => ({ trains: board }) }));
+    render(
+      <SeatFinder
+        from="ASR"
+        to="LDH"
+        date="2026-09-25"
+        rows={rows}
+        intent={intent({ wants: true, afterMin: 240, beforeMin: 720, windowLabel: "Subah (04:00–12:00)" })}
+        onChip={() => {}}
+      />,
+    );
+    expect(await screen.findByText("Seat Finder")).toBeTruthy();
+    await waitFor(() => expect(screen.getByText("AVL 410")).toBeTruthy());
+    expect(screen.getAllByText(/Subah \(04:00–12:00\)/).length).toBeGreaterThan(0);
+    expect(screen.queryByText("AVL 100")).toBeNull(); /* 16:50 subah nahi */
   });
 });

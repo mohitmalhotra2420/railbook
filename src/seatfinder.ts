@@ -23,6 +23,10 @@ export type SeatIntent = {
   confirmedOnly: boolean;
   /** "5 baje ke baad" / "after 5" / "शाम 5 के बाद" → minute of day. */
   afterMin: number | null;
+  /** Round-19: "subah / dopahar / shaam / raat" → window ka upper bound (raat me lower se chhota = wrap). */
+  beforeMin: number | null;
+  /** Window ka label jo card me dikhta hai — jaise "Subah (04:00–12:00)". */
+  windowLabel: string | null;
   /** "sabse jaldi pahunchne wali" (kam travel time). */
   earliest: boolean;
   /** "low fare / sasta / kam kiraya" — fare ke hisaab se sort. */
@@ -163,20 +167,57 @@ export function afterMinuteFromText(text: string): number | null {
   return (hour % 24) * 60 + minute;
 }
 
+/* ── Round-19: time window (subah / dopahar / shaam / raat) ─────────────────────────────────────
+ * User (screenshot): "Mujhe kal subha ki trains btana amritsar se ludhiana ki" → poora din ki list
+ * aa gayi (16:50, 18:55 bhi). Ab shabd wala window ban jaata hai aur Seat Finder usi par filter
+ * karta hai — poori din ki list nahi. Koi naya API nahi, sirf bhasha padhna. */
+const WINDOWS: { re: RegExp; after: number; before: number; label: string }[] = [
+  { re: /(सुबह|सवेरे|सुभ|subah|subha|savere|saverey|early\s*morning|\bmorning\b)/i, after: 240, before: 720, label: "Subah (04:00–12:00)" },
+  { re: /(दोपहर|dopahar|afternoon)/i, after: 720, before: 1020, label: "Dopahar (12:00–17:00)" },
+  { re: /(शाम|shaam|sham|evening)/i, after: 1020, before: 1260, label: "Shaam (17:00–21:00)" },
+  { re: /(रात|raat|night)/i, after: 1260, before: 240, label: "Raat (21:00 ke baad)" },
+];
+
+/** "12 baje se pehle" / "before 8" → minute of day. */
+const beforeMinuteFromText = (text: string): number | null => {
+  const t = String(text ?? "").toLowerCase();
+  const m = /(\d{1,2})(?::(\d{2}))?\s*(?:baje\s*)?(?:se\s*)?(?:pehle|pahle|before)/i.exec(t) || /(?:before|पहले)\s*(\d{1,2})/.exec(t);
+  if (!m) return null;
+  const h = Number(m[1]);
+  if (!Number.isFinite(h) || h > 23) return null;
+  const mm = Number(m[2] ?? 0);
+  return (h % 24) * 60 + (mm <= 59 ? mm : 0);
+};
+
+export function windowFromText(text: string): { after: number; before: number; label: string } | null {
+  const t = String(text ?? "");
+  if (/\d/.test(t)) return null; /* ghadi boli gayi — afterMin/beforeMin alag se parse hote hain */
+  for (const w of WINDOWS) if (w.re.test(t)) return { after: w.after, before: w.before, label: w.label };
+  return null;
+}
+
 export function detectSeatIntent(text: string): SeatIntent {
   const raw = String(text ?? "");
   const cls = classFromText(raw);
   const acOnly = acGroupFromText(raw) && cls === null;
+  const after = afterMinuteFromText(raw);
+  const wordWindow = after == null ? windowFromText(raw) : null;
+  const before = wordWindow ? wordWindow.before : beforeMinuteFromText(raw);
+  const asksTrains = /(train|trains|गाड़ी|गाडी|ट्रेन|gaadi|gadi|express|exp\b|mail)/i.test(raw);
+  const asks = /(hai|hain|है|हैं|क्या|kaun|which|konsi|dikha|दिखा|batao|बताओ|chahiye|चाहिए)/i.test(raw);
   const wants =
     SEAT_WORDS.test(raw) ||
     acOnly ||
-    (Boolean(cls) && /(hai|hain|है|हैं|क्या|kaun|which|konsi|dikha|दिखा|batao|बताओ)/i.test(raw));
+    (Boolean(cls) && asks) ||
+    (Boolean(wordWindow || before != null) && (asksTrains || asks));
   return {
     wants,
     classCode: cls,
     acOnly,
     confirmedOnly: CONFIRMED_WORDS.test(raw),
-    afterMin: afterMinuteFromText(raw),
+    afterMin: wordWindow ? wordWindow.after : after,
+    beforeMin: before,
+    windowLabel: wordWindow?.label ?? null,
     earliest: EARLIEST_WORDS.test(raw),
     cheapest: CHEAPEST_WORDS.test(raw),
   };
@@ -365,15 +406,20 @@ export function uniqueTrainCount(rows: SeatRow[]): number {
 /** Filter (user ke chips) — sab client-side, koi naya server call nahi. */
 export function filterSeatRows(
   rows: SeatRow[],
-  opts: { confirmedOnly?: boolean; afterMin?: number | null; earliest?: boolean; cheapest?: boolean },
+  opts: { confirmedOnly?: boolean; afterMin?: number | null; beforeMin?: number | null; earliest?: boolean; cheapest?: boolean },
 ): SeatRow[] {
   let out = rows.slice();
   if (opts.confirmedOnly) out = out.filter((r) => r.seat);
-  if (opts.afterMin != null) {
-    const min = opts.afterMin;
+  const after = opts.afterMin ?? null;
+  const before = opts.beforeMin ?? null;
+  if (after != null || before != null) {
     out = out.filter((r) => {
       const m = /^(\d{1,2}):(\d{2})/.exec(r.departure ?? "");
-      return m ? Number(m[1]) * 60 + Number(m[2]) >= min : false;
+      if (!m) return false;
+      const dep = Number(m[1]) * 60 + Number(m[2]);
+      if (after != null && before != null) return before < after ? dep >= after || dep <= before : dep >= after && dep <= before;
+      if (after != null) return dep >= after;
+      return dep <= (before as number);
     });
   }
   if (opts.cheapest) {
@@ -491,6 +537,43 @@ export function mergeClassBoards(base: BoardClassRow[], extra: BoardClassRow[] |
     if (String(out[at].status ?? "UNKNOWN").toUpperCase() === "UNKNOWN") out[at] = c;
   }
   return out;
+}
+
+/** Round-19 (user screenshot: journey card me 12926 ki 2A/3A/SL AVL dikh rahi thi par neeche Seat
+ *  Finder ki "Available" list me wahi train hi nahi thi — kyunki Seat Finder sirf route board dekhta
+ *  tha, jo kuch classes WL/N-A bata deta hai jabki per-train board par wahi seat AVAILABLE hoti hai).
+ *
+ *  Isliye: upar wale journey card ke apne per-train class rows (classOptions — wahi data jo card
+ *  dikhata hai) ko PEHLE rakhte hain, aur route board se sirf wo classes add karte hain jo card me
+ *  nahi thi. Numbers bilkul card jaise — koi banaya hua row nahi, koi guess nahi. */
+export function mergeBoardsPreferCard(card: BoardTrainRow[], other: BoardTrainRow[]): BoardTrainRow[] {
+  const keyOf = (b: BoardTrainRow) => String(b.trainNumber ?? "").trim();
+  const codeOf = (c: BoardClassRow) => String(c.classCode ?? c.code ?? "").trim().toUpperCase();
+  const out = new Map<string, BoardTrainRow>();
+  for (const b of card) {
+    const k = keyOf(b);
+    if (!k) continue;
+    out.set(k, { trainNumber: k, trainName: b.trainName ?? "", classes: (b.classes ?? []).slice() });
+  }
+  for (const b of other) {
+    const k = keyOf(b);
+    if (!k) continue;
+    const base = out.get(k);
+    if (!base) {
+      out.set(k, { trainNumber: k, trainName: b.trainName ?? "", classes: (b.classes ?? []).slice() });
+      continue;
+    }
+    const have = new Set((base.classes ?? []).map(codeOf));
+    const add: BoardClassRow[] = [];
+    for (const c of b.classes ?? []) {
+      const code = codeOf(c);
+      if (!code || have.has(code)) continue;
+      have.add(code);
+      add.push(c);
+    }
+    if (add.length) base.classes = [...(base.classes ?? []), ...add];
+  }
+  return [...out.values()];
 }
 
 /** Kis train ka per-train board laana chahiye (bounded, honest — sirf missing/UNKNOWN ke liye). */

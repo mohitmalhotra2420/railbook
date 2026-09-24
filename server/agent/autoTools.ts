@@ -158,6 +158,7 @@ export async function runAutoTool(name: string, rawArgs: unknown): Promise<AutoT
           class_code: (args.class_code ?? args.classCode ?? args.classes ?? null) as string | null,
           only_available: typeof args.only_available === "boolean" ? args.only_available : typeof args.onlyAvailable === "boolean" ? args.onlyAvailable : null,
           depart_after: (args.depart_after ?? args.afterText ?? args.after ?? null) as string | null,
+          depart_before: (args.depart_before ?? args.beforeText ?? args.before ?? null) as string | null,
           sort_by: (args.sort_by ?? args.sortBy ?? null) as "cheapest" | "fastest" | null,
           train_numbers: (args.train_numbers ?? args.trainNumbers ?? null) as string | null,
           quota: (args.quota ?? null) as string | null,

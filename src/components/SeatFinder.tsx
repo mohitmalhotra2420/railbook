@@ -21,6 +21,7 @@ import {
   fetchRouteBoard,
   fetchTrainClasses,
   filterSeatRows,
+  mergeBoardsPreferCard,
   mergeClassBoards,
   seatSummaryLine,
   trainsNeedingClasses,
@@ -34,13 +35,21 @@ import {
 } from "../seatfinder";
 
 const CLASS_CHIPS: (ClassCode | "ALL")[] = ["ALL", "1A", "2A", "3A", "3E", "SL", "CC", "2S", "EC"];
-const TIME_OPTIONS: { min: number | null; label: string }[] = [
-  { min: null, label: "Sab" },
-  { min: 6 * 60, label: "Subah 6 ke baad" },
-  { min: 12 * 60, label: "12 baje ke baad" },
-  { min: 17 * 60, label: "5 baje ke baad" },
-  { min: 21 * 60, label: "9 baje ke baad" },
+/* Round-19: shabd wale WINDOW chips bhi (subah/dopahar/shaam/raat) — pehle sirf "X ke baad" the,
+ * isliye "kal subha ki trains" par poori din ki list dikhti thi. */
+const TIME_OPTIONS: { after: number | null; before: number | null; label: string }[] = [
+  { after: null, before: null, label: "Sab" },
+  { after: 240, before: 720, label: "🌅 Subah (04:00–12:00)" },
+  { after: 720, before: 1020, label: "☀️ Dopahar (12:00–17:00)" },
+  { after: 1020, before: 1260, label: "🌆 Shaam (17:00–21:00)" },
+  { after: 1260, before: 240, label: "🌙 Raat (21:00 ke baad)" },
+  { after: 360, before: null, label: "Subah 6 ke baad" },
+  { after: 720, before: null, label: "12 baje ke baad" },
+  { after: 1020, before: null, label: "5 baje ke baad" },
+  { after: 1260, before: null, label: "9 baje ke baad" },
+  { after: null, before: 720, label: "12 baje se pehle" },
 ];
+const timeKey = (after: number | null, before: number | null) => `${after ?? ""}-${before ?? ""}`;
 
 function statusBadge(r: SeatRow) {
   if (r.status === "AVAILABLE") return <span className="sf-badge avl">AVL {r.seats ?? "—"}</span>;
@@ -79,6 +88,7 @@ export function SeatFinder({
   date,
   rows,
   intent,
+  cardBoard = null,
   speak = false,
   onChip,
 }: {
@@ -88,6 +98,8 @@ export function SeatFinder({
   date: string;
   rows: SeatSearchRow[];
   intent: SeatIntent;
+  /** Round-19: upar wale journey card ke per-train class rows (wahi data jo card me dikh raha hai). */
+  cardBoard?: BoardTrainRow[] | null;
   /** Voice se poochha gaya → jawab ek line me bol bhi do (screen par poora card). */
   speak?: boolean;
   onChip: (text: string) => void;
@@ -100,6 +112,8 @@ export function SeatFinder({
   /* 24 Sep 2026: "AC trains dikhao" → AC group (1A/2A/3A/3E/CC/EC), 2S/SL nahi. */
   const [acOnly, setAcOnly] = useState(intent.acOnly);
   const [afterMin, setAfterMin] = useState<number | null>(intent.afterMin);
+  /* Round-19: "subah ki trains" → window ka upper bound bhi (user screenshot ka fix). */
+  const [beforeMin, setBeforeMin] = useState<number | null>(intent.beforeMin);
   const [earliest, setEarliest] = useState(intent.earliest);
   const [cheapest, setCheapest] = useState(intent.cheapest);
   const [showAllSeat, setShowAllSeat] = useState(false);
@@ -125,7 +139,7 @@ export function SeatFinder({
   /* Board poori khaali aayi (provider busy) → pehle 6 trains ka per-train board try karo, taaki
    * kuch asli data dikhe. Sab fail ho to honest banner + ↻ button (28 rows "data nahi aayi" nahi). */
   useEffect(() => {
-    if (!board || board.length) return;
+    if (!board || board.length || (cardBoard && cardBoard.length)) return;
     let live = true;
     void (async () => {
       const targets = rows.slice(0, 6).map((r) => String(r.number).trim());
@@ -142,7 +156,7 @@ export function SeatFinder({
     return () => {
       live = false;
     };
-  }, [board, rows, date, from, to]);
+  }, [board, rows, date, from, to, cardBoard]);
 
   /* ── 24 Sep 2026 (user: "card sirf single class hi show kar rha" — Swarn Shatabdi ke CC aur EC
    * dono available the, card me sirf ek dikhi): route board kuch classes "UNKNOWN" ya missing deta
@@ -175,14 +189,15 @@ export function SeatFinder({
   }, [board, from, to, date, cls, acOnly, mode]);
 
   /* Route board + per-train board (jahan class missing/UNKNOWN thi) — sab real rows. */
-  const boardFull = useMemo(
-    () =>
-      (board ?? []).map((b) => {
-        const more = extraBoards[String(b.trainNumber ?? "").trim()];
-        return more ? { ...b, classes: mergeClassBoards(b.classes ?? [], more) } : b;
-      }),
-    [board, extraBoards],
-  );
+  const boardFull = useMemo(() => {
+    /* Round-19: pehle upar wale card ka apna data (numbers bilkul wahi jo user card me dekh raha
+     * hai), phir route board ki wo classes jo card me nahi thi, phir per-train extra rows. */
+    const base = cardBoard && cardBoard.length ? mergeBoardsPreferCard(cardBoard, board ?? []) : board ?? [];
+    return base.map((b) => {
+      const more = extraBoards[String(b.trainNumber ?? "").trim()];
+      return more ? { ...b, classes: mergeClassBoards(b.classes ?? [], more) } : b;
+    });
+  }, [board, cardBoard, extraBoards]);
 
   const merged = useMemo(
     () => (board ? buildAllClassRows(rows, boardFull, cls, mode, acOnly) : null),
@@ -190,19 +205,21 @@ export function SeatFinder({
   );
   const sortOpts = { earliest: earliest && !cheapest, cheapest };
   const seat = useMemo(
-    () => (merged ? filterSeatRows(merged.seat, { afterMin, ...sortOpts }) : []),
-    [merged, afterMin, earliest, cheapest],
+    () => (merged ? filterSeatRows(merged.seat, { afterMin, beforeMin, ...sortOpts }) : []),
+    [merged, afterMin, beforeMin, earliest, cheapest],
   );
   const wl = useMemo(
-    () => (merged && mode === "all" ? filterSeatRows(merged.wl, { afterMin, ...sortOpts }) : []),
-    [merged, afterMin, mode, earliest, cheapest],
+    () => (merged && mode === "all" ? filterSeatRows(merged.wl, { afterMin, beforeMin, ...sortOpts }) : []),
+    [merged, afterMin, beforeMin, mode, earliest, cheapest],
   );
   const noData = useMemo(() => (merged && mode === "all" ? merged.noData : []), [merged, mode]);
   const seatIgnoringTime = useMemo(
     () => (merged ? filterSeatRows(merged.seat, sortOpts) : []),
     [merged, earliest, cheapest],
   );
-  const loading = board === null;
+  /* cardBoard ho to data pehle se hai — route board ka intezaar nahi. */
+  const hasCard = Boolean(cardBoard && cardBoard.length);
+  const loading = board === null && !hasCard;
 
   useEffect(() => {
     if (!speak || spokenRef.current || !merged) return;
@@ -225,7 +242,8 @@ export function SeatFinder({
         <div>
           <strong>Seat Finder</strong>
           <span className="sf-sub">
-            {from} → {to} · {formatShortDate(date)} · {cls ?? (acOnly ? "AC classes" : "sab class")} ·{" "}
+            {from} → {to} · {formatShortDate(date)} · {cls ?? (acOnly ? "AC classes" : "sab class")}
+            {intent.windowLabel ? ` · ${intent.windowLabel}` : ""} ·{" "}
             {loading ? "live board aa raha hai…" : `${mode === "avail" ? "Available (AVL + RAC)" : "sabhi trains"}`}
           </span>
         </div>
@@ -270,13 +288,17 @@ export function SeatFinder({
           ❄️ AC
         </button>
         <select
-          className={`sf-chip sf-select ${afterMin != null ? "on-time" : ""}`}
-          value={afterMin ?? ""}
-          onChange={(e) => setAfterMin(e.target.value === "" ? null : Number(e.target.value))}
+          className={`sf-chip sf-select ${afterMin != null || beforeMin != null ? "on-time" : ""}`}
+          value={timeKey(afterMin, beforeMin)}
+          onChange={(e) => {
+            const [a, b] = e.target.value.split("-");
+            setAfterMin(a === "" ? null : Number(a));
+            setBeforeMin(b === "" ? null : Number(b));
+          }}
           aria-label="Time filter"
         >
           {TIME_OPTIONS.map((o) => (
-            <option key={String(o.min)} value={o.min ?? ""}>
+            <option key={timeKey(o.after, o.before)} value={timeKey(o.after, o.before)}>
               Time: {o.label}
             </option>
           ))}
@@ -304,7 +326,7 @@ export function SeatFinder({
       {loading && <div className="sf-loading">Live seat data aa raha hai…</div>}
 
       {/* Board poori tarah khaali = provider busy. Saaf batao + ↻ (28 trains "data nahi aayi" nahi). */}
-      {!loading && board !== null && board.length === 0 && (
+      {!loading && board !== null && board.length === 0 && !hasCard && (
         <div className="sf-empty">
           <b>Live board abhi nahi aa payi (provider busy).</b> Har train ka data alag se check kar sakte ho —
           <span className="sf-empty-chips">
@@ -314,7 +336,7 @@ export function SeatFinder({
       )}
       {boardNote && <div className="sf-foot muted" style={{ background: "none", border: 0 }}>{boardNote}</div>}
 
-      {!loading && (board?.length ?? 0) > 0 && (
+      {!loading && (hasCard || (board?.length ?? 0) > 0) && (
         <>
           <div className="sf-sec">
             <p className="sf-head">
@@ -327,8 +349,14 @@ export function SeatFinder({
                   <>
                     <b>Is time ke baad koi train me seat nahi.</b> Jo {uniqueTrainCount(seatIgnoringTime)} trains me seat hai wo is time se pehle ki hain.
                     <span className="sf-empty-chips">
-                      <button className="sf-chip" onClick={() => setAfterMin(null)}>
-                        Subah ki wali dikhao
+                      <button
+                        className="sf-chip"
+                        onClick={() => {
+                          setAfterMin(null);
+                          setBeforeMin(null);
+                        }}
+                      >
+                        Time filter hatao
                       </button>
                       <button className="sf-chip" onClick={() => setCls(cls === "3A" ? null : "3A")}>
                         3A me dekho
@@ -410,7 +438,7 @@ export function SeatFinder({
             </div>
           )}
           <div className="sf-foot">
-            <b>Real data:</b> live route board · {seatTrains + wlTrains + noData.length} trains ka jawab ·
+            <b>Real data:</b> {hasCard ? "upar wale card ka hi per-train board + live route board" : "live route board"} · {seatTrains + wlTrains + noData.length} trains ka jawab ·
             Available = AVL + RAC · Sabhi trains = WL / N-A bhi, <b>har class apni real status ke saath</b> ·{" "}
             <b>AC</b> = 1A/2A/3A/3E/CC/EC (2S/SL nahi) ·
             WL ka <b>confirm % hum nahi dete</b> (sirf WL number, koi andaza nahi).

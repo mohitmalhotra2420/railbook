@@ -114,8 +114,12 @@ export const AUTO_TOOLS = [
         "Ek route ke SAARE trains par seat/class/availability ek call me (live board + per-train rows). " +
         "Seat/berth/class sawaal ke liye YEHI tool pehle call karo — jaise '2A me kaunsi train me seat hai', " +
         "'AC trains dikhao', 'sabse sasti seat wali', 'raat 9 ke baad sleeper me seat', 'sirf confirmed wali', " +
-        "'12029 me seat hai kya'. classCode 'ALL' | 'AC' | '2A'/'3A'/'SL'/'CC'/'EC'/'2S' (comma se kai), " +
-        "afterText = user ki time bhasha as-is ('5 baje ke baad'), sortBy 'cheapest'|'fastest'. " +
+        "'12029 me seat hai kya'. " +
+        "TIME FILTER: user ne waqt bola ho (subah/dopahar/shaam/raat/morning/evening/night, '9 baje ke baad', '12 se pehle') " +
+        "to afterText me wahi shabd bhejo ('subah' = 04:00-12:00 ka window) aur beforeText me upper bound — " +
+        "poora din ka jawab MAT do, sirf usi window ki trains batao. " +
+        "classCode 'ALL' | 'AC' | '2A'/'3A'/'SL'/'CC'/'EC'/'2S' (comma se kai), " +
+        "afterText = user ki time bhasha as-is ('5 baje ke baad' / 'subah'), sortBy 'cheapest'|'fastest'. " +
         "WL ka confirm% kabhi mat batao (data nahi) — sirf WL number.",
       parameters: {
         type: "object",
@@ -125,7 +129,8 @@ export const AUTO_TOOLS = [
           date: { type: "string", description: "YYYY-MM-DD" },
           classCode: { type: "string", description: "'ALL' | 'AC' | '1A'|'2A'|'3A'|'3E'|'SL'|'CC'|'EC'|'2S' (comma-separated bhi)" },
           onlyAvailable: { type: "boolean", description: "true = sirf AVAILABLE/RAC (default), false = WL/N-A bhi" },
-          afterText: { type: "string", description: "Time filter, user ki bhasha: '5 baje ke baad' / '17:00'" },
+          afterText: { type: "string", description: "Time filter, user ki bhasha: 'subah' | 'dopahar' | 'shaam' | 'raat' | '5 baje ke baad' | '17:00'" },
+          beforeText: { type: "string", description: "Is waqt se PEHLE: '12:00' / '12 baje se pehle'" },
           sortBy: { type: "string", description: "'cheapest' (sabse sasta) | 'fastest' (sabse kam time)" },
           trainNumbers: { type: "string", description: "Sirf in trains par — comma-separated" },
         },

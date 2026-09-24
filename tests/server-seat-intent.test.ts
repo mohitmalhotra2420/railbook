@@ -188,3 +188,75 @@ describe("server — onlyAvailable par bhi WL rows (honest jawab)", () => {
     expect(line).not.toMatch(/\d+\s*%/); /* confirm% kabhi nahi */
   });
 });
+
+/* ── Round-19 (24 Sep 2026, user screenshot) ────────────────────────────────────────────────────
+ * "Mujhe kal subha ki trains btana amritsar se ludhiana ki" → poori din ki list aa gayi. Ab:
+ *   • shabd wala TIME WINDOW banta hai (subah 04:00–12:00, dopahar, shaam, raat 21:00→04:00),
+ *   • window + trains ka zikr = seat intent ON (warna line hi nahi aati thi),
+ *   • pickSeatRows window par filter karta hai (raat me wrap bhi),
+ *   • line ka label bhi window batata hai. Koi provider/tool/API change nahi. */
+describe("server — time window (Round-19)", () => {
+  it("'kal subha ki trains' → morning window + seat intent ON (trains ka zikr)", () => {
+    const s = parseSeatIntent("Mujhe kal subha ki trains btana amritsar se ludhiana ki");
+    expect(s.seatIntent).toBe(true);
+    expect(s.departAfterMinute).toBe(240);
+    expect(s.departBeforeMinute).toBe(720);
+    expect(s.windowLabel).toContain("Subah");
+    expect(s.matched).toContain("window:Subah (04:00–12:00)");
+  });
+
+  it("ghadi wala filter purana hi rehta hai ('raat 9 ke baad' → 21:00, upper bound nahi)", () => {
+    const s = parseSeatIntent("raat 9 ke baad sleeper me seat hai kya");
+    expect(s.departAfterMinute).toBe(1260);
+    expect(s.departBeforeMinute).toBeNull();
+    expect(s.windowLabel).toBe("21:00 ke baad");
+  });
+
+  it("'12 baje se pehle' → sirf upper bound; 'shaam'/ 'raat' apne window", () => {
+    const before = parseSeatIntent("12 baje se pehle wali trains dikhao");
+    expect(before.departAfterMinute).toBeNull();
+    expect(before.departBeforeMinute).toBe(720);
+    expect(before.windowLabel).toContain("se pehle");
+    expect(parseSeatIntent("shaam ki gaadi batao").departAfterMinute).toBe(1020);
+    expect(parseSeatIntent("raat ki trains").departBeforeMinute).toBe(240); /* wrap */
+  });
+
+  it("window filter: subah me 16:50 nahi aata, raat me 23:05 + 00:40 dono aate hain", () => {
+    const board = [
+      { trainNumber: "12014", trainName: "SHTABDI", classes: [{ classCode: "CC", status: "AVAILABLE", seats: 410, fare: 490 }] },
+      { trainNumber: "12030", trainName: "SWARN SHATABDI", classes: [{ classCode: "CC", status: "AVAILABLE", seats: 100, fare: 490 }] },
+      { trainNumber: "1", trainName: "LATE", classes: [{ classCode: "SL", status: "AVAILABLE", seats: 5, fare: 300 }] },
+      { trainNumber: "2", trainName: "MIDNIGHT", classes: [{ classCode: "SL", status: "AVAILABLE", seats: 9, fare: 300 }] },
+    ];
+    const times = new Map([
+      ["12014", { departure: "04:55" }],
+      ["12030", { departure: "16:50" }],
+      ["1", { departure: "23:05" }],
+      ["2", { departure: "00:40" }],
+    ]);
+    const morning = pickSeatRows(board, { classCodes: [], onlyAvailable: true, departAfterMinute: 240, departBeforeMinute: 720, sortBy: null }, times);
+    expect(morning.seat.map((r) => r.number)).toEqual(["12014"]);
+    const night = pickSeatRows(board, { classCodes: [], onlyAvailable: true, departAfterMinute: 1260, departBeforeMinute: 240, sortBy: null }, times);
+    expect(night.seat.map((r) => r.number).sort()).toEqual(["1", "2"]);
+    /* time hi nahi mila → seat list se hata (jhooth nahi) aur count batata hai */
+    const noTimes = pickSeatRows(board, { classCodes: [], onlyAvailable: true, departAfterMinute: 240, departBeforeMinute: 720, sortBy: null });
+    expect(noTimes.seat).toEqual([]);
+    expect(noTimes.unknownTime).toBe(4);
+  });
+
+  it("line me window ka label dikhta hai (jaise 'Subah (04:00–12:00)')", () => {
+    const pick = pickSeatRows(
+      [{ trainNumber: "12014", trainName: "SHTABDI", classes: [{ classCode: "CC", status: "AVAILABLE", seats: 410, fare: 490 }] }],
+      { classCodes: [], onlyAvailable: true, departAfterMinute: 240, departBeforeMinute: 720, sortBy: null },
+      new Map([["12014", { departure: "04:55" }]]),
+    );
+    const line = seatSummaryLine(
+      pick,
+      { classCodes: [], classGroup: null, sortBy: null, departAfterMinute: 240, windowLabel: "Subah (04:00–12:00)" },
+      { from: "ASR", to: "LDH" },
+    );
+    expect(line).toContain("Subah (04:00–12:00)");
+    expect(line).toContain("12014");
+    expect(line).not.toMatch(/\d+\s*%/);
+  });
+});

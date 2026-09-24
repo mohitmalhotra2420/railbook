@@ -30,6 +30,12 @@ export interface SeatIntentSlots {
   sortBy: SeatSortBy | null;
   /** "5 baje ke baad" → minute-of-day (17:00 = 1020). */
   departAfterMinute: number | null;
+  /** Round-19 (24 Sep 2026, user screenshot: "kal subha ki trains btao" par poori din ki list
+   *  aa gayi): "subah / dopahar / shaam / raat" jaisa TIME WINDOW → upper bound (minute-of-day).
+   *  "raat" me ye lower bound se chhota hota hai (21:00 → 04:00 wrap). */
+  departBeforeMinute: number | null;
+  /** Window ka insaani label (jawab me dikhta hai) — jaise "Subah (12 baje se pehle)". */
+  windowLabel: string | null;
   /** TQ (tatkal) / PT (premium tatkal) / LD (ladies) — GN default. */
   quota: string | null;
   /** Kin shabdon se samjha (diagnostics; koi PII nahi). */
@@ -123,6 +129,42 @@ export function departAfterMinute(text: string): number | null {
   return null;
 }
 
+/** Round-19: "subah / dopahar / shaam / raat" (bina ghadi ke) → poora time WINDOW.
+ *  User (screenshot): "Mujhe kal subha ki trains btana amritsar se ludhiana ki" → poora din ki list
+ *  aa gayi (16:50, 18:55 bhi). Ab ye window ban jaata hai aur usi par filter lagta hai.
+ *  Sab kuch bhasha-padhna hi hai — koi provider/tool/API call nahi. */
+export const TIME_WINDOWS: { re: RegExp; after: number; before: number; label: string }[] = [
+  { re: /(सुबह|सवेरे|सुभ|subah|subha|savere|saverey|early\s*morning|\bmorning\b)/i, after: 240, before: 720, label: "Subah (04:00–12:00)" },
+  { re: /(दोपहर|dopahar|afternoon)/i, after: 720, before: 1020, label: "Dopahar (12:00–17:00)" },
+  { re: /(शाम|shaam|sham|evening)/i, after: 1020, before: 1260, label: "Shaam (17:00–21:00)" },
+  { re: /(रात|raat|night)/i, after: 1260, before: 240, label: "Raat (21:00 ke baad)" },
+];
+
+/** "12 baje se pehle" / "before 8" / "8 baje se pahle" → us se pehle ka time (minute-of-day). */
+export function beforeMinute(text: string): number | null {
+  const t = String(text ?? "");
+  const m =
+    /(\d{1,2})(?::(\d{2}))?\s*(?:baje\s*)?(?:se\s*)?(?:pehle|pahle|पहले|before)/i.exec(t) ||
+    /(?:before|पहले)\s*(\d{1,2})(?::(\d{2}))?/i.exec(t);
+  if (!m) return null;
+  const raw = Number(m[1]);
+  if (raw > 23) return null;
+  const mm = Number(m[2] ?? 0);
+  if (mm > 59) return null;
+  const pm = pmOf(t);
+  const h = pm === -1 ? raw : pm === 1 ? (raw % 12) + 12 : raw;
+  return (h % 24) * 60 + mm;
+}
+
+/** Sirf shabd wala window ("subah ki trains", "shaam ki gaadi") — ghadi boli ho to null. */
+export function timeWindowWords(text: string): { after: number; before: number; label: string } | null {
+  const t = String(text ?? "");
+  /* Ghadi ka zikr ho ("9 baje ke baad", "12 se pehle") to door/after wala parser hi chalta hai. */
+  if (/\d/.test(t)) return null;
+  for (const w of TIME_WINDOWS) if (w.re.test(t)) return { after: w.after, before: w.before, label: w.label };
+  return null;
+}
+
 export function parseSeatIntent(rawText: string): SeatIntentSlots {
   const text = String(rawText ?? "");
   const explicitClasses = classFrom(text);
@@ -135,7 +177,21 @@ export function parseSeatIntent(rawText: string): SeatIntentSlots {
   const confirmedOnly = CONFIRMED_WORDS.test(text);
   const earliest = FASTEST_WORDS.test(text);
   const cheapest = CHEAPEST_WORDS.test(text);
-  const departAfterMinuteValue = departAfterMinute(text);
+  const explicitAfter = departAfterMinute(text);
+  /* Round-19: time window — "subah ki trains" jaisa sawaal. Ghadi boli ho ("9 baje ke baad") to
+   * wahi jeetta hai; warna shabd wala window (subah/dopahar/shaam/raat) aur "X se pehle". */
+  const windowWord = explicitAfter == null ? timeWindowWords(text) : null;
+  const beforeValue = windowWord ? null : beforeMinute(text);
+  const departAfterMinuteValue = windowWord ? windowWord.after : explicitAfter;
+  const departBeforeMinuteValue = windowWord ? windowWord.before : beforeValue;
+  const windowLabel =
+    explicitAfter != null
+      ? `${String(Math.floor(explicitAfter / 60)).padStart(2, "0")}:${String(explicitAfter % 60).padStart(2, "0")} ke baad`
+      : windowWord
+        ? windowWord.label
+        : beforeValue != null
+          ? `${String(Math.floor(beforeValue / 60)).padStart(2, "0")}:${String(beforeValue % 60).padStart(2, "0")} se pehle`
+          : null;
   const quota = /premium\s*tatkal|प्रीमियम\s*तत्काल/i.test(text)
     ? "PT"
     : /tatkal|तत्काल/i.test(text)
@@ -151,10 +207,20 @@ export function parseSeatIntent(rawText: string): SeatIntentSlots {
   if (earliest) matched.push("sort:fastest");
   if (cheapest) matched.push("sort:cheapest");
   if (departAfterMinuteValue != null) matched.push(`after:${departAfterMinuteValue}`);
+  if (departBeforeMinuteValue != null) matched.push(`before:${departBeforeMinuteValue}`);
+  if (windowLabel) matched.push(`window:${windowLabel}`);
   if (quota) matched.push(`quota:${quota}`);
 
-  /* Seat intent = seat ka zikr, ya AC group, ya class + sawaal ("2A hai?"), ya sirf-confirmed / sort maanga gaya. */
-  const seatIntent = seatWord || confirmedOnly || classGroup != null || (explicitClasses.length > 0 && hasQuestion);
+  /* Seat intent = seat ka zikr, ya AC group, ya class + sawaal ("2A hai?"), ya sirf-confirmed / sort
+   * maanga gaya. Round-19: time window ("kal subah ki trains") + trains/sawaal bhi seat intent hai —
+   * tabhi us window ka live seat jawab upar dikhta hai (warna poori din ki list aati thi). */
+  const asksTrains = /(train|trains|गाड़ी|गाडी|ट्रेन|gaadi|gadi|गाड़ियां|express|exp\b|mail)/i.test(text);
+  const seatIntent =
+    seatWord ||
+    confirmedOnly ||
+    classGroup != null ||
+    (explicitClasses.length > 0 && hasQuestion) ||
+    (windowLabel != null && (asksTrains || hasQuestion));
 
   return {
     seatIntent,
@@ -164,6 +230,8 @@ export function parseSeatIntent(rawText: string): SeatIntentSlots {
     confirmedOnly,
     sortBy: cheapest ? "cheapest" : earliest ? "fastest" : null,
     departAfterMinute: departAfterMinuteValue,
+    departBeforeMinute: departBeforeMinuteValue,
+    windowLabel,
     quota,
     matched,
   };

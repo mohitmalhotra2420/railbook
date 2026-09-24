@@ -12,7 +12,7 @@ import { BERTH_BY_CLASS, CLASS_LABELS, isBookable, type ClassAvailability, type 
 import type { AgentTrainTable } from "../ai/agent";
 import { JourneyOptions } from "../components/JourneyOptions";
 import { SeatFinder } from "../components/SeatFinder";
-import { detectSeatIntent, type SeatIntent, type SeatSearchRow } from "../seatfinder";
+import { detectSeatIntent, type BoardTrainRow, type SeatIntent, type SeatSearchRow } from "../seatfinder";
 import { VoiceSheet, type VoiceSuggestion } from "../components/VoiceSheet";
 import { AlternativesCard } from "../components/AlternativesCard";
 import { TrainPicker } from "../components/TrainPicker";
@@ -1840,6 +1840,12 @@ function BlockView({
     /* 24 Sep 2026 (user: "Seat Finder plan card par bhi lage, aur hamesha dikhe"): plan ke
      * direct trains se hi Seat Finder ke rows bante hain — server/AI/API ko chhua nahi. */
     const planRows: SeatSearchRow[] = [];
+    /* Round-19 (user screenshot: card me 11078/12926 ki AVL classes dikh rahi thi par Seat Finder ki
+     * "Available" list me nahi — kyunki Seat Finder sirf route board dekhta tha, jo kai class WL/N-A
+     * bata deta hai jabki per-train board par wahi seat AVAILABLE hai). Ab card ke apne per-train
+     * class rows (classOptions) bhi Seat Finder ko diye jaate hain — bilkul wahi data jo card dikhata
+     * hai. Sirf maujooda plan payload se, koi naya call/endpoint nahi. */
+    const cardBoard: BoardTrainRow[] = [];
     const seenPlanTrains = new Set<string>();
     for (const o of block.plan.routeOptions ?? []) {
       if (o.changes !== 0) continue;
@@ -1854,6 +1860,20 @@ function BlockView({
         durationLabel: o.durationLabel ?? null,
         arrivalDayOffset: o.arrivalDayOffset ?? null,
       });
+      const rowsOfTrain = (o.classOptions?.length ? o.classOptions : o.availability ? [o.availability] : [])
+        .filter((c) => c?.classCode && String(c.status ?? "").toUpperCase() !== "UNKNOWN")
+        .map((c) => ({
+          classCode: String(c.classCode).toUpperCase(),
+          status: String(c.status).toUpperCase(),
+          seats: c.seats ?? null,
+          rac: c.rac ?? null,
+          waitlist: c.waitlist ?? null,
+          fare: c.fare ?? null,
+          source: c.source ?? null,
+        }));
+      if (rowsOfTrain.length) {
+        cardBoard.push({ trainNumber: tn, trainName: String(o.trainNames?.[0] ?? ""), classes: rowsOfTrain });
+      }
     }
     return (
       <>
@@ -1875,6 +1895,7 @@ function BlockView({
           to={block.plan.query.to}
           date={block.plan.query.date}
           rows={planRows}
+          cardBoard={cardBoard}
           intent={seatFinder.intent}
           speak={seatFinder.viaVoice}
           onChip={onChip}

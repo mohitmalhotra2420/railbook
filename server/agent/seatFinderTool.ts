@@ -22,7 +22,12 @@
 import { getProvider } from "../providers/index.js";
 import { routedClassBoard, routedRouteBoard, routedStationSearch } from "../railway/router.js";
 import { searchStations as searchLocalStations } from "../data/stations.js";
-import { AC_CLASSES, departAfterMinute as parseDepartAfter } from "../understand/seatIntent.js";
+import {
+  AC_CLASSES,
+  TIME_WINDOWS,
+  beforeMinute as parseBeforeMinute,
+  departAfterMinute as parseDepartAfter,
+} from "../understand/seatIntent.js";
 import { pickSeatRows, seatSummaryLine, type SeatBoardClass, type SeatBoardTrain, type SeatFilterRow } from "./seatFilter.js";
 
 export interface FindSeatsArgs {
@@ -32,6 +37,9 @@ export interface FindSeatsArgs {
   class_code?: string | null;
   only_available?: boolean | null;
   depart_after?: string | number | null;
+  /** Round-19: "subah/dopahar/shaam/raat" bhi yahan aa sakta hai (window ban jaata hai) aur
+   *  "12 se pehle" wala upper bound. */
+  depart_before?: string | number | null;
   sort_by?: "cheapest" | "fastest" | null;
   train_numbers?: string | string[] | null;
   quota?: string | null;
@@ -72,6 +80,16 @@ export function minutesFromArg(raw: string | number | null | undefined): number 
   return parseDepartAfter(t); /* "5 baje ke baad", "रात 9 के बाद", "after 5" — wahi server parser */
 }
 
+/** Round-19: shabd wala time window ("subah", "shaam", "raat", "morning") → {after, before, label}.
+ *  `before` agar `after` se chhota ho to window raat ki tarah wrap karta hai (21:00 → 04:00). */
+export function timeWindowFromWord(raw: string | null | undefined): { after: number; before: number; label: string } | null {
+  const t = String(raw ?? "").trim();
+  if (!t) return null;
+  if (/\d/.test(t)) return null; /* ghadi boli gayi — minutesFromArg ka kaam */
+  for (const w of TIME_WINDOWS) if (w.re.test(t)) return { after: w.after, before: w.before, label: w.label };
+  return null;
+}
+
 async function stationCode(raw: string): Promise<string | null> {
   const s = String(raw ?? "").trim();
   if (!s) return null;
@@ -103,7 +121,17 @@ export async function runFindSeatsTool(args: FindSeatsArgs): Promise<FindSeatsRe
 
   const classCodes = classesFromArg(args.class_code);
   const onlyAvailable = args.only_available !== false; /* default: seat wali (AVL/RAC) */
-  const departAfterMinute = minutesFromArg(args.depart_after);
+  /* Round-19: AI ne "subah"/"shaam"/"raat" bheja ho to poora WINDOW banao (warna sirf "ke baad"). */
+  const wordWindow = timeWindowFromWord(args.depart_after == null ? null : String(args.depart_after));
+  const departAfterMinute = wordWindow ? wordWindow.after : minutesFromArg(args.depart_after);
+  const departBeforeMinute = wordWindow
+    ? wordWindow.before
+    : minutesFromArg(args.depart_before) ?? (args.depart_before == null || typeof args.depart_before === "number" ? null : parseBeforeMinute(String(args.depart_before)));
+  const windowLabel =
+    wordWindow?.label ??
+    (args.depart_before != null && departBeforeMinute != null && departAfterMinute == null
+      ? `${String(Math.floor(departBeforeMinute / 60)).padStart(2, "0")}:${String(departBeforeMinute % 60).padStart(2, "0")} se pehle`
+      : null);
   const sortBy = args.sort_by === "cheapest" || args.sort_by === "fastest" ? args.sort_by : null;
   const quota = (args.quota ?? "GN").toString().toUpperCase().slice(0, 2) || "GN";
   const wantTrains = (Array.isArray(args.train_numbers) ? args.train_numbers : String(args.train_numbers ?? "").split(/[\s,]+/))
@@ -173,7 +201,7 @@ export async function runFindSeatsTool(args: FindSeatsArgs): Promise<FindSeatsRe
   });
 
   const pool = wantTrains.length ? trains.filter((t) => wantTrains.includes(String(t.trainNumber ?? "").trim())) : trains;
-  const timesNeeded = departAfterMinute != null || sortBy === "fastest";
+  const timesNeeded = departAfterMinute != null || departBeforeMinute != null || sortBy === "fastest";
   let times: Map<string, { departure?: string | null; arrival?: string | null; durationMinutes?: number | null }> | undefined;
   if (timesNeeded) {
     try {
@@ -189,7 +217,15 @@ export async function runFindSeatsTool(args: FindSeatsArgs): Promise<FindSeatsRe
     }
   }
 
-  const slots = { classCodes, classGroup: classCodes.length && String(args.class_code ?? "").toUpperCase() === "AC" ? ("AC" as const) : null, onlyAvailable, departAfterMinute, sortBy };
+  const slots = {
+    classCodes,
+    classGroup: classCodes.length && String(args.class_code ?? "").toUpperCase() === "AC" ? ("AC" as const) : null,
+    onlyAvailable,
+    departAfterMinute,
+    departBeforeMinute,
+    windowLabel,
+    sortBy,
+  };
   const pick = pickSeatRows(pool, slots, times);
   /* WL rows alag se (onlyAvailable par bhi), taaki "seat nahi par WL itni" sach bata sake. */
   const wlPick = onlyAvailable
@@ -218,6 +254,8 @@ export async function runFindSeatsTool(args: FindSeatsArgs): Promise<FindSeatsRe
       classCodes,
       onlyAvailable,
       departAfterMinute,
+      departBeforeMinute,
+      windowLabel,
       sortBy,
       trainNumbers: wantTrains,
       trainsSeen: pool.length,
@@ -238,7 +276,10 @@ export const FIND_SEATS_DESCRIPTION =
   "'AC trains dikhao', 'sabse sasti seat wali train', 'raat 9 ke baad sleeper me seat', 'sirf confirmed wali dikhao', " +
   "'12029 me seat hai kya' — to PEHLE ye tool call karo aur uske result se hi jawab do (kabhi memory se seat mat batao). " +
   "Args: class_code = 'ALL' | 'AC' (1A/2A/3A/3E/CC/EC) | '2A','3A','SL','CC','EC','2S','3E','1A' (comma se kai); " +
-  "only_available = true sirf AVAILABLE+RAC, false to WL/N-A bhi; depart_after = '17:00' ya '5 baje ke baad' (user ki bhasha as-is chalti hai); " +
+  "only_available = true sirf AVAILABLE+RAC, false to WL/N-A bhi; " +
+  "TIME FILTER — user ne waqt bola ho to ye ZAROOR bhejo: depart_after = 'subah' | 'dopahar' | 'shaam' | 'raat' (poora window) " +
+  "YA '17:00' / '5 baje ke baad'; depart_before = '12:00' / '12 baje se pehle'. " +
+  "'subah ki trains batao' jaisa sawaal aaye to poora din ka jawab MAT do — usi window ki trains batao. " +
   "sort_by = 'cheapest' | 'fastest'; train_numbers = sirf in trains par (comma-separated). " +
   "WL ka confirm% kabhi mat batao (data nahi hai) — sirf WL number.";
 
@@ -250,7 +291,8 @@ export const FIND_SEATS_PARAMETERS = {
     date: { type: "string", description: "Journey date YYYY-MM-DD" },
     class_code: { type: "string", description: "'ALL' | 'AC' | '1A'|'2A'|'3A'|'3E'|'SL'|'CC'|'EC'|'2S' (comma-separated bhi)" },
     only_available: { type: "boolean", description: "true = sirf AVAILABLE/RAC (default true); false = WL/N-A bhi dikhao" },
-    depart_after: { type: "string", description: "'17:00' ya user ki bhasha '5 baje ke baad' / 'raat 9 ke baad'" },
+    depart_after: { type: "string", description: "Window ka shabd ('subah' | 'dopahar' | 'shaam' | 'raat') ya '17:00' / '5 baje ke baad' / 'raat 9 ke baad'" },
+    depart_before: { type: "string", description: "'12:00' ya '12 baje se pehle' (is waqt se pehle wali trains)" },
     sort_by: { type: "string", description: "'cheapest' (sabse sasta) ya 'fastest' (sabse kam time)" },
     train_numbers: { type: "string", description: "Sirf in trains par — comma-separated (jaise '12029,12497')" },
     quota: { type: "string", description: "GN (default) | TQ (tatkal) | PT (premium tatkal) | LD (ladies)" },
