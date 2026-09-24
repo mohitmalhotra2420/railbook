@@ -589,7 +589,8 @@ export class RailCoreProvider implements RailwayProvider {
   ): Promise<ClassAvailability> {
     const unknown: ClassAvailability = {
       code: classCode,
-      label: CLASS_LABELS[classCode],
+      /* classCode bhi (consumers isi ko padhte hain) */
+      classCode: classCode,      label: CLASS_LABELS[classCode],
       status: "UNKNOWN",
       fare: 0,
     };
@@ -644,7 +645,8 @@ export class RailCoreProvider implements RailwayProvider {
     const fare = Number(o.total_fare ?? o.fare ?? 0);
     return {
       code: classCode,
-      label: CLASS_LABELS[classCode],
+      /* classCode bhi (consumers isi ko padhte hain) */
+      classCode: classCode,      label: CLASS_LABELS[classCode],
       status: parsed.status,
       seats: parsed.seats,
       rac: parsed.rac,

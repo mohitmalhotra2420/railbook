@@ -301,7 +301,11 @@ async function railyatriAvailability(
     if (!sc) return null;
     return {
       code: classCode,
-      label: CLASS_LABELS[classCode],
+      /* 24 Sep 2026 (user: "ConfirmTkt ne 20986 JAT->MTJ 2A RAC 10 dikhaya, AI ne kyu nahi"):
+       * is row me sirf `code` tha, `classCode` nahi — journey ka earlier-stop scan
+       * `r.classCode` padhta hai, isliye saari rows filter ho jaati thi (option mila hi nahi).
+       * Ab har provider dono bhejta hai. */
+      classCode: classCode,      label: CLASS_LABELS[classCode],
       status: sc.status,
       seats: sc.seats ?? undefined,
       rac: sc.rac ?? undefined,
@@ -1602,7 +1606,8 @@ export class FallbackRailwayProvider implements RailwayProvider {
     const started = Date.now();
     const unknown: ClassAvailability = {
       code: classCode,
-      label: CLASS_LABELS[classCode],
+      /* classCode bhi (consumers isi ko padhte hain) */
+      classCode: classCode,      label: CLASS_LABELS[classCode],
       status: "UNKNOWN",
       fare: 0,
     };

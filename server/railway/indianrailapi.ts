@@ -216,7 +216,10 @@ export async function indianRailApiAvailability(
   if (parsed.status === "UNKNOWN") return null;
   return {
     code: classCode,
-    label: CLASS_LABELS[classCode],
+    /* 24 Sep 2026 (user: ConfirmTkt ne 20986 JAT->MTJ 2A RAC 10 dikhaya, humne nahi):
+         * sabhi providers ab `classCode` bhi bhejte hain — consumers (journey scan/UI) isi ko
+         * padhte hain; pehle sirf `code` tha → scan ki rows filter ho jaati thi. */
+    classCode: classCode,    label: CLASS_LABELS[classCode],
     status: parsed.status,
     seats: parsed.seats ?? undefined,
     rac: parsed.rac ?? undefined,

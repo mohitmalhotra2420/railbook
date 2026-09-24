@@ -62,7 +62,10 @@ function classRow(
   const inv = availabilityFor(train.number, date, classCode);
   return {
     code: classCode,
-    label: CLASS_LABELS[classCode],
+    /* 24 Sep 2026 (user: ConfirmTkt ne 20986 JAT->MTJ 2A RAC 10 dikhaya, humne nahi):
+         * sabhi providers ab `classCode` bhi bhejte hain — consumers (journey scan/UI) isi ko
+         * padhte hain; pehle sirf `code` tha → scan ki rows filter ho jaati thi. */
+    classCode: classCode,    label: CLASS_LABELS[classCode],
     fare,
     ...inv,
   };
@@ -161,7 +164,8 @@ export class MockRailwayProvider implements RailwayProvider {
     if (found) return found;
     return {
       code: classCode,
-      label: CLASS_LABELS[classCode],
+      /* classCode bhi (consumers isi ko padhte hain) */
+      classCode: classCode,      label: CLASS_LABELS[classCode],
       status: "NOT_AVAILABLE",
       fare: 0,
     };

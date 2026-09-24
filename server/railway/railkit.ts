@@ -734,7 +734,8 @@ export class RailKitProvider implements RailwayProvider {
   ): Promise<ClassAvailability> {
     const unknown: ClassAvailability = {
       code: classCode,
-      label: CLASS_LABELS[classCode],
+      /* classCode bhi (consumers isi ko padhte hain) */
+      classCode: classCode,      label: CLASS_LABELS[classCode],
       status: "UNKNOWN",
       fare: 0,
     };
@@ -751,7 +752,8 @@ export class RailKitProvider implements RailwayProvider {
       const train = asObj(d.train);
       return {
         code: classCode,
-        label: CLASS_LABELS[classCode],
+        /* classCode bhi (consumers isi ko padhte hain) */
+        classCode: classCode,        label: CLASS_LABELS[classCode],
         status: parsed.status,
         seats: parsed.seats,
         rac: parsed.rac,

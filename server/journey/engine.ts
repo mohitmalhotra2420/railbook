@@ -827,7 +827,29 @@ export async function findBoardFromEarlier(args: {
         const directWlOf = (t as { directWl?: Record<string, number> }).directWl ?? args.directWl ?? null;
         const hint = need.length ? [...need] : Array.from(new Set([...(args.travelClass ? [args.travelClass] : []), ...tcls]));
         const dest = stops[iTo];
-        const dayOf = (st: Stop) => (typeof st.day === "number" ? st.day : 1);
+        /* 24 Sep 2026 (user: "ConfirmTkt ne 20986 ke liye JAT se 2A RAC 10 dikhaya, AI ne kyu nahi"):
+         * web schedule me `day` field aksar nahi aata (sab stops day=1 maane jaate the) → earlier stop ka
+         * segDate GALAT (boarding ke din) ban jaata tha, isliye train-origin (JAT, 24 Sep) ka board
+         * khaali aata tha aur same-train option kabhi nahi milta tha. Ab din clock-time se infer hote
+         * hain: jab departure waqt peeche chala jaaye (00:40 ke baad aana) = agla din. */
+        const stopDay: number[] = (() => {
+          const out: number[] = [];
+          let d = 1;
+          for (let i = 0; i < stops.length; i++) {
+            if (i > 0) {
+              const prev = minutesOf(stops[i - 1].departure ?? stops[i - 1].arrival ?? "");
+              const cur = minutesOf(stops[i].arrival ?? stops[i].departure ?? "");
+              if (prev != null && cur != null && cur < prev) d += 1;
+            }
+            out[i] = typeof stops[i].day === "number" ? (stops[i].day as number) : d;
+          }
+          return out;
+        })();
+        const dayOf = (st: Stop) => {
+          const idx = stops.indexOf(st);
+          if (idx >= 0 && stopDay[idx] != null) return stopDay[idx];
+          return typeof st.day === "number" ? st.day : 1;
+        };
         /* Ek ticket-segment (bookFrom → bookUpto) probe karo — passenger phir bhi from→to hi travel karta hai. */
         /* Returns true only for a REAL seat (AVL/RAC) — better-WL is recorded but the scan continues (a real seat
          * further back / further ahead must still be found). Max 1 better-WL per train. */
@@ -840,13 +862,17 @@ export async function findBoardFromEarlier(args: {
           const segDate = addDays(args.date, Math.min(0, dayOf(bf) - dayOf(stops[iFrom])));
           const board = await routedClassBoard(t.number, segDate, String(bf.code).toUpperCase(), segTo, "GN", hint);
           /* Round-18m-7: SAB classes check — jis class mein bhi seat mile, sab dikhao. Stale AVL/RAC bhi option (⚠), fresh pehle. */
-          let all = bookableRows(board.classes, { includeStale: true }).filter((r) => enoughSeats(r, args.passengers) && (!need.length || need.includes(r.classCode)));
+          /* 24 Sep 2026: rows kabhi sirf `code` bhejti thi (railyatri/railkit) → `need.includes(undefined)`
+           * false → saari rows filter ho jaati thi aur same-train option kabhi nahi milta tha.
+           * Ab dono padhte hain (yaad rakho: ye hi "20986 JAT→MTJ RAC 10" miss hone ki wajah thi). */
+          const clsOf = (r: { classCode?: string | null; code?: string | null }) => String(r.classCode ?? r.code ?? "").toUpperCase();
+          let all = bookableRows(board.classes, { includeStale: true }).filter((r) => enoughSeats(r, args.passengers) && (!need.length || need.includes(clsOf(r))));
           /* Round-18m-42 (user ConfirmTkt: 12904 ASR→LDH SL WL 164, ASR→BVI SL WL 38 "Same Train Alternate"): AVL/RAC
            * na mile to BEHTAR WL bhi option hai — direct WL se kam-se-kam 40% chhoti aur ≤ 60. Alag flag (betterWl)
            * ke saath — UI blue "WL — better chance", kabhi seat-proven nahi kehte. */
           if (!all.length && directWlOf && !betterWlRecorded) {
             const wlRows = board.classes
-              .filter((c) => !c.stale && c.status === "WAITLIST" && typeof c.waitlist === "number" && c.waitlist > 0 && (!need.length || need.includes(c.code)))
+              .filter((c) => !c.stale && c.status === "WAITLIST" && typeof c.waitlist === "number" && c.waitlist > 0 && (!need.length || need.includes(String(c.code ?? c.classCode ?? "").toUpperCase())))
               .filter((c) => { const dw = directWlOf?.[c.code]; return typeof dw === "number" && dw > 0 && c.waitlist! <= 60 && c.waitlist! <= dw * 0.6; })
               .map((c) => ({ ...(c.updatedAt ? { asOf: c.updatedAt } : {}), classCode: c.code, status: c.status, seats: null, rac: null, waitlist: c.waitlist ?? null, fare: c.fare > 0 ? c.fare : null, source: String(c.source ?? "web"), betterWl: true, directWaitlist: directWlOf?.[c.code] ?? null }) as RouteAvailability)
               .sort((a, b) => (a.waitlist ?? 999) - (b.waitlist ?? 999));
@@ -891,10 +917,31 @@ export async function findBoardFromEarlier(args: {
           }
           return true;
         };
-        /* Phase 1 (Round-18m-6): earlier stop → destination. */
+        /* Phase 1 (Round-18m-6): earlier stop → destination.
+         * 24 Sep 2026 (user: "ConfirmTkt ne 20986 ke liye Book From Jammu Tawi 2A RAC 10 dikhaya —
+         * saare earlier stops probe karo"): PEHLE ye loop nearest seat par BREAK kar deta tha aur
+         * sirf train-origin ka ek extra call karta tha, isliye JAT (nearest JRC ke PEECHHE padta hai)
+         * list me kabhi nahi aata tha. Ab boarding se train ORIGIN tak SAARE earlier stops probe hote
+         * hain — parallel batches me (EARLIER_PROBE_CONCURRENCY, default 3), taaki latency na badhe. */
         if (mode === "earlier") {
-          for (let k = 0; k < earlier.length; k++) {
-            if (await tryOneSegment(earlier[k], null, k + 1, 0)) return; // nearest earlier stop with a seat is enough for this train
+          const conc = Math.max(1, Math.min(6, Number(process.env.EARLIER_PROBE_CONCURRENCY ?? 3) || 3));
+          let next = 0;
+          await Promise.all(
+            Array.from({ length: Math.min(conc, earlier.length) }, async () => {
+              while (next < earlier.length) {
+                const k = next++;
+                await tryOneSegment(earlier[k], null, k + 1, 0);
+              }
+            }),
+          );
+          /* Better-WL race (parallel probes): ek train ke liye sirf SABSE ACHHI WL option rakho. */
+          const wls = options.filter((o) => o.trainNumber === t.number && o.availability.betterWl);
+          if (wls.length > 1) {
+            wls.sort((a, b) => (a.availability.waitlist ?? 999) - (b.availability.waitlist ?? 999));
+            for (const drop of wls.slice(1)) {
+              const at = options.indexOf(drop);
+              if (at >= 0) options.splice(at, 1);
+            }
           }
           return;
         }
