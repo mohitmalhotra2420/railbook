@@ -693,7 +693,27 @@ export function JourneyOptions({
           {openTricks[o.trainNumbers[0]] && (o.earlierStopOptions ?? []).map((b) => (
             <div key={`${b.trainNumber}-${b.bookFrom}-${b.bookUpto ?? ""}`} className="jx-sb-alt">
               <span className="jx-sb-alt-label">Ticket {b.bookFromName ?? b.bookFrom} ({b.bookFrom}){b.bookUpto ? ` → ${b.bookUptoName ?? b.bookUpto} (${b.bookUpto})` : ` → ${b.destination}`} · board {b.boardAt}, utro {b.destination}:</span>
-              <ClassRow label="" rows={b.classOptions ?? [b.availability]} onPick={onPickClass ? (r) => onPickClass({ trainNumber: b.trainNumber, classCode: r.classCode, from: b.bookFrom, to: b.bookUpto ?? b.destination, boardAt: b.boardAt, row: r }) : undefined} />
+              <ClassRow label="" rows={b.classOptions ?? [b.availability]} onPick={
+                onPickClass
+                  ? (r) =>
+                      onPickClass({
+                        trainNumber: b.trainNumber,
+                        classCode: r.classCode,
+                        from: b.bookFrom,
+                        to: b.bookUpto ?? b.destination,
+                        boardAt: b.boardAt,
+                        row: r,
+                        /* Round-20: passenger form ke header ke liye — jo card me dikha wahi. */
+                        trainName: b.trainName,
+                        departure: b.bookFromDeparture ?? null,
+                        arrival: b.arrival ?? null,
+                        arrivalDayOffset: b.arrivalDayOffset ?? null,
+                        durationLabel: durLabel(b.durationMinutes ?? null),
+                        fromName: b.bookFromName ?? null,
+                        toName: (b.bookUpto ? b.bookUptoName : b.destinationName) ?? null,
+                      })
+                  : undefined
+              } />
             </div>
           ))}
         </div>
@@ -769,7 +789,26 @@ export function JourneyOptions({
               </div>
               <div className="jx-strip-labels" style={b.bookUpto ? { gridTemplateColumns: "repeat(4, 1fr)" } : undefined}><span>Book from</span><span>Boarding</span><span>Deboarding</span>{b.bookUpto && <span>Book upto</span>}</div>
               {/* Round-18m-14: alternative row ki classes bhi tappable (stale → refresh). */}
-              <ClassRow label="" rows={(b.classOptions ?? [b.availability]).filter((r) => r.classCode !== b.availability.classCode || r.stale)} onPick={onPickClass ? (r) => onPickClass({ trainNumber: b.trainNumber, classCode: r.classCode, from: b.bookFrom, to: b.bookUpto ?? b.destination, boardAt: b.boardAt }) : undefined} />
+              <ClassRow label="" rows={(b.classOptions ?? [b.availability]).filter((r) => r.classCode !== b.availability.classCode || r.stale)} onPick={
+                onPickClass
+                  ? (r) =>
+                      onPickClass({
+                        trainNumber: b.trainNumber,
+                        classCode: r.classCode,
+                        from: b.bookFrom,
+                        to: b.bookUpto ?? b.destination,
+                        boardAt: b.boardAt,
+                        row: r,
+                        trainName: b.trainName,
+                        departure: b.bookFromDeparture ?? null,
+                        arrival: b.arrival ?? null,
+                        arrivalDayOffset: b.arrivalDayOffset ?? null,
+                        durationLabel: durLabel(b.durationMinutes ?? null),
+                        fromName: b.bookFromName ?? null,
+                        toName: (b.bookUpto ? b.bookUptoName : b.destinationName) ?? null,
+                      })
+                  : undefined
+              } />
               <div className="jx-bfe-foot">
                 <span className="jx-stat"><span className="jx-stat-ic">{IC.clock}</span>{durLabel(b.durationMinutes) ?? "—"} · Direct · board {b.boardAt}</span>
                 {(b.classOptions ?? []).filter((r) => r.classCode !== b.availability.classCode).length > 0 && (
@@ -967,7 +1006,26 @@ export function JourneyOptions({
             { ic: IC.arrow, text: `Direct · board ${bfeHero.boardAt}` },
             { ic: IC.rupee, text: bfeHero.availability.fare != null ? inr(bfeHero.availability.fare) : "Fare on select" },
           ]} />
-          <ClassRow label="Available classes · tap = fresh check" rows={bfeHero.classOptions ?? [bfeHero.availability]} onPick={onPickClass ? (r) => onPickClass({ trainNumber: bfeHero.trainNumber, classCode: r.classCode, from: bfeHero.bookFrom, to: bfeHero.bookUpto ?? bfeHero.destination, boardAt: bfeHero.boardAt }) : undefined} />
+          <ClassRow label="Available classes · tap = booking" rows={bfeHero.classOptions ?? [bfeHero.availability]} onPick={
+                onPickClass
+                  ? (r) =>
+                      onPickClass({
+                        trainNumber: bfeHero.trainNumber,
+                        classCode: r.classCode,
+                        from: bfeHero.bookFrom,
+                        to: bfeHero.bookUpto ?? bfeHero.destination,
+                        boardAt: bfeHero.boardAt,
+                        row: r,
+                        trainName: bfeHero.trainName,
+                        departure: bfeHero.bookFromDeparture ?? null,
+                        arrival: bfeHero.arrival ?? null,
+                        arrivalDayOffset: bfeHero.arrivalDayOffset ?? null,
+                        durationLabel: durLabel(bfeHero.durationMinutes ?? null),
+                        fromName: bfeHero.bookFromName ?? null,
+                        toName: (bfeHero.bookUpto ? bfeHero.bookUptoName : bfeHero.destinationName) ?? null,
+                      })
+                  : undefined
+              } />
           <ClassRow label="Other classes (not fresh)" rows={(bfeHero.classOptions ?? []).filter((r) => r.stale)} />
           <div className="jx-hero-cta">
             <div className="jx-hero-note">
@@ -1016,7 +1074,30 @@ export function JourneyOptions({
             { ic: IC.rupee, text: heroDirect.availability?.fare != null ? inr(heroDirect.availability.fare) : "Fare on select" },
           ]} />
           {/* Round-18m-12: is train ka POORA class board — AVL/RAC/WL sab (RAC bhi option hai). */}
-          {heroDirect.changes === 0 && <ClassRow label="All classes (this train) · tap = fresh check" rows={heroDirect.classOptions ?? (heroDirect.availability ? [heroDirect.availability] : [])} onPick={onPickClass ? (r) => onPickClass({ trainNumber: heroDirect.trainNumbers[0], classCode: r.classCode, from: heroDirect.origin, to: heroDirect.destination }) : undefined} />}
+          {heroDirect.changes === 0 && <ClassRow
+                      label="All classes (this train) · tap = booking"
+                      rows={heroDirect.classOptions ?? (heroDirect.availability ? [heroDirect.availability] : [])}
+                      onPick={
+                        onPickClass
+                          ? (r) =>
+                              onPickClass({
+                                trainNumber: heroDirect.trainNumbers[0],
+                                classCode: r.classCode,
+                                from: heroDirect.origin,
+                                to: heroDirect.destination,
+                                row: r,
+                                option: heroDirect,
+                                trainName: heroDirect.trainNames[0] ?? null,
+                                departure: heroDirect.departure ?? null,
+                                arrival: heroDirect.arrival ?? null,
+                                arrivalDayOffset: heroDirect.arrivalDayOffset ?? null,
+                                durationLabel: heroDirect.durationLabel ?? null,
+                                fromName: heroDirect.legs?.[0]?.fromName ?? null,
+                                toName: heroDirect.legs?.[0]?.toName ?? null,
+                              })
+                          : undefined
+                      }
+                    />}
           <div className="jx-hero-cta">
             <div className="jx-hero-note">
               <span className="jx-hero-note-ic">{isOk(heroDirect.availability) ? IC.shield : IC.warn}</span>
