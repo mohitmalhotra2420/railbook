@@ -157,6 +157,48 @@ async function main() {
   check("generic path: mobile + email bhare", doc3.getElementById("m1").value === "9876543210" && doc3.getElementById("e1").value === "asha@example.com");
   check("generic path: expectedPaths me naye paths", w.RailBookPocFieldMap.expectedPaths(payload()).includes("contact.mobile"));
 
+  /* ── 5. checkbox alag row/section me (IRCTC ka doosra shape) ── */
+  const paxOnly = (i) => `
+    <tr class="pax-row" id="orow${i}">
+      <td><input formcontrolname="passengerName" id="opn${i}"></td>
+      <td><input formcontrolname="passengerAge" id="opa${i}"></td>
+      <td><select formcontrolname="passengerGender" id="opg${i}"><option value=""></option><option value="F">Female</option><option value="M">Male</option></select></td>
+      <td><select formcontrolname="passengerBerthChoice" id="opb${i}"><option value="NP">No Preference</option><option value="LB">Lower</option></select></td>
+      <td><select formcontrolname="passengerFoodChoice" id="opf${i}"><option value="D">Catering Service Option</option><option value="V">Veg</option></select></td>
+    </tr>`;
+
+  /* 5a. form ke neeche EK shared pair (do passengers, dono ko ek hi control) */
+  w = boot(`<!doctype html><html><body><form><table>${paxOnly(0)}${paxOnly(1)}</table>
+    <div class="flags">
+      <input type="checkbox" id="scb" formcontrolname="confirmBerths"><label for="scb">Book only if confirm berths are allotted</label>
+      <input type="checkbox" id="sau" formcontrolname="autoUpgradation"><label for="sau">Consider for auto up-gradation</label>
+    </div></form></body></html>`);
+  let docS = w.document;
+  let resS = await w.RailBookPocIrctc.fillIrctc(docS, payload({
+    passengers: [
+      { name: "Asha Kaur", age: 28, gender: "female", berth: "Lower", food: "Veg", bookOnlyIfConfirm: true, autoUpgrade: true },
+      { name: "Ravi Sharma", age: 35, gender: "male", berth: "No Preference", food: "Veg" },
+    ],
+  }));
+  check("shared pair (form ke neeche ek hi checkbox) → mil gaya", docS.getElementById("scb").checked && resS.filled.includes("passengers.0.bookOnlyIfConfirm"));
+  check("shared pair: dusre passenger ka flag bhi wahi control", docS.getElementById("sau").checked && resS.filled.includes("passengers.0.autoUpgrade"));
+
+  /* 5b. per-passenger checkbox row alag (2 anchors, 2 passengers) — DOM order se match */
+  w = boot(`<!doctype html><html><body><form><table>
+     ${paxOnly(0)}<tr><td colspan="5"><input type="checkbox" id="rcb0" formcontrolname="confirmBerths"><label for="rcb0">Book only if confirm berths are allotted</label></td></tr>
+     ${paxOnly(1)}<tr><td colspan="5"><input type="checkbox" id="rcb1" formcontrolname="confirmBerths"><label for="rcb1">Book only if confirm berths are allotted</label></td></tr>
+   </table></form></body></html>`);
+  docS = w.document;
+  resS = await w.RailBookPocIrctc.fillIrctc(docS, payload({
+    passengers: [
+      { name: "Asha Kaur", age: 28, gender: "female", berth: "Lower", food: "Veg" },
+      { name: "Ravi Sharma", age: 35, gender: "male", berth: "No Preference", food: "Veg", bookOnlyIfConfirm: true },
+    ],
+  }));
+  check("per-row checkbox rows: sirf 2nd passenger ka check hua (order se match)",
+    docS.getElementById("rcb1").checked && docS.getElementById("rcb0").checked === false && resS.filled.includes("passengers.1.bookOnlyIfConfirm"),
+    `rcb0=${docS.getElementById("rcb0").checked} rcb1=${docS.getElementById("rcb1").checked}`);
+
   const failedCount = checks.filter((c) => !c.ok).length;
   console.log(`\n${checks.length - failedCount}/${checks.length} checks PASS`);
   process.exit(failedCount ? 1 : 0);

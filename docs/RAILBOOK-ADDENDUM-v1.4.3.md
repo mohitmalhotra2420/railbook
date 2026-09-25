@@ -305,3 +305,29 @@ User ne teen screenshots ke saath teen cheezein maangi thi:
 **Tests:** naye `tests/round20-chip-to-passenger.test.tsx` (7) · `tests/round20-passenger-form.test.tsx` (9) · `tests/round20-pantry-api.test.ts` (3) → kul **96 files / 986 tests PASS**; `tsc -p tsconfig.server.json` clean; client TS errors me koi naya error nahi (puraane exactly wahi 67).
 
 **Preview (single-source):** `/home/user/RailBook/previews/RailBook-round20-2026-09-25.html` — asli payload (`provas/asr-ldh-2026-09-26-board.json` + search times + live AI reply) se asli React components ka render + built CSS.
+
+### 9.12 Round-21 (25 Sep) — IRCTC autofill me food + dono checkbox + mobile/email, aur deploy
+
+User ne maanga: *"passenger details ke saath food bhi autofill ho, 'Book only if confirm berths are allotted', 'Consider for auto up-gradation', aur mobile + email (agar user ne enter kiya ho) — iske baad deploy krdena."*
+
+**Payload (web → app/extension)** — `src/irctc/handoff.ts`
+
+- Naya **V2** payload (`IrctcHandoffPayloadV2`): `version: 2`, `journey` (waisa hi), `passengers[{name, age, gender, berth, **food**, **bookOnlyIfConfirm?**, **autoUpgrade?**}]`, aur **`contact?{mobile?, email?}`**. Flags sirf `true` par hi payload me jaate hain (`false`/absent = site ka default waisa hi — hum kabhi uncheck nahi karte).
+- Food labels IRCTC ke apne option text se match karte hain: `VEG → "Veg"`, `NON_VEG → "Non Veg"`, `NO_FOOD → "No Food"`; khaali chhoda to `""` → IRCTC ka default (`Catering Service Option`).
+- Contact validation: mobile 10 digit aur email shape — **galat ho to handoff reject** (`ok: false` + error), chupke drop nahi hota.
+- **Backward compatibility (jaan-boojh kar):** V2 alag key `railbookAutofillPayloadV2` me likha jaata hai; **purani key `railbookAutofillTestPayload` aur `postMessage` dono me exact purana V1 shape** hi jaata hai. Isliye purane app/extension (v1.4.3 tak) par kuch nahi tootta — unhe sirf food/contact/checkbox nazar nahi aate.
+- Review screen ka handoff card ab contact bhi bhejta hai (`ReviewStatus.tsx` → `IrctcHandoff ... contact={state.contact}`), aur summary me food/flags/contact ki lines dikhti hain.
+
+**Android engine (autofill sach me bharta hai)** — `assets/autofill/fieldmap.js` + `irctc-passenger.js`
+
+- `fieldmap.js`: allowlists me `food` + `bookOnlyIfConfirm`/`autoUpgrade` + page-level `contact.mobile`/`email`; `FOOD_MAP` (site option TEXT se — value guess nahi); `FLAG_RULES` + `flagTargets`/`fillFlags` (checkbox `.checked = true` sirf true par, aur **kabhi uncheck nahi**); `expectedPaths`/`fillFields` me naye paths; `version === 2 ? 2 : 1` passthrough.
+- `irctc-passenger.js`: `passengerFoodChoice` select ke liye **"No Food" ab mapped** (`FOOD_UNMAPPED` se nikaal diya); naye `contactAnchor` (page-level `mobile|phone` / `e-?mail`, visible, non-sensitive, passenger rows ke **baahar**, exactly-1 warna NOT FOUND) aur `flagAnchors` (checkbox label/formcontrolname signal, row-scoped). `MainActivity.kt` ab pehle V2 key padhta hai, phir purani.
+- **Round-21b fix (real-site shapes):** IRCTC par ye checkbox kabhi passenger row ke andar, kabhi uske neeche ki **apni row/section** me hote hain → naya `pickFlagTarget()`: pehle exact row match, warna shared anchor (exactly 1 = sabke liye ek hi control) ya DOM-order match (anchors ki ginti == passengers ki ginti); ambiguous par **NOT FOUND** (galat passenger ko tick nahi karte). Ye bug preview banate waqt pakda gaya (2 notFound → 0).
+
+**Verification**
+
+- `tests/irctc-handoff.test.tsx` **13/13 PASS** (allowlists, food labels, flags only-true + legacy me kabhi nahi, contact valid-only + invalid error, summary lines); full suite **96 files / 992 tests PASS**; server `tsc` clean; client TS baseline 67 (koi naya nahi).
+- Naya **asli-engine check**: `tools/round21-autofill-engine-check.mjs` — app ke wahi do assets jsdom me ek IRCTC-jaisa page par chalaata hai: **25/25 PASS** (V2 validate, V1 untouched, galat mobile reject, unknown key reject, food Veg/No Food, dono checkbox, blank = untouched, mobile/email, shared-pair shape, per-row shape, sensitive guard, generic `data-rb` path).
+- **Preview (single-source):** `/home/user/RailBook/previews/RailBook-round21-2026-09-25.html` — usi asli engine ka result (14 filled / 0 notFound), payload badal ke live dobara chala sakte ho.
+- **Deploy:** commit `93dc921` → Render `dep-daqvdufavr4c73f6ek8g` **LIVE 2026-09-25T04:23:11Z**; `/api/version` = `93dc921`; live bundle me `railbookAutofillPayloadV2`, `railbookAutofillTestPayload`, `Book only if confirm berths`, `auto up-gradation`, `Food choice`, `No Food` sab maujood.
+- **APK v1.4.4** (`RailBook-v1.4.4-release.apk`, versionCode 27) — assets badle hain isliye device par naya APK zaroori hai; purana v1.4.3 APK sirf food/contact/checkbox ke bina autofill karta rahega (kuch tootta nahi).
