@@ -70,7 +70,14 @@ export function FareReview() {
           Nothing is confirmed until the railway provider accepts this booking.
         </p>
         {/* Additive: optional, user-initiated IRCTC handoff. Existing summary + Confirm Booking above are unchanged. */}
-        <IrctcHandoff train={train} date={state.date} classCode={klass.code} passengers={state.passengers} />
+        {/* Round-21: food/catering + IRCTC ke dono checkbox + contact (mobile/email) bhi autofill ke liye jaate hain. */}
+        <IrctcHandoff
+          train={train}
+          date={state.date}
+          classCode={klass.code}
+          passengers={state.passengers}
+          contact={state.contact}
+        />
       </main>
       <div className="sticky-cta">
         {short ? (

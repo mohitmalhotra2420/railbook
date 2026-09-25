@@ -14,6 +14,8 @@ import { IrctcHandoff } from "../src/components/IrctcHandoff";
 import {
   HANDOFF_KIND,
   HANDOFF_STORAGE_KEY,
+  HANDOFF_STORAGE_KEY_V2,
+  formatHandoffSummary,
   IRCTC_HANDOFF_URL,
   buildHandoffPayload,
   clearStoredHandoff,
@@ -60,9 +62,11 @@ const input = (over: Partial<HandoffInput> = {}): HandoffInput => ({
 
 /* Independent re-check of the frozen validator's allowlists (no import from src, so a widening of
    the payload shape on either side fails this test). */
-const ALLOWED_TOP = ["kind", "version", "test", "createdAt", "journey", "passengers"];
+const ALLOWED_TOP = ["kind", "version", "test", "createdAt", "journey", "passengers", "contact"];
 const ALLOWED_JOURNEY = ["from", "fromCode", "to", "toCode", "date", "trainNumber", "classCode"];
-const ALLOWED_PAX = ["name", "age", "gender", "berth", "food"];
+const ALLOWED_PAX = ["name", "age", "gender", "berth", "food", "bookOnlyIfConfirm", "autoUpgrade"];
+/* Round-21: purana (V1) shape bilkul waise hi rehta hai — sirf legacy key/postMessage isi me jaate hain. */
+const ALLOWED_PAX_LEGACY = ["name", "age", "gender", "berth", "food"];
 
 beforeEach(() => {
   clearStoredHandoff();
@@ -76,9 +80,11 @@ describe("IRCTC handoff — payload contract", () => {
     expect(res.ok).toBe(true);
     if (!res.ok) return;
 
+    /* V2 (naya autofill — app v1.4.4+): sirf 3 cheezein zyada ho sakti hain (contact + 2 flags),
+     * aur wo bhi tabhi jab user ne di ho. Yahan kuch nahi diya gaya → shape V1 jaisa, version 2. */
     expect(res.payload).toEqual({
       kind: "railbook-autofill-test",
-      version: 1,
+      version: 2,
       test: true,
       createdAt: "2026-09-19T06:00:00.000Z",
       journey: {
@@ -95,11 +101,17 @@ describe("IRCTC handoff — payload contract", () => {
         { name: "Ravi Sharma", age: 35, gender: "male", berth: "No Preference", food: "" },
       ],
     });
+    /* LEGACY (purana key + postMessage) — bilkul purana frozen shape. */
+    expect(res.payloadLegacy).toEqual({ ...res.payload, version: 1 });
+    expect(Object.keys(res.payloadLegacy).sort()).toEqual(["createdAt", "journey", "kind", "passengers", "test", "version"]);
+    for (const p of res.payloadLegacy.passengers) expect(Object.keys(p).sort()).toEqual([...ALLOWED_PAX_LEGACY].sort());
 
-    // key allowlists — no extra key anywhere (deep check)
-    expect(Object.keys(res.payload).sort()).toEqual([...ALLOWED_TOP].sort());
+    // key allowlists — koi extra key kahin bhi nahi (contacts/flags optional hain, isliye subset check)
+    expect(Object.keys(res.payload).every((k) => ALLOWED_TOP.includes(k))).toBe(true);
+    expect(ALLOWED_TOP.every((k) => k === "contact" || (res.payload as Record<string, unknown>)[k] !== undefined)).toBe(true);
     expect(Object.keys(res.payload.journey).sort()).toEqual([...ALLOWED_JOURNEY].sort());
-    for (const p of res.payload.passengers) expect(Object.keys(p).sort()).toEqual([...ALLOWED_PAX].sort());
+    /* flags optional hain (tick na ho to key hi nahi) — isliye subset check */
+    for (const p of res.payload.passengers) expect(Object.keys(p).every((k) => ALLOWED_PAX.includes(k))).toBe(true);
     expect(res.payload.kind).toBe(HANDOFF_KIND);
   });
 
@@ -147,12 +159,15 @@ describe("IRCTC handoff — local bridge", () => {
     expect(res.ok).toBe(true);
     if (!res.ok) return;
 
-    const bridge = storeHandoff(res.payload);
+    const bridge = storeHandoff(res.payload, res.payloadLegacy);
     expect(bridge).toEqual({ stored: true, posted: true });
-    expect(JSON.parse(window.localStorage.getItem(HANDOFF_STORAGE_KEY) as string)).toEqual(res.payload);
+    /* purani key = purana shape (v1.4.3 app/extension waisa hi chalta rahe) */
+    expect(JSON.parse(window.localStorage.getItem(HANDOFF_STORAGE_KEY) as string)).toEqual(res.payloadLegacy);
+    /* nayi key = extended shape (app v1.4.4+) */
+    expect(JSON.parse(window.localStorage.getItem(HANDOFF_STORAGE_KEY_V2) as string)).toEqual(res.payload);
     expect(readStoredHandoff()).toEqual(res.payload);
     expect(postSpy).toHaveBeenCalledTimes(1);
-    expect(postSpy.mock.calls[0][0]).toEqual(res.payload);
+    expect(postSpy.mock.calls[0][0]).toEqual(res.payloadLegacy);
     expect(postSpy.mock.calls[0][1]).toBe(window.location.origin);
   });
 
@@ -162,8 +177,79 @@ describe("IRCTC handoff — local bridge", () => {
     });
     const res = buildHandoffPayload(input());
     if (!res.ok) throw new Error("payload should build");
-    expect(() => storeHandoff(res.payload)).not.toThrow();
-    expect(storeHandoff(res.payload).stored).toBe(false);
+    expect(() => storeHandoff(res.payload, res.payloadLegacy)).not.toThrow();
+    expect(storeHandoff(res.payload, res.payloadLegacy).stored).toBe(false);
+  });
+});
+
+
+describe("IRCTC handoff — Round-21 (food + checkboxes + contact ka autofill)", () => {
+  it("khaana IRCTC ke apne labels me jaata hai; khaali chhoda ho to site ka default", () => {
+    const res = buildHandoffPayload(
+      input({
+        passengers: [
+          pax({ foodChoice: "VEG" }),
+          pax({ foodChoice: "NON_VEG" }),
+          pax({ foodChoice: "NO_FOOD" }),
+          pax({ foodChoice: "" }),
+        ],
+      }),
+    );
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.payload.passengers.map((p) => p.food)).toEqual(["Veg", "Non Veg", "No Food", ""]);
+  });
+
+  it("IRCTC ke dono checkbox sirf tab jaate hain jab user ne tick kiya ho", () => {
+    const res = buildHandoffPayload(
+      input({ passengers: [pax({ bookOnlyIfConfirm: true, autoUpgrade: true }), pax()] }),
+    );
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.payload.passengers[0].bookOnlyIfConfirm).toBe(true);
+    expect(res.payload.passengers[0].autoUpgrade).toBe(true);
+    /* jisne tick nahi kiya uske object me key hi nahi — site ka default waisa hi rehta hai */
+    expect("bookOnlyIfConfirm" in res.payload.passengers[1]).toBe(false);
+    expect("autoUpgrade" in res.payload.passengers[1]).toBe(false);
+    /* legacy (purane app) payload me ye flags kabhi nahi jaate */
+    expect("bookOnlyIfConfirm" in res.payloadLegacy.passengers[0]).toBe(false);
+  });
+
+  it("mobile/email sirf user ke entered + valid hone par jaate hain", () => {
+    const ok = buildHandoffPayload(input({ contact: { mobile: "98765 43210", email: "asha@example.com" } }));
+    expect(ok.ok).toBe(true);
+    if (!ok.ok) return;
+    expect(ok.payload.contact).toEqual({ mobile: "9876543210", email: "asha@example.com" });
+
+    /* khaali → contact key hi nahi */
+    const none = buildHandoffPayload(input({ contact: { mobile: "", email: "" } }));
+    if (!none.ok) return;
+    expect(none.payload.contact).toBeUndefined();
+
+    /* galat mobile/email → saaf error (jhoothi value kabhi nahi bhejte) */
+    const bad = buildHandoffPayload(input({ contact: { mobile: "12345", email: "not-an-email" } }));
+    expect(bad.ok).toBe(false);
+    if (bad.ok) return;
+    expect(bad.errors.join(" | ")).toMatch(/mobile/i);
+
+    /* legacy payload me contact kabhi nahi (purana app unknown key par poora payload reject karta hai) */
+    expect("contact" in ok.payloadLegacy).toBe(false);
+  });
+
+  it("copy-ready summary me bhi food / checkbox / contact dikhte hain", () => {
+    const res = buildHandoffPayload(
+      input({
+        passengers: [pax({ foodChoice: "VEG", bookOnlyIfConfirm: true, autoUpgrade: true })],
+        contact: { mobile: "9876543210", email: "asha@example.com" },
+      }),
+    );
+    if (!res.ok) return;
+    const text = formatHandoffSummary(res.payload);
+    expect(text).toContain("food Veg");
+    expect(text).toContain("book only if confirm berths");
+    expect(text).toContain("consider for auto up-gradation");
+    expect(text).toContain("9876543210");
+    expect(text).toContain("asha@example.com");
   });
 });
 

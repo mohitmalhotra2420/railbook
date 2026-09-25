@@ -24,6 +24,11 @@ export const IRCTC_HANDOFF_URL = "https://www.irctc.co.in/nget/train-search";
 /** Storage key the authorised autofill component reads (unchanged, same as the POC contract). */
 export const HANDOFF_STORAGE_KEY = "railbookAutofillTestPayload";
 
+/** Round-21 (25 Sep 2026): EXTENDED payload ka apna key — food/catering, IRCTC ke do checkbox aur
+ *  contact (mobile/email) ke saath. Naya app (v1.4.4+) pehle yahi padhta hai, warna purana key.
+ *  Purana key hamesha PURANE shape me hi likha jaata hai, isliye purane app/extension bhi kaam karte rehte hain. */
+export const HANDOFF_STORAGE_KEY_V2 = "railbookAutofillPayloadV2";
+
 /** Frozen validator requires this literal kind + test flag; the REAL gate stays on the extension side. */
 export const HANDOFF_KIND = "railbook-autofill-test";
 
@@ -50,6 +55,15 @@ export interface HandoffPassenger {
   gender: "male" | "female" | "transgender" | "other";
   berth: string;
   food: string;
+  /** Round-21: IRCTC ke checkbox — sirf tab likhe jaate hain jab user ne tick kiya ho. */
+  bookOnlyIfConfirm?: true;
+  autoUpgrade?: true;
+}
+
+/** Round-21: IRCTC ka contact block — sirf wahi jo user ne khud bhara ho. */
+export interface HandoffContact {
+  mobile?: string;
+  email?: string;
 }
 
 export interface IrctcHandoffPayload {
@@ -61,19 +75,49 @@ export interface IrctcHandoffPayload {
   passengers: HandoffPassenger[];
 }
 
+/** Extended payload (app v1.4.4+ / naya autofill) — purane shape ke upar sirf 3 cheezein add. */
+export interface IrctcHandoffPayloadV2 extends Omit<IrctcHandoffPayload, "version"> {
+  version: 2;
+  contact?: HandoffContact;
+}
+
 export type HandoffBuild =
-  | { ok: true; errors: []; payload: IrctcHandoffPayload }
-  | { ok: false; errors: string[]; payload: null };
+  | {
+      ok: true;
+      errors: [];
+      /** Extended payload (V2) — naya autofill yahi padhta hai. */
+      payload: IrctcHandoffPayloadV2;
+      /** Bilkul purana shape (V1) — purane app/extension ke liye. */
+      payloadLegacy: IrctcHandoffPayload;
+    }
+  | { ok: false; errors: string[]; payload: null; payloadLegacy: null };
 
 /** Everything the handoff needs, all of it already present on the review screen. */
 export interface HandoffInput {
   train: Pick<TrainResult, "number" | "from" | "to" | "date">;
   date: string;
   classCode: ClassCode;
-  passengers: Array<Pick<Passenger, "name" | "age" | "gender" | "berthPreference">>;
+  passengers: Array<Pick<Passenger, "name" | "age" | "gender" | "berthPreference" | "foodChoice" | "bookOnlyIfConfirm" | "autoUpgrade">>;
+  /** Round-21: contact details — sirf jab user ne form me bhare ho. */
+  contact?: { mobile?: string; email?: string } | null;
 }
 
 const GENDERS = new Set(["male", "female", "transgender", "other"]);
+
+/* Round-21: RailBook ka food choice → IRCTC ke apne option labels (wahi jo authorised autofill engine
+ * exact match karta hai; "No Food" site ke apne option text se match hota hai, value guess nahi hoti).
+ * Khaali chhoda ho to "" → IRCTC ka apna default (Catering Service Option) chalta rehta hai. */
+const FOOD_LABELS: Record<string, string> = { VEG: "Veg", NON_VEG: "Non Veg", NO_FOOD: "No Food" };
+
+/** Mobile sirf tab bheja jaata hai jab 10 digit ka ho; email basic shape par. */
+function cleanContact(input?: { mobile?: string; email?: string } | null): HandoffContact | null {
+  const mobile = String(input?.mobile ?? "").replace(/[^0-9]/g, "").slice(0, 10);
+  const email = String(input?.email ?? "").trim().slice(0, 60);
+  const out: HandoffContact = {};
+  if (/^\d{10}$/.test(mobile)) out.mobile = mobile;
+  if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) out.email = email;
+  return out.mobile || out.email ? out : null;
+}
 
 function isRealCalendarDate(value: string): boolean {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
@@ -127,27 +171,55 @@ export function buildHandoffPayload(input: HandoffInput, now: Date = new Date())
        * default ("No Preference"). "Any" is carried as-is (the component maps it) and Window/Aisle/
        * Cabin/Coupe stay untouched. */
       berth: String(p?.berthPreference ?? "").trim() || "No Preference",
-      /* RailBook has no meal field — "" means "leave the site's own default unchanged". */
-      food: "",
+      /* Round-21: user ka apna khaana (IRCTC label) — khaali ho to site ka default chalta rehta hai. */
+      food: FOOD_LABELS[String(p?.foodChoice ?? "").toUpperCase()] ?? "",
     };
   });
 
-  if (errors.length) return { ok: false, errors, payload: null };
+  /* Round-21: user ne mobile/email bhara hai to wo valid hona chahiye — warna saaf error (chupke se drop
+   * nahi karte: IRCTC par pahunchta hi nahi aur user ko pata bhi nahi chalta). */
+  const rawMobile = String(input.contact?.mobile ?? "").replace(/[^0-9]/g, "").slice(0, 10);
+  const rawEmail = String(input.contact?.email ?? "").trim();
+  if (rawMobile && !/^\d{10}$/.test(rawMobile)) errors.push("contact mobile must be a 10 digit number (ya khaali chhodo)");
+  if (rawEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rawEmail)) errors.push("contact email looks invalid (ya khaali chhodo)");
 
-  const payload: IrctcHandoffPayload = {
+  if (errors.length) return { ok: false, errors, payload: null, payloadLegacy: null };
+  const contact = cleanContact(input.contact);
+
+  /* Round-21: extended (V2) payload — food + IRCTC checkboxes + contact. Jis passenger ne checkbox tick nahi
+   * kiya uske liye key hi nahi jaati (site ka default waisa hi rehta hai). Contact sirf valid hone par. */
+  const passengersV2: HandoffPassenger[] = passengers.map((p, i) => {
+    const src = list[i];
+    return {
+      ...p,
+      ...(src?.bookOnlyIfConfirm === true ? { bookOnlyIfConfirm: true as const } : {}),
+      ...(src?.autoUpgrade === true ? { autoUpgrade: true as const } : {}),
+    };
+  });
+  const payload: IrctcHandoffPayloadV2 = {
     kind: HANDOFF_KIND,
-    version: 1,
+    version: 2,
     test: true,
     createdAt: now.toISOString(),
     journey: { from: fromName, fromCode, to: toName, toCode, date, trainNumber, classCode },
-    passengers,
+    passengers: passengersV2,
+    ...(contact ? { contact } : {}),
+  };
+  /* Purana shape bilkul waise hi (V1) — purane app/extension ke liye. */
+  const payloadLegacy: IrctcHandoffPayload = {
+    kind: HANDOFF_KIND,
+    version: 1,
+    test: true,
+    createdAt: payload.createdAt,
+    journey: payload.journey,
+    passengers: passengers.map((p) => ({ name: p.name, age: p.age, gender: p.gender, berth: p.berth, food: p.food })),
   };
 
   /* Belt-and-braces: the frozen validator scans the serialised payload for sensitive words. */
   const hit = JSON.stringify(payload).match(FORBIDDEN_WORDS);
-  if (hit) return { ok: false, errors: [`payload contains a forbidden sensitive word: ${hit[0]}`], payload: null };
+  if (hit) return { ok: false, errors: [`payload contains a forbidden sensitive word: ${hit[0]}`], payload: null, payloadLegacy: null };
 
-  return { ok: true, errors: [], payload };
+  return { ok: true, errors: [], payload, payloadLegacy };
 }
 
 /**
@@ -155,17 +227,35 @@ export function buildHandoffPayload(input: HandoffInput, now: Date = new Date())
  * its storage key plus a same-origin window message. Local only — no network, no cookies.
  * A failure to store must never block the user's own IRCTC journey, so nothing here throws.
  */
-export function storeHandoff(payload: IrctcHandoffPayload): { stored: boolean; posted: boolean } {
+export function storeHandoff(payload: IrctcHandoffPayloadV2 | IrctcHandoffPayload, legacy?: IrctcHandoffPayload): { stored: boolean; posted: boolean } {
   let stored = false;
   let posted = false;
+  const legacyPayload: IrctcHandoffPayload =
+    legacy ??
+    {
+      kind: payload.kind,
+      version: 1,
+      test: true,
+      createdAt: payload.createdAt,
+      journey: payload.journey,
+      passengers: payload.passengers.map((p) => ({ name: p.name, age: p.age, gender: p.gender, berth: p.berth, food: p.food })),
+    };
   try {
-    window.localStorage.setItem(HANDOFF_STORAGE_KEY, JSON.stringify(payload));
+    /* Purana key = purana shape (v1.4.3 tak ke app/extension bilkul waise hi chalte hain). */
+    window.localStorage.setItem(HANDOFF_STORAGE_KEY, JSON.stringify(legacyPayload));
     stored = true;
   } catch {
     stored = false;
   }
+  /* Naya (V2) payload apne key me — app v1.4.4+ isse padhta hai (food + checkboxes + contact). */
   try {
-    window.postMessage(payload, window.location.origin);
+    window.localStorage.setItem(HANDOFF_STORAGE_KEY_V2, JSON.stringify(payload));
+  } catch {
+    /* ignore — payload purane path se phir bhi jaata hai */
+  }
+  try {
+    /* postMessage me LEGACY shape hi (purana app sniffer unknown keys par poora payload reject kar deta hai). */
+    window.postMessage(legacyPayload, window.location.origin);
     posted = true;
   } catch {
     posted = false;
@@ -174,10 +264,10 @@ export function storeHandoff(payload: IrctcHandoffPayload): { stored: boolean; p
 }
 
 /** Read back what the last handoff left locally (read-only helper; used by tests/diagnostics). */
-export function readStoredHandoff(): IrctcHandoffPayload | null {
+export function readStoredHandoff(): IrctcHandoffPayloadV2 | IrctcHandoffPayload | null {
   try {
-    const raw = window.localStorage.getItem(HANDOFF_STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as IrctcHandoffPayload) : null;
+    const raw = window.localStorage.getItem(HANDOFF_STORAGE_KEY_V2) || window.localStorage.getItem(HANDOFF_STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as IrctcHandoffPayloadV2) : null;
   } catch {
     return null;
   }
@@ -187,6 +277,7 @@ export function readStoredHandoff(): IrctcHandoffPayload | null {
 export function clearStoredHandoff(): void {
   try {
     window.localStorage.removeItem(HANDOFF_STORAGE_KEY);
+    window.localStorage.removeItem(HANDOFF_STORAGE_KEY_V2);
   } catch {
     /* ignore */
   }
@@ -276,7 +367,7 @@ export function openIrctcHandoff(): IrctcOpenResult {
 }
 
 /** Human-readable card the user can copy into IRCTC (website-only path; no PII beyond journey pax names). */
-export function formatHandoffSummary(payload: IrctcHandoffPayload): string {
+export function formatHandoffSummary(payload: IrctcHandoffPayloadV2 | IrctcHandoffPayload): string {
   const j = payload.journey;
   const lines: string[] = [
     "RailBook → IRCTC handoff (copy/paste)",
@@ -292,9 +383,17 @@ export function formatHandoffSummary(payload: IrctcHandoffPayload): string {
   payload.passengers.forEach((p, i) => {
     lines.push(
       `  ${i + 1}. ${p.name} · age ${p.age} · ${p.gender} · berth ${p.berth || "No Preference"}` +
-        (p.food ? ` · food ${p.food}` : ""),
+        (p.food ? ` · food ${p.food}` : "") +
+        (p.bookOnlyIfConfirm ? " · book only if confirm berths" : "") +
+        (p.autoUpgrade ? " · consider for auto up-gradation" : ""),
     );
   });
+  const c = (payload as IrctcHandoffPayloadV2).contact;
+  if (c && (c.mobile || c.email)) {
+    lines.push("", "Contact (IRCTC me):");
+    if (c.mobile) lines.push(`  mobile: ${c.mobile}`);
+    if (c.email) lines.push(`  email:  ${c.email}`);
+  }
   lines.push(
     "",
     "Note: IRCTC me Search / Book / Login / Pay aap khud karenge.",
@@ -304,7 +403,7 @@ export function formatHandoffSummary(payload: IrctcHandoffPayload): string {
 }
 
 /** Clipboard helper — user gesture only. Returns false if clipboard API blocked. */
-export async function copyHandoffSummary(payload: IrctcHandoffPayload): Promise<boolean> {
+export async function copyHandoffSummary(payload: IrctcHandoffPayloadV2 | IrctcHandoffPayload): Promise<boolean> {
   const text = formatHandoffSummary(payload);
   try {
     if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {

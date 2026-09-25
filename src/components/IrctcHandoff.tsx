@@ -33,7 +33,7 @@ export function IrctcHandoff(props: HandoffInput) {
       setStatus(`Handoff abhi nahi bana sakte — ${res.errors[0]}`);
       return;
     }
-    const bridge = storeHandoff(res.payload);
+    const bridge = storeHandoff(res.payload, res.payloadLegacy);
     /* Open FIRST (sync, user-gesture) so popup blockers and unit tests see window.open immediately. */
     const open = openIrctcHandoff();
     void openIrctcInNewTab; /* legacy export kept available */
