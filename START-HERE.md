@@ -72,10 +72,16 @@ android-app/app/src/main/assets/autofill/
 - **Round-21:** IRCTC autofill me food + "Book only if confirm berths are allotted" + "Consider for auto up-gradation" + mobile/email. Naya **V2 payload** (`railbookAutofillPayloadV2`); purani key + `postMessage` me exact **V1 shape** (purane app/extension safe).
 - **Round-21b (latest):** catering ka **per-source sach** — `sources{erail,confirmtkt}`, `conflict`, `premiumCatering` (Rajdhani/Shatabda/Duronto/Vande Bharat/Tejas), `foodChoiceExpected`, `evidence[]`. Passenger form me **Food choice sirf saaf data par**; conflict par honest line, guess kabhi nahi. App panel batata hai jab IRCTC page par food option hi na ho.
 - **Round-21c:** chat section se **Seat Finder card hata** diya (component `SeatFinder.tsx`, `seatfinder.ts` filters, `server/agent/seatFinderTool.ts` + `seatFilter.ts`, AI seat intent — **sab intact**, sirf chat render se gaya).
-- **Round-22 (latest, 26 Sep):**
+- **Round-22 (26 Sep):**
   1. **Seat-answer padhne layak** — `ReplyText.tsx` ab **em-dash (—)** aur "… departure" wale text ko rows me todta hai + upar ek honest summary line (`💺 2 me seat (102, 42) · fare ₹150–₹180`) — sirf usi text ke numbers se.
   2. **Filters direct card ke shuru me** — naya shared `src/components/SeatFilterBar.tsx` (✅ Available · 🚆 Sabhi trains · Sab class · class chips · ❄️ AC · Time · ⚡ Sabse jaldi · 💰 Sabse sasta); SeatFinder card + JourneyOptions dono wahi ek component use karte hain. Filter **sirf direct list** par (connecting/alternatives untouched); class filter par block me sirf wahi class chip; "Sabse sasta" filtered class ke fare par.
   3. **IRCTC overlay simple** — Android app me sirf **"Redirecting to IRCTC…" + 45s countdown** (pehle 30s + extra 30s phase tha — ab ek hi 45s, uske baad seedha continue).
+
+- **Round-23 (latest, 26 Sep 2026):**
+  1. **Available me sirf AVL/RAC** — `JourneyOptions.tsx` me ✅ Available mode par rows ab sirf AVL/RAC class chips dikhate hain; WL/N-A chips hidden, aur jis train me ek bhi AVL/RAC nahi wo list se hat jaati hai (jaise 11058 jaise trains WL-only gap wale). 🚆 Sabhi trains par sab kuch waise hi (saari classes, WL/N-A halki) — koi fake row nahi.
+  2. **Review page ab sirf "Continue to IRCTC"** — `src/views/ReviewStatus.tsx` ke `FareReview` se booking summary, wallet box, "Nothing is confirmed…" note aur neeche ka sticky **Confirm Booking** hataye. `IrctcHandoff.tsx` se **Copy journey + passenger summary** button, copy-ready summary block aur payload preview hate. Continue click par journey+passenger summary **clipboard me best-effort copy** hoti hai (UI me nahi dikhti); honest note rehti hai — "Kuch bhi auto-submit nahi hota · login / OTP / CAPTCHA / payment RailBook ke paas nahi aate". RailBook ka apna booking flow (Passengers → IRCTC handoff jaisa) untouched.
+  3. **App header ab asli version** — `MainActivity.appVersionLabel()` `versionName (versionCode)` dikhata hai (pehle `strings.xml` me hardcoded `v1.2.8` tha, isliye device par purana build chalne ka confusion hota tha). New debug ke liye: header padho → `v1.4.7 (30)` = latest.
+  4. Tests: naya `tests/round23-avail-chips-and-review.test.tsx` (3) + `tests/irctc-handoff.test.tsx` update; full suite **102 files / 1021 PASS**.
 
 ### Standing rules (inhe todna nahi)
 
@@ -89,15 +95,17 @@ android-app/app/src/main/assets/autofill/
 
 | cheez | value |
 |---|---|
-| vitest | **101 files / 1018 tests PASS** (~120-175 s) |
+| vitest | **102 files / 1021 tests PASS** (~120-175 s) |
 | server tsc | clean |
 | client tsc | 67 errors (purane, baseline — koi naya nahi) |
-| live commit | `75c474b` |
-| APK | v1.4.6 `RailBook-v1.4.6-release.apk` (versionCode 29) sha256 `23f9f050…f11068` |
+| live commit | `fa7130d` (Round-23) |
+| preview | `RailBook-round23-2026-09-26.html` |
+| APK | v1.4.7 `RailBook-v1.4.7-release.apk` (versionCode 30 "1.4.7-version-label-avail-clean") sha256 `bd347c5e…c43d37` |
 
 ### Chhote gotchas
 
 - Bash tool: `command` aur `cwd` **alag fields** me do (ek me poora nahi).
 - Patch karne se pehle `grep -n` se current text lo; patch ke baad turant syntax check (`node -e "new vm.Script(...)"` JS ke liye).
 - vitest background me `cwd=/home/user` se mat chalao — repo root se chalao.
+- **App header = install proof:** "Redirecting to IRCTC…" ke saath **45s** + koi step line nahi dikhe to build current hai; 30s ya steps dikhe to purana APK — naya install karo (v1.4.7).
 - Preview me external CSS/JS load nahi hota (sandboxed iframe) — sab inline rakho.
