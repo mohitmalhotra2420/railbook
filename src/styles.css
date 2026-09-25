@@ -2256,6 +2256,11 @@ table.traintable {
 .pax-trip-src { font-size: 11px; margin-top: 5px; }
 .pax-catering { border: 1px solid #f0d8b4; background: var(--amber-soft); color: #7a5210; border-radius: 12px; padding: 9px 11px; font-size: 12.5px; margin-bottom: 12px; }
 .pax-catering.no { border-color: var(--line); background: #fbf9f5; color: var(--muted); }
+/* Round-21b: catering saaf taur par hai (premium ya dono sources ek hi baat) → hara. */
+.pax-catering.yes { border-color: #b7e2c8; background: #eef9f2; color: #12603f; }
+/* Round-21b: sources conflict (erail vs confirmtkt) — honest line, Food choice tabhi dikhta hai jab data saaf ho. */
+.pax-catering.warn { border-color: #f0d8b4; background: var(--amber-soft); }
+.pax-catering-ev { margin-top: 4px; font-size: 11.5px; line-height: 1.45; }
 .pax-check { display: flex; gap: 9px; align-items: flex-start; margin-top: 9px; font-size: 12.5px; line-height: 1.35; }
 .pax-check input { margin-top: 2px; width: 16px; height: 16px; }
 .pax-skip { font-size: 11.5px; margin-top: 9px; }

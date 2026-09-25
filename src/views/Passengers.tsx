@@ -53,7 +53,20 @@ function fieldClass(filled: boolean): string {
   return filled ? "done" : "need";
 }
 
-type Pantry = { pantry: boolean | null; providers: string[]; note: string | null };
+/* Round-21b (25 Sep, user: "kuch bhi fake mat rakho — jis train me food choice hai hi nahi to kyu dikha rahe"):
+ * pehle hum sirf merged `pantry` dekh kar Food choice dikha dete the; 12716/12926 par erail "available"
+ * kehta tha jabki confirmtkt false — aur IRCTC ke booking page par wo option hi nahi aata. Ab:
+ *   • foodChoiceExpected === true → tabhi Food choice dropdown (server ka honest gate)
+ *   • conflict / "nahi hai" → dropdown nahi, neeche honest line (sources ke saath) */
+type Pantry = {
+  pantry: boolean | null;
+  providers: string[];
+  note: string | null;
+  conflict?: boolean;
+  premiumCatering?: boolean;
+  foodChoiceExpected?: boolean;
+  evidence?: string[];
+};
 
 export function Passengers() {
   const {
@@ -185,15 +198,23 @@ export function Passengers() {
           </section>
         )}
 
-        {/* ── Catering (IRCTC jaisa food choice) — sirf jab train me pantry ho. Data real. ── */}
+        {/* ── Catering (IRCTC jaisa food choice) — sirf REAL + saaf data par. Jo provider kehta hai wahi. ── */}
         {pantry && (
-          <div className={`pax-catering ${pantry.pantry ? "yes" : "no"}`}>
-            {pantry.pantry === true
-              ? `🍽️ Is train me catering/pantry hai — har passenger ke khaane ka option neeche hai.`
-              : pantry.pantry === false
-                ? `🍽️ Is train me pantry nahi hai — khaana IRCTC eCatering (ecatering.irctc.co.in) se en-route station par order kar sakte ho.`
-                : `🍽️ Catering info provider se nahi aayi — IRCTC booking par check kar lo.`}
+          <div className={`pax-catering ${pantry.foodChoiceExpected ? "yes" : pantry.conflict ? "warn" : "no"}`}>
+            {pantry.foodChoiceExpected
+              ? `🍽️ Is train me catering hai — har passenger ke khaane ka option neeche hai (IRCTC "Food choice" me wahi jaayega).`
+              : pantry.conflict
+                ? `⚠️ Catering data me sources aapas me alag hain — isliye RailBook yahan Food choice nahi dikha raha (guess nahi karte).`
+                : pantry.pantry === false
+                  ? `🍽️ Is train me pantry/catering nahi mili — khaana IRCTC eCatering (ecatering.irctc.co.in) se en-route station par order kar sakte ho.`
+                  : `🍽️ Catering info provider se nahi aayi — IRCTC booking page par jo dikhe wahi final.`}
             {pantry.providers.length > 0 && <span className="muted"> · {pantry.providers.join("+")}</span>}
+            {!!pantry.evidence?.length && (
+              <div className="pax-catering-ev muted">{pantry.evidence.join(" · ")}</div>
+            )}
+            {!pantry.foodChoiceExpected && pantry.pantry !== false && !pantry.conflict && (
+              <div className="pax-catering-ev muted">IRCTC booking page par food option dikhe to wahan se chun lena — hum sirf wahi autofill karte hain jo IRCTC me hota hai.</div>
+            )}
           </div>
         )}
 
@@ -277,8 +298,8 @@ export function Passengers() {
                   </div>
                   {err.berthPreference && <div className="err-msg">{err.berthPreference}</div>}
                 </div>
-                {/* IRCTC food choice — sirf jab train me pantry ho (real data). */}
-                {pantry?.pantry === true && (
+                {/* IRCTC food choice — sirf jab catering ka REAL + saaf signal ho (warna IRCTC me bhi nahi hota). */}
+                {pantry?.foodChoiceExpected === true && (
                   <div className="field">
                     <label htmlFor={`food-${p.id}`}>Food choice</label>
                     <div className="control">

@@ -38,6 +38,8 @@ const train: TrainResult = {
   classes: [{ code: "CC", label: "AC Chair Car", status: "AVAILABLE", seats: 410, fare: 490, source: "web_confirmtkt" }],
 };
 
+/* Round-21b: server ab per-source sach bhejta hai aur food choice sirf `foodChoiceExpected` par
+ * dikhta hai (user: "kuch bhi fake mat rakho"). Purane boolean fixture ki jagah asli payload shape. */
 function stubApi(pantry: boolean | null) {
   (globalThis as unknown as { fetch: unknown }).fetch = vi.fn(async (url: string) => {
     const u = String(url);
@@ -45,8 +47,13 @@ function stubApi(pantry: boolean | null) {
       ? {
           trainNumber: "12014",
           pantry,
-          providers: pantry == null ? [] : ["erail"],
-          note: pantry == null ? "pantry info provider se nahi aayi" : null,
+          sources: { erail: pantry === true, confirmtkt: pantry === true },
+          conflict: false,
+          premiumCatering: pantry === true,
+          foodChoiceExpected: pantry === true,
+          evidence: pantry === true ? ["Shatabdi — catering fare me included"] : ["erail (IR timetable): pantry not available"],
+          providers: pantry == null ? [] : ["web_erail"],
+          note: pantry === true ? null : pantry == null ? "catering info provider se nahi aayi" : "is train me pantry/catering nahi mili",
         }
       : u.includes("/api/meta")
         ? { provider: { id: "test", name: "Test", mock: false }, serviceFee: 50 }
@@ -131,7 +138,7 @@ describe("Round-20 · IRCTC jaisa passenger form", () => {
     expect(container.textContent).not.toMatch(/insurance premium|travel insurance|UPI|net banking/i);
   });
 
-  it("catering: pantry ho to food choice IRCTC jaisa, warna field nahi", async () => {
+  it("catering: real+saaf signal par food choice IRCTC jaisa, warna field nahi (Round-21b gate)", async () => {
     const { container, unmount } = render(
       <BookingProvider>
         <Passengers />
@@ -140,7 +147,7 @@ describe("Round-20 · IRCTC jaisa passenger form", () => {
     await waitFor(() => expect(screen.getByLabelText(/Food choice/i)).toBeTruthy());
     const food = screen.getByLabelText(/Food choice/i) as HTMLSelectElement;
     expect([...food.options].map((o) => o.textContent)).toEqual(["Select", "Veg meal", "Non-veg meal", "No food (mujhe nahi chahiye)"]);
-    expect(container.querySelector(".pax-catering")?.textContent).toMatch(/pantry hai/i);
+    expect(container.querySelector(".pax-catering")?.textContent).toMatch(/catering hai/i);
     unmount();
 
     /* pantry false → khaana field nahi, aur honest note (kuch invent nahi) */
@@ -151,7 +158,7 @@ describe("Round-20 · IRCTC jaisa passenger form", () => {
       </BookingProvider>,
     );
     await waitFor(() => expect(c2.querySelector(".pax-catering")).toBeTruthy());
-    await waitFor(() => expect(String(c2.querySelector(".pax-catering")?.textContent)).toMatch(/pantry nahi hai/i));
+    await waitFor(() => expect(String(c2.querySelector(".pax-catering")?.textContent)).toMatch(/pantry\/catering nahi mili/i));
     expect(c2.querySelector("#food-p1")).toBeNull();
   });
 

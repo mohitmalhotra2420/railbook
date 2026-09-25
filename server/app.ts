@@ -927,11 +927,52 @@ export function createApp() {
         return;
       }
       const facts = await scrapeTrainFactsWeb(number).catch(() => null);
+
+      /* ── Round-21b (25 Sep, user: "jo real provider se aa raha hai wahi dikhao, kuch bhi fake nahi") ──
+       * Pehle hum erail ka `pantry` hi seedha UI ko de dete the — aur 12716/12926 jaise trains par
+       * RailBook ka "Food choice" dikh raha tha jabki IRCTC ke us booking page par wo option hi nahi hota.
+       * Ab do cheezein alag-alag aur bina milaawat ke bheji jaati hain:
+       *   sources.erail / sources.confirmtkt — dono ka apna jawaab (null = us source ne kuch nahi kaha)
+       *   conflict — dono alag-alag keh rahe hain (guess nahi karenge, honest note denge)
+       *   premiumCatering — Rajdhani/Shatabdi/Duronto/Vande Bharat/Tejas: in me catering fare me shamil
+       *     hoti hai (erail ka "pantry car" field in par meaningless hai, isliye ye strong signal hai)
+       *   foodChoiceExpected — sirf yahi par passenger form me Food choice dikhta hai (IRCTC jaisa),
+       *     warna honest line. Koi naya source/logic nahi — wahi maujooda scrapeTrainFactsWeb. */
+      const src = facts?.pantrySources ?? { erail: null, confirmtkt: null };
+      const positives = [src.erail === true, src.confirmtkt === true].filter(Boolean).length;
+      const negatives = [src.erail === false, src.confirmtkt === false].filter(Boolean).length;
+      const conflict = positives > 0 && negatives > 0;
+      const hay = `${facts?.trainType ?? ""} ${facts?.trainName ?? ""}`.replace(/jan\s*shatabdi/gi, " ");
+      const premiumCatering = /rajdhani|shatabdi|duronto|vande\s*bharat|tejas/i.test(hay);
+      /* Premium par catering fare me included hoti hai (erail ka pantry-car field uske against nahi);
+       * baaki trains par dono sources ka ek hi jawaab chahiye — warna kuch nahi dikhate. */
+      const foodChoiceExpected = premiumCatering || (positives > 0 && !conflict);
+
+      const evidence: string[] = [];
+      if (premiumCatering) evidence.push(`${facts?.trainType ?? facts?.trainName ?? "premium train"} — catering fare me included`);
+      if (src.erail != null) evidence.push(`erail (IR timetable): pantry ${src.erail ? "available" : "not available"}`);
+      if (src.confirmtkt != null) evidence.push(`confirmtkt: HasPantry ${src.confirmtkt ? "true" : "false"}`);
+
+      const note = foodChoiceExpected
+        ? null
+        : conflict
+          ? `catering data me sources alag-alag hain (${evidence.join(" · ")}) — isliye RailBook khud koi Food choice nahi dikhata; IRCTC booking page par jo dikhe wahi final`
+          : negatives > 0
+            ? `is train me pantry/catering nahi mili (${evidence.join(" · ")})`
+            : "catering info provider se nahi aayi";
+
       res.json({
         trainNumber: number,
+        trainName: facts?.trainName ?? null,
+        trainType: facts?.trainType ?? null,
         pantry: facts?.pantry ?? null,
+        sources: src,
+        conflict,
+        premiumCatering,
+        foodChoiceExpected,
+        evidence,
         providers: facts?.providers ?? [],
-        note: facts?.pantry == null ? "pantry info provider se nahi aayi" : null,
+        note,
       });
     } catch (err) {
       next(err);

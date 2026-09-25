@@ -11,9 +11,8 @@ import { addDays, availabilityLabel, formatShortDate, inr, newId, todayYmd } fro
 import { BERTH_BY_CLASS, CLASS_LABELS, isBookable, type ClassAvailability, type ClassCode, type Passenger, type Station, type TrainResult } from "../types";
 import type { AgentTrainTable } from "../ai/agent";
 import { JourneyOptions } from "../components/JourneyOptions";
-import { SeatFinder } from "../components/SeatFinder";
 import { bookingFromChipPayload, bookingFromSeatRow, stationOf } from "../booking/fromOption";
-import { detectSeatIntent, type BoardTrainRow, type SeatIntent, type SeatRow, type SeatSearchRow } from "../seatfinder";
+import { detectSeatIntent, type SeatIntent, type SeatRow } from "../seatfinder";
 import { VoiceSheet, type VoiceSuggestion } from "../components/VoiceSheet";
 import { AlternativesCard } from "../components/AlternativesCard";
 import { TrainPicker } from "../components/TrainPicker";
@@ -1898,23 +1897,9 @@ function BlockView({
 }) {
   const { updatePassenger } = useBooking();
   if (block.type === "traintable") {
-    return (
-      <TrainTableView
-        table={block.table}
-        seatFinder={
-          seatFinder
-            ? {
-                intent: seatFinder.intent,
-                viaVoice: seatFinder.viaVoice,
-                onChip,
-                onBook: onBookSeat
-                  ? (r: SeatRow) => onBookSeat(r, { from: block.table.from, to: block.table.to, date: block.table.date })
-                  : undefined,
-              }
-            : undefined
-        }
-      />
-    );
+    /* Round-21c: chat se Seat Finder card hata (user: "seat finder aur direct trains ab same hi hain").
+     * Train list table jaisa tha waisa hi rehta hai. */
+    return <TrainTableView table={block.table} />;
   }
   if (block.type === "choice") {
     return <ChoiceDropdown choice={block.choice} onPick={(value) => onChip(block.choice.sendTemplate.replace("{value}", value))} />;
@@ -1937,46 +1922,12 @@ function BlockView({
     );
   }
   if (block.type === "journey") {
-    /* 24 Sep 2026 (user: "Seat Finder plan card par bhi lage, aur hamesha dikhe"): plan ke
-     * direct trains se hi Seat Finder ke rows bante hain — server/AI/API ko chhua nahi. */
-    const planRows: SeatSearchRow[] = [];
-    /* Round-19 (user screenshot: card me 11078/12926 ki AVL classes dikh rahi thi par Seat Finder ki
-     * "Available" list me nahi — kyunki Seat Finder sirf route board dekhta tha, jo kai class WL/N-A
-     * bata deta hai jabki per-train board par wahi seat AVAILABLE hai). Ab card ke apne per-train
-     * class rows (classOptions) bhi Seat Finder ko diye jaate hain — bilkul wahi data jo card dikhata
-     * hai. Sirf maujooda plan payload se, koi naya call/endpoint nahi. */
-    const cardBoard: BoardTrainRow[] = [];
-    const seenPlanTrains = new Set<string>();
-    for (const o of block.plan.routeOptions ?? []) {
-      if (o.changes !== 0) continue;
-      const tn = String(o.trainNumbers?.[0] ?? "");
-      if (!tn || seenPlanTrains.has(tn)) continue;
-      seenPlanTrains.add(tn);
-      planRows.push({
-        number: tn,
-        name: String(o.trainNames?.[0] ?? ""),
-        departure: o.departure ?? null,
-        arrival: o.arrival ?? null,
-        durationLabel: o.durationLabel ?? null,
-        arrivalDayOffset: o.arrivalDayOffset ?? null,
-      });
-      const rowsOfTrain = (o.classOptions?.length ? o.classOptions : o.availability ? [o.availability] : [])
-        .filter((c) => c?.classCode && String(c.status ?? "").toUpperCase() !== "UNKNOWN")
-        .map((c) => ({
-          classCode: String(c.classCode).toUpperCase(),
-          status: String(c.status).toUpperCase(),
-          seats: c.seats ?? null,
-          rac: c.rac ?? null,
-          waitlist: c.waitlist ?? null,
-          fare: c.fare ?? null,
-          source: c.source ?? null,
-        }));
-      if (rowsOfTrain.length) {
-        cardBoard.push({ trainNumber: tn, trainName: String(o.trainNames?.[0] ?? ""), classes: rowsOfTrain });
-      }
-    }
+    /* Round-21c (25 Sep, user: "seat finder aur direct trains ab same hi hain — seat finder ka UI
+     * sirf chat section se hata do"): plan card ke chips pehle se hi wahi shakal hain (shared
+     * TrainClassBlock), isliye alag Seat Finder card chat me nahi dikhaya jaata. Component
+     * (SeatFinder.tsx), filters (src/seatfinder/*) aur AI/server ka seat intent — sab jaisa tha
+     * waisa hi hai; sirf chat se ye ek card hata hai. */
     return (
-      <>
       <JourneyOptions
         plan={block.plan}
         onPickTrain={(n) => onChip(`${n} ki seat availability ${block.plan.query.travelClass ? block.plan.query.travelClass + " " : ""}${block.plan.query.date} ko ${block.plan.query.from} se ${block.plan.query.to}`)}
@@ -2010,33 +1961,6 @@ function BlockView({
             : null
         }
       />
-      {seatFinder && planRows.length > 0 && (
-        <SeatFinder
-          from={block.plan.query.from}
-          to={block.plan.query.to}
-          date={block.plan.query.date}
-          rows={planRows}
-          cardBoard={cardBoard}
-          intent={seatFinder.intent}
-          speak={seatFinder.viaVoice}
-          onChip={onChip}
-          onBook={
-            onBookSeat
-              ? (r) => {
-                  /* Us train ka asli option mila to station ka naam bhi — warna code (kuch invent nahi). */
-                  const opt = (block.plan.routeOptions ?? []).find((o) => o.trainNumbers?.includes(r.number));
-                  onBookSeat(r, {
-                    from: block.plan.query.from,
-                    to: block.plan.query.to,
-                    toName: opt?.legs?.[0]?.toName ?? null,
-                    date: block.plan.query.date,
-                  });
-                }
-              : undefined
-          }
-        />
-      )}
-      </>
     );
   }
   if (block.type === "chips") {
@@ -2313,13 +2237,10 @@ function TrainMini({
  * Chat-text bullet list confusing thi — ab search results proper <table>
  * mein aate hain: train, nikalne/pahunchne ka time, duration, classes.
  * Sabse fast row ⚡ ke saath highlight. Data 100% server tool evidence se. */
-function TrainTableView({
-  table,
-  seatFinder,
-}: {
-  table: AgentTrainTable;
-  seatFinder?: { intent: SeatIntent; viaVoice: boolean; onChip: (text: string) => void; onBook?: (r: SeatRow) => void };
-}) {
+/* Round-21c: yahan pehle Seat Finder card bhi mount hota tha — user ne kaha ki direct trains aur
+ * Seat Finder ki UI ab same hai, isliye chat se wo card hata diya (component/AI/backend jaisa tha
+ * waisa hi hai). */
+function TrainTableView({ table }: { table: AgentTrainTable }) {
   const rows = table.rows ?? [];
   const day = (n: number) => (n > 0 ? `+${n}d` : "");
   return (
@@ -2364,18 +2285,6 @@ function TrainTableView({
         </table>
       </div>
       <div className="traintable-foot muted">Real railway data · koi guess nahi</div>
-      {seatFinder && (
-        <SeatFinder
-          from={table.from}
-          to={table.to}
-          date={table.date}
-          rows={rows}
-          intent={seatFinder.intent}
-          speak={seatFinder.viaVoice}
-          onChip={seatFinder.onChip}
-          onBook={seatFinder.onBook}
-        />
-      )}
     </div>
   );
 }

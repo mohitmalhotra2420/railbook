@@ -1,0 +1,1527 @@
+{
+  "provenance": {
+    "retrievedAt": "2026-09-25T07:12:23.529Z",
+    "requestDate": "2026-09-25",
+    "travelDate": "2026-09-26",
+    "freshness": "fresh",
+    "sourceTypes": [
+      "web_scrape"
+    ]
+  },
+  "query": {
+    "from": "ASR",
+    "to": "NDLS",
+    "date": "2026-09-26",
+    "travelClass": null,
+    "preference": "best_overall",
+    "passengers": null
+  },
+  "best": {
+    "rank": 1,
+    "category": "best_overall",
+    "badges": [
+      "best_overall",
+      "fastest",
+      "direct"
+    ],
+    "trainNumbers": [
+      "12030"
+    ],
+    "trainNames": [
+      "SWARN SHATABDI"
+    ],
+    "origin": "ASR",
+    "destination": "NDLS",
+    "departure": "16:50",
+    "arrival": "22:50",
+    "arrivalDayOffset": 0,
+    "durationMinutes": 360,
+    "durationLabel": "6h",
+    "changes": 0,
+    "legs": [
+      {
+        "trainNumber": "12030",
+        "trainName": "SWARN SHATABDI",
+        "from": "ASR",
+        "to": "NDLS",
+        "fromName": "Amritsar Jn",
+        "toName": "New Delhi",
+        "departure": "16:50",
+        "arrival": "22:50",
+        "arrivalDayOffset": 0,
+        "durationMinutes": 360,
+        "classes": [
+          "CC",
+          "EC"
+        ]
+      }
+    ],
+    "layoverMinutes": null,
+    "classes": [
+      "CC",
+      "EC"
+    ],
+    "availability": {
+      "asOf": "2026-09-25T07:12:05.000Z",
+      "classCode": "CC",
+      "status": "AVAILABLE",
+      "seats": 17,
+      "rac": null,
+      "waitlist": null,
+      "fare": 1000,
+      "source": "web_railyatri"
+    },
+    "classOptions": [
+      {
+        "asOf": "2026-09-25T07:12:05.000Z",
+        "classCode": "CC",
+        "status": "AVAILABLE",
+        "seats": 17,
+        "rac": null,
+        "waitlist": null,
+        "fare": 1000,
+        "source": "web_railyatri"
+      },
+      {
+        "asOf": "2026-09-25T07:12:11.000Z",
+        "classCode": "EC",
+        "status": "WAITLIST",
+        "seats": null,
+        "rac": null,
+        "waitlist": 6,
+        "fare": 1560,
+        "source": "web_railyatri"
+      }
+    ],
+    "probed": true,
+    "reliability": null,
+    "source": "web_erail",
+    "why": "sabse kam duration (6h), direct, koi change nahi"
+  },
+  "routeOptions": [
+    {
+      "rank": 1,
+      "category": "best_overall",
+      "badges": [
+        "best_overall",
+        "fastest",
+        "direct"
+      ],
+      "trainNumbers": [
+        "12030"
+      ],
+      "trainNames": [
+        "SWARN SHATABDI"
+      ],
+      "origin": "ASR",
+      "destination": "NDLS",
+      "departure": "16:50",
+      "arrival": "22:50",
+      "arrivalDayOffset": 0,
+      "durationMinutes": 360,
+      "durationLabel": "6h",
+      "changes": 0,
+      "legs": [
+        {
+          "trainNumber": "12030",
+          "trainName": "SWARN SHATABDI",
+          "from": "ASR",
+          "to": "NDLS",
+          "fromName": "Amritsar Jn",
+          "toName": "New Delhi",
+          "departure": "16:50",
+          "arrival": "22:50",
+          "arrivalDayOffset": 0,
+          "durationMinutes": 360,
+          "classes": [
+            "CC",
+            "EC"
+          ]
+        }
+      ],
+      "layoverMinutes": null,
+      "classes": [
+        "CC",
+        "EC"
+      ],
+      "availability": {
+        "asOf": "2026-09-25T07:12:05.000Z",
+        "classCode": "CC",
+        "status": "AVAILABLE",
+        "seats": 17,
+        "rac": null,
+        "waitlist": null,
+        "fare": 1000,
+        "source": "web_railyatri"
+      },
+      "classOptions": [
+        {
+          "asOf": "2026-09-25T07:12:05.000Z",
+          "classCode": "CC",
+          "status": "AVAILABLE",
+          "seats": 17,
+          "rac": null,
+          "waitlist": null,
+          "fare": 1000,
+          "source": "web_railyatri"
+        },
+        {
+          "asOf": "2026-09-25T07:12:11.000Z",
+          "classCode": "EC",
+          "status": "WAITLIST",
+          "seats": null,
+          "rac": null,
+          "waitlist": 6,
+          "fare": 1560,
+          "source": "web_railyatri"
+        }
+      ],
+      "probed": true,
+      "reliability": null,
+      "source": "web_erail",
+      "why": "sabse kam duration (6h), direct, koi change nahi"
+    },
+    {
+      "rank": 2,
+      "category": "best_availability",
+      "badges": [
+        "best_availability",
+        "earliest"
+      ],
+      "trainNumbers": [
+        "12014"
+      ],
+      "trainNames": [
+        "AMRITSAR SHTABDI"
+      ],
+      "origin": "ASR",
+      "destination": "NDLS",
+      "departure": "04:55",
+      "arrival": "11:02",
+      "arrivalDayOffset": 0,
+      "durationMinutes": 367,
+      "durationLabel": "6h 07m",
+      "changes": 0,
+      "legs": [
+        {
+          "trainNumber": "12014",
+          "trainName": "AMRITSAR SHTABDI",
+          "from": "ASR",
+          "to": "NDLS",
+          "fromName": "Amritsar Jn",
+          "toName": "New Delhi",
+          "departure": "04:55",
+          "arrival": "11:02",
+          "arrivalDayOffset": 0,
+          "durationMinutes": 367,
+          "classes": [
+            "CC",
+            "EC"
+          ]
+        }
+      ],
+      "layoverMinutes": null,
+      "classes": [
+        "CC",
+        "EC"
+      ],
+      "availability": {
+        "asOf": "2026-09-25T07:12:05.000Z",
+        "classCode": "CC",
+        "status": "AVAILABLE",
+        "seats": 182,
+        "rac": null,
+        "waitlist": null,
+        "fare": 1000,
+        "source": "web_railyatri"
+      },
+      "classOptions": [
+        {
+          "asOf": "2026-09-25T07:12:05.000Z",
+          "classCode": "CC",
+          "status": "AVAILABLE",
+          "seats": 182,
+          "rac": null,
+          "waitlist": null,
+          "fare": 1000,
+          "source": "web_railyatri"
+        },
+        {
+          "asOf": "2026-09-25T07:12:11.000Z",
+          "classCode": "EC",
+          "status": "WAITLIST",
+          "seats": null,
+          "rac": null,
+          "waitlist": 2,
+          "fare": 1560,
+          "source": "web_railyatri"
+        }
+      ],
+      "probed": true,
+      "reliability": null,
+      "source": "web_erail",
+      "why": "CC AVAILABLE 182, sabse pehle departure 04:55"
+    },
+    {
+      "rank": 3,
+      "category": "direct",
+      "badges": [],
+      "trainNumbers": [
+        "12716"
+      ],
+      "trainNames": [
+        "SACHKHAND EXP"
+      ],
+      "origin": "ASR",
+      "destination": "NDLS",
+      "departure": "05:30",
+      "arrival": "12:45",
+      "arrivalDayOffset": 0,
+      "durationMinutes": 435,
+      "durationLabel": "7h 15m",
+      "changes": 0,
+      "legs": [
+        {
+          "trainNumber": "12716",
+          "trainName": "SACHKHAND EXP",
+          "from": "ASR",
+          "to": "NDLS",
+          "fromName": "Amritsar Jn",
+          "toName": "New Delhi",
+          "departure": "05:30",
+          "arrival": "12:45",
+          "arrivalDayOffset": 0,
+          "durationMinutes": 435,
+          "classes": [
+            "1A",
+            "2A",
+            "3A",
+            "SL"
+          ]
+        }
+      ],
+      "layoverMinutes": null,
+      "classes": [
+        "1A",
+        "2A",
+        "3A",
+        "SL"
+      ],
+      "availability": {
+        "asOf": "2026-09-25T07:12:11.000Z",
+        "classCode": "1A",
+        "status": "AVAILABLE",
+        "seats": 2,
+        "rac": null,
+        "waitlist": null,
+        "fare": 1830,
+        "source": "web_railyatri"
+      },
+      "classOptions": [
+        {
+          "asOf": "2026-09-25T07:12:11.000Z",
+          "classCode": "1A",
+          "status": "AVAILABLE",
+          "seats": 2,
+          "rac": null,
+          "waitlist": null,
+          "fare": 1830,
+          "source": "web_railyatri"
+        },
+        {
+          "asOf": "2026-09-25T07:12:05.000Z",
+          "classCode": "SL",
+          "status": "WAITLIST",
+          "seats": null,
+          "rac": null,
+          "waitlist": 111,
+          "fare": 315,
+          "source": "web_railyatri"
+        },
+        {
+          "asOf": "2026-09-25T07:12:11.000Z",
+          "classCode": "3A",
+          "status": "WAITLIST",
+          "seats": null,
+          "rac": null,
+          "waitlist": 34,
+          "fare": 795,
+          "source": "web_railyatri"
+        },
+        {
+          "asOf": "2026-09-25T07:12:11.000Z",
+          "classCode": "2A",
+          "status": "WAITLIST",
+          "seats": null,
+          "rac": null,
+          "waitlist": 9,
+          "fare": 1100,
+          "source": "web_railyatri"
+        }
+      ],
+      "probed": true,
+      "reliability": null,
+      "source": "web_erail",
+      "why": "direct train",
+      "earlierStopOptions": [
+        {
+          "classOptions": [
+            {
+              "asOf": "2026-09-25T07:12:22.000Z",
+              "classCode": "3A",
+              "status": "WAITLIST",
+              "seats": null,
+              "rac": null,
+              "waitlist": 14,
+              "fare": 2185,
+              "source": "web_railyatri",
+              "betterWl": true,
+              "directWaitlist": 34
+            },
+            {
+              "asOf": "2026-09-25T07:12:22.000Z",
+              "classCode": "SL",
+              "status": "WAITLIST",
+              "seats": null,
+              "rac": null,
+              "waitlist": 27,
+              "fare": 865,
+              "source": "web_railyatri",
+              "betterWl": true,
+              "directWaitlist": 111
+            }
+          ],
+          "durationMinutes": 435,
+          "trainNumber": "12716",
+          "trainName": "SACHKHAND EXP",
+          "bookFrom": "ASR",
+          "bookFromName": "Amritsar Jn",
+          "bookFromDeparture": "05:30",
+          "boardAt": "ASR",
+          "boardAtName": "Amritsar Jn",
+          "boardAtDeparture": "05:30",
+          "destination": "NDLS",
+          "destinationName": "New Delhi",
+          "arrival": "12:45",
+          "arrivalDayOffset": 0,
+          "availability": {
+            "asOf": "2026-09-25T07:12:22.000Z",
+            "classCode": "3A",
+            "status": "WAITLIST",
+            "seats": null,
+            "rac": null,
+            "waitlist": 14,
+            "fare": 2185,
+            "source": "web_railyatri",
+            "betterWl": true,
+            "directWaitlist": 34
+          },
+          "directStatus": "AVAILABLE",
+          "stopsBefore": 0,
+          "source": "web_railyatri",
+          "bookUpto": "NED",
+          "bookUptoName": "H Sahib Nanded",
+          "bookUptoArrival": "14:35",
+          "stopsAfter": 4
+        }
+      ]
+    },
+    {
+      "rank": 4,
+      "category": "direct",
+      "badges": [],
+      "trainNumbers": [
+        "12926"
+      ],
+      "trainNames": [
+        "PASCHIM EXPRESS"
+      ],
+      "origin": "ASR",
+      "destination": "NDLS",
+      "departure": "07:20",
+      "arrival": "16:20",
+      "arrivalDayOffset": 0,
+      "durationMinutes": 540,
+      "durationLabel": "9h",
+      "changes": 0,
+      "legs": [
+        {
+          "trainNumber": "12926",
+          "trainName": "PASCHIM EXPRESS",
+          "from": "ASR",
+          "to": "NDLS",
+          "fromName": "Amritsar Jn",
+          "toName": "New Delhi",
+          "departure": "07:20",
+          "arrival": "16:20",
+          "arrivalDayOffset": 0,
+          "durationMinutes": 540,
+          "classes": [
+            "1A",
+            "2A",
+            "3A",
+            "SL"
+          ]
+        }
+      ],
+      "layoverMinutes": null,
+      "classes": [
+        "1A",
+        "2A",
+        "3A",
+        "SL"
+      ],
+      "availability": {
+        "asOf": "2026-09-25T07:12:12.000Z",
+        "classCode": "2A",
+        "status": "AVAILABLE",
+        "seats": 10,
+        "rac": null,
+        "waitlist": null,
+        "fare": 1270,
+        "source": "web_railyatri"
+      },
+      "classOptions": [
+        {
+          "asOf": "2026-09-25T07:12:12.000Z",
+          "classCode": "2A",
+          "status": "AVAILABLE",
+          "seats": 10,
+          "rac": null,
+          "waitlist": null,
+          "fare": 1270,
+          "source": "web_railyatri"
+        },
+        {
+          "asOf": "2026-09-25T07:12:12.000Z",
+          "classCode": "1A",
+          "status": "AVAILABLE",
+          "seats": 6,
+          "rac": null,
+          "waitlist": null,
+          "fare": 2095,
+          "source": "web_railyatri"
+        },
+        {
+          "asOf": "2026-09-25T07:12:06.000Z",
+          "classCode": "SL",
+          "status": "WAITLIST",
+          "seats": null,
+          "rac": null,
+          "waitlist": 66,
+          "fare": 360,
+          "source": "web_railyatri"
+        },
+        {
+          "asOf": "2026-09-25T07:12:12.000Z",
+          "classCode": "3A",
+          "status": "WAITLIST",
+          "seats": null,
+          "rac": null,
+          "waitlist": 18,
+          "fare": 915,
+          "source": "web_railyatri"
+        }
+      ],
+      "probed": true,
+      "reliability": null,
+      "source": "web_erail",
+      "why": "direct train",
+      "earlierStopOptions": [
+        {
+          "classOptions": [
+            {
+              "asOf": "2026-09-25T07:12:22.000Z",
+              "classCode": "3A",
+              "status": "WAITLIST",
+              "seats": null,
+              "rac": null,
+              "waitlist": 5,
+              "fare": 2060,
+              "source": "web_railyatri",
+              "betterWl": true,
+              "directWaitlist": 18
+            },
+            {
+              "asOf": "2026-09-25T07:12:22.000Z",
+              "classCode": "SL",
+              "status": "WAITLIST",
+              "seats": null,
+              "rac": null,
+              "waitlist": 21,
+              "fare": 815,
+              "source": "web_railyatri",
+              "betterWl": true,
+              "directWaitlist": 66
+            }
+          ],
+          "durationMinutes": 540,
+          "trainNumber": "12926",
+          "trainName": "PASCHIM EXPRESS",
+          "bookFrom": "ASR",
+          "bookFromName": "Amritsar Jn",
+          "bookFromDeparture": "07:20",
+          "boardAt": "ASR",
+          "boardAtName": "Amritsar Jn",
+          "boardAtDeparture": "07:20",
+          "destination": "NDLS",
+          "destinationName": "New Delhi",
+          "arrival": "16:20",
+          "arrivalDayOffset": 0,
+          "availability": {
+            "asOf": "2026-09-25T07:12:22.000Z",
+            "classCode": "3A",
+            "status": "WAITLIST",
+            "seats": null,
+            "rac": null,
+            "waitlist": 5,
+            "fare": 2060,
+            "source": "web_railyatri",
+            "betterWl": true,
+            "directWaitlist": 18
+          },
+          "directStatus": "AVAILABLE",
+          "stopsBefore": 0,
+          "source": "web_railyatri",
+          "bookUpto": "BDTS",
+          "bookUptoName": "Bandra Terminus",
+          "bookUptoArrival": "14:40",
+          "stopsAfter": 4
+        }
+      ]
+    },
+    {
+      "rank": 5,
+      "category": "direct",
+      "badges": [],
+      "trainNumbers": [
+        "11058"
+      ],
+      "trainNames": [
+        "ASR CSMT EXP"
+      ],
+      "origin": "ASR",
+      "destination": "NDLS",
+      "departure": "08:50",
+      "arrival": "20:25",
+      "arrivalDayOffset": 0,
+      "durationMinutes": 695,
+      "durationLabel": "11h 35m",
+      "changes": 0,
+      "legs": [
+        {
+          "trainNumber": "11058",
+          "trainName": "ASR CSMT EXP",
+          "from": "ASR",
+          "to": "NDLS",
+          "fromName": "Amritsar Jn",
+          "toName": "New Delhi",
+          "departure": "08:50",
+          "arrival": "20:25",
+          "arrivalDayOffset": 0,
+          "durationMinutes": 695,
+          "classes": [
+            "2A",
+            "3E",
+            "SL"
+          ]
+        }
+      ],
+      "layoverMinutes": null,
+      "classes": [
+        "2A",
+        "3E",
+        "SL"
+      ],
+      "availability": {
+        "asOf": "2026-09-25T07:12:12.000Z",
+        "classCode": "3E",
+        "status": "AVAILABLE",
+        "seats": 46,
+        "rac": null,
+        "waitlist": null,
+        "fare": 785,
+        "source": "web_railyatri"
+      },
+      "classOptions": [
+        {
+          "asOf": "2026-09-25T07:12:12.000Z",
+          "classCode": "3E",
+          "status": "AVAILABLE",
+          "seats": 46,
+          "rac": null,
+          "waitlist": null,
+          "fare": 785,
+          "source": "web_railyatri"
+        },
+        {
+          "asOf": "2026-09-25T07:12:12.000Z",
+          "classCode": "2A",
+          "status": "AVAILABLE",
+          "seats": 8,
+          "rac": null,
+          "waitlist": null,
+          "fare": 1210,
+          "source": "web_railyatri"
+        },
+        {
+          "asOf": "2026-09-25T07:12:06.000Z",
+          "classCode": "SL",
+          "status": "NOT_AVAILABLE",
+          "seats": 0,
+          "rac": null,
+          "waitlist": null,
+          "fare": null,
+          "source": "web_railyatri"
+        }
+      ],
+      "probed": true,
+      "reliability": null,
+      "source": "web_erail",
+      "why": "direct train"
+    },
+    {
+      "rank": 6,
+      "category": "cheapest",
+      "badges": [
+        "cheapest"
+      ],
+      "trainNumbers": [
+        "20808"
+      ],
+      "trainNames": [
+        "HIRAKUND EXP"
+      ],
+      "origin": "ASR",
+      "destination": "NDLS",
+      "departure": "23:55",
+      "arrival": "08:00",
+      "arrivalDayOffset": 1,
+      "durationMinutes": 485,
+      "durationLabel": "8h 05m",
+      "changes": 0,
+      "legs": [
+        {
+          "trainNumber": "20808",
+          "trainName": "HIRAKUND EXP",
+          "from": "ASR",
+          "to": "NDLS",
+          "fromName": "Amritsar Jn",
+          "toName": "New Delhi",
+          "departure": "23:55",
+          "arrival": "08:00",
+          "arrivalDayOffset": 1,
+          "durationMinutes": 485,
+          "classes": [
+            "2A",
+            "3A",
+            "3E",
+            "SL"
+          ]
+        }
+      ],
+      "layoverMinutes": null,
+      "classes": [
+        "2A",
+        "3A",
+        "3E",
+        "SL"
+      ],
+      "availability": {
+        "asOf": "2026-09-25T07:12:05.000Z",
+        "classCode": "SL",
+        "status": "WAITLIST",
+        "seats": null,
+        "rac": null,
+        "waitlist": 58,
+        "fare": 315,
+        "source": "web_railyatri"
+      },
+      "classOptions": [
+        {
+          "asOf": "2026-09-25T07:12:05.000Z",
+          "classCode": "SL",
+          "status": "WAITLIST",
+          "seats": null,
+          "rac": null,
+          "waitlist": 58,
+          "fare": 315,
+          "source": "web_railyatri"
+        },
+        {
+          "asOf": "2026-09-25T07:12:11.000Z",
+          "classCode": "3E",
+          "status": "WAITLIST",
+          "seats": null,
+          "rac": null,
+          "waitlist": 20,
+          "fare": 735,
+          "source": "web_railyatri"
+        },
+        {
+          "asOf": "2026-09-25T07:12:11.000Z",
+          "classCode": "3A",
+          "status": "WAITLIST",
+          "seats": null,
+          "rac": null,
+          "waitlist": 48,
+          "fare": 795,
+          "source": "web_railyatri"
+        },
+        {
+          "asOf": "2026-09-25T07:12:11.000Z",
+          "classCode": "2A",
+          "status": "WAITLIST",
+          "seats": null,
+          "rac": null,
+          "waitlist": 17,
+          "fare": 1100,
+          "source": "web_railyatri"
+        }
+      ],
+      "probed": true,
+      "reliability": null,
+      "source": "web_erail",
+      "why": "verified fare ₹315"
+    },
+    {
+      "rank": 7,
+      "category": "direct",
+      "badges": [],
+      "trainNumbers": [
+        "12498"
+      ],
+      "trainNames": [
+        "SHANE PUNJAB"
+      ],
+      "origin": "ASR",
+      "destination": "NDLS",
+      "departure": "15:10",
+      "arrival": "22:30",
+      "arrivalDayOffset": 0,
+      "durationMinutes": 440,
+      "durationLabel": "7h 20m",
+      "changes": 0,
+      "legs": [
+        {
+          "trainNumber": "12498",
+          "trainName": "SHANE PUNJAB",
+          "from": "ASR",
+          "to": "NDLS",
+          "fromName": "Amritsar Jn",
+          "toName": "New Delhi",
+          "departure": "15:10",
+          "arrival": "22:30",
+          "arrivalDayOffset": 0,
+          "durationMinutes": 440,
+          "classes": [
+            "2S",
+            "CC"
+          ]
+        }
+      ],
+      "layoverMinutes": null,
+      "classes": [
+        "2S",
+        "CC"
+      ],
+      "availability": null,
+      "classOptions": [],
+      "probed": false,
+      "reliability": null,
+      "source": "web_erail",
+      "why": "direct train"
+    }
+  ],
+  "connections": [],
+  "alternativeDates": [],
+  "directUnavailable": false,
+  "directStaleAvailable": false,
+  "recovery": {
+    "reason": "Kuch classes ASR se WL/N-A thi — usi train mein train-origin se / aage tak ticket par seat mili.",
+    "differentTrain": [],
+    "partialRoute": null,
+    "connecting": [],
+    "alternativeDates": [],
+    "alternateStations": [],
+    "boardFromEarlier": [
+      {
+        "classOptions": [
+          {
+            "asOf": "2026-09-25T07:12:22.000Z",
+            "classCode": "3A",
+            "status": "WAITLIST",
+            "seats": null,
+            "rac": null,
+            "waitlist": 14,
+            "fare": 2185,
+            "source": "web_railyatri",
+            "betterWl": true,
+            "directWaitlist": 34
+          },
+          {
+            "asOf": "2026-09-25T07:12:22.000Z",
+            "classCode": "SL",
+            "status": "WAITLIST",
+            "seats": null,
+            "rac": null,
+            "waitlist": 27,
+            "fare": 865,
+            "source": "web_railyatri",
+            "betterWl": true,
+            "directWaitlist": 111
+          }
+        ],
+        "durationMinutes": 435,
+        "trainNumber": "12716",
+        "trainName": "SACHKHAND EXP",
+        "bookFrom": "ASR",
+        "bookFromName": "Amritsar Jn",
+        "bookFromDeparture": "05:30",
+        "boardAt": "ASR",
+        "boardAtName": "Amritsar Jn",
+        "boardAtDeparture": "05:30",
+        "destination": "NDLS",
+        "destinationName": "New Delhi",
+        "arrival": "12:45",
+        "arrivalDayOffset": 0,
+        "availability": {
+          "asOf": "2026-09-25T07:12:22.000Z",
+          "classCode": "3A",
+          "status": "WAITLIST",
+          "seats": null,
+          "rac": null,
+          "waitlist": 14,
+          "fare": 2185,
+          "source": "web_railyatri",
+          "betterWl": true,
+          "directWaitlist": 34
+        },
+        "directStatus": "AVAILABLE",
+        "stopsBefore": 0,
+        "source": "web_railyatri",
+        "bookUpto": "NED",
+        "bookUptoName": "H Sahib Nanded",
+        "bookUptoArrival": "14:35",
+        "stopsAfter": 4
+      },
+      {
+        "classOptions": [
+          {
+            "asOf": "2026-09-25T07:12:22.000Z",
+            "classCode": "3A",
+            "status": "WAITLIST",
+            "seats": null,
+            "rac": null,
+            "waitlist": 5,
+            "fare": 2060,
+            "source": "web_railyatri",
+            "betterWl": true,
+            "directWaitlist": 18
+          },
+          {
+            "asOf": "2026-09-25T07:12:22.000Z",
+            "classCode": "SL",
+            "status": "WAITLIST",
+            "seats": null,
+            "rac": null,
+            "waitlist": 21,
+            "fare": 815,
+            "source": "web_railyatri",
+            "betterWl": true,
+            "directWaitlist": 66
+          }
+        ],
+        "durationMinutes": 540,
+        "trainNumber": "12926",
+        "trainName": "PASCHIM EXPRESS",
+        "bookFrom": "ASR",
+        "bookFromName": "Amritsar Jn",
+        "bookFromDeparture": "07:20",
+        "boardAt": "ASR",
+        "boardAtName": "Amritsar Jn",
+        "boardAtDeparture": "07:20",
+        "destination": "NDLS",
+        "destinationName": "New Delhi",
+        "arrival": "16:20",
+        "arrivalDayOffset": 0,
+        "availability": {
+          "asOf": "2026-09-25T07:12:22.000Z",
+          "classCode": "3A",
+          "status": "WAITLIST",
+          "seats": null,
+          "rac": null,
+          "waitlist": 5,
+          "fare": 2060,
+          "source": "web_railyatri",
+          "betterWl": true,
+          "directWaitlist": 18
+        },
+        "directStatus": "AVAILABLE",
+        "stopsBefore": 0,
+        "source": "web_railyatri",
+        "bookUpto": "BDTS",
+        "bookUptoName": "Bandra Terminus",
+        "bookUptoArrival": "14:40",
+        "stopsAfter": 4
+      }
+    ]
+  },
+  "sources": [
+    "web_erail",
+    "web_railyatri"
+  ],
+  "notes": [
+    "Book-upto scan: 6 trains × destination ke aage 3 stops tak (16 segments, har class) — ticket aage tak, utro NDLS par.",
+    "Class-wise scan: 6 direct trains ki WL/N-A classes ke liye train-origin→ASR ke stops (16 segments) check hue — passenger ASR par hi chadhta hai."
+  ],
+  "summary": "Best plan: 12030 SWARN SHATABDI 16:50→22:50, 6h (CC 17 seats open). Class-wise same-train options (jo ASR se WL/N-A thi): 12716: 3A WL 14, SL WL 27 — ticket ASR→NED (4 stop aage tak), board ASR, utro NDLS; 12926: 3A WL 5, SL WL 21 — ticket ASR→BDTS (4 stop aage tak), board ASR, utro NDLS.",
+  "legPlans": [],
+  "audit": {
+    "passengers": null,
+    "directTrains": 7,
+    "directProbed": 6,
+    "bfeTrains": 6,
+    "bfeStopsChecked": 16,
+    "connHubs": [],
+    "hubDecision": null,
+    "connLeg1Checked": 0,
+    "connLeg2Checked": 0
+  },
+  "whyPoints": [
+    "Direct train gives seat certainty for 2 logon ke liye, unlike 20808 which is WL 58 and 12716/12926 with WL 14/5.",
+    "Booking via IRCTC is simple, no extra layover or transfer, saving time and avoiding stale data issues.",
+    "Cheaper than 12716 3A WL ₹2185 or 12926 3A WL ₹2060, and faster than 12014 6h 7m.",
+    "Earlier scan shows 12030 has ample seats, so no need to hunt for alternate trains or risk RAC.",
+    "Direct train — koi change nahi, 6h."
+  ],
+  "whySource": "ai",
+  "decision": {
+    "source": "rules",
+    "model": null,
+    "recommendedId": "D:12030",
+    "recommended": {
+      "id": "D:12030",
+      "kind": "direct",
+      "trainNumbers": [
+        "12030"
+      ],
+      "label": "SWARN SHATABDI",
+      "departure": "16:50",
+      "arrival": "22:50",
+      "durationMinutes": 360,
+      "availability": {
+        "asOf": "2026-09-25T07:12:05.000Z",
+        "classCode": "CC",
+        "status": "AVAILABLE",
+        "seats": 17,
+        "rac": null,
+        "waitlist": null,
+        "fare": 1000,
+        "source": "web_railyatri"
+      },
+      "classOptions": [
+        {
+          "asOf": "2026-09-25T07:12:05.000Z",
+          "classCode": "CC",
+          "status": "AVAILABLE",
+          "seats": 17,
+          "rac": null,
+          "waitlist": null,
+          "fare": 1000,
+          "source": "web_railyatri"
+        },
+        {
+          "asOf": "2026-09-25T07:12:11.000Z",
+          "classCode": "EC",
+          "status": "WAITLIST",
+          "seats": null,
+          "rac": null,
+          "waitlist": 6,
+          "fare": 1560,
+          "source": "web_railyatri"
+        }
+      ],
+      "seatTier": "fresh",
+      "boardAt": "ASR"
+    },
+    "ranking": [
+      "D:12030",
+      "D:12014",
+      "D:12716",
+      "D:12926",
+      "D:11058"
+    ],
+    "candidates": [
+      {
+        "id": "D:12030",
+        "kind": "direct",
+        "trainNumbers": [
+          "12030"
+        ],
+        "label": "SWARN SHATABDI",
+        "departure": "16:50",
+        "arrival": "22:50",
+        "durationMinutes": 360,
+        "availability": {
+          "asOf": "2026-09-25T07:12:05.000Z",
+          "classCode": "CC",
+          "status": "AVAILABLE",
+          "seats": 17,
+          "rac": null,
+          "waitlist": null,
+          "fare": 1000,
+          "source": "web_railyatri"
+        },
+        "classOptions": [
+          {
+            "asOf": "2026-09-25T07:12:05.000Z",
+            "classCode": "CC",
+            "status": "AVAILABLE",
+            "seats": 17,
+            "rac": null,
+            "waitlist": null,
+            "fare": 1000,
+            "source": "web_railyatri"
+          },
+          {
+            "asOf": "2026-09-25T07:12:11.000Z",
+            "classCode": "EC",
+            "status": "WAITLIST",
+            "seats": null,
+            "rac": null,
+            "waitlist": 6,
+            "fare": 1560,
+            "source": "web_railyatri"
+          }
+        ],
+        "seatTier": "fresh",
+        "boardAt": "ASR"
+      },
+      {
+        "id": "D:12014",
+        "kind": "direct",
+        "trainNumbers": [
+          "12014"
+        ],
+        "label": "AMRITSAR SHTABDI",
+        "departure": "04:55",
+        "arrival": "11:02",
+        "durationMinutes": 367,
+        "availability": {
+          "asOf": "2026-09-25T07:12:05.000Z",
+          "classCode": "CC",
+          "status": "AVAILABLE",
+          "seats": 182,
+          "rac": null,
+          "waitlist": null,
+          "fare": 1000,
+          "source": "web_railyatri"
+        },
+        "classOptions": [
+          {
+            "asOf": "2026-09-25T07:12:05.000Z",
+            "classCode": "CC",
+            "status": "AVAILABLE",
+            "seats": 182,
+            "rac": null,
+            "waitlist": null,
+            "fare": 1000,
+            "source": "web_railyatri"
+          },
+          {
+            "asOf": "2026-09-25T07:12:11.000Z",
+            "classCode": "EC",
+            "status": "WAITLIST",
+            "seats": null,
+            "rac": null,
+            "waitlist": 2,
+            "fare": 1560,
+            "source": "web_railyatri"
+          }
+        ],
+        "seatTier": "fresh",
+        "boardAt": "ASR"
+      },
+      {
+        "id": "D:12716",
+        "kind": "direct",
+        "trainNumbers": [
+          "12716"
+        ],
+        "label": "SACHKHAND EXP",
+        "departure": "05:30",
+        "arrival": "12:45",
+        "durationMinutes": 435,
+        "availability": {
+          "asOf": "2026-09-25T07:12:11.000Z",
+          "classCode": "1A",
+          "status": "AVAILABLE",
+          "seats": 2,
+          "rac": null,
+          "waitlist": null,
+          "fare": 1830,
+          "source": "web_railyatri"
+        },
+        "classOptions": [
+          {
+            "asOf": "2026-09-25T07:12:11.000Z",
+            "classCode": "1A",
+            "status": "AVAILABLE",
+            "seats": 2,
+            "rac": null,
+            "waitlist": null,
+            "fare": 1830,
+            "source": "web_railyatri"
+          },
+          {
+            "asOf": "2026-09-25T07:12:05.000Z",
+            "classCode": "SL",
+            "status": "WAITLIST",
+            "seats": null,
+            "rac": null,
+            "waitlist": 111,
+            "fare": 315,
+            "source": "web_railyatri"
+          },
+          {
+            "asOf": "2026-09-25T07:12:11.000Z",
+            "classCode": "3A",
+            "status": "WAITLIST",
+            "seats": null,
+            "rac": null,
+            "waitlist": 34,
+            "fare": 795,
+            "source": "web_railyatri"
+          },
+          {
+            "asOf": "2026-09-25T07:12:11.000Z",
+            "classCode": "2A",
+            "status": "WAITLIST",
+            "seats": null,
+            "rac": null,
+            "waitlist": 9,
+            "fare": 1100,
+            "source": "web_railyatri"
+          }
+        ],
+        "seatTier": "fresh",
+        "boardAt": "ASR"
+      },
+      {
+        "id": "D:12926",
+        "kind": "direct",
+        "trainNumbers": [
+          "12926"
+        ],
+        "label": "PASCHIM EXPRESS",
+        "departure": "07:20",
+        "arrival": "16:20",
+        "durationMinutes": 540,
+        "availability": {
+          "asOf": "2026-09-25T07:12:12.000Z",
+          "classCode": "2A",
+          "status": "AVAILABLE",
+          "seats": 10,
+          "rac": null,
+          "waitlist": null,
+          "fare": 1270,
+          "source": "web_railyatri"
+        },
+        "classOptions": [
+          {
+            "asOf": "2026-09-25T07:12:12.000Z",
+            "classCode": "2A",
+            "status": "AVAILABLE",
+            "seats": 10,
+            "rac": null,
+            "waitlist": null,
+            "fare": 1270,
+            "source": "web_railyatri"
+          },
+          {
+            "asOf": "2026-09-25T07:12:12.000Z",
+            "classCode": "1A",
+            "status": "AVAILABLE",
+            "seats": 6,
+            "rac": null,
+            "waitlist": null,
+            "fare": 2095,
+            "source": "web_railyatri"
+          },
+          {
+            "asOf": "2026-09-25T07:12:06.000Z",
+            "classCode": "SL",
+            "status": "WAITLIST",
+            "seats": null,
+            "rac": null,
+            "waitlist": 66,
+            "fare": 360,
+            "source": "web_railyatri"
+          },
+          {
+            "asOf": "2026-09-25T07:12:12.000Z",
+            "classCode": "3A",
+            "status": "WAITLIST",
+            "seats": null,
+            "rac": null,
+            "waitlist": 18,
+            "fare": 915,
+            "source": "web_railyatri"
+          }
+        ],
+        "seatTier": "fresh",
+        "boardAt": "ASR"
+      },
+      {
+        "id": "D:11058",
+        "kind": "direct",
+        "trainNumbers": [
+          "11058"
+        ],
+        "label": "ASR CSMT EXP",
+        "departure": "08:50",
+        "arrival": "20:25",
+        "durationMinutes": 695,
+        "availability": {
+          "asOf": "2026-09-25T07:12:12.000Z",
+          "classCode": "3E",
+          "status": "AVAILABLE",
+          "seats": 46,
+          "rac": null,
+          "waitlist": null,
+          "fare": 785,
+          "source": "web_railyatri"
+        },
+        "classOptions": [
+          {
+            "asOf": "2026-09-25T07:12:12.000Z",
+            "classCode": "3E",
+            "status": "AVAILABLE",
+            "seats": 46,
+            "rac": null,
+            "waitlist": null,
+            "fare": 785,
+            "source": "web_railyatri"
+          },
+          {
+            "asOf": "2026-09-25T07:12:12.000Z",
+            "classCode": "2A",
+            "status": "AVAILABLE",
+            "seats": 8,
+            "rac": null,
+            "waitlist": null,
+            "fare": 1210,
+            "source": "web_railyatri"
+          },
+          {
+            "asOf": "2026-09-25T07:12:06.000Z",
+            "classCode": "SL",
+            "status": "NOT_AVAILABLE",
+            "seats": 0,
+            "rac": null,
+            "waitlist": null,
+            "fare": null,
+            "source": "web_railyatri"
+          }
+        ],
+        "seatTier": "fresh",
+        "boardAt": "ASR"
+      },
+      {
+        "id": "D:20808",
+        "kind": "direct",
+        "trainNumbers": [
+          "20808"
+        ],
+        "label": "HIRAKUND EXP",
+        "departure": "23:55",
+        "arrival": "08:00",
+        "durationMinutes": 485,
+        "availability": {
+          "asOf": "2026-09-25T07:12:05.000Z",
+          "classCode": "SL",
+          "status": "WAITLIST",
+          "seats": null,
+          "rac": null,
+          "waitlist": 58,
+          "fare": 315,
+          "source": "web_railyatri"
+        },
+        "classOptions": [
+          {
+            "asOf": "2026-09-25T07:12:05.000Z",
+            "classCode": "SL",
+            "status": "WAITLIST",
+            "seats": null,
+            "rac": null,
+            "waitlist": 58,
+            "fare": 315,
+            "source": "web_railyatri"
+          },
+          {
+            "asOf": "2026-09-25T07:12:11.000Z",
+            "classCode": "3E",
+            "status": "WAITLIST",
+            "seats": null,
+            "rac": null,
+            "waitlist": 20,
+            "fare": 735,
+            "source": "web_railyatri"
+          },
+          {
+            "asOf": "2026-09-25T07:12:11.000Z",
+            "classCode": "3A",
+            "status": "WAITLIST",
+            "seats": null,
+            "rac": null,
+            "waitlist": 48,
+            "fare": 795,
+            "source": "web_railyatri"
+          },
+          {
+            "asOf": "2026-09-25T07:12:11.000Z",
+            "classCode": "2A",
+            "status": "WAITLIST",
+            "seats": null,
+            "rac": null,
+            "waitlist": 17,
+            "fare": 1100,
+            "source": "web_railyatri"
+          }
+        ],
+        "seatTier": "none",
+        "boardAt": "ASR"
+      },
+      {
+        "id": "D:12498",
+        "kind": "direct",
+        "trainNumbers": [
+          "12498"
+        ],
+        "label": "SHANE PUNJAB",
+        "departure": "15:10",
+        "arrival": "22:30",
+        "durationMinutes": 440,
+        "availability": null,
+        "classOptions": [],
+        "seatTier": "none",
+        "boardAt": "ASR"
+      },
+      {
+        "id": "B:12716:ASR>NED",
+        "kind": "bfe",
+        "trainNumbers": [
+          "12716"
+        ],
+        "label": "SACHKHAND EXP",
+        "departure": "05:30",
+        "arrival": "12:45",
+        "durationMinutes": 435,
+        "availability": {
+          "asOf": "2026-09-25T07:12:22.000Z",
+          "classCode": "3A",
+          "status": "WAITLIST",
+          "seats": null,
+          "rac": null,
+          "waitlist": 14,
+          "fare": 2185,
+          "source": "web_railyatri",
+          "betterWl": true,
+          "directWaitlist": 34
+        },
+        "classOptions": [
+          {
+            "asOf": "2026-09-25T07:12:22.000Z",
+            "classCode": "3A",
+            "status": "WAITLIST",
+            "seats": null,
+            "rac": null,
+            "waitlist": 14,
+            "fare": 2185,
+            "source": "web_railyatri",
+            "betterWl": true,
+            "directWaitlist": 34
+          },
+          {
+            "asOf": "2026-09-25T07:12:22.000Z",
+            "classCode": "SL",
+            "status": "WAITLIST",
+            "seats": null,
+            "rac": null,
+            "waitlist": 27,
+            "fare": 865,
+            "source": "web_railyatri",
+            "betterWl": true,
+            "directWaitlist": 111
+          }
+        ],
+        "seatTier": "none",
+        "bookFrom": "ASR",
+        "boardAt": "ASR",
+        "bookUpto": "NED"
+      },
+      {
+        "id": "B:12926:ASR>BDTS",
+        "kind": "bfe",
+        "trainNumbers": [
+          "12926"
+        ],
+        "label": "PASCHIM EXPRESS",
+        "departure": "07:20",
+        "arrival": "16:20",
+        "durationMinutes": 540,
+        "availability": {
+          "asOf": "2026-09-25T07:12:22.000Z",
+          "classCode": "3A",
+          "status": "WAITLIST",
+          "seats": null,
+          "rac": null,
+          "waitlist": 5,
+          "fare": 2060,
+          "source": "web_railyatri",
+          "betterWl": true,
+          "directWaitlist": 18
+        },
+        "classOptions": [
+          {
+            "asOf": "2026-09-25T07:12:22.000Z",
+            "classCode": "3A",
+            "status": "WAITLIST",
+            "seats": null,
+            "rac": null,
+            "waitlist": 5,
+            "fare": 2060,
+            "source": "web_railyatri",
+            "betterWl": true,
+            "directWaitlist": 18
+          },
+          {
+            "asOf": "2026-09-25T07:12:22.000Z",
+            "classCode": "SL",
+            "status": "WAITLIST",
+            "seats": null,
+            "rac": null,
+            "waitlist": 21,
+            "fare": 815,
+            "source": "web_railyatri",
+            "betterWl": true,
+            "directWaitlist": 66
+          }
+        ],
+        "seatTier": "none",
+        "bookFrom": "ASR",
+        "boardAt": "ASR",
+        "bookUpto": "BDTS"
+      }
+    ],
+    "whyPoints": [
+      "Direct train — koi change nahi, 6h.",
+      "CC AVL 17 @ ₹1000 — provider-verified.",
+      "Runner-up: 11058 ASR CSMT EXP (11h 35m, 3E AVL 46 @ ₹785 ASR se) — ₹215/pax sasta. Basis: pehle ASR se hi confirmed seat, phir time, phir fare — trade-off aapka.",
+      "7 direct trains mein sabse fast.",
+      "Sasta option 11058 (₹785) bhi hai — Lowest fare tab mein."
+    ],
+    "verdict": "Best plan: 12030 SWARN SHATABDI 16:50→22:50, 6h (CC 17 seats open). Class-wise same-train options (jo ASR se WL/N-A thi): 12716: 3A WL 14, SL WL 27 — ticket ASR→NED (4 stop aage tak), board ASR, utro NDLS; 12926: 3A WL 5, SL WL 21 — ticket ASR→BDTS (4 stop aage tak), board ASR, utro NDLS."
+  }
+}

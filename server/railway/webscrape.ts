@@ -1251,6 +1251,12 @@ export type ScrapedTrainFacts = {
   source: string | null;
   destination: string | null;
   pantry: boolean | null;
+  /* Round-21b (25 Sep, user: "kuch bhi fake mat rakho — jo real provider se aaye wahi dikhao"):
+   * pantry ka per-source sach. erail = IR timetable line ("Pantry is (not) available"),
+   * confirmtkt = JSON ka HasPantry. Dono alag ho sakte hain (dekha gaya: 12716/12926 par erail
+   * "available" aur confirmtkt false) — isliye merged `pantry` ke saath ye bhi rakha jaata hai,
+   * UI sach ke hisaab se decide kare (guess nahi). */
+  pantrySources: { erail: boolean | null; confirmtkt: boolean | null };
   classes: string[];
   trainType: string | null;
   runDays: string | null;
@@ -1264,7 +1270,7 @@ export type ScrapedTrainFacts = {
 export async function scrapeTrainFactsWeb(trainNumber: string): Promise<ScrapedTrainFacts | null> {
   const num = String(trainNumber ?? "").trim();
   if (!/^\d{4,6}$/.test(num)) return null;
-  const out: ScrapedTrainFacts = { trainNumber: num, trainName: null, source: null, destination: null, pantry: null, classes: [], trainType: null, runDays: null, foodRating: null, rating: null, sentence: null, providers: [], sourceUrls: [] };
+  const out: ScrapedTrainFacts = { trainNumber: num, trainName: null, source: null, destination: null, pantry: null, pantrySources: { erail: null, confirmtkt: null }, classes: [], trainType: null, runDays: null, foodRating: null, rating: null, sentence: null, providers: [], sourceUrls: [] };
   const erailUrl = `https://erail.in/train-enquiry/${num}`;
   const ctUrl = `https://www.confirmtkt.com/train-schedule/${num}`;
   const [erail, ct] = await Promise.all([fetchHtml(erailUrl), fetchHtml(ctUrl)]);
@@ -1282,6 +1288,7 @@ export async function scrapeTrainFactsWeb(trainNumber: string): Promise<ScrapedT
       out.runDays = m[4].trim();
       out.classes = m[5].trim().split(/\s+/).filter((c) => /^[0-9A-Z]{2,3}$/.test(c) && c !== "GN");
       out.pantry = !/not available/i.test(m[6]);
+      out.pantrySources.erail = out.pantry;
       out.sentence = `${num} ${out.trainName}, ${out.source} to ${out.destination}, runs ${out.runDays}, classes ${out.classes.join(" ")}. ${m[6]}.`;
       const cat = /category type is ([A-Za-z ]+?)\./i.exec(text.replace(/\s+/g, " "));
       if (cat) out.trainType = cat[1].trim();
@@ -1297,6 +1304,7 @@ export async function scrapeTrainFactsWeb(trainNumber: string): Promise<ScrapedT
     const tn = /"TrainName":"([^"]+)"/.exec(ct);
     if (hp || tt) {
       const ctPantry = hp ? hp[1] === "true" : null;
+      out.pantrySources.confirmtkt = ctPantry;
       if (out.pantry == null) out.pantry = ctPantry;
       else if (ctPantry != null && ctPantry !== out.pantry) out.sentence = `${out.sentence ?? ""} (Note: erail (IR timetable data) says pantry ${out.pantry ? "available" : "not available"}, confirmtkt says ${ctPantry ? "available" : "not available"} — sources differ; tell the user both; erail is the primary source; suggest confirming on IRCTC while booking. Do NOT ask the user to retry.)`.trim();
       if (!out.trainType && tt) out.trainType = tt[1];

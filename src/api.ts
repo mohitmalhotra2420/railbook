@@ -419,9 +419,28 @@ export function pickTrainsApi(q: string, ctx?: { from?: string | null; to?: stri
 }
 
 /** Round-20: train ka catering/pantry info (read-only; wahi server function jo AI ka TRAIN_FACTS
- * tool use karta hai) — passenger form me food choice dikhane ke liye. */
+ * tool use karta hai) — passenger form me food choice dikhane ke liye.
+ * Round-21b: ab per-source sach bhi aata hai (sources/conflict/premiumCatering/evidence) taaki UI
+ * "jo real provider kehta hai" wahi dikhaye — merged value par guess nahi. */
+export type TrainPantry = {
+  trainNumber: string;
+  trainName?: string | null;
+  trainType?: string | null;
+  pantry: boolean | null;
+  /** Round-21b: dono sources ka apna jawaab (null = us source ne kuch nahi kaha). */
+  sources?: { erail: boolean | null; confirmtkt: boolean | null };
+  /** Round-21b: sources aapas me alag-alag — guess nahi, honest note. */
+  conflict?: boolean;
+  /** Round-21b: Rajdhani/Shatabdi/Duronto/Vande Bharat/Tejas — catering fare me included. */
+  premiumCatering?: boolean;
+  /** Round-21b: sirf yahi true hone par passenger form me Food choice dikhta hai (IRCTC jaisa). */
+  foodChoiceExpected?: boolean;
+  /** Round-21b: insaani zubaan me evidence lines (UI note me dikhti hain). */
+  evidence?: string[];
+  providers: string[];
+  note: string | null;
+};
+
 export function trainPantryApi(trainNumber: string) {
-  return request<{ trainNumber: string; pantry: boolean | null; providers: string[]; note: string | null }>(
-    `/api/trains/${encodeURIComponent(trainNumber)}/pantry`,
-  );
+  return request<TrainPantry>(`/api/trains/${encodeURIComponent(trainNumber)}/pantry`);
 }
