@@ -262,13 +262,18 @@ describe("IRCTC handoff — review-screen card", () => {
     expect(openSpy).not.toHaveBeenCalled();
     expect(window.localStorage.getItem(HANDOFF_STORAGE_KEY)).toBeNull();
 
-    // preview shows exactly what would be handed over
-    const preview = container.querySelector("#irctc-payload-preview");
-    expect(preview).toBeTruthy();
-    const shown = JSON.parse(preview!.textContent as string);
-    expect(shown.kind).toBe(HANDOFF_KIND);
-    expect(shown.passengers).toHaveLength(2);
-    expect(shown.journey.trainNumber).toBe("12014");
+    /* Round-23 (26 Sep, user): copy-ready summary / technical payload preview UI se hata diye —
+     * user ko sirf Continue button dikhta hai. Payload phir bhi waise hi banta hai (neeche verify). */
+    expect(container.querySelector("#irctc-payload-preview")).toBeNull();
+    expect(container.querySelector("#irctc-handoff-summary")).toBeNull();
+    expect(container.querySelector("#irctc-copy-summary")).toBeNull();
+    const built = buildHandoffPayload(input());
+    expect(built.ok).toBe(true);
+    if (built.ok) {
+      expect(built.payload.kind).toBe(HANDOFF_KIND);
+      expect(built.payload.passengers).toHaveLength(2);
+      expect(built.payload.journey.trainNumber).toBe("12014");
+    }
 
     fireEvent.click(getByText("Continue to IRCTC"));
 

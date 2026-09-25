@@ -3,8 +3,11 @@
  * user-initiated handoff).
  *
  * On an explicit click only: build the local payload → keep it for the authorised autofill
- * component (Chrome extension / future RailBook app) → open official IRCTC (app intent on
- * Android when possible, else website tab) → show copy-ready journey/pax summary.
+ * component (Chrome extension / RailBook app) → open official IRCTC (app intent on Android when
+ * possible, else website tab) → summary clipboard par chali jaati hai (best-effort).
+ *
+ * Round-23 (26 Sep, user): review page par SIRF ye Continue button chahiye — booking summary,
+ * wallet, copy journey+passenger summary aur neeche ka Confirm Booking sab hata diye.
  * Nothing is filled, clicked, submitted or paid here; login/OTP/CAPTCHA/payment and the final
  * booking action stay with the user on IRCTC.
  *
@@ -16,7 +19,6 @@ import type { HandoffInput } from "../irctc/handoff";
 import {
   buildHandoffPayload,
   copyHandoffSummary,
-  formatHandoffSummary,
   openIrctcHandoff,
   openIrctcInNewTab,
   storeHandoff,
@@ -25,7 +27,6 @@ import {
 export function IrctcHandoff(props: HandoffInput) {
   const built = useMemo(() => buildHandoffPayload(props), [props]);
   const [status, setStatus] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
 
   const onContinue = () => {
     const res = buildHandoffPayload(props);
@@ -40,7 +41,6 @@ export function IrctcHandoff(props: HandoffInput) {
 
     /* Clipboard is best-effort and must not delay the open. */
     void copyHandoffSummary(res.payload).then((copyOk) => {
-      setCopied(copyOk);
       const copyBit = copyOk
         ? "Journey + passenger summary clipboard pe copy ho gaya — IRCTC me jaldi paste/type kar sakte ho."
         : "Neeche summary se copy kar lo (clipboard block ho to).";
@@ -84,21 +84,13 @@ export function IrctcHandoff(props: HandoffInput) {
     }
   };
 
-  const onCopyOnly = async () => {
-    if (!built.ok) return;
-    const ok = await copyHandoffSummary(built.payload);
-    setCopied(ok);
-    setStatus(ok ? "Summary clipboard pe copy ho gayi." : "Clipboard block — neeche se manually copy karo.");
-  };
-
-  const summary = built.ok ? formatHandoffSummary(built.payload) : "";
-
   return (
-    <section className="list-card" id="irctc-handoff" aria-label="Continue to IRCTC (optional)" style={{ marginTop: 12 }}>
-      <div className="muted">Continue to IRCTC (optional)</div>
+    <section className="list-card" id="irctc-handoff" aria-label="Continue to IRCTC" style={{ marginTop: 12 }}>
+      <div className="muted">IRCTC par booking</div>
       <div style={{ marginTop: 6 }}>
-        Aap wahi journey IRCTC par le ja sakte hain. <b>Continue</b> pe: summary copy + official IRCTC open
-        (Android pe Rail Connect app try, warna website). Booking wahin, apne haath se.
+        Aap wahi journey IRCTC par le ja sakte hain. <b>Continue</b> pe: official IRCTC khulta hai
+        (Android pe Rail Connect app try, warna website) aur passenger details wahan auto-fill ke liye
+        taiyaar rehti hain. Booking wahin, apne haath se.
       </div>
       <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
         <button
@@ -111,17 +103,6 @@ export function IrctcHandoff(props: HandoffInput) {
         >
           Continue to IRCTC
         </button>
-        <button
-          className="btn"
-          id="irctc-copy-summary"
-          type="button"
-          onClick={() => {
-            void onCopyOnly();
-          }}
-          disabled={!built.ok}
-        >
-          {copied ? "Summary copied ✓" : "Copy journey + passenger summary"}
-        </button>
       </div>
       {!built.ok && (
         <div className="banner err" style={{ marginTop: 10 }}>
@@ -133,23 +114,11 @@ export function IrctcHandoff(props: HandoffInput) {
           {status}
         </div>
       )}
-      {built.ok && (
-        <details style={{ marginTop: 10 }} open>
-          <summary className="muted">Copy-ready summary (From / To / Date / Class / passengers)</summary>
-          <pre id="irctc-handoff-summary" style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: 12 }}>
-            {summary}
-          </pre>
-          <details style={{ marginTop: 8 }}>
-            <summary className="muted">Technical payload preview</summary>
-            <pre id="irctc-payload-preview" style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: 12 }}>
-              {JSON.stringify(built.payload, null, 2)}
-            </pre>
-          </details>
-        </details>
-      )}
+      {/* Round-23 (user): "copy journey + passenger summary user ko nahi dikhna chahiye" — copy button,
+          copy-ready summary aur technical payload preview UI se hata diye. Click par summary phir bhi
+          clipboard par jaati hai (best-effort) taaki IRCTC me type/paste karne me aasani ho. */}
       <div className="muted" id="irctc-handoff-note" style={{ marginTop: 8, fontSize: 12 }}>
-        Kuch bhi auto-submit nahi hota · login/OTP/CAPTCHA/payment RailBook ke paas nahi aate · official IRCTC
-        app me website se fields inject nahi ho sakti · auto-fill = Chrome extension (desktop) ya RailBook app.
+        Kuch bhi auto-submit nahi hota · login / OTP / CAPTCHA / payment RailBook ke paas nahi aate.
       </div>
     </section>
   );

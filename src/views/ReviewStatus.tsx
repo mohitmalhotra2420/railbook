@@ -4,72 +4,22 @@ import { Shell } from "../components/Shell";
 import { formatLongDate, inr } from "../format";
 import { CLASS_LABELS } from "../types";
 
+/* Round-23 (26 Sep 2026, user screenshot): "es page pe bas Continue to IRCTC show hona chahiye —
+ * booking summary aur wallet hata do; copy journey+passenger summary user ko nahi dikhna chahiye;
+ * neeche jo Confirm Booking aata hai wo bhi hata do."
+ *
+ * Isliye is page par SIRF IRCTC handoff card hai. RailBook ke andar ka booking/payment flow
+ * (Passengers → confirm) waise hi maujood hai — usse chhua nahi gaya, bas review screen se wo
+ * buttons/wallet block hata diye (user ka flow: RailBook me journey chunna, booking IRCTC par). */
 export function FareReview() {
-  const { state, wallet, confirm, go } = useBooking();
+  const { state } = useBooking();
   const train = state.selectedTrain;
   const klass = state.selectedClass;
   if (!train || !klass) return null;
 
-  const fare = state.previewFare ?? {
-    baseFare: klass.fare * state.passengers.length,
-    serviceFee: 0,
-    total: klass.fare * state.passengers.length,
-  };
-  const short = wallet && wallet.balance < fare.total;
-
   return (
-    <Shell title="Booking summary" back>
+    <Shell title="Continue to IRCTC" back>
       <main className="page">
-        {state.error && (
-          <div className="banner err">
-            {state.error}
-            {short && (
-              <div style={{ marginTop: 8 }}>
-                <button className="btn sm navy" onClick={() => go("wallet")}>Add Money</button>
-              </div>
-            )}
-          </div>
-        )}
-        <section className="summary">
-          <div className="row"><span className="k">Train</span><span>{train.number} {train.name}</span></div>
-          <div className="row"><span className="k">Date</span><span>{formatLongDate(train.date)}</span></div>
-          <div className="row"><span className="k">From → To</span><span>{train.from.code} → {train.to.code}</span></div>
-          <div className="row"><span className="k">Class</span><span>{CLASS_LABELS[klass.code]}</span></div>
-          <div className="row"><span className="k">Seat</span><span>{state.seatPreference}</span></div>
-          <div className="row">
-            <span className="k">Passengers</span>
-            <span>{state.passengers.map((p) => p.name).join(", ")}</span>
-          </div>
-          <div className="row">
-            <span className="k">Base fare</span>
-            <span>
-              {"railwayAvailable" in fare && fare.railwayAvailable === false
-                ? "Fare unavailable"
-                : inr(fare.baseFare)}
-            </span>
-          </div>
-          <div className="row"><span className="k">Service fee</span><span>{inr(fare.serviceFee)}</span></div>
-          <div className="row total">
-            <span>Total</span>
-            <span>
-              {"railwayAvailable" in fare && fare.railwayAvailable === false
-                ? "—"
-                : inr(fare.total)}
-            </span>
-          </div>
-        </section>
-
-        {wallet && (
-          <section className="list-card" style={{ marginTop: 12 }}>
-            <div className="muted">Wallet</div>
-            <div>Current balance {inr(wallet.balance)}</div>
-            <div className="muted">Remaining after booking {inr(wallet.balance - fare.total)}</div>
-          </section>
-        )}
-        <p className="muted" style={{ marginTop: 12 }}>
-          Nothing is confirmed until the railway provider accepts this booking.
-        </p>
-        {/* Additive: optional, user-initiated IRCTC handoff. Existing summary + Confirm Booking above are unchanged. */}
         {/* Round-21: food/catering + IRCTC ke dono checkbox + contact (mobile/email) bhi autofill ke liye jaate hain. */}
         <IrctcHandoff
           train={train}
@@ -79,19 +29,6 @@ export function FareReview() {
           contact={state.contact}
         />
       </main>
-      <div className="sticky-cta">
-        {short ? (
-          <button className="btn primary" onClick={() => go("wallet")}>Add Money</button>
-        ) : (
-          <button
-            className="btn primary"
-            disabled={state.flow === "BOOKING_PENDING" || state.flow === "PAYMENT_PENDING"}
-            onClick={() => void confirm()}
-          >
-            {state.flow === "BOOKING_PENDING" ? "Booking…" : "Confirm Booking"}
-          </button>
-        )}
-      </div>
     </Shell>
   );
 }

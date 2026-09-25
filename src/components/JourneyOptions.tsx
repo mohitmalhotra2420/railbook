@@ -533,20 +533,18 @@ export function JourneyOptions({
   const filterOn = fMode === "avail" || fCls != null || fAc || fAfter != null || fBefore != null || fEarliest || fCheapest;
   /* Class/AC filter train ke apne rows par — jo train us class me hi nahi hai wo list me nahi aati (fake nahi). */
   const rowsOfTrainFiltered = (o: AgentRouteOption): AvailLike[] => {
-    const rows = liveRows[o.trainNumbers[0]] ?? o.classOptions ?? [];
-    if (fCls) return rows.filter((r) => classCodeOf(r) === fCls);
-    if (fAc) return rows.filter((r) => AC_CLASS_SET.has(classCodeOf(r)));
+    let rows = liveRows[o.trainNumbers[0]] ?? o.classOptions ?? [];
+    if (fCls) rows = rows.filter((r) => classCodeOf(r) === fCls);
+    else if (fAc) rows = rows.filter((r) => AC_CLASS_SET.has(classCodeOf(r)));
+    /* Round-23 (26 Sep, user screenshot: "Available selection pe WL wali class bhi show hoti hai
+     * jabki sirf available ya RAC show honi chahiye"): Available mode me sirf AVL/RAC classes
+     * dikhti hain — WL/N-A chips yahan nahi (jo dikh raha hai wahi filter ka matlab hai). */
+    if (fMode === "avail") rows = rows.filter((r) => r.status === "AVAILABLE" || r.status === "RAC");
     return rows;
   };
   const directFiltered = direct.filter((o) => {
     const rows = rowsOfTrainFiltered(o);
-    if ((fCls != null || fAc) && rows.length === 0) return false;
-    if (fMode === "avail") {
-      const anySeat = (rows.length ? rows : liveRows[o.trainNumbers[0]] ?? o.classOptions ?? []).some(
-        (r) => r.status === "AVAILABLE" || r.status === "RAC",
-      );
-      if (!anySeat) return false;
-    }
+    if ((fCls != null || fAc || fMode === "avail") && rows.length === 0) return false;
     if ((fAfter != null || fBefore != null) && !departureInWindow(o.departure, fAfter, fBefore)) return false;
     return true;
   });
