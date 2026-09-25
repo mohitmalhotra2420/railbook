@@ -331,3 +331,26 @@ User ne maanga: *"passenger details ke saath food bhi autofill ho, 'Book only if
 - **Preview (single-source):** `/home/user/RailBook/previews/RailBook-round21-2026-09-25.html` — usi asli engine ka result (14 filled / 0 notFound), payload badal ke live dobara chala sakte ho.
 - **Deploy:** commit `93dc921` → Render `dep-daqvdufavr4c73f6ek8g` **LIVE 2026-09-25T04:23:11Z**; `/api/version` = `93dc921`; live bundle me `railbookAutofillPayloadV2`, `railbookAutofillTestPayload`, `Book only if confirm berths`, `auto up-gradation`, `Food choice`, `No Food` sab maujood.
 - **APK v1.4.4** (`RailBook-v1.4.4-release.apk`, versionCode 27) — assets badle hain isliye device par naya APK zaroori hai; purana v1.4.3 APK sirf food/contact/checkbox ke bina autofill karta rahega (kuch tootta nahi).
+
+### 9.13 Round-21b/21c (25 Sep) — "jo real provider kehta hai wahi dikhao" + chat se Seat Finder UI hataya
+
+User (2 screenshots): RailBook ke passenger form me **Food choice** dikh raha tha, par IRCTC ke booking page par wo option hi nahi tha —
+*"es train mein food choice hai hi nahi to fir kyu dikha rha? kuch bhi fake mat rakho jo real provider se aaye wahi dikhao, aur wo map bhi ho RailBook se IRCTC pe."*
+Saath hi: *"seat finder aur direct trains ab same hi show kar rahe hain to seat finder ka UI sirf chat section se hata do — SeatFinder.ts, filters, AI using seat finder yeh sab delete nahi karna."*
+
+**1) Catering: per-source sach (koi merged guess nahi)**
+
+- `server/railway/webscrape.ts`: `ScrapedTrainFacts` me naya **`pantrySources {erail, confirmtkt}`** (additive; erail ka "Pantry is (not) available" aur confirmtkt ka `HasPantry` alag-alag rakhe jaate hain). Merged `pantry` waisa hi rehta hai (purane callers safe).
+- `GET /api/trains/:number/pantry` ab deta hai: `sources`, **`conflict`**, **`premiumCatering`** (Rajdhani/Shatabdi/Duronto/Vande Bharat/Tejas — catering fare me included; "Jan Shatabdi" ko premium nahi maana jaata), **`foodChoiceExpected`**, `evidence[]` (insaani zubaan me) aur honest `note`. Sab kuch wahi maujooda `scrapeTrainFactsWeb` se — koi naya source nahi.
+- **Live asli misaal:** `12716` → erail "available", confirmtkt `HasPantry=false` → **conflict**, `foodChoiceExpected=false` (aapka case!) · `12926` wahi · `12014` Shatabdi → premium hone se `true` (erail na kehne par bhi, kyunki catering fare me hai) · `22691` Rajdhani → `true` · `12497` → dono na, `false`.
+- `src/views/Passengers.tsx`: **Food choice dropdown sirf `foodChoiceExpected === true` par**; conflict par amber honest line (dono sources ke saath), "nahi mili" par eCatering line, data na aaye par "provider se nahi aayi" — **guess kabhi nahi**.
+- Android app panel (`railbook-webview-bridge.js`): agar IRCTC ke page par food field hi nahi mila to ab saaf line aati hai — *"IRCTC ke is page par food/catering option nahi mila — is train/class me IRCTC ne nahi diya, isliye form ki Food choice apply nahi hui"* (chup-chaap skip nahi).
+
+**2) Chat section se Seat Finder UI hataya (baaki sab intact)**
+
+- `src/views/Concierge.tsx`: `<SeatFinder>` ke dono mounts (plan card + train table) aur uska import hata diya; `TrainTableView` ab sirf table deta hai. **Delete kuch nahi hua** — `src/components/SeatFinder.tsx`, `src/seatfinder.ts` (intent + `departureInWindow` filter), `server/agent/seatFinderTool.ts`, `server/agent/seatFilter.ts` aur AI ka seat intent waise hi hain; plan card ka time-window filter (jo Seat Intent se aata hai) aur class chips (shared `TrainClassBlock`) bilkul waisa hi chalta hai.
+
+**Tests / verify:** naye `tests/round21b-pantry-sources.test.ts` (6) · `tests/round21b-food-gate.test.tsx` (4) · `tests/round21c-chat-without-seatfinder.test.ts` (4); `tests/round20-passenger-form.test.tsx` naye payload shape par update → kul **99 files / 1006 tests PASS**; server `tsc` clean; client TS errors HEAD ke barabar (68, koi naya nahi).
+**Live:** commit `99a0c9d` → Render `dep-dar1ucc9v7es7396tt80` **LIVE 2026-09-25T07:14:55Z**; `/api/version` = `99a0c9d`; pantry curls (5 trains) upar wale natije dete hain.
+**Preview (single-source):** `/home/user/RailBook/previews/RailBook-round21b-2026-09-25.html` — asli components + built CSS + **live** payloads (plan `provas/asr-ndls-2026-09-26-plan.json`, pantry live).
+**APK v1.4.5** (versionCode 28) — bridge ki nayi honest line ke liye.
