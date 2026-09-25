@@ -280,3 +280,28 @@ Ab Seat Finder ki "✅ Available" list bhi wahi poora sach dikhati hai jo upar c
 - **Verification (asli payload se, component ka asli render):** LDH -> MTJ · 25 Sep par Seat Finder me **10/10 trains** aur unki **saari classes** (12926: 3A AVL 23 · SL AVL 8 · 2A AVL 5 · 1A N/A) — upar wale card se bilkul match.
 - Seat Finder ke andar build ab hamesha "all" (WL/N-A rows bhi banti hain); section-level gating UI me — "Sabhi trains" me WL **section** alag, "Available" me WL/N-A chips usi train ke block me halki.
 - Tests: `tests/seat-finder-card.test.tsx` (18) — Available me saari classes + halki chips, "SEAT NAHI" section. Kul **93 files / 969 tests PASS**.
+
+### 9.11 Round-20 (25 Sep) — Direct card = Seat Finder jaisa, class chip tap → seedha IRCTC-jaisa passenger form, aur chat ka lamba jawab
+
+User ne teen screenshots ke saath teen cheezein maangi thi:
+
+**1) "Direct trains ka UI bhi bilkul Seat Finder jaisa same to same chip wala ho"**
+
+- Naya shared block `src/components/TrainClassBlock.tsx` — **wahi ek markup** jo Seat Finder ka `TrainGroup` pehle se banata tha (`.sf-group` + left accent, header me train number/naam/time/"N classes (M me seat)", chips me class code + badge (AVL/RAC/WL/N-A) + fare, `off` = halki chip).
+- Journey plan ka **DIRECT TRAINS** card (`JourneyOptions.tsx`) bhi ab yahi block use karta hai — Seat Finder card aur direct card ki shakal **bilkul ek** (screenshot 1 = screenshot 2). Sirf rendering badla: data wahi plan/board payload, koi naya API/AI logic nahi. `↻ purana data` ka tag chip par, header tap se poora train (purana behaviour as-is).
+
+**2) "Kisi bhi class pe tap → seedha passenger form; upar train number, date, from, to apne aap; form IRCTC ke according same to same — sirf insurance aur payment chhod kar; jis train me catering ho usme catering; class wahi jo train me asli hai"**
+
+- `src/booking/fromOption.ts` (naya, sirf mapping): `stationOf` · `classFromBoardRow` · `trainFromRouteOption` · `bookingFromSeatRow` · `bookingFromChipPayload` — jo chip par dikha wahi booking me jaata hai (koi number/status invent nahi, koi naya API call nahi).
+- Chip tap par: class **bookable** (AVL/RAC/WL) → `SELECT_TRAIN_AND_CLASS { toPassengers: true }` → berth step skip, seedha **Passengers** screen; warna (N/A/data nahi) purana fresh-seat-check chat flow. Wahi wiring Seat Finder ke chips par bhi (`onBook` prop).
+- Passenger form (IRCTC ke passenger-details page jaisa): upar **journey summary** (train number · naam · date · from → to · class badge · fare · source), phir per passenger **Name / Age / Gender / Berth preference** + **Food choice** (sirf jab train me pantry ho), **ID proof (type + number, optional)**, aur IRCTC ke dono checkbox (Book only if confirm berths / Consider for auto up-gradation), phir **Contact details** (10-digit mobile, email, WhatsApp updates). **Insurance aur payment ka koi block nahi** (wo IRCTC handoff par).
+- **Catering data real:** naya read-only endpoint `GET /api/trains/:number/pantry` — andar wahi maujooda `scrapeTrainFactsWeb` chalta hai jo AI ka TRAIN_FACTS tool pehle se use karta hai (koi naya source nahi). Probe: **12926 pantry = true**, **12014 pantry = false** → food choice sirf 12926 par dikhta hai, 12014 par honest note ("pantry nahi hai — IRCTC eCatering se en-route station par"). Data na aaye to `null` + "provider se nahi aayi" (jhooth nahi).
+- **Class real train data ke according:** berth options `BERTH_BY_CLASS` se (CC me Window/Aisle, SL me Lower/Middle/Upper…), class code/fare/status chip me jo tha wahi.
+
+**3) "Chat ka lamba jawab padne me mushkil — thoda attractive banao"**
+
+- Naya `src/components/ReplyText.tsx` — **sirf presentation** (msg.text waisa hi rehta hai): screenshot 3 wala ek-hi-line text (`* 11057 CSMT ASR EXPRESS – 3E AVAILABLE 44 seats ₹520, dep 12:55 * …`) ab **rows** me: train number + naam, class chip, AVL/RAC/WL badge (tone ke hisaab se rang), fare, time — aur window/route wali line upar **chip** me, aakhri sentence neeche tail me (kuch chhupta nahi, kuch invent nahi). Pipe wale SEAT rows (`"A | B | C"`) bhi rows ban jaate hain. Pattern match na ho to poora text pehle jaisa paragraph.
+
+**Tests:** naye `tests/round20-chip-to-passenger.test.tsx` (7) · `tests/round20-passenger-form.test.tsx` (9) · `tests/round20-pantry-api.test.ts` (3) → kul **96 files / 986 tests PASS**; `tsc -p tsconfig.server.json` clean; client TS errors me koi naya error nahi (puraane exactly wahi 67).
+
+**Preview (single-source):** `/home/user/RailBook/previews/RailBook-round20-2026-09-25.html` — asli payload (`provas/asr-ldh-2026-09-26-board.json` + search times + live AI reply) se asli React components ka render + built CSS.

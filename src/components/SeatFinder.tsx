@@ -15,6 +15,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { formatShortDate, inr } from "../format";
 import type { ClassCode } from "../types";
 import { speakGuide } from "../voice/speakGuide";
+import { TrainClassBlock } from "./TrainClassBlock";
 import {
   buildAllClassRows,
   clearRouteBoardCache,
@@ -83,43 +84,33 @@ function statusBadge(r: SeatRow) {
 function TrainGroup({ rows, onPick }: { rows: SeatRow[]; onPick?: (r: SeatRow) => void }) {
   const g = rows[0];
   const fares = rows.filter((r) => r.seat).map((r) => r.fare).filter((f): f is number => typeof f === "number");
-  const seats = rows.filter((r) => r.seat);
-  const tone = seats.length ? "seat" : g.status === "NO_DATA" || g.status === "UNKNOWN" ? "nodata" : "wl";
+  const seats = rows.filter((r) => r.seat).length;
+  /* Round-20: chip/header ka markup ab shared TrainClassBlock se — journey card ke direct trains bhi
+   * bilkul yahi block use karte hain (user: "same to same"). Data wahi SeatRow. */
   return (
-    <div className={`sf-group ${tone}`}>
-      <div className="sf-group-h">
-        <span className="sf-group-t">
-          <strong>{g.number}</strong> <span className="sf-tname">{g.name}</span>
-        </span>
-        <span className="sf-group-meta">
-          {g.departure && g.arrival ? `${g.departure} → ${g.arrival}` : "time list me nahi"}
-          {/* Round-19f (user baar-baar: "upar card me classes available me sabhi dikh nhi rhi jabki
-              neeche zyada hai"): ek train ki SAARI classes yahan dikhti hain — seat wali rangdar,
-              WL/N-A halki (dimmed). Koi class chhupti nahi. */}
-          {rows.length > 1 && <span className="sf-group-n"> · {rows.length} classes{seats.length ? ` (${seats.length} me seat)` : ""}</span>}
-        </span>
-      </div>
-      <div className="sf-group-c">
-        {rows.map((r) => (
-          <button
-            key={`${r.number}-${r.classCode}`}
-            type="button"
-            className={`sf-cchip${r.seat ? "" : " off"}`}
-            onClick={() => onPick?.(r)}
-            title={
-              r.seat
-                ? `${r.classCode}${r.fare ? ` · ${inr(r.fare)}` : ""} — tap karke fresh check`
-                : `${r.classCode} abhi bookable nahi (WL/N-A) — tap karke fresh check`
-            }
-          >
-            <span className="sf-cls">{r.classCode}</span>
-            {statusBadge(r)}
-            {r.fare ? <span className="sf-cfare">{inr(r.fare)}</span> : null}
-          </button>
-        ))}
-        {fares.length > 1 && <span className="sf-cfrom">from {inr(Math.min(...fares))}</span>}
-      </div>
-    </div>
+    <TrainClassBlock
+      number={g.number}
+      name={g.name}
+      timeText={g.departure && g.arrival ? `${g.departure} → ${g.arrival}` : "time list me nahi"}
+      countText={rows.length > 1 ? `${rows.length} classes${seats ? ` (${seats} me seat)` : ""}` : null}
+      rows={rows.map((r) => ({
+        code: r.classCode,
+        status: r.status,
+        seats: r.seats,
+        rac: r.rac,
+        waitlist: r.waitlist,
+        fare: r.fare,
+        seat: r.seat,
+        raw: r,
+      }))}
+      fromText={fares.length > 1 ? `from ${inr(Math.min(...fares))}` : null}
+      onChip={onPick ? (c) => onPick(c.raw as SeatRow) : undefined}
+      chipTitle={(c) =>
+        c.seat
+          ? `${c.code}${c.fare ? ` · ${inr(c.fare)}` : ""} — tap karke fresh check`
+          : `${c.code} abhi bookable nahi (WL/N-A) — tap karke fresh check`
+      }
+    />
   );
 }
 
@@ -154,6 +145,7 @@ export function SeatFinder({
   cardBoard = null,
   speak = false,
   onChip,
+  onBook,
 }: {
   from: string;
   to: string;
@@ -166,7 +158,17 @@ export function SeatFinder({
   /** Voice se poochha gaya → jawab ek line me bol bhi do (screen par poora card). */
   speak?: boolean;
   onChip: (text: string) => void;
+  /** Round-20: bookable class (AVL/RAC/WL) chip tap → seedha passenger form (caller handle karta hai). */
+  onBook?: (r: SeatRow) => void;
 }) {
+  /* Round-20: tap — bookable (AVL/RAC/WL) ho to seedha passenger form, warna purana fresh-check message. */
+  const tap = (r: SeatRow) => {
+    if (onBook && (r.status === "AVAILABLE" || r.status === "RAC" || r.status === "WAITLIST")) {
+      onBook(r);
+      return;
+    }
+    onChip(pickUtter(r));
+  };
   const [board, setBoard] = useState<BoardTrainRow[] | null>(null);
   /* "Sabhi trains" default hai (seat upar / WL neeche — jaisa user ne pehle kaha).
    * User ne "sirf confirmed" bola ho to seedha "Available" mode. */
@@ -494,7 +496,7 @@ export function SeatFinder({
               </div>
             )}
             {seatShown.map((g) => (
-              <TrainGroup key={`${g[0].number}-${g[0].departure ?? ""}`} rows={g} onPick={(x) => onChip(pickUtter(x))} />
+              <TrainGroup key={`${g[0].number}-${g[0].departure ?? ""}`} rows={g} onPick={tap} />
             ))}
             {seatGroups.length > 8 && (
               <button className="sf-more" onClick={() => setShowAllSeat((v) => !v)}>
@@ -511,7 +513,7 @@ export function SeatFinder({
                   <span className="sf-count">· {uniqueTrainCount(wlAll)} trains · {wlAll.length} classes — poori list, kuch chhupa nahi</span>
                 </p>
                 {noSeatShown.map((g) => (
-                  <TrainGroup key={`off-${g[0].number}-${g[0].departure ?? ""}`} rows={g} onPick={(x) => onChip(pickUtter(x))} />
+                  <TrainGroup key={`off-${g[0].number}-${g[0].departure ?? ""}`} rows={g} onPick={tap} />
                 ))}
                 {noSeatGroups.length > 8 && (
                   <button className="sf-more" onClick={() => setShowAllOff((v) => !v)}>
@@ -530,7 +532,7 @@ export function SeatFinder({
               </p>
               {wl.length === 0 && <div className="sf-empty">Is filter me WL wali bhi koi nahi.</div>}
               {wlShown.map((g) => (
-                <TrainGroup key={`${g[0].number}-${g[0].departure ?? ""}-wl`} rows={g} onPick={(x) => onChip(pickUtter(x))} />
+                <TrainGroup key={`${g[0].number}-${g[0].departure ?? ""}-wl`} rows={g} onPick={tap} />
               ))}
               {wlGroups.length > 4 && (
                 <button className="sf-more" onClick={() => setShowAllWl((v) => !v)}>
@@ -550,7 +552,7 @@ export function SeatFinder({
                 Inhe “seat nahi” <b>nahi</b> maana gaya — check karo (↻).
               </div>
               {noDataShown.map((r) => (
-                <Row key={`nd-${r.number}`} r={r} onPick={(x) => onChip(pickUtter(x))} />
+                <Row key={`nd-${r.number}`} r={r} onPick={tap} />
               ))}
               {noData.length > 3 && (
                 <button className="sf-more" onClick={() => setShowAllNoData((v) => !v)}>

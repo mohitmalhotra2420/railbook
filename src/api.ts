@@ -138,6 +138,8 @@ export interface NvidiaAdminCatalog {
 }
 
 export const api = {
+  /** Round-20: pantry/catering (read-only) — passenger form ka food choice. */
+  trainPantry: (trainNumber: string) => trainPantryApi(trainNumber),
   adminModels: (refresh = false) =>
     request<AdminModelCatalog>(`/api/admin/models${refresh ? "?refresh=1" : ""}`),
   refreshAdminModels: () =>
@@ -414,4 +416,12 @@ export function pickTrainsApi(q: string, ctx?: { from?: string | null; to?: stri
   if (ctx?.from) p.set("from", ctx.from);
   if (ctx?.to) p.set("to", ctx.to);
   return request<import("./ai/agent").AgentTrainPicker>(`/api/trains/pick?${p.toString()}`);
+}
+
+/** Round-20: train ka catering/pantry info (read-only; wahi server function jo AI ka TRAIN_FACTS
+ * tool use karta hai) — passenger form me food choice dikhane ke liye. */
+export function trainPantryApi(trainNumber: string) {
+  return request<{ trainNumber: string; pantry: boolean | null; providers: string[]; note: string | null }>(
+    `/api/trains/${encodeURIComponent(trainNumber)}/pantry`,
+  );
 }

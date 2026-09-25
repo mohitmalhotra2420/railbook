@@ -81,12 +81,32 @@ export interface Recommendation {
   reason: string;
 }
 
+/** Round-20 (25 Sep, user: "passenger form IRCTC ke according — insurance/payment chhod kar").
+ *  IRCTC ke passenger details wale fields: naam, umar, gender, berth, khaana (catering), ID proof,
+ *  "confirm berth mile to hi book karo" aur auto up-gradation. Insurance/payment yahan nahi. */
 export interface Passenger {
   id: string;
   name: string;
   age: string;
   gender: "" | "MALE" | "FEMALE" | "OTHER";
   berthPreference: string;
+  /** IRCTC food choice — sirf jab train me pantry/catering ho (server probed, real). */
+  foodChoice?: "" | "VEG" | "NON_VEG" | "NO_FOOD";
+  /** Optional ID proof (IRCTC jaisa) — sirf yaad rakhne ke liye, verify hum nahi karte. */
+  idType?: string;
+  idNumber?: string;
+  /** IRCTC checkbox: "Book only if confirm berths are allotted". */
+  bookOnlyIfConfirm?: boolean;
+  /** IRCTC checkbox: auto up-gradation. */
+  autoUpgrade?: boolean;
+}
+
+/** Round-20: IRCTC ke "Contact Details" (mobile/email) — booking ke saath save, insurance/payment nahi. */
+export interface ContactDetails {
+  mobile: string;
+  email: string;
+  /** IRCTC jaisa: journey updates isi number par. */
+  whatsappOptIn?: boolean;
 }
 
 export interface FareBreakdown {

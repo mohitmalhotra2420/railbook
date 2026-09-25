@@ -3,6 +3,7 @@ import type {
   BookingRecord,
   ClassAvailability,
   FlowState,
+  ContactDetails,
   Passenger,
   Recommendation,
   Screen,
@@ -36,6 +37,8 @@ export interface BookingSnapshot {
   selectedClass: ClassAvailability | null;
   seatPreference: string;
   passengers: Passenger[];
+  /** Round-20: IRCTC ka "Contact Details" (mobile/email) — passenger form me hi. */
+  contact: ContactDetails;
   notice: string | null;
   error: string | null;
   booking: BookingRecord | null;
@@ -65,7 +68,9 @@ export type BookingAction =
   | { type: "SEARCH_EMPTY"; date: string }
   | { type: "SEARCH_ERROR"; error: string }
   | { type: "SELECT_TRAIN"; train: TrainResult }
-  | { type: "SELECT_TRAIN_AND_CLASS"; train: TrainResult; klass: ClassAvailability }
+  /* Round-20: class chip tap se seedha passenger form. toPassengers=true par berth step skip hota hai
+   * (berth preference khud passenger form me IRCTC jaise field hai). */
+  | { type: "SELECT_TRAIN_AND_CLASS"; train: TrainResult; klass: ClassAvailability; toPassengers?: boolean }
   | { type: "PATCH_TRAIN"; trainNumber: string; classes: ClassAvailability[] }
   | { type: "SELECT_CLASS"; klass: ClassAvailability }
   | { type: "SELECT_SEAT"; seat: string }
@@ -73,6 +78,7 @@ export type BookingAction =
   | { type: "ADD_PASSENGER" }
   | { type: "REMOVE_PASSENGER"; id: string }
   | { type: "UPDATE_PASSENGER"; id: string; patch: Partial<Passenger> }
+  | { type: "UPDATE_CONTACT"; patch: Partial<ContactDetails> }
   | { type: "GO_REVIEW"; fare: { baseFare: number; serviceFee: number; total: number } }
   | { type: "SET_BOOKING"; booking: BookingRecord }
   | { type: "SET_FLOW"; flow: FlowState }
@@ -92,6 +98,13 @@ export function blankPassenger(seat = ""): Passenger {
     age: "",
     gender: "",
     berthPreference: seat,
+    /* Round-20 — IRCTC jaise defaults: khaana "No Food" nahi maangte, user chune; ID khaali;
+     * dono checkbox IRCTC ke default OFF. */
+    foodChoice: "",
+    idType: "",
+    idNumber: "",
+    bookOnlyIfConfirm: false,
+    autoUpgrade: false,
   };
 }
 
@@ -112,6 +125,8 @@ export function initialBooking(date: string): BookingSnapshot {
     selectedClass: null,
     seatPreference: "",
     passengers: [blankPassenger()],
+    /* Round-20: IRCTC ka contact block (mobile/email) — passenger form me hi dikhta hai. */
+    contact: { mobile: "", email: "", whatsappOptIn: true },
     notice: null,
     error: null,
     booking: null,
@@ -298,8 +313,8 @@ export function bookingReducer(
         ...state,
         selectedTrain: action.train,
         selectedClass: action.klass,
-        flow: "CLASS_SELECTED",
-        screen: "seat",
+        flow: action.toPassengers ? "PASSENGERS_PENDING" : "CLASS_SELECTED",
+        screen: action.toPassengers ? "passengers" : "seat",
         notice: null,
         error: null,
         seatPreference: "",
@@ -357,6 +372,11 @@ export function bookingReducer(
       if (state.passengers.length <= 1) return state;
       const passengers = state.passengers.filter((p) => p.id !== action.id);
       return { ...state, passengers, passengerCount: passengers.length };
+    }
+    case "UPDATE_CONTACT": {
+      const patch = { ...action.patch };
+      if (patch.mobile != null) patch.mobile = String(patch.mobile).replace(/[^0-9]/g, "").slice(0, 10);
+      return { ...state, contact: { ...state.contact, ...patch } };
     }
     case "UPDATE_PASSENGER": {
       const patch = { ...action.patch };
@@ -486,6 +506,8 @@ export function restore(fallbackDate: string): BookingSnapshot | null {
     if (screen === "seat" && !parsed.selectedClass) screen = parsed.selectedTrain ? "class" : trains.length ? "results" : "home";
     const passengers = Array.isArray(parsed.passengers)
       ? parsed.passengers.map((p) => ({
+          /* Round-20: purane snapshot me naye IRCTC fields nahi hote — blank se bharo. */
+          ...blankPassenger(""),
           ...p,
           gender: String(p.name ?? "").trim() ? p.gender : "",
         }))

@@ -1,0 +1,208 @@
+{
+ "text": "💺 sab class me seat wali 6 trains (Subah (04:00–12:00)) — 12014 CC AVL 475 ₹510 (04:55) · 22488 CC AVL 238 ₹625 (08:20) · 22430 2S AVL 146 ₹100 (09:30) · 11058 3E AVL 128 ₹520 (08:50) · +11 aur (Seat Finder card me). (ASR → LDH · live board)\nSEAT (15 rows): 12014 AMRITSAR SHTABDI · CC · AVAILABLE 475 seats · ₹510 · 04:55 | 22488 VANDE BHARAT EXP · CC · AVAILABLE 238 seats · ₹625 · 08:20 | 22430 PTK DLI EXP · 2S · AVAILABLE 146 seats · ₹100 · 09:30 | 11058 ASR CSMT EXP · 3E · AVAILABLE 128 seats · ₹520 · 08:50 | 15708 ASR KIR EXPRESS · 3E · AVAILABLE 61 seats · ₹520 · 07:40 | 11058 ASR CSMT EXP · 2A · AVAILABLE 47 seats · ₹725 · 08:50 | 15708 ASR KIR EXPRESS · SL · AVAILABLE 40 seats · ₹150 · 07:40 | 15708 ASR KIR EXPRESS · 2A · AVAILABLE 37 seats · ₹725 · 07:40\nWAITLIST/N-A (10 rows, confirm% NAHI batana): 12926 PASCHIM EXPRESS · SL · WL 61 · ₹180 · 07:20 | 14542 ASR CDG EXP · 2A · N/A · ₹725 · 05:10 | 14542 ASR CDG EXP · 3A · N/A · ₹520 · 05:10 | 14542 ASR CDG EXP · CC · N/A · ₹270 · 05:10 | 14542 ASR CDG EXP · 2S · N/A · ₹85 · 05:10 | 12716 SACHKHAND EXP · 1A · N/A · ₹1270 · 05:30 | 12716 SACHKHAND EXP · 2A · N/A · ₹770 · 05:30 | 12716 SACHKHAND EXP · 3A · N/A · ₹565 · 05:30\nSource: web_confirmtkt · 18 trains dekhe (5 ka alag board check kiya).",
+ "seatFilter": {
+  "classCodes": [],
+  "line": null,
+  "rows": [
+   {
+    "number": "12014",
+    "name": "AMRITSAR SHTABDI",
+    "classCode": "CC",
+    "status": "AVAILABLE",
+    "seats": 475,
+    "rac": null,
+    "waitlist": null,
+    "fare": 510,
+    "departure": "04:55",
+    "durationMinutes": 122
+   },
+   {
+    "number": "22488",
+    "name": "VANDE BHARAT EXP",
+    "classCode": "CC",
+    "status": "AVAILABLE",
+    "seats": 238,
+    "rac": null,
+    "waitlist": null,
+    "fare": 625,
+    "departure": "08:20",
+    "durationMinutes": 116
+   },
+   {
+    "number": "11058",
+    "name": "ASR CSMT EXP",
+    "classCode": "3E",
+    "status": "AVAILABLE",
+    "seats": 128,
+    "rac": null,
+    "waitlist": null,
+    "fare": 520,
+    "departure": "08:50",
+    "durationMinutes": 160
+   },
+   {
+    "number": "15708",
+    "name": "ASR KIR EXPRESS",
+    "classCode": "3E",
+    "status": "AVAILABLE",
+    "seats": 61,
+    "rac": null,
+    "waitlist": null,
+    "fare": 520,
+    "departure": "07:40",
+    "durationMinutes": 145
+   },
+   {
+    "number": "11058",
+    "name": "ASR CSMT EXP",
+    "classCode": "2A",
+    "status": "AVAILABLE",
+    "seats": 47,
+    "rac": null,
+    "waitlist": null,
+    "fare": 725,
+    "departure": "08:50",
+    "durationMinutes": 160
+   },
+   {
+    "number": "15708",
+    "name": "ASR KIR EXPRESS",
+    "classCode": "SL",
+    "status": "AVAILABLE",
+    "seats": 40,
+    "rac": null,
+    "waitlist": null,
+    "fare": 150,
+    "departure": "07:40",
+    "durationMinutes": 145
+   },
+   {
+    "number": "15708",
+    "name": "ASR KIR EXPRESS",
+    "classCode": "2A",
+    "status": "AVAILABLE",
+    "seats": 37,
+    "rac": null,
+    "waitlist": null,
+    "fare": 725,
+    "departure": "07:40",
+    "durationMinutes": 145
+   },
+   {
+    "number": "12014",
+    "name": "AMRITSAR SHTABDI",
+    "classCode": "EC",
+    "status": "AVAILABLE",
+    "seats": 28,
+    "rac": null,
+    "waitlist": null,
+    "fare": 805,
+    "departure": "04:55",
+    "durationMinutes": 122
+   }
+  ],
+  "wlRows": [
+   {
+    "number": "12926",
+    "name": "PASCHIM EXPRESS",
+    "classCode": "SL",
+    "status": "WAITLIST",
+    "seats": null,
+    "rac": null,
+    "waitlist": 61,
+    "fare": 180,
+    "departure": "07:20",
+    "durationMinutes": 130
+   },
+   {
+    "number": "14542",
+    "name": "ASR CDG EXP",
+    "classCode": "2A",
+    "status": "UNKNOWN",
+    "seats": null,
+    "rac": null,
+    "waitlist": null,
+    "fare": 725,
+    "departure": "05:10",
+    "durationMinutes": 122
+   },
+   {
+    "number": "14542",
+    "name": "ASR CDG EXP",
+    "classCode": "3A",
+    "status": "NOT_AVAILABLE",
+    "seats": null,
+    "rac": null,
+    "waitlist": null,
+    "fare": 520,
+    "departure": "05:10",
+    "durationMinutes": 122
+   },
+   {
+    "number": "14542",
+    "name": "ASR CDG EXP",
+    "classCode": "CC",
+    "status": "NOT_AVAILABLE",
+    "seats": null,
+    "rac": null,
+    "waitlist": null,
+    "fare": 270,
+    "departure": "05:10",
+    "durationMinutes": 122
+   },
+   {
+    "number": "14542",
+    "name": "ASR CDG EXP",
+    "classCode": "2S",
+    "status": "NOT_AVAILABLE",
+    "seats": null,
+    "rac": null,
+    "waitlist": null,
+    "fare": 85,
+    "departure": "05:10",
+    "durationMinutes": 122
+   },
+   {
+    "number": "12716",
+    "name": "SACHKHAND EXP",
+    "classCode": "1A",
+    "status": "NOT_AVAILABLE",
+    "seats": null,
+    "rac": null,
+    "waitlist": null,
+    "fare": 1270,
+    "departure": "05:30",
+    "durationMinutes": 125
+   },
+   {
+    "number": "12716",
+    "name": "SACHKHAND EXP",
+    "classCode": "2A",
+    "status": "NOT_AVAILABLE",
+    "seats": null,
+    "rac": null,
+    "waitlist": null,
+    "fare": 770,
+    "departure": "05:30",
+    "durationMinutes": 125
+   },
+   {
+    "number": "12716",
+    "name": "SACHKHAND EXP",
+    "classCode": "3A",
+    "status": "NOT_AVAILABLE",
+    "seats": null,
+    "rac": null,
+    "waitlist": null,
+    "fare": 565,
+    "departure": "05:30",
+    "durationMinutes": 125
+   }
+  ],
+  "trainsSeen": 18,
+  "source": "web_confirmtkt"
+ },
+ "latencyMs": 49888,
+ "modelUsed": "openai/gpt-oss-20b",
+ "tool": null
+}

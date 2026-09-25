@@ -42,6 +42,7 @@ import { JOURNEY_CONFIG, findAlternativeTrains, findConnections, findPartialRout
 import { pickTrains } from "./journey/trainpicker.js";
 import { publicCapabilityPayload } from "./providers/capabilities.js";
 import { railcoreBlockState } from "./railway/railcore.js";
+import { scrapeTrainFactsWeb } from "./railway/webscrape.js";
 import { getNvidiaCatalog, publicNvidiaPayload, refreshNvidiaCatalog } from "./understand/nvidia.js";
 import { answerFromEvidence, compactScheduleEvidence, shouldGroundFact } from "./understand/ground.js";
 import { todayYmdFrom } from "./understand/legacy-dates.js";
@@ -914,6 +915,29 @@ export function createApp() {
    * same parser) taaki "Render ke IP se chalta hai ya nahi" ka pakka jawab mile. */
   /* 23 Sep 2026: train facts (Wikipedia) — provider chain ke baad last-resort
    * reference. Koi seat/fare ka dawa nahi, sirf verified page summary. */
+  /* Round-20 (25 Sep, user: "jis train mein catering hai usmein catering rakho"): pantry/catering
+   * info passenger form me dikhani hai. Ye ENDPOINT SIRF READ-ONLY hai — wahi maujooda function
+   * (scrapeTrainFactsWeb: erail + confirmtkt) call karta hai jo AI ka TRAIN_FACTS tool pehle se
+   * use karta hai. Koi naya source/logic nahi, kuch badla nahi. */
+  app.get("/api/trains/:number/pantry", async (req, res, next) => {
+    try {
+      const number = String(req.params.number ?? "").replace(/\D/g, "").slice(0, 5);
+      if (!number) {
+        res.status(400).json({ error: "train number required" });
+        return;
+      }
+      const facts = await scrapeTrainFactsWeb(number).catch(() => null);
+      res.json({
+        trainNumber: number,
+        pantry: facts?.pantry ?? null,
+        providers: facts?.providers ?? [],
+        note: facts?.pantry == null ? "pantry info provider se nahi aayi" : null,
+      });
+    } catch (err) {
+      next(err);
+    }
+  });
+
   app.get("/api/trains/:number/facts", async (req, res, next) => {
     try {
       const number = String(req.params.number ?? "").trim();

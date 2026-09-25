@@ -12,10 +12,12 @@ import { BERTH_BY_CLASS, CLASS_LABELS, isBookable, type ClassAvailability, type 
 import type { AgentTrainTable } from "../ai/agent";
 import { JourneyOptions } from "../components/JourneyOptions";
 import { SeatFinder } from "../components/SeatFinder";
-import { detectSeatIntent, type BoardTrainRow, type SeatIntent, type SeatSearchRow } from "../seatfinder";
+import { bookingFromChipPayload, bookingFromSeatRow, stationOf } from "../booking/fromOption";
+import { detectSeatIntent, type BoardTrainRow, type SeatIntent, type SeatRow, type SeatSearchRow } from "../seatfinder";
 import { VoiceSheet, type VoiceSuggestion } from "../components/VoiceSheet";
 import { AlternativesCard } from "../components/AlternativesCard";
 import { TrainPicker } from "../components/TrainPicker";
+import { ReplyText } from "../components/ReplyText";
 
 import type { ChatMessage } from "../conversation/types";
 import { useVoiceInput } from "../voice/useVoiceInput";
@@ -158,7 +160,7 @@ function writePersistedMemory(msgs: ChatMessage[], agentCtx: import("../api").Ag
 
 export function Concierge() {
   const booking = useBooking();
-  const { state, wallet, go, setFrom, setTo, setDate, setPassengerCount, clearPassengerCount, clearDateProvided, resetJourney, searchRoute, selectTrain, selectClass, selectSeat, updatePassenger, goReview, confirm, retrieve } = booking;
+  const { state, wallet, go, setFrom, setTo, setDate, setPassengerCount, clearPassengerCount, clearDateProvided, resetJourney, searchRoute, selectTrain, selectClass, selectTrainAndClassGo, selectSeat, updatePassenger, goReview, confirm, retrieve } = booking;
   const [prefs, setPrefs] = useState<Prefs>({});
   const [lastAsked, setLastAsked] = useState<DialogSlot>(null);
   /* Round-8: refresh ke baad bhi conversation + agent-context yaad —
@@ -1352,6 +1354,72 @@ export function Concierge() {
     }
   }
 
+  /* ── Round-20 (25 Sep, user: "kisi bhi class pe tap krnе pe seedha passenger form khulna chahiye,
+   * upar automatically train number, date, from, to station aaye") ────────────────────────────────
+   * Chip tap → class bookable hai (AVL/RAC/WL) to SEEDHA passenger form (train no · date · from → to ·
+   * class · fare pehle se bhare hue). Warna (N/A / data nahi) purana fresh seat check wala chat flow.
+   * Sirf mapping: chip me jo real provider row hai wahi booking me jaati hai — koi number invent nahi,
+   * koi naya API call nahi, AI/tools/planner ko chhua nahi. */
+  function openBookingFromChip(q: {
+    trainNumber: string;
+    classCode: string;
+    from: string;
+    to: string;
+    date?: string | null;
+    row?: { status?: string | null; seats?: number | null; rac?: number | null; waitlist?: number | null; fare?: number | null; source?: string | null; asOf?: string | null } | null;
+    trainName?: string | null;
+    departure?: string | null;
+    arrival?: string | null;
+    arrivalDayOffset?: number | null;
+    durationLabel?: string | null;
+    fromName?: string | null;
+    toName?: string | null;
+  }) {
+    const status = String(q.row?.status ?? "UNKNOWN").toUpperCase();
+    if (status !== "AVAILABLE" && status !== "RAC" && status !== "WAITLIST") {
+      void handleText(
+        `${q.trainNumber} ki fresh seat availability${q.classCode ? ` ${q.classCode}` : ""} ${q.date ?? state.date} ko ${q.from} se ${q.to}`,
+      );
+      return;
+    }
+    const { train, klass } = bookingFromChipPayload({ ...q, requestDate: q.date ?? state.date });
+    selectTrainAndClassGo(train, klass);
+    speakGuide(`${klass.code} select ho gayi. Ab passenger details bhariye.`);
+    setMessages((m) => [
+      ...m,
+      {
+        id: newId(),
+        role: "assistant",
+        text: `✅ ${klass.code} select — passenger form khul gaya: ${train.number} ${train.name ? `${train.name} · ` : ""}${train.date} · ${train.from.code} → ${train.to.code}. Passenger details IRCTC style me bhar do; payment IRCTC handoff par hi hoga.`,
+      },
+    ]);
+  }
+
+  /** Seat Finder ke chip tap par bhi wahi — row me jo hai wahi. */
+  function openBookingFromSeatRow(r: SeatRow, ctx: { from: string; to: string; toName?: string | null; date: string }) {
+    if (r.status !== "AVAILABLE" && r.status !== "RAC" && r.status !== "WAITLIST") {
+      void handleText(
+        `${r.number} ki fresh seat availability ${r.classCode !== "—" ? `${r.classCode} ` : ""}${ctx.date} ko ${ctx.from} se ${ctx.to}`,
+      );
+      return;
+    }
+    const { train, klass } = bookingFromSeatRow(r, {
+      from: stationOf(ctx.from),
+      to: stationOf(ctx.to, ctx.toName ?? null),
+      date: ctx.date,
+    });
+    selectTrainAndClassGo(train, klass);
+    speakGuide(`${klass.code} select ho gayi. Ab passenger details bhariye.`);
+    setMessages((m) => [
+      ...m,
+      {
+        id: newId(),
+        role: "assistant",
+        text: `✅ ${klass.code} select — passenger form khul gaya: ${train.number} ${train.name ? `${train.name} · ` : ""}${train.date} · ${train.from.code} → ${train.to.code}.`,
+      },
+    ]);
+  }
+
   async function onChooseClass(klass: ClassAvailability) {
     if (klass.status !== "UNKNOWN" && !isBookable(klass.status)) {
       setMessages((m) => [
@@ -1554,7 +1622,9 @@ export function Concierge() {
                         <p className="msg-text">{rest}</p>
                       </details>
                     ) : (
-                      <p className="msg-text">{rest}</p>
+                      /* Round-20: lamba jawab (screenshot 3) attractive rows me — ReplyText sirf
+                       * render karta hai, text waisa hi rehta hai. */
+                      <ReplyText text={rest} />
                     ))}
                 </>
               );
@@ -1578,6 +1648,8 @@ export function Concierge() {
                 onWallet={() => go("wallet")}
                 onBookings={() => go("bookings")}
                 onOpenBoard={(from, to, date) => void openBoardFor(from, to, date)}
+                onBookClass={(q) => openBookingFromChip(q)}
+                onBookSeat={(r, ctx) => openBookingFromSeatRow(r, ctx)}
                 seatFinder={seatFind}
               />
             ))}
@@ -1783,6 +1855,8 @@ function BlockView({
   onWallet,
   onBookings,
   onOpenBoard,
+  onBookClass,
+  onBookSeat,
   seatFinder,
 }: {
   block: Block;
@@ -1802,6 +1876,23 @@ function BlockView({
   onBookings: () => void;
   /** Round-18e: explicit "Sabhi trains · Book" CTA from BEST FOR YOU card → TrainBoard. */
   onOpenBoard?: (from: string, to: string, date: string, trainNumber: string | null) => void;
+  /* Round-20: card/Seat Finder ke class chip tap → seedha passenger form (train no/date/from→to bhare hue). */
+  onBookClass?: (q: {
+    trainNumber: string;
+    classCode: string;
+    from: string;
+    to: string;
+    date?: string | null;
+    row?: { status?: string | null; seats?: number | null; rac?: number | null; waitlist?: number | null; fare?: number | null; source?: string | null; asOf?: string | null } | null;
+    trainName?: string | null;
+    departure?: string | null;
+    arrival?: string | null;
+    arrivalDayOffset?: number | null;
+    durationLabel?: string | null;
+    fromName?: string | null;
+    toName?: string | null;
+  }) => void;
+  onBookSeat?: (r: SeatRow, ctx: { from: string; to: string; toName?: string | null; date: string }) => void;
   /* Seat Finder: us turn ka seat/class intent (Concierge state se aata hai — AI/server untouched). */
   seatFinder?: { intent: SeatIntent; viaVoice: boolean } | null;
 }) {
@@ -1811,7 +1902,16 @@ function BlockView({
       <TrainTableView
         table={block.table}
         seatFinder={
-          seatFinder ? { intent: seatFinder.intent, viaVoice: seatFinder.viaVoice, onChip } : undefined
+          seatFinder
+            ? {
+                intent: seatFinder.intent,
+                viaVoice: seatFinder.viaVoice,
+                onChip,
+                onBook: onBookSeat
+                  ? (r: SeatRow) => onBookSeat(r, { from: block.table.from, to: block.table.to, date: block.table.date })
+                  : undefined,
+              }
+            : undefined
         }
       />
     );
@@ -1884,7 +1984,20 @@ function BlockView({
         onPickLeg={(l) => onChip(`${l.trainNumber} ki seat availability ${l.classCode ? l.classCode + " " : block.plan.query.travelClass ? block.plan.query.travelClass + " " : ""}${l.date} ko ${l.ticketFrom ?? l.from} se ${l.ticketUpto ?? l.to}${l.ticketFrom && l.ticketFrom !== l.from ? ` (boarding ${l.from} se)` : ""}`)}
         /* Round-18m-6: ticket bookFrom→destination (boarding origin par) — query usi segment ki. */
         onPickBoardEarlier={(o) => onChip(`${o.trainNumber} ki seat availability ${o.classCode} ${block.plan.query.date} ko ${o.bookFrom} se ${o.destination} (boarding ${o.boardAt} se)`)}
-        onPickClass={(q) => onChip(`${q.trainNumber} ki fresh seat availability${q.classCode ? ` ${q.classCode}` : ""} ${q.date ?? block.plan.query.date} ko ${q.from} se ${q.to}${q.boardAt && q.boardAt !== q.from ? ` (boarding ${q.boardAt} se)` : ""}`)}
+        /* Round-20: class chip tap → seedha passenger form (bookable class par); warna purana fresh check. */
+        onPickClass={(q) => {
+          if (onBookClass) {
+            onBookClass({
+              ...q,
+              row: (q.row as { status?: string | null } | null) ?? null,
+              from: q.from,
+              to: q.to,
+              date: q.date ?? block.plan.query.date,
+            });
+            return;
+          }
+          onChip(`${q.trainNumber} ki fresh seat availability${q.classCode ? ` ${q.classCode}` : ""} ${q.date ?? block.plan.query.date} ko ${q.from} se ${q.to}${q.boardAt && q.boardAt !== q.from ? ` (boarding ${q.boardAt} se)` : ""}`);
+        }}
         onPickDate={(d) => onChip(`${block.plan.query.from} se ${block.plan.query.to} ${d} ki trains dikhao`)}
         onPickStations={(f, t) => onChip(`${f} se ${t} ${block.plan.query.date} ki trains dikhao`)}
         onOpenBoard={onOpenBoard ? () => onOpenBoard(block.plan.query.from, block.plan.query.to, block.plan.query.date, block.plan.best?.trainNumbers[0] ?? null) : undefined}
@@ -1907,6 +2020,20 @@ function BlockView({
           intent={seatFinder.intent}
           speak={seatFinder.viaVoice}
           onChip={onChip}
+          onBook={
+            onBookSeat
+              ? (r) => {
+                  /* Us train ka asli option mila to station ka naam bhi — warna code (kuch invent nahi). */
+                  const opt = (block.plan.routeOptions ?? []).find((o) => o.trainNumbers?.includes(r.number));
+                  onBookSeat(r, {
+                    from: block.plan.query.from,
+                    to: block.plan.query.to,
+                    toName: opt?.legs?.[0]?.toName ?? null,
+                    date: block.plan.query.date,
+                  });
+                }
+              : undefined
+          }
         />
       )}
       </>
@@ -2191,7 +2318,7 @@ function TrainTableView({
   seatFinder,
 }: {
   table: AgentTrainTable;
-  seatFinder?: { intent: SeatIntent; viaVoice: boolean; onChip: (text: string) => void };
+  seatFinder?: { intent: SeatIntent; viaVoice: boolean; onChip: (text: string) => void; onBook?: (r: SeatRow) => void };
 }) {
   const rows = table.rows ?? [];
   const day = (n: number) => (n > 0 ? `+${n}d` : "");
@@ -2246,6 +2373,7 @@ function TrainTableView({
           intent={seatFinder.intent}
           speak={seatFinder.viaVoice}
           onChip={seatFinder.onChip}
+          onBook={seatFinder.onBook}
         />
       )}
     </div>

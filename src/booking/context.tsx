@@ -51,9 +51,13 @@ interface BookingCtx {
   patchTrain: (trainNumber: string, classes: ClassAvailability[]) => void;
   selectTrain: (t: TrainResult) => void;
   selectTrainAndClass: (t: TrainResult, k: ClassAvailability) => void;
+  /** Round-20: class chip tap → seedha passenger form (train no/date/from→to already bhare hue). */
+  selectTrainAndClassGo: (t: TrainResult, k: ClassAvailability) => void;
   selectClass: (k: ClassAvailability) => Promise<void>;
   selectSeat: (s: string) => void;
   updatePassenger: (id: string, patch: Partial<BookingSnapshot["passengers"][0]>) => void;
+  /** Round-20: IRCTC jaisa contact block (mobile/email). */
+  updateContact: (patch: Partial<BookingSnapshot["contact"]>) => void;
   addPassenger: () => void;
   removePassenger: (id: string) => void;
   goReview: () => Promise<void>;
@@ -328,9 +332,12 @@ export function BookingProvider({ children }: { children: ReactNode }) {
       patchTrain: (trainNumber, classes) => dispatch({ type: "PATCH_TRAIN", trainNumber, classes }),
       selectTrain: (train) => dispatch({ type: "SELECT_TRAIN", train }),
       selectTrainAndClass: (train, klass) => dispatch({ type: "SELECT_TRAIN_AND_CLASS", train, klass }),
+      /* Round-20: chip tap → berth step skip karke seedha passenger form. */
+      selectTrainAndClassGo: (train, klass) => dispatch({ type: "SELECT_TRAIN_AND_CLASS", train, klass, toPassengers: true }),
       selectClass,
       selectSeat: (seat) => dispatch({ type: "SELECT_SEAT", seat }),
       updatePassenger: (id, patch) => dispatch({ type: "UPDATE_PASSENGER", id, patch }),
+      updateContact: (patch) => dispatch({ type: "UPDATE_CONTACT", patch }),
       addPassenger: () => dispatch({ type: "ADD_PASSENGER" }),
       removePassenger: (id) => dispatch({ type: "REMOVE_PASSENGER", id }),
       goReview,

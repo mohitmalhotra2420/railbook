@@ -2233,3 +2233,55 @@ table.traintable {
 .sf-cchip.off .sf-cfare { color: #9aa1ad; font-weight: 600; }
 .sf-cchip.off .sf-badge { background: #f2f2f6; color: #6b7280; }
 .sf-cchip.off .sf-badge.avl { background: #f2f2f6; color: #6b7280; }
+
+/* ── Round-20 (25 Sep 2026) ────────────────────────────────────────────────────────────────
+ * 1) Direct trains card bhi Seat Finder jaisa: block header tap se poora train khule (journey card),
+ *    stale chip par ↻ tag. (Markup shared TrainClassBlock se — dono jagah ek hi shakal.)
+ * 2) Passenger form IRCTC jaisa (journey summary + catering + contact).
+ * 3) Chat ka lamba jawab attractive rows me (ReplyText).
+ */
+.sf-group-hbtn { display: flex; width: 100%; text-align: left; gap: 10px; justify-content: space-between; align-items: baseline; flex-wrap: wrap; background: none; border: 0; padding: 0; cursor: pointer; font: inherit; color: inherit; }
+.sf-ctag { font-size: 10.5px; color: var(--muted); font-weight: 600; }
+.sf-cchip.stale { border-color: #e4d7bd; background: #fffdf6; }
+.sf-cchip.stale .sf-ctag { color: #8a6d3b; }
+
+/* Passenger form — IRCTC ka passenger-details page jaisa (insurance/payment chhod kar). */
+.pax-trip { border: 1px solid var(--line); border-left: 4px solid var(--navy); border-radius: 14px; background: #fff; padding: 10px 12px; margin-bottom: 12px; }
+.pax-trip-top { font-size: 13.5px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.pax-trip-no { border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; font-weight: 800; background: #f1f4f8; }
+.pax-trip-class { margin-left: auto; background: var(--navy); color: #fff; font-weight: 800; font-size: 11.5px; border-radius: 999px; padding: 2px 10px; }
+.pax-trip-route { display: flex; align-items: center; gap: 8px; margin-top: 7px; font-size: 13px; flex-wrap: wrap; }
+.pax-trip-route b { font-size: 13.5px; }
+.pax-trip-meta { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 6px; font-size: 12px; color: var(--ink); }
+.pax-trip-src { font-size: 11px; margin-top: 5px; }
+.pax-catering { border: 1px solid #f0d8b4; background: var(--amber-soft); color: #7a5210; border-radius: 12px; padding: 9px 11px; font-size: 12.5px; margin-bottom: 12px; }
+.pax-catering.no { border-color: var(--line); background: #fbf9f5; color: var(--muted); }
+.pax-check { display: flex; gap: 9px; align-items: flex-start; margin-top: 9px; font-size: 12.5px; line-height: 1.35; }
+.pax-check input { margin-top: 2px; width: 16px; height: 16px; }
+.pax-skip { font-size: 11.5px; margin-top: 9px; }
+
+/* Chat ka lamba jawab — padhne me aasan (ReplyText). */
+.rp { display: grid; gap: 8px; }
+.rp-head { display: flex; flex-wrap: wrap; gap: 6px; }
+.rp-headchip { font-size: 11.5px; font-weight: 700; color: #22304a; background: #eef2f8; border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; }
+.rp-rows { display: grid; gap: 7px; }
+.rp-row { border: 1px solid var(--line); border-left: 4px solid var(--green); border-radius: 12px; background: #fff; padding: 8px 10px; }
+.rp-l1 { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+.rp-no { border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; font-weight: 800; background: #f1f4f8; font-size: 12px; }
+.rp-name { font-weight: 700; font-size: 12.5px; }
+.rp-l2 { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; margin-top: 5px; font-size: 12px; }
+.rp-cls { background: #f1f4f8; border-radius: 6px; padding: 1px 6px; font-weight: 800; color: #22304a; font-size: 11.5px; }
+.rp-st { font-size: 11px; font-weight: 700; border-radius: 8px; padding: 2px 8px; }
+.rp-st.ok { background: var(--green-soft); color: var(--green); }
+.rp-st.rac { background: #e8f0ff; color: #1d4ed8; }
+.rp-st.wl { background: var(--amber-soft); color: var(--amber); }
+.rp-st.bad { background: var(--red-soft); color: var(--red); }
+.rp-fare { font-weight: 700; color: #374151; }
+.rp-dep { color: var(--muted); }
+.rp-tail { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--ink); }
+
+/* Round-20: chat rows ka tone (AVL/RAC/WL/N-A) — left border se turant pata chale. */
+.rp-row.ok { border-left-color: var(--green); }
+.rp-row.rac { border-left-color: #1d4ed8; }
+.rp-row.wl { border-left-color: var(--amber); background: #fffdf9; }
+.rp-row.bad { border-left-color: var(--red); background: #fffafa; }

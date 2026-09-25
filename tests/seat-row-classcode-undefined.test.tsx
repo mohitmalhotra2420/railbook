@@ -107,14 +107,16 @@ describe("seat rows: server `code` shape → UI `classCode` (undefined fix)", ()
       expect(container.textContent).toContain("SL AVL 9");
     }, { timeout: 4000 });
     expect(container.textContent).not.toContain("undefined");
-    expect(container.textContent).toContain("SL Train Cancelled");
+    /* Round-20: chips ab Seat Finder wale shared block (TrainClassBlock) se — class chip + badge.
+     * Cancelled train ka badge "Cancelled" hi dikhata hai (pehle ek hi string "SL Train Cancelled" thi). */
+    expect(container.textContent).toContain("SL Cancelled");
     /* class chip tap → classCode "SL" hi jaye (booking/handoff ke liye) */
     const picks: string[] = [];
     const { container: c2 } = render(
       <JourneyOptions plan={planWithoutProbe()} onPickClass={(q) => picks.push(q.classCode)} />,
     );
     await waitFor(() => expect(c2.textContent).toContain("SL AVL 9"), { timeout: 4000 });
-    const chip = Array.from(c2.querySelectorAll("button.jx-cchip-btn")).find((b) => String(b.textContent).includes("SL AVL 9"));
+    const chip = Array.from(c2.querySelectorAll("button.sf-cchip")).find((b) => String(b.textContent).includes("SL AVL 9"));
     expect(chip).toBeTruthy();
     fireEvent.click(chip!);
     expect(picks).toContain("SL");

@@ -8,6 +8,7 @@
  *
  * Koi client-side ranking/guess nahi — jo plan mein nahi hai wo dikhta nahi.
  */
+import { TrainClassBlock, type ClassChipData } from "./TrainClassBlock";
 import { useEffect, useState } from "react";
 import type { AgentConnection, AgentJourneyPlan, AgentRouteLeg, AgentRouteOption } from "../ai/agent";
 import type { JSX, ReactNode } from "react";
@@ -78,6 +79,35 @@ function availTextOf(a: AvailLike | null | undefined): { text: string; tone: Ton
   if (/REGRET/i.test(String(a.status))) return { text: `${cls} Regret`, tone: tone("bad") };
   return { text: cls ? `${cls} ${a.status}` : String(a.status), tone: "muted" };
 }
+/** Round-20: AvailLike row → shared chip data (Seat Finder wali shakal) — kuch naya nahi banate. */
+function chipDataOf(r: AvailLike): ClassChipData {
+  const code = classCodeOf(r) || "—";
+  const stale = Boolean(r.stale);
+  const note = (r as { note?: string | null }).note ?? null;
+  return {
+    code,
+    status: String(r.status ?? "UNKNOWN"),
+    seats: r.seats ?? null,
+    rac: r.rac ?? null,
+    waitlist: r.waitlist ?? null,
+    fare: r.fare ?? null,
+    /* WL/N-A halki; AVL/RAC rangdar — Seat Finder ka hi rule. */
+    seat: r.status === "AVAILABLE" || r.status === "RAC",
+    stale,
+    asOf: r.asOf ?? null,
+    tag: note && /cancel/i.test(note) ? "Cancelled" : note && /depart/i.test(note) ? "Departed" : stale ? `↻ ${ageLabel(r.asOf)}` : null,
+    raw: r,
+  };
+}
+
+/** "4 classes (2 me seat)" — Seat Finder ke header jaisa hi meta. */
+function countTextOf(rows: AvailLike[]): string | null {
+  const codes = rows.map(classCodeOf).filter(Boolean);
+  if (codes.length <= 1) return null;
+  const seats = rows.filter((r) => r.status === "AVAILABLE" || r.status === "RAC").length;
+  return `${codes.length} classes${seats ? ` (${seats} me seat)` : ""}`;
+}
+
 /** "2 ghante pehle" / "12 din pehle" — provider timestamp se; na ho to "purana data". */
 function ageLabel(asOf?: string | null): string {
   const ms = asOf ? Date.parse(asOf) : NaN;
@@ -380,7 +410,26 @@ export function JourneyOptions({
   plan: AgentJourneyPlan;
   onPickTrain?: (trainNumber: string) => void;
   /** Round-18m-14: class chip tap → fresh seat check for that train/class/segment. */
-  onPickClass?: (q: { trainNumber: string; classCode: string; from: string; to: string; date?: string | null; boardAt?: string | null }) => void;
+  /* Round-20: chip tap par caller ko poora row + option bhi milta hai — usse seedha passenger form
+   * (train no / date / from → to pehle se bhare) khul sakta hai. Purane callers bina row ke bhi chalte hain. */
+  onPickClass?: (q: {
+    trainNumber: string;
+    classCode: string;
+    from: string;
+    to: string;
+    date?: string | null;
+    boardAt?: string | null;
+    row?: AvailLike | null;
+    option?: AgentRouteOption | null;
+    /* Round-20: passenger form ke header ke liye — jo card me dikh raha hai wahi. */
+    trainName?: string | null;
+    departure?: string | null;
+    arrival?: string | null;
+    arrivalDayOffset?: number | null;
+    durationLabel?: string | null;
+    fromName?: string | null;
+    toName?: string | null;
+  }) => void;
   /** Round-18m-3: connecting leg tap → us leg ke segment+date ki seat query. */
   onPickLeg?: (leg: { trainNumber: string; from: string; to: string; date: string; classCode?: string | null; ticketFrom?: string | null; ticketUpto?: string | null }) => void;
   /** Round-18m-6: book-from-earlier tap → seat check for bookFrom→destination. */
@@ -593,7 +642,38 @@ export function JourneyOptions({
       {boardOpen && (showAllTrains ? [...directShown] : [...directShown].slice(0, 5)).sort((a, b) => (a.departure ?? "").localeCompare(b.departure ?? "")).map((o) => (
         <div key={o.trainNumbers[0]} className="jx-sb-row">
           <button type="button" className="jx-sb-head" onClick={pick ? () => pick(o) : undefined}><span className="jx-no">{o.trainNumbers[0]}</span> <span className="jx-name">{o.trainNames[0]}</span> <span className="jx-sub">{o.departure}→{o.arrival}{dateTag(baseDate, o.arrivalDayOffset)} · {o.durationLabel ?? ""}</span>{aiRec?.kind === "direct" && aiRec.trainNumbers[0] === o.trainNumbers[0] && <span className="jx-sb-pick">{IC.star} AI pick</span>}</button>
-          {rowsFor(o).length ? <ClassRow label="" rows={rowsFor(o)} onPick={onPickClass ? (r) => onPickClass({ trainNumber: o.trainNumbers[0], classCode: r.classCode, from: o.origin, to: o.destination }) : undefined} /> : liveNotes[o.trainNumbers[0]] ? <span className="jx-sub">{liveNotes[o.trainNumbers[0]]}</span> : <button type="button" className="jx-sub jx-linkbtn" onClick={onPickClass ? () => onPickClass({ trainNumber: o.trainNumbers[0], classCode: "", from: o.origin, to: o.destination }) : undefined}>{o.probed ? "Koi class data nahi" : "Seat data provider se nahi aayi"} · ↻ check karo</button>}
+          {rowsFor(o).length ? (
+            /* Round-20 (user: "direct trains card bhi Seat Finder jaisa same to same chip wala"):
+             * chips ab shared TrainClassBlock se — bilkul Seat Finder card jaisa block + chips. */
+            <TrainClassBlock
+              number={o.trainNumbers[0]}
+              name={o.trainNames[0]}
+              timeText={`${o.departure} → ${o.arrival}${dateTag(baseDate, o.arrivalDayOffset)} · ${o.durationLabel ?? ""}`}
+              countText={countTextOf(rowsFor(o))}
+              rows={rowsFor(o).map(chipDataOf)}
+              onChip={
+                onPickClass
+                  ? (c) =>
+                      onPickClass({
+                        trainNumber: o.trainNumbers[0],
+                        classCode: c.code,
+                        from: o.origin,
+                        to: o.destination,
+                        row: (c.raw as AvailLike) ?? null,
+                        option: o,
+                        trainName: o.trainNames[0] ?? null,
+                        departure: o.departure ?? null,
+                        arrival: o.arrival ?? null,
+                        arrivalDayOffset: o.arrivalDayOffset ?? null,
+                        durationLabel: o.durationLabel ?? null,
+                        fromName: o.legs?.[0]?.fromName ?? null,
+                        toName: o.legs?.[0]?.toName ?? null,
+                      })
+                  : undefined
+              }
+              chipTitle={(c) => `${c.code} — tap karke booking (passenger form)`}
+            />
+          ) : liveNotes[o.trainNumbers[0]] ? <span className="jx-sub">{liveNotes[o.trainNumbers[0]]}</span> : <button type="button" className="jx-sub jx-linkbtn" onClick={onPickClass ? () => onPickClass({ trainNumber: o.trainNumbers[0], classCode: "", from: o.origin, to: o.destination }) : undefined}>{o.probed ? "Koi class data nahi" : "Seat data provider se nahi aayi"} · ↻ check karo</button>}
           {/* Round-18m-30 (user rule): jo class boarding se WL/N-A thi, usi train mein train-origin se / destination
               ke aage tak ticket par seat — har row = book-from → book-upto, passenger apne hi stations par.
               24 Sep 2026: ye blocks default COLLAPSED (ek line summary) — pehle har train ke neeche 5-6 extra
@@ -613,7 +693,7 @@ export function JourneyOptions({
           {openTricks[o.trainNumbers[0]] && (o.earlierStopOptions ?? []).map((b) => (
             <div key={`${b.trainNumber}-${b.bookFrom}-${b.bookUpto ?? ""}`} className="jx-sb-alt">
               <span className="jx-sb-alt-label">Ticket {b.bookFromName ?? b.bookFrom} ({b.bookFrom}){b.bookUpto ? ` → ${b.bookUptoName ?? b.bookUpto} (${b.bookUpto})` : ` → ${b.destination}`} · board {b.boardAt}, utro {b.destination}:</span>
-              <ClassRow label="" rows={b.classOptions ?? [b.availability]} onPick={onPickClass ? (r) => onPickClass({ trainNumber: b.trainNumber, classCode: r.classCode, from: b.bookFrom, to: b.bookUpto ?? b.destination, boardAt: b.boardAt }) : undefined} />
+              <ClassRow label="" rows={b.classOptions ?? [b.availability]} onPick={onPickClass ? (r) => onPickClass({ trainNumber: b.trainNumber, classCode: r.classCode, from: b.bookFrom, to: b.bookUpto ?? b.destination, boardAt: b.boardAt, row: r }) : undefined} />
             </div>
           ))}
         </div>
@@ -658,7 +738,7 @@ export function JourneyOptions({
 
   /* "fresh chat page" jaisa feel: har page ka apna intro line (user: "fresh chat page pe khule"). */
   const pageIntro: Record<"direct" | "alt" | "connect", string> = {
-    direct: `Saari ${direct.length} direct trains × har class ka status — koi bhi class chip tap karo to fresh seat check ho jaayega.`,
+    direct: `Saari ${direct.length} direct trains × har class ka status — koi bhi class chip tap karo to seedha passenger form khulega (train number, date, from→to pehle se bhare honge). WL/N-A chip par tap karne se fresh seat check hoti hai.`,
     alt: "Jo direct list me nahi mila: same train me pehle station se ticket, doosri trains jisme seat hai, doosre station, aur doosri dates.",
     connect: "Do tickets (har leg ka apna) — dono legs me seat verify hui hai. Leg 1 aur Leg 2 me se jis train par tap karo, uski fresh seat check khul jaayegi.",
   };
