@@ -16,7 +16,7 @@ railbook-full/
 │   ├── .env                   ← GITHUB_TOKEN + RENDER_API_KEY (deploy ke liye — isko commit NAHI karna)
 │   └── .git/                  ← poori history (HEAD: 99a0c9d)
 ├── android-app/               ← Android WebView app (Kotlin + autofill assets, keystore ke saath)
-├── host-scripts/              ← apk-build-v145.sh (APK banane ka script)
+├── host-scripts/              ← apk-build-v146.sh (APK banane ka script)
 ├── previews/                  ← har round ke real-render previews (HTML)
 └── apks/                      ← latest release APKs (v1.4.4, v1.4.5)
 ```
@@ -65,13 +65,17 @@ android-app/app/src/main/assets/autofill/
 ```
 `MainActivity.kt` (`injectRailbookCapture`) V2 key `railbookAutofillPayloadV2` pehle padhta hai, phir purani key.
 
-## 4. Current state (25 Sep 2026)
+## 4. Current state (26 Sep 2026)
 
-- **Live:** commit `99a0c9d`, deploy `dep-dar1ucc9v7es7396tt80` (2026-09-25T07:14:55Z), `/api/version` = `99a0c9d`.
+- **Live:** commit `75c474b`, deploy `dep-darcj0h7lnhs73cs4gsg` (2026-09-25T19:21Z), `/api/version` = `75c474b`.
 - **Round-20:** direct-trains card = Seat Finder jaisa shared `TrainClassBlock`; kisi bhi class chip par tap → seedha IRCTC-jaisa passenger form (train no/date/from→to auto, catering real, insurance/payment nahi); chat ka lamba jawab `ReplyText` rows me.
 - **Round-21:** IRCTC autofill me food + "Book only if confirm berths are allotted" + "Consider for auto up-gradation" + mobile/email. Naya **V2 payload** (`railbookAutofillPayloadV2`); purani key + `postMessage` me exact **V1 shape** (purane app/extension safe).
 - **Round-21b (latest):** catering ka **per-source sach** — `sources{erail,confirmtkt}`, `conflict`, `premiumCatering` (Rajdhani/Shatabda/Duronto/Vande Bharat/Tejas), `foodChoiceExpected`, `evidence[]`. Passenger form me **Food choice sirf saaf data par**; conflict par honest line, guess kabhi nahi. App panel batata hai jab IRCTC page par food option hi na ho.
-- **Round-21c (latest):** chat section se **Seat Finder card hata** diya (component `SeatFinder.tsx`, `seatfinder.ts` filters, `server/agent/seatFinderTool.ts` + `seatFilter.ts`, AI seat intent — **sab intact**, sirf chat render se gaya).
+- **Round-21c:** chat section se **Seat Finder card hata** diya (component `SeatFinder.tsx`, `seatfinder.ts` filters, `server/agent/seatFinderTool.ts` + `seatFilter.ts`, AI seat intent — **sab intact**, sirf chat render se gaya).
+- **Round-22 (latest, 26 Sep):**
+  1. **Seat-answer padhne layak** — `ReplyText.tsx` ab **em-dash (—)** aur "… departure" wale text ko rows me todta hai + upar ek honest summary line (`💺 2 me seat (102, 42) · fare ₹150–₹180`) — sirf usi text ke numbers se.
+  2. **Filters direct card ke shuru me** — naya shared `src/components/SeatFilterBar.tsx` (✅ Available · 🚆 Sabhi trains · Sab class · class chips · ❄️ AC · Time · ⚡ Sabse jaldi · 💰 Sabse sasta); SeatFinder card + JourneyOptions dono wahi ek component use karte hain. Filter **sirf direct list** par (connecting/alternatives untouched); class filter par block me sirf wahi class chip; "Sabse sasta" filtered class ke fare par.
+  3. **IRCTC overlay simple** — Android app me sirf **"Redirecting to IRCTC…" + 45s countdown** (pehle 30s + extra 30s phase tha — ab ek hi 45s, uske baad seedha continue).
 
 ### Standing rules (inhe todna nahi)
 
@@ -85,11 +89,11 @@ android-app/app/src/main/assets/autofill/
 
 | cheez | value |
 |---|---|
-| vitest | **99 files / 1006 tests PASS** (~115 s) |
+| vitest | **101 files / 1018 tests PASS** (~120-175 s) |
 | server tsc | clean |
-| client tsc | 68 errors (purane, baseline — koi naya nahi) |
-| live commit | `99a0c9d` |
-| APK | v1.4.5 `RailBook-v1.4.5-release.apk` (versionCode 28) |
+| client tsc | 67 errors (purane, baseline — koi naya nahi) |
+| live commit | `75c474b` |
+| APK | v1.4.6 `RailBook-v1.4.6-release.apk` (versionCode 29) sha256 `23f9f050…f11068` |
 
 ### Chhote gotchas
 
