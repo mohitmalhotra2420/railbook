@@ -376,3 +376,23 @@ User ke teen points (2 screenshots + 1 filter screenshot):
 
 **Tests / verify:** naye `tests/round22-seat-reply-rows.test.tsx` (4) · `tests/round22-direct-card-filters.test.tsx` (8) → kul **101 files / 1018 tests PASS**; server `tsc` clean; client TS 67 (HEAD ke barabar — ek puraana test-side error bhi fix hua). **Preview:** `/home/user/RailBook/previews/RailBook-round22-2026-09-26.html` (asli components + built CSS + live plan payload; filter wale card chips par asli click karke capture kiye gaye states).
 **APK v1.4.6** (versionCode 29) — overlay change ke liye.
+
+### 9.15 Round-23 (26 Sep) — Available me sirf AVL/RAC, review page par sirf Continue to IRCTC, aur app ka asli version label
+
+**1) "Screenshot abhi bhi 30 sec dikha raha hai"**
+
+- Wajah **purana APK** thi: device par jo build chal raha tha usme purani strings thi. v1.4.6 me `prewarm_title` = "Redirecting to IRCTC…", 45s countdown aur step-lines hidden ho chuki hain (dex me `45s khatam…` hai, `30s khatam` nahi — v1.4.5 me ulta).
+- Asli confusion ki jadh bhi band ki: header ka version ek **hardcoded string** tha (`v1.2.8`) — isliye device par kaun sa build hai pata hi nahi chalta tha. Ab `MainActivity.appVersionLabel()` **packageManager se asli `versionName (versionCode)`** dikhata hai (v1.4.7 se aage), aur default string neutral ("RailBook") kar di.
+
+**2) "Available selection pe WL wali class bhi show hoti hai, jabki sirf available ya RAC show honi chahiye"**
+
+- `src/components/JourneyOptions.tsx`: ✅ Available mode me ab **sirf AVL/RAC class chips** dikhti hain (WL/N-A chips chhup jaati hain), aur jis train me ek bhi AVL/RAC class nahi wo list se hat jati hai. 🚆 Sabhi trains par purana rule — **har train ki saari classes (WL/N-A halki)** — waisa hi rehta hai.
+- Seat Finder card (jo abhi chat me mount nahi hota, code intact hai) apne purane "saari classes halki" rule par hi hai — bolo to wahan bhi same kar dunga.
+
+**3) "Review page par bas Continue to IRCTC → andar sab hata do"**
+
+- `src/views/ReviewStatus.tsx` (`FareReview`): ab sirf **IrctcHandoff card** hai. Hata diya — booking summary (Train/Date/From→To/Class/Seat/Passengers/Base fare/Service fee/Total), wallet card, "Nothing is confirmed…" note, aur neeche ka **sticky CTA (Confirm Booking / Add Money)**. Page title "Continue to IRCTC".
+- `src/components/IrctcHandoff.tsx`: **"Copy journey + passenger summary" button**, **copy-ready summary block** aur **technical payload preview** UI se hata diye (user: "user ko nahi show hona chahiye"). Click par summary ab bhi chupke clipboard par jaati hai (best-effort) aur ek chhoti honest line rehti hai ("Kuch bhi auto-submit nahi hota · login/OTP/CAPTCHA/payment RailBook ke paas nahi aate"). Payload banana/store karna waisa hi hai (tests se verify).
+- RailBook ke andar ka booking flow (Passengers → confirm) **waise hi maujood hai** — sirf review screen se wo buttons gaye (user ka flow: journey RailBook me, booking IRCTC par).
+
+**Tests:** naya `tests/round23-avail-chips-and-review.test.tsx` (3) · `tests/irctc-handoff.test.tsx` update (preview/copy UI hatne ke baad payload verify) → kul **102 files / 1021 tests PASS**; server `tsc` clean; client TS 67 (baseline). **APK v1.4.7** (versionCode 30) — dynamic version label ke saath.
