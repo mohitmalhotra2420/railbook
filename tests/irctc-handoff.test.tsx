@@ -108,7 +108,7 @@ describe("IRCTC handoff — payload contract", () => {
 
     // key allowlists — koi extra key kahin bhi nahi (contacts/flags optional hain, isliye subset check)
     expect(Object.keys(res.payload).every((k) => ALLOWED_TOP.includes(k))).toBe(true);
-    expect(ALLOWED_TOP.every((k) => k === "contact" || (res.payload as Record<string, unknown>)[k] !== undefined)).toBe(true);
+    expect(ALLOWED_TOP.every((k) => k === "contact" || (res.payload as unknown as Record<string, unknown>)[k] !== undefined)).toBe(true);
     expect(Object.keys(res.payload.journey).sort()).toEqual([...ALLOWED_JOURNEY].sort());
     /* flags optional hain (tick na ho to key hi nahi) — isliye subset check */
     for (const p of res.payload.passengers) expect(Object.keys(p).every((k) => ALLOWED_PAX.includes(k))).toBe(true);

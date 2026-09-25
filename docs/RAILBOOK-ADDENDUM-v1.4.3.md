@@ -354,3 +354,25 @@ Saath hi: *"seat finder aur direct trains ab same hi show kar rahe hain to seat 
 **Live:** commit `99a0c9d` → Render `dep-dar1ucc9v7es7396tt80` **LIVE 2026-09-25T07:14:55Z**; `/api/version` = `99a0c9d`; pantry curls (5 trains) upar wale natije dete hain.
 **Preview (single-source):** `/home/user/RailBook/previews/RailBook-round21b-2026-09-25.html` — asli components + built CSS + **live** payloads (plan `provas/asr-ndls-2026-09-26-plan.json`, pantry live).
 **APK v1.4.5** (versionCode 28) — bridge ki nayi honest line ke liye.
+
+### 9.14 Round-22 (26 Sep) — seat-answer padhne layak, direct card ke shuru me filters, aur IRCTC overlay 45s
+
+User ke teen points (2 screenshots + 1 filter screenshot):
+
+**1) "Pehle screenshot mein ese simple answer padhna bada mushkil hai — thoda attractive banao (AI seat finder se related answer ho to)"**
+
+- `src/components/ReplyText.tsx`: parser me **em-dash (—)** separator aur "… departure" wala suffix add hua — screenshot ka asli text (`* 12484 ASR TVCN SF EXP — SL — AVAILABLE 102 seats — ₹180 — 05:55 departure`) ab **rows** me tootta hai. Purane `–` / `-` / `|` formats waise hi chalte hain.
+- Headline ab chips me baant-ti hai (route · window+class) aur rows ke upar ek **honest summary line** (`💺 2 me seat (102, 42) · fare ₹150–₹180`) — jo **sirf usi text ke numbers** se banti hai, kuch invent nahi. Row na bane to jawab pehle jaisa paragraph hi rehta hai (kuch chhupta nahi).
+
+**2) Filter screenshot: "yeh filter direct train ke card mein starting mein add kro"**
+
+- Naya shared `src/components/SeatFilterBar.tsx` — **wahi chips** jo Seat Finder card me thi (✅ Available · 🚆 Sabhi trains · Sab class · 1A/2A/3A/3E/SL/CC/2S/EC · ❄️ AC · Time · ⚡ Sabse jaldi · 💰 Sabse sasta). SeatFinder.tsx aur JourneyOptions.tsx dono yahi ek component use karte hain (dono jagah shakal bilkul same).
+- **Direct trains card ke shuru me** chips row lagti hai; filter **sirf direct list** par chalta hai — connecting / alternatives / alternative dates / planner ka data waisa hi rehta hai (user ka purana rule: "card filter karo lekin connecting/alternatives mein change na aayein"). Class/AC filter par har train ke block me sirf wahi class chip dikhti hai; "Sabse sasta" filtered class ke fare par chalta hai (jo dikh raha hai wahi compare hota hai).
+- Purana window-toggle (19d) ka state hata diya — window ab **Time chip** se hi control hota hai (`Time: Sab (poori list)` = window hatao), aur chips ke neeche ek honest filter line + **Clear** button aata hai. Tests update: `tests/round19d-card-window.test.tsx`.
+
+**3) "Second screenshot: sirf likho redirecting to irctc and time; 30 sec ke baad bhi extra 30 sec leta — countdown 45 sec ka karo"**
+
+- Android app: `strings.xml` ka `prewarm_title` ab **"Redirecting to IRCTC…"**; step-by-step lines wala TextView hidden (progress status bar me). `MainActivity.kt`: **ek hi 45s countdown** (pehle 30s + extra 30s phase tha) aur uske baad seedha honest reveal — koi extra wait nahi; status line: "IRCTC login page 45s me nahi aaya — jo page hai wahan se aap continue kar sakte hain (login aap karein)."
+
+**Tests / verify:** naye `tests/round22-seat-reply-rows.test.tsx` (4) · `tests/round22-direct-card-filters.test.tsx` (8) → kul **101 files / 1018 tests PASS**; server `tsc` clean; client TS 67 (HEAD ke barabar — ek puraana test-side error bhi fix hua). **Preview:** `/home/user/RailBook/previews/RailBook-round22-2026-09-26.html` (asli components + built CSS + live plan payload; filter wale card chips par asli click karke capture kiye gaye states).
+**APK v1.4.6** (versionCode 29) — overlay change ke liye.

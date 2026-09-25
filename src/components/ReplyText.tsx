@@ -30,10 +30,13 @@ type Parsed = { head: string[]; rows: Row[]; rest: string[] };
 
 const CLASSES = "1A|2A|3A|3E|SL|CC|2S|EC|EA|FC|2A\\+|GN";
 /* Row ka match line/segment ke SHURU me — aage jo bacha (jaise "… 22 trains check ki") wo rest text. */
+/* Round-22 (26 Sep, user screenshot: seedha AI seat-answer) — us text me separator EM-DASH (—) hai
+ * aur time ke baad "departure" shabd bhi. Dono add kiye (purane –/-/| formats waise hi chalte hain). */
+const SEP = "[–\\-—|•:·]"; /* en-dash, hyphen, EM-DASH, pipe, bullet, colon, middle-dot */
 const ROW_RE = new RegExp(
-  "^(?:\\*|•|\\d+[.)])?\\s*(?<number>\\d{4,5})\\s+(?<name>[^–\\-|•*·]{2,60}?)\\s*[–\\-|•:·]?\\s*(?<cls>" +
+  "^(?:\\*|•|\\d+[.)])?\\s*(?<number>\\d{4,5})\\s+(?<name>[^–\\-—|•*·]{2,60}?)\\s*" + SEP + "?\\s*(?<cls>" +
     CLASSES +
-    ")(?<clslabel>\\b(?!\\d))\\s*(?:[–\\-|•:·]\\s*)?(?<status>AVAILABLE|RAC|WAITLIST|WL|NOT[ _]?AVAILABLE|N\\/A|REGRET|DEPARTED|CANCELLED)?\\s*(?<count>\\d{1,4})?\\s*(?<scale>seats?)?\\s*(?<fare>₹\\s?[\\d,]+)?\\s*,?\\s*(?<dep>(?:dep(?:arture)?\\.?\\s*:?)?\\s*\\d{1,2}:\\d{2})?",
+    ")(?<clslabel>\\b(?!\\d))\\s*(?:" + SEP + "\\s*)?(?<status>AVAILABLE|RAC|WAITLIST|WL|NOT[ _]?AVAILABLE|N\\/A|REGRET|DEPARTED|CANCELLED)?\\s*(?<count>\\d{1,4})?\\s*(?<scale>seats?)?\\s*(?:" + SEP + "\\s*)?(?<fare>₹\\s?[\\d,]+)?\\s*,?\\s*(?:" + SEP + "\\s*)?(?<dep>(?:dep(?:arture)?\\.?\\s*:?)?\\s*\\d{1,2}:\\d{2}(?:\\s*(?:departure|dep\\.?))?)?",
   "i",
 );
 
@@ -42,7 +45,7 @@ function rowOf(seg: string): { row: Row; tail: string } | null {
   if (!m?.groups) return null;
   const g = m.groups as Record<string, string | undefined>;
   const consumed = m[0].length;
-  const tail = seg.trim().slice(consumed).replace(/^[\s,;.|–-]+/, "").trim();
+  const tail = seg.trim().slice(consumed).replace(/^[\s,;.|–—\-]+/, "").trim();
   const statusRaw = String(g.status ?? "").toUpperCase().replace(/\s+/g, "_");
   const status = statusRaw === "WL" ? "WAITLIST" : statusRaw === "N/A" ? "NOT_AVAILABLE" : statusRaw;
   const dep = g.dep ? (g.dep.match(/\d{1,2}:\d{2}/)?.[0] ?? null) : null;
@@ -110,6 +113,24 @@ function parseReply(text: string): Parsed {
   return out;
 }
 
+/** Head text (jaise "Kal 27 Sep ko Amritsar → Ludhiana, Subah (04:00–12:00) window mein SL class") ko
+ * 2 chips me baanto: route aur window/class — shabd waise hi, bas padhne me aasan. */
+function headChips(head: string[]): string[] {
+  const out: string[] = [];
+  for (const h of head) {
+    const t = h.trim();
+    if (!t) continue;
+    const arrow = /^(?<route>.*?→\s*[^,]+)\s*,\s*(?<rest>.+)$/.exec(t);
+    if (arrow?.groups?.route && arrow.groups.rest) {
+      out.push(arrow.groups.route.trim());
+      out.push(arrow.groups.rest.trim());
+      continue;
+    }
+    out.push(t);
+  }
+  return out.slice(0, 3);
+}
+
 const statusTone = (s: string) =>
   s === "AVAILABLE" ? "ok" : s === "RAC" ? "rac" : s === "WAITLIST" ? "wl" : "bad";
 
@@ -127,13 +148,29 @@ export function ReplyText({ text }: { text: string }): JSX.Element {
   if (parsed.rows.length === 0) return <p className="msg-text">{text}</p>;
   return (
     <div className="rp">
-      {parsed.head.length > 0 && (
+      {headChips(parsed.head).length > 0 && (
         <div className="rp-head">
-          {parsed.head.map((h, i) => (
+          {headChips(parsed.head).map((h, i) => (
             <span key={i} className="rp-headchip">{h}</span>
           ))}
         </div>
       )}
+      {(() => {
+        /* Round-22: summary line — sirf usi text ke numbers se (jo dikh raha hai wahi; kuch invent nahi). */
+        const seatRows = parsed.rows.filter((r) => r.status === "AVAILABLE" || r.status === "RAC");
+        if (!seatRows.length) return null;
+        const counts = seatRows.map((r) => r.count).filter((n): n is number => typeof n === "number");
+        const fares = parsed.rows
+          .map((r) => Number(String(r.fare ?? "").replace(/[^\d]/g, "")))
+          .filter((n) => Number.isFinite(n) && n > 0);
+        return (
+          <div className="rp-sum">
+            💺 {seatRows.length} me seat
+            {counts.length ? ` (${counts.join(", ")})` : ""}
+            {fares.length > 1 ? ` · fare ₹${Math.min(...fares)}–₹${Math.max(...fares)}` : fares.length === 1 ? ` · fare ₹${fares[0]}` : ""}
+          </div>
+        );
+      })()}
       <div className="rp-rows">
         {parsed.rows.map((r, i) => (
           <div key={i} className={`rp-row ${statusTone(r.status)}`}>

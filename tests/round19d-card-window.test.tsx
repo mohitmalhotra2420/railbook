@@ -102,12 +102,14 @@ describe("Round-19d — card ki direct list window se filter", () => {
     expect(getByText(/Alternative trains/)).toBeTruthy();
   });
 
-  it("'Sabhi direct dikhao' chip dabaate hi poori list wapas (aur phir sirf window)", () => {
-    const { container, getByText } = render(<JourneyOptions plan={plan()} window={SUBHA} />);
-    fireEvent.click(getByText("Sabhi 5 direct dikhao"));
+  /* Round-22 (26 Sep, user screenshot): window toggle ab direct card ke Time chip se chalta hai
+   * ("Time: Sab (poori list)" = window hatao; Time chip se window wapas) — duplicate state nahi. */
+  it("'Time: Sab (poori list)' dabaate hi poori list wapas (aur Time chip se phir sirf window)", () => {
+    const { container, getByText, getByLabelText } = render(<JourneyOptions plan={plan()} window={SUBHA} />);
+    fireEvent.click(getByText("Time: Sab (poori list)"));
     let rows = [...container.querySelectorAll(".jx-sb-row .jx-no")].map((n) => n.textContent);
     expect(rows).toContain("12030");
-    fireEvent.click(getByText("Sirf Subah (04:00–12:00) dikhao"));
+    fireEvent.change(getByLabelText("Time filter"), { target: { value: "240-720" } });
     rows = [...container.querySelectorAll(".jx-sb-row .jx-no")].map((n) => n.textContent);
     expect(rows).not.toContain("12030");
   });

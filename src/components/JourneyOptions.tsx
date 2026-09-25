@@ -13,7 +13,9 @@ import { useEffect, useState } from "react";
 import type { AgentConnection, AgentJourneyPlan, AgentRouteLeg, AgentRouteOption } from "../ai/agent";
 import type { JSX, ReactNode } from "react";
 import { addDays, formatShortDate, inr } from "../format";
-import { departureInWindow } from "../seatfinder";
+import { departureInWindow, type SeatMode } from "../seatfinder";
+import type { ClassCode } from "../types";
+import { AC_CLASS_SET, SeatFilterBar } from "./SeatFilterBar";
 
 function dayTag(n: number): string {
   return n > 0 ? ` +${n}d` : "";
@@ -507,11 +509,65 @@ export function JourneyOptions({
   const best = plan.best;
   const direct = plan.routeOptions.filter((o) => o.changes === 0);
   /* Round-19d: window filter SIRF direct trains par (0 change). Connecting/alternatives untouched. */
+  /* ── Round-22 (26 Sep 2026, user screenshot: Seat Finder ke filter chips) ──
+   * "yeh filter direct train ke card mein starting mein add kro." Chips wahi shared SeatFilterBar
+   * se lagti hain (Seat Finder card jaisi same to same). Filter SIRF direct list par lagta hai —
+   * connecting / alternatives / alternative-dates / planner ka data jaisa tha waisa hi rehta hai. */
+  const [fMode, setFMode] = useState<SeatMode>("all");
+  const [fCls, setFCls] = useState<ClassCode | null>(null);
+  const [fAc, setFAc] = useState(false);
+  /* AI ka time-window (user ne "kal subah" bola ho) chip ka default hai — user chip se badal sakta hai. */
+  const [fAfter, setFAfter] = useState<number | null>(win?.afterMin ?? null);
+  const [fBefore, setFBefore] = useState<number | null>(win?.beforeMin ?? null);
+  const [fEarliest, setFEarliest] = useState(false);
+  const [fCheapest, setFCheapest] = useState(false);
+  /* Naya sawaal / naya window → Time chip AI ke window par reset (warna purana filter chip-chaap on reh jata). */
+  useEffect(() => {
+    setFAfter(win?.afterMin ?? null);
+    setFBefore(win?.beforeMin ?? null);
+    setFEarliest(false);
+    setFCheapest(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [win?.afterMin ?? null, win?.beforeMin ?? null, plan.query.from, plan.query.to, plan.query.date]);
   const winOn = Boolean(win && (win.afterMin != null || win.beforeMin != null));
-  const [showAllDirect, setShowAllDirect] = useState(false);
-  const directInWindow = winOn ? direct.filter((o) => departureInWindow(o.departure, win!.afterMin, win!.beforeMin)) : direct;
+  const filterOn = fMode === "avail" || fCls != null || fAc || fAfter != null || fBefore != null || fEarliest || fCheapest;
+  /* Class/AC filter train ke apne rows par — jo train us class me hi nahi hai wo list me nahi aati (fake nahi). */
+  const rowsOfTrainFiltered = (o: AgentRouteOption): AvailLike[] => {
+    const rows = liveRows[o.trainNumbers[0]] ?? o.classOptions ?? [];
+    if (fCls) return rows.filter((r) => classCodeOf(r) === fCls);
+    if (fAc) return rows.filter((r) => AC_CLASS_SET.has(classCodeOf(r)));
+    return rows;
+  };
+  const directFiltered = direct.filter((o) => {
+    const rows = rowsOfTrainFiltered(o);
+    if ((fCls != null || fAc) && rows.length === 0) return false;
+    if (fMode === "avail") {
+      const anySeat = (rows.length ? rows : liveRows[o.trainNumbers[0]] ?? o.classOptions ?? []).some(
+        (r) => r.status === "AVAILABLE" || r.status === "RAC",
+      );
+      if (!anySeat) return false;
+    }
+    if ((fAfter != null || fBefore != null) && !departureInWindow(o.departure, fAfter, fBefore)) return false;
+    return true;
+  });
+  const minFareOf = (o: AgentRouteOption): number | null => {
+    /* Class/AC filter laga ho to "sabse sasta" usi filtered class ka fare dekhta hai (jo dikh raha
+     * hai wahi compare hota hai) — warna poori train ka sabse kam fare. */
+    const rows = fCls != null || fAc ? rowsOfTrainFiltered(o) : liveRows[o.trainNumbers[0]] ?? o.classOptions ?? [];
+    const fares = rows.map((r) => r.fare).filter((x): x is number => typeof x === "number");
+    return fares.length ? Math.min(...fares) : null;
+  };
+  /* "Sabse jaldi" = nikalne ke time se; "Sabse sasta" = sabse kam fare wali class se. Default: list ka apna order. */
+  const directSorted = (() => {
+    const arr = [...directFiltered];
+    if (fEarliest && !fCheapest) arr.sort((a, b) => (a.departure ?? "99:99").localeCompare(b.departure ?? "99:99"));
+    else if (fCheapest) arr.sort((a, b) => (minFareOf(a) ?? 9e9) - (minFareOf(b) ?? 9e9));
+    return arr;
+  })();
   /* Window me koi direct hi na mile to list khaali karne ka matlab nahi — poori list + saaf note. */
-  const directShown = winOn && !showAllDirect && directInWindow.length > 0 ? directInWindow : direct;
+  const timeOnly = fAfter != null || fBefore != null;
+  const directInWindow = timeOnly ? direct.filter((o) => departureInWindow(o.departure, fAfter, fBefore)) : direct;
+  const directShown = timeOnly && directInWindow.length === 0 ? direct : directSorted;
   const connections = plan.connections.length ? plan.connections : plan.recovery?.connecting ?? [];
   const altDates = plan.alternativeDates.filter((d) => d.count > 0);
   const rec = plan.recovery;
@@ -544,8 +600,8 @@ export function JourneyOptions({
     : !plan.directUnavailable && !bfeHero ? best : null;
   /* Round-19d: window laga ho aur hero (direct) us window ke bahar ho → window ka best direct hero banega.
    * Window me koi direct na mile to purana hero jaisa hai (kuch chhupana nahi). */
-  const heroSwapped = Boolean(winOn && !showAllDirect && heroDirectRaw && heroDirectRaw.changes === 0 &&
-    !departureInWindow(heroDirectRaw.departure, win!.afterMin, win!.beforeMin) && directInWindow.length > 0);
+  const heroSwapped = Boolean(timeOnly && heroDirectRaw && heroDirectRaw.changes === 0 &&
+    !departureInWindow(heroDirectRaw.departure, fAfter, fBefore) && directInWindow.length > 0);
   const heroDirect = heroSwapped ? directInWindow[0] : heroDirectRaw;
   const decidedBy = plan.decision?.source === "ai" ? "AI" : null;
   const asOf = timeLabel(plan.provenance?.retrievedAt);
@@ -611,10 +667,7 @@ export function JourneyOptions({
   /* 24 Sep 2026 (user: "alternative trains ka alag page, leg 1/leg 2 ka alag page banao,
    * front chat me sirf header rahe"): poora detail ab alag page par. */
   const [page, setPage] = useState<"direct" | "alt" | "connect" | null>(initialPage ?? null);
-  /* Naya sawaal / naya window → purana "sabhi dikhao" reset (warna filter chup-chaap off reh jata). */
-  useEffect(() => {
-    setShowAllDirect(false);
-  }, [winOn, win?.afterMin ?? null, win?.beforeMin ?? null]);
+  /* Window/Time chip ki honest line — toggle ab wahi Time chip badalta hai (duplicate state nahi). */
   const windowBar = winOn && direct.length > 0 && (
     <div className="jx-windowbar">
       <span className="jx-windowbar-ic">{IC.clock}</span>
@@ -622,24 +675,63 @@ export function JourneyOptions({
         <strong>{win?.label ?? "Time window"}</strong> — {directInWindow.length
           ? `direct trains sirf isi window ki (${directInWindow.length} mili)`
           : "is window me koi seedha train nahi mila — neeche poori direct list"}
-        {directInWindow.length > 0 && !showAllDirect && heroSwapped ? " · AI ke pick ke bajaye window ka best upar" : ""}
+        {directInWindow.length > 0 && heroSwapped ? " · AI ke pick ke bajaye window ka best upar" : ""}
       </span>
-      {directInWindow.length > 0 && (
-        <button type="button" className="jx-windowbar-btn" onClick={() => setShowAllDirect((v) => !v)}>
-          {showAllDirect ? `Sirf ${win?.label ?? "window"} dikhao` : `Sabhi ${direct.length} direct dikhao`}
+      {timeOnly && directInWindow.length > 0 && (
+        <button type="button" className="jx-windowbar-btn" onClick={() => { setFAfter(null); setFBefore(null); }}>
+          Time: Sab (poori list)
         </button>
       )}
     </div>
   );
   const seatBoard = direct.length > 0 && (
     <Section ic={IC.train} title={`Direct trains ${plan.query.from}→${plan.query.to}`} badge={`${probedDirect.length}/${directShown.length} seat-checked`} foot={unprobedDirect.length ? `${unprobedDirect.map((o) => o.trainNumbers[0]).join(", ")}: seat data provider se nahi aayi — inhe "seat nahi" nahi maana; Refresh seats se dobara check karo.` : "Har direct train ki har class ka status upar hai — RAC bhi booking option hai (berth chart ke baad)."}>
+      {/* Round-22 (user screenshot): Seat Finder ke wahi filter chips — direct card ke shuru me. */}
+      <div className="jx-sb-filters">
+      <SeatFilterBar
+        mode={fMode}
+        setMode={setFMode}
+        cls={fCls}
+        setCls={setFCls}
+        acOnly={fAc}
+        setAcOnly={setFAc}
+        afterMin={fAfter}
+        beforeMin={fBefore}
+        setTime={(a, b) => {
+          setFAfter(a);
+          setFBefore(b);
+        }}
+        earliest={fEarliest}
+        setEarliest={setFEarliest}
+        cheapest={fCheapest}
+        setCheapest={setFCheapest}
+        label="Direct trains filters"
+      />
+      </div>
+      {filterOn && (
+        <div className="jx-sb-filternote">
+          Filter: {[
+            fMode === "avail" ? "✅ Available (AVL/RAC)" : null,
+            fCls ? `class ${fCls}` : fAc ? "❄️ AC classes" : null,
+            timeOnly ? `time ${win?.label ?? `${fAfter ?? "00:00"}–${fBefore ?? "24:00"}`}` : null,
+            fEarliest ? "⚡ sabse jaldi" : fCheapest ? "💰 sabse sasta" : null,
+          ]
+            .filter(Boolean)
+            .join(" · ")} — {directShown.length} direct train{directShown.length === 1 ? "" : "s"}
+          <button type="button" className="jx-sb-filternote-clear" onClick={() => {
+            setFMode("all"); setFCls(null); setFAc(false); setFAfter(null); setFBefore(null); setFEarliest(false); setFCheapest(false);
+          }}>
+            Clear
+          </button>
+        </div>
+      )}
       <div className="jx-sb-rowhead">
         <button type="button" className="jx-why-head jx-sb-toggle" onClick={() => setBoardOpen((v) => !v)}>{boardOpen ? "Hide" : "Show"} {directShown.length} trains · har class ka seat status{!boardOpen && plan.directUnavailable ? " · sab WL/N-A" : ""} <span className={`jx-caret${boardOpen ? " open" : ""}`} /></button>
         {/* Direct trains ka apna page — entry yahi (neeche duplicate card nahi). */}
         <button type="button" className="jx-sb-pagechip" onClick={() => setPage("direct")}>Poora page {IC.chev}</button>
       </div>
       {windowBar}
-      {boardOpen && (showAllTrains ? [...directShown] : [...directShown].slice(0, 5)).sort((a, b) => (a.departure ?? "").localeCompare(b.departure ?? "")).map((o) => (
+      {boardOpen && (showAllTrains ? directShown : directShown.slice(0, 5)).map((o) => (
         <div key={o.trainNumbers[0]} className="jx-sb-row">
           <button type="button" className="jx-sb-head" onClick={pick ? () => pick(o) : undefined}><span className="jx-no">{o.trainNumbers[0]}</span> <span className="jx-name">{o.trainNames[0]}</span> <span className="jx-sub">{o.departure}→{o.arrival}{dateTag(baseDate, o.arrivalDayOffset)} · {o.durationLabel ?? ""}</span>{aiRec?.kind === "direct" && aiRec.trainNumbers[0] === o.trainNumbers[0] && <span className="jx-sb-pick">{IC.star} AI pick</span>}</button>
           {rowsFor(o).length ? (
@@ -649,8 +741,8 @@ export function JourneyOptions({
               number={o.trainNumbers[0]}
               name={o.trainNames[0]}
               timeText={`${o.departure} → ${o.arrival}${dateTag(baseDate, o.arrivalDayOffset)} · ${o.durationLabel ?? ""}`}
-              countText={countTextOf(rowsFor(o))}
-              rows={rowsFor(o).map(chipDataOf)}
+              countText={countTextOf(rowsOfTrainFiltered(o))}
+              rows={rowsOfTrainFiltered(o).map(chipDataOf)}
               onChip={
                 onPickClass
                   ? (c) =>
@@ -888,7 +980,7 @@ export function JourneyOptions({
           <span className="jx-pill">{IC.cal} {formatShortDate(plan.query.date)}</span>
           {pax ? <span className="jx-pill">{IC.users} {pax} passenger{pax > 1 ? "s" : ""}</span> : <span className="jx-pill jx-pill-warn">{IC.users} passengers? — batao, seats usi hisaab se</span>}
           {plan.query.travelClass && <span className="jx-pill">{plan.query.travelClass}</span>}
-          <span className="jx-pill">{IC.train} {directShown.length} direct{winOn && !showAllDirect && directInWindow.length !== direct.length ? ` (${win?.label ?? "window"})` : ""}</span>
+          <span className="jx-pill">{IC.train} {directShown.length} direct{filterOn ? " (filter)" : ""}</span>
           {direct.length > 0 && (
             <span className={`jx-pill ${seatTrainCount > 0 ? "jx-pill-ok" : "jx-pill-warn"}`}>
               {IC.check} {seatTrainCount > 0 ? `${seatTrainCount} me seat` : "seat kisi me nahi"}

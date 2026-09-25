@@ -16,6 +16,7 @@ import { formatShortDate, inr } from "../format";
 import type { ClassCode } from "../types";
 import { speakGuide } from "../voice/speakGuide";
 import { TrainClassBlock } from "./TrainClassBlock";
+import { SeatFilterBar } from "./SeatFilterBar";
 import {
   buildAllClassRows,
   clearRouteBoardCache,
@@ -37,22 +38,6 @@ import {
   type SeatSearchRow,
 } from "../seatfinder";
 
-const CLASS_CHIPS: (ClassCode | "ALL")[] = ["ALL", "1A", "2A", "3A", "3E", "SL", "CC", "2S", "EC"];
-/* Round-19: shabd wale WINDOW chips bhi (subah/dopahar/shaam/raat) — pehle sirf "X ke baad" the,
- * isliye "kal subha ki trains" par poori din ki list dikhti thi. */
-const TIME_OPTIONS: { after: number | null; before: number | null; label: string }[] = [
-  { after: null, before: null, label: "Sab" },
-  { after: 240, before: 720, label: "🌅 Subah (04:00–12:00)" },
-  { after: 720, before: 1020, label: "☀️ Dopahar (12:00–17:00)" },
-  { after: 1020, before: 1260, label: "🌆 Shaam (17:00–21:00)" },
-  { after: 1260, before: 240, label: "🌙 Raat (21:00 ke baad)" },
-  { after: 360, before: null, label: "Subah 6 ke baad" },
-  { after: 720, before: null, label: "12 baje ke baad" },
-  { after: 1020, before: null, label: "5 baje ke baad" },
-  { after: 1260, before: null, label: "9 baje ke baad" },
-  { after: null, before: 720, label: "12 baje se pehle" },
-];
-const timeKey = (after: number | null, before: number | null) => `${after ?? ""}-${before ?? ""}`;
 
 /** Rows ko train-wise group karo (order wahi rehta hai jo filter/sort ne diya). */
 function groupByTrain(rows: SeatRow[]): SeatRow[][] {
@@ -356,79 +341,27 @@ export function SeatFinder({
         </div>
       </div>
 
-      <div className="sf-chips">
-        <button
-          className={`sf-chip ${mode === "avail" ? "on" : ""}`}
-          onClick={() => setMode(mode === "avail" ? "all" : "avail")}
-          title="Sirf AVAILABLE aur RAC wali trains"
-        >
-          ✅ Available
-        </button>
-        <button
-          className={`sf-chip ${mode === "all" ? "on" : ""}`}
-          onClick={() => setMode("all")}
-          title="Sabhi trains + unki saari classes (real status ke saath)"
-        >
-          🚆 Sabhi trains
-        </button>
-        {CLASS_CHIPS.map((c) => (
-          <button
-            key={c}
-            className={`sf-chip ${(c === "ALL" ? cls === null && !acOnly : cls === c) ? "sel" : ""}`}
-            onClick={() => {
-              setAcOnly(false);
-              setCls(c === "ALL" ? null : (c as ClassCode));
-            }}
-          >
-            {c === "ALL" ? "Sab class" : c}
-          </button>
-        ))}
-        {/* 24 Sep 2026 user: "AC trains dikhao" par 2S/SL bhi dikh rahe the — ab poora AC group. */}
-        <button
-          className={`sf-chip ${acOnly ? "sel" : ""}`}
-          title="Sirf AC classes: 1A, 2A, 3A, 3E, CC, EC (2S/SL nahi)"
-          onClick={() => {
-            setAcOnly((v) => !v);
-            setCls(null);
-          }}
-        >
-          ❄️ AC
-        </button>
-        <select
-          className={`sf-chip sf-select ${afterMin != null || beforeMin != null ? "on-time" : ""}`}
-          value={timeKey(afterMin, beforeMin)}
-          onChange={(e) => {
-            const [a, b] = e.target.value.split("-");
-            setAfterMin(a === "" ? null : Number(a));
-            setBeforeMin(b === "" ? null : Number(b));
-          }}
-          aria-label="Time filter"
-        >
-          {TIME_OPTIONS.map((o) => (
-            <option key={timeKey(o.after, o.before)} value={timeKey(o.after, o.before)}>
-              Time: {o.label}
-            </option>
-          ))}
-        </select>
-        <button
-          className={`sf-chip ${earliest ? "sel" : ""}`}
-          onClick={() => {
-            setEarliest((v) => !v);
-            setCheapest(false);
-          }}
-        >
-          ⚡ Sabse jaldi
-        </button>
-        <button
-          className={`sf-chip ${cheapest ? "sel" : ""}`}
-          onClick={() => {
-            setCheapest((v) => !v);
-            setEarliest(false);
-          }}
-        >
-          💰 Sabse sasta
-        </button>
-      </div>
+      {/* Round-22: chips ab shared SeatFilterBar se — journey card ke direct block me bhi bilkul
+       * yahi row lagti hai (single source, dono jagah same shakal). */}
+      <SeatFilterBar
+        mode={mode}
+        setMode={setMode}
+        cls={cls}
+        setCls={setCls}
+        acOnly={acOnly}
+        setAcOnly={setAcOnly}
+        afterMin={afterMin}
+        beforeMin={beforeMin}
+        setTime={(a, b) => {
+          setAfterMin(a);
+          setBeforeMin(b);
+        }}
+        earliest={earliest}
+        setEarliest={setEarliest}
+        cheapest={cheapest}
+        setCheapest={setCheapest}
+        label="Seat Finder filters"
+      />
 
       {loading && <div className="sf-loading">Live seat data aa raha hai…</div>}
 
