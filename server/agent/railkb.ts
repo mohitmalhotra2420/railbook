@@ -233,8 +233,10 @@ export function railKbAnswer(questionText: string): string | null {
       else if (k.includes(" ")) {
         const kt = k.split(" ").filter((w) => w.length > 1);
         if (kt.length >= 2) {
-          const hit = kt.filter((w) => qtok.has(w)).length / kt.length;
-          if (hit >= 0.6) score += 3;
+          const matched = kt.filter((w) => qtok.has(w)).length;
+          /* 0.75+ overlap AUR kam-se-kam 2 token — warna "vande bharat kya hoti hai" jaisa
+           * general sawaal catering-entry se match ho jaata tha (galat jawab). */
+          if (matched >= 2 && matched / kt.length >= 0.75) score += 3;
         }
       }
     }

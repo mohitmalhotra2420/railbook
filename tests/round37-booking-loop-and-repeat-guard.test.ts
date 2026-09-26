@@ -264,14 +264,19 @@ describe("Round-37d · web/general sawaal par ChatGPT-jaisa COMPOSED jawab (raw 
     expect(agentic).toContain("kuch bana kar mat likho");
   });
 
-  it("WEB_SEARCH ka topic-answer ab composed hota hai (raw extract dump nahi)", () => {
-    expect(agentic).toContain("const composed = await composeWebAnswer(userText || q, ans.text, ans.title);");
-    expect(agentic).toContain("${composed ?? ans.text}");
+  it("final jawab par web-answer polish hota hai (raw extract dump nahi) — model-loop ke calls shift nahi hote", () => {
+    /* Round-37d/37f: composer tool ke andar nahi chalta (warna model-loop ke mocked calls shift ho kar
+     * turn.ok toot jaata tha) — final jawab banate waqt polishWebReply chalta hai. */
+    expect(agentic).toContain("async function polishWebReply(reply: string, steps: ToolTraceStep[], userText: string)");
+    expect(agentic).toContain("reply: await polishWebReply(clean, steps, input.text),");
+    expect(agentic).toContain("reply: await polishWebReply(deterministicSummary(steps), steps, input.text),");
+    expect(agentic).toContain("return composed ? reply.split(raw).join(composed) : reply;");
   });
 
-  it("deterministic web-rescue bhi composed jawab deta hai (Fallback bhi dump nahi)", () => {
-    expect(agentic).toContain("const composed = await composeWebAnswer(userText, `${best.title}\\n${best.snippet}`, best.title);");
-    expect(agentic).toContain("Web se mila${best.title ? ` (${best.title})` : \"\"}: ${composed ?? best.snippet}");
+  it("polish raw web-answer ko summary se nikaalta hai (data field ka bharosa nahi)", () => {
+    expect(agentic).toContain('const m = /^Web se mila \\(Wikipedia — ([^),]+)(?:, top rows)?\\): ([\\s\\S]*?)\\n\\(Source:/m.exec(step.summary ?? "");');
+    expect(agentic).toContain("if (raw.length < 40 || !reply.includes(raw)) return reply;");
+    expect(agentic).toContain("const composed = await composeWebAnswer(userText, raw, title);");
   });
 
   it("NEXT-step call bhi isi shared helper par chalta hai (duplicate logic nahi)", () => {
@@ -308,9 +313,9 @@ describe("Round-37f · general sawaal par ChatGPT-jaisa saaf jawab (raw dump / u
   const kb = read("server/agent/railkb.ts");
   const agentic = read("server/agent/agentic.ts");
 
-  it("KB ab alag shabdon wali query bhi pakadta hai (60%+ token overlap)", () => {
-    expect(kb).toContain("const hit = kt.filter((w) => qtok.has(w)).length / kt.length;");
-    expect(kb).toContain("if (hit >= 0.6) score += 3;");
+  it("KB ab alag shabdon wali query bhi pakadta hai — par 0.75+ overlap aur 2+ token (galat match nahi)", () => {
+    expect(kb).toContain("const matched = kt.filter((w) => qtok.has(w)).length;");
+    expect(kb).toContain("if (matched >= 2 && matched / kt.length >= 0.75) score += 3;");
   });
 
   it("composer inkaar kare to short excerpt (raw dump nahi) aur 'SAAF' jaisa token user ko na dikhe", () => {

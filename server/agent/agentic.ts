@@ -1254,12 +1254,10 @@ export async function executeApprovedTool(
         for (const t of tries) {
           const ans = await findTopicAnswer(t);
           if (!ans) continue;
-          /* Round-37d: raw extract dump nahi — model se composed 2-4 line jawab (facts se hi). */
-          const composed = await composeWebAnswer(userText || q, ans.text, ans.title);
           const summary =
             ans.kind === "table"
-              ? `Web se mila (Wikipedia — ${ans.title}, top rows):\n${composed ?? ans.text}\n(Source: ${ans.url})`
-              : `Web se mila (Wikipedia — ${ans.title}): ${composed ?? ans.text}\n(Source: ${ans.url})`;
+              ? `Web se mila (Wikipedia — ${ans.title}, top rows):\n${ans.text}\n(Source: ${ans.url})`
+              : `Web se mila (Wikipedia — ${ans.title}): ${ans.text}\n(Source: ${ans.url})`;
           return okResult("web", summary, {
             query: q,
             answer_found: true,
@@ -2419,11 +2417,7 @@ async function webRescueAnswer(userText: string, steps: ToolTraceStep[], stepNo:
       : `${result.summary}\n(Ye railway API ka data nahi, web se laaya gaya jawab hai.)`;
   }
   const best = d.results?.[0];
-  if (best) {
-    /* Round-37d: snippet dump ki jagah model se composed jawab (facts se hi). */
-    const composed = await composeWebAnswer(userText, `${best.title}\n${best.snippet}`, best.title);
-    return `Web se mila${best.title ? ` (${best.title})` : ""}: ${composed ?? best.snippet}\n(Source: ${best.url}; web search — live railway data nahi.)`;
-  }
+  if (best) return `Web se mila: ${best.title} — ${best.snippet}\n(Source: ${best.url}; web search — live railway data nahi.)`;
   return null;
 }
 
@@ -2663,19 +2657,31 @@ async function composeWebAnswer(userText: string, facts: string, title: string |
     { maxTokens: 450, timeoutMs: 12000 },
   );
   const text = out ? out.replace(/\s*\n\s*/g, "\n").trim() : "";
-  /* Model ne saaf inkaar kiya (facts me jawab nahi) — us surat me poora raw dump dene ki jagah
-   * sirf shuru ke 2 jumle (concise, source ke saath). "SAAF" jaise token kabhi user ko na dikhein. */
-  if (!text || /^saf+\b/i.test(text) || /jawab nahi mila|nahi mila is page|not in the (?:given )?facts/i.test(text.slice(0, 120))) {
-    const short = facts
-      .replace(/\s+/g, " ")
-      .split(/(?<=[.!?])\s+/)
-      .slice(0, 2)
-      .join(" ")
-      .slice(0, 300)
-      .trim();
-    return short || null;
-  }
+  /* Model ne inkaar kiya / "SAAF" jaisa token diya / kuch nahi likha → null; call site purana
+   * answer-ready text rakhega (kabhi bhi "SAAF" ya adhoora dump user ko nahi jaata). */
+  if (!text || /^saf+\b/i.test(text) || text.length < 25 || /jawab nahi mila|not in the (?:given )?facts/i.test(text.slice(0, 120))) return null;
   return text;
+}
+
+/* Round-37d: final jawab banate waqt web-answer ko polish karo — raw Wikipedia extract ki jagah
+ * model se COMPOSED 2-4 line Hinglish (sirf usi answer text se; model na de to purana text waisa hi).
+ * Tool ke andar nahi chalate warna model-loop ke calls shift ho jaate hain. */
+async function polishWebReply(reply: string, steps: ToolTraceStep[], userText: string): Promise<string> {
+  const step = steps.find((s) => s.ok && s.tool === "WEB_SEARCH" && s.source !== "kb");
+  if (!step) return reply;
+  /* Summary ka shape: "Web se mila (Wikipedia — <title>[, top rows]): <raw>
+(Source: <url>)" */
+  const m = /^Web se mila \(Wikipedia — ([^),]+)(?:, top rows)?\): ([\s\S]*?)\n\(Source:/m.exec(step.summary ?? "");
+  if (!m) return reply;
+  const title = m[1].trim();
+  const raw = m[2].trim();
+  if (raw.length < 40 || !reply.includes(raw)) return reply;
+  try {
+    const composed = await composeWebAnswer(userText, raw, title);
+    return composed ? reply.split(raw).join(composed) : reply;
+  } catch {
+    return reply;
+  }
 }
 
 export async function nextStepFromModelOnly(args: {
@@ -3586,7 +3592,7 @@ export async function runAgenticTurn(input: {
       // Repair ke baad bhi model wahi harkat kare to tool summaries hi FINAL jawab hain.
       return {
         ok: true,
-        reply: deterministicSummary(steps),
+        reply: await polishWebReply(deterministicSummary(steps), steps, input.text),
         grounded: true,
         steps,
         modelUsed, modelFallbacks, latencyMs: Date.now() - startedAll,
@@ -3784,7 +3790,7 @@ export async function runAgenticTurn(input: {
     }
     return {
       ok: true,
-      reply: clean,
+      reply: await polishWebReply(clean, steps, input.text),
       grounded: true,
       steps,
       modelUsed, modelFallbacks, latencyMs: Date.now() - startedAll,
@@ -3802,7 +3808,7 @@ export async function runAgenticTurn(input: {
   }
   return {
     ok: steps.some((s) => s.ok),
-    reply: deterministicSummary(steps),
+    reply: await polishWebReply(deterministicSummary(steps), steps, input.text),
     grounded: true,
     steps,
     modelUsed, modelFallbacks, latencyMs: Date.now() - startedAll,
