@@ -14,9 +14,10 @@ STAGE=$(mktemp -d /tmp/rbfull.XXXXXX)
 DEST="$STAGE/railbook-full"
 mkdir -p "$DEST/railbook" "$DEST/docs" "$DEST/host-scripts"
 
-# repo source (node_modules/dist/.git/.env chhod kar — binary junk ke bina)
+# repo source — .git history bhi saath (taaki naye workspace me continue kar sakein), par credentials nahi
 tar -C "$REPO" \
-  --exclude=node_modules --exclude=dist --exclude=.git --exclude=.env --exclude=.env.local \
+  --exclude=node_modules --exclude=dist --exclude=.env --exclude=.env.local \
+  --exclude='.git/config' --exclude='.git/credentials' --exclude='.git-credentials' --exclude=.netrc \
   --exclude='*.log' --exclude=.vite --exclude=coverage --exclude=tmpscripts --exclude=.arena \
   -cf - . | tar -C "$DEST/railbook" -xf -
 

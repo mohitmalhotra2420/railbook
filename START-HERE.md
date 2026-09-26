@@ -10,15 +10,15 @@ railbook-full/
 │   ├── src/                   ← client (views/, components/, booking/, ai/, irctc/, seatfinder.ts…)
 │   ├── server/                ← server (app.ts, agent/, railway/ scrapers…)
 │   ├── tests/                 ← 108 files (vitest) — source-of-truth behaviour
-│   ├── docs/                  ← RAILBOOK-ADDENDUM (round-by-round history, §9.13 = latest)
+│   ├── docs/                  ← RAILBOOK-ADDENDUM (round-by-round history, §9.21 = latest)
 │   ├── provas/                ← real payload samples (live se liye gaye)
-│   ├── tools/                 ← preview/verification tools (Round-21/21b/21c)
+│   ├── tools/                 ← preview/verification tools (Round-29: build-round29-preview.mjs, probe-live-r29*.mjs)
 │   ├── .env                   ← GITHUB_TOKEN + RENDER_API_KEY (deploy ke liye — isko commit NAHI karna)
-│   └── .git/                  ← poori history (HEAD: 99a0c9d)
+│   └── .git/                  ← poori history (HEAD: cc2f8d3)
 ├── android-app/               ← Android WebView app (Kotlin + autofill assets, keystore ke saath)
-├── host-scripts/              ← apk-build-v146.sh (APK banane ka script)
+├── host-scripts/              ← apk-build-v149.sh (APK banane ka script, latest = v149)
 ├── previews/                  ← har round ke real-render previews (HTML)
-└── apks/                      ← latest release APKs (v1.4.4, v1.4.5)
+└── apks/                      ← latest release APKs (v1.4.8, v1.4.9 — r29 me naya APK nahi)
 ```
 
 ## 1. Turant shuru karne ke liye
