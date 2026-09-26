@@ -552,3 +552,42 @@ User ke teen points (2 screenshots + 1 filter screenshot):
 **APK v1.4.9** (versionCode 32, `1.4.9-clean-ui-30s`, 4,819,427 B, sha256 `4ea684c3…8e1ce`): bridge files verified — purana panel string APK ke andar bhi nahi, pill + assurance line maujood.
 **Tests:** naya `tests/round28-pax-dock-and-autofill-note.test.tsx` (15 — dock/CTA/assurance, overlay CSS, Android header gone par listeners zinda, 30s constant, bridge me panel gone + `ui-notice` + diagnostics) + round-24 CSS assert update → kul **107 files / 1070 tests PASS**; client TS 67 (baseline); build `index-3AgEmAG-.js` 472.71 kB.
 **Preview:** `RailBook-round28-2026-09-26.html` (`tools/build-round28-preview.mjs`).
+
+### 9.21 Round-29 (26 Sep) — "same train ki classes alag alag cards me kyun" → ek train = ek card · class tap → seedha form · "book krdo" par AI khud form · "vaishno devi" (chhota naam) → SVDK
+
+User ke do screenshots (@`20be5c2`) ke chaar points. Grouping **sirf display level** par hai — provider ka jawab/text, API calls, fare/availability ka source aur booking engine waisa hi.
+
+**1) Ek train = ek card (chat ka train-list)**
+
+- Screenshot 1 me `22432` do baar aur `19804` do baar (same train ke classes alag cards me) — aur wo cards chat ke **text se bane rows** the (`ReplyText`), jo tappable bhi nahi the.
+- Fix: `src/components/ReplyText.tsx` me naya pure helper **`groupReplyRowsByTrain()`** (trainNumber primary key) + grouped render:
+  - ek card = ek train; header me `number` + `naam` **sirf ek baar** + `N classes` count;
+  - andar har class ki **apni row** — `3A | AVL 122 | ₹635`, `SL | AVL 94 | ₹250` (har class ka apna status/count/fare/dep; koi merge/average/sum nahi);
+  - **order preserve** (jo train pehle aayi wahi card wahin; koi sort/filter nahi);
+  - bilkul same record (class+status+count+fare+dep) dobara aaye to ek hi baar — par alag status/fare wala record chhupta nahi (overwrite bhi nahi);
+  - input rows **mutate nahi** hoti (derived view-model).
+- Live board wala block (`.sf-group`, Round-27) pehle se train-wise tha; ab **dono** jagah ek train = ek card.
+
+**2) Class par tap → seedha passenger form**
+
+- Chat card ki class row ab **button** hai (available/RAC/WL/status-pata-nahi) → `openBookingFromReplyRow()` → wahi `selectTrainAndClassGo()` jo Seat Finder/direct card ke chips par lagta hai. `N/A`/`REGRET` par jhootha button nahi (wahan booking ka rasta hi nahi).
+- Live proof: `12208 KGM GARIB RATH · 3A · SVDK → LDH · 2026-09-27 · ₹470` → passenger form.
+
+**3) "22432 mein 3A book krdo" → AI khud passenger form kholta hai (loop khatam)**
+
+- Pehle: "…check kar raha hoon" repeat, "Check hui?" par bhi wahi jawab, aur ek baar text beech se kata hua ("ability check karne ke liye…") jabki date pehle se pata thi.
+- Ab: `src/booking/autobook.ts` (naya, pure + tested) + Concierge me booking-intent gate —
+  `isBookingIntent()` ("book krdo / booking kardo / ticket chahiye" haan; sawaal nahi) → train (message/context/last-mentioned) + class (message) → `pickRowForBooking()` (usi class ki openable row, warna us train ki pehli openable row) → `buildAutoBookSeat()` → seedha passenger form. Date sirf jo user/server ne di (form ka "aaj" default guess nahi).
+- Status pata na ho (**UNKNOWN** — data ke saath aaya hi nahi) to **bhi** form khulta hai; asli availability + fare "Review journey" par provider se (`goReview`), aur wahan bookable na ho to wahi rok deta hai. `booking/state.ts` ka `SELECT_TRAIN_AND_CLASS` bhi UNKNOWN par screen badalta hai (N/A/REGRET/CANCELLED par purana guard).
+- `Passengers.tsx` ki lines honest: fare `0` → "💰 Fare abhi confirm nahi — Review journey par provider se aayega", timings khaali → "🕑 Timings provider ke data me nahi the" (pehle "₹0" aur "🕑 → " jaisa adhoora dikhta tha).
+- Text ka adhoora kata hua hissa bhi gaya: `ReplyText` ka parser ab aadhe shabd par ruk kar row nahi banata — poora jumla paragraph hi rehta hai.
+
+**4) "vaishno devi" jaisa chhota station naam → SVDK**
+
+- `server/understand/legacy-stations.ts` + `src/ai/stations.ts` alias map me: `vaishno devi`, `vaishno devi katra`, `vaishnodevi`, `vishno devi`, `mata vaishno devi`, `shri mata vaishno devi (katra)`, `smvd katra`, `वैष्णो देवी`, `वैष्णो देवी कटरा`, `वैष्णोदेवी`, `माता वैष्णो देवी` — sab **SVDK** (koi naya station/naam nahi, sirf alias).
+- Live: "Vaishno devi se Ludhiana kal ke liye…" par header `SVDK → LDH, 2026-09-27` (pehle "vaishno devi" parse hi nahi hota tha).
+
+**Files:** `src/components/ReplyText.tsx` · `src/views/Concierge.tsx` (onBook wiring + booking-intent auto-advance) · `src/booking/autobook.ts` (naya) · `src/booking/state.ts` · `src/views/Passengers.tsx` · `src/styles.css` (`.rp-gcount/.rp-crows/.rp-crow`) · `src/ai/stations.ts` + `server/understand/legacy-stations.ts` (aliases).
+**Tests:** naya `tests/round29-group-same-train-book.test.tsx` (**22**) + round-20/round-27 ke ReplyText asserts grouped markup par update → **108 files / 1091 tests PASS**; server tsc clean · client tsc 67 (baseline) · build `index-DIw-tok9.js` 477.97 kB.
+**Live proof (`686a88f`):** turn 1 — `boardGroups 19 · trains 19 · duplicateTrains [] · svdkRoute true` (har train ek hi card me; chhota naam resolve hua) · class chip tap → `12208 · 3A · SVDK → LDH · 2026-09-27 · ₹470` · "12208 mein 3A book krdo" → form khud khula (train+class+date; row me fare na hone par honest line). Chat me Round-28 ki assurance line + "Review journey (pehle details bharo)" CTA bhi zinda.
+**Preview:** `RailBook-round29-2026-09-26.html` (`tools/build-round29-preview.mjs`) · probes `tools/probe-live-r29.mjs` (local, mock) + `tools/probe-live-r29-live.mjs` (live). **APK nahi** — r29 me koi Android/native change nahi (app wahi live web URL load karta hai), isliye v1.4.9 hi chalti rahegi.

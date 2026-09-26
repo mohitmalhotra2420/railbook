@@ -9,7 +9,7 @@ railbook-full/
 ├── railbook/                  ← asli repo (Vite + React + TS client + Express/TS server + tests)
 │   ├── src/                   ← client (views/, components/, booking/, ai/, irctc/, seatfinder.ts…)
 │   ├── server/                ← server (app.ts, agent/, railway/ scrapers…)
-│   ├── tests/                 ← 107 files (vitest) — source-of-truth behaviour
+│   ├── tests/                 ← 108 files (vitest) — source-of-truth behaviour
 │   ├── docs/                  ← RAILBOOK-ADDENDUM (round-by-round history, §9.13 = latest)
 │   ├── provas/                ← real payload samples (live se liye gaye)
 │   ├── tools/                 ← preview/verification tools (Round-21/21b/21c)
@@ -108,7 +108,14 @@ android-app/app/src/main/assets/autofill/
   3. **Native mic:** Android WebView me Web Speech API **nahi hota** — naya `VoiceBridge.kt` (SpeechRecognizer, hi-IN, `window.__railbookVoice.dispatch`) + `MainActivity` me `addJavascriptInterface(…, "RailBookVoice")` + manifest `<queries>`; client `src/voice/nativeSpeech.ts` + `speech.ts`/`useVoiceInput.ts` native-aware (native par `getUserMedia` call nahi).
   4. Tests: `tests/round27-seat-classes-and-mic.test.tsx` (12) + round-25 test format update → **106 files / 1055 PASS** · preview `RailBook-round27-2026-09-26.html` · builders `tools/build-round27-preview.mjs`, probe `tools/probe-live-r27.mjs`. **APK v1.4.8 (vc 31)** — native mic ke liye zaroori.
 
-- **Round-28 (latest, 26 Sep 2026):** black handoff panel + blue header user ko nahi (backend me) · passenger dock fix · 45s → 30s + "details khud bhar jaayengi" →
+- **Round-29 (latest, 26 Sep 2026):** "same train ki classes alag alag cards me kyun" + "class pe tap" + "22432 mein 3A book krdo" + "vaishno devi" →
+  1. **Ek train = ek card (chat):** `ReplyText.tsx` me `groupReplyRowsByTrain()` — trainNumber par grouping, header me number+naam ek baar, andar har class ki apni row (apna AVL/RAC/WL + fare), **order preserve**, exact duplicate record ek hi baar, input rows mutate nahi (sirf display view-model).
+  2. **Class row tap → seedha passenger form:** `openBookingFromReplyRow()` → wahi `selectTrainAndClassGo()` (N/A/REGRET par button nahi).
+  3. **"book krdo" → khud passenger form:** naya `src/booking/autobook.ts` (`isBookingIntent` · `pickRowForBooking` · `buildAutoBookSeat`) + Concierge gate; UNKNOWN status par bhi form (live check "Review journey" par), `booking/state.ts` UNKNOWN allow; `Passengers.tsx` honest fare/timings lines ("₹0" nahi).
+  4. **Chhota station naam:** "vaishno devi" (+ 10 aur variants, Hindi bhi) → SVDK dono station maps me.
+  5. Tests: `tests/round29-group-same-train-book.test.tsx` (22) + round-20/27 update → **108 files / 1091 PASS** · preview `RailBook-round29-2026-09-26.html` · builder `tools/build-round29-preview.mjs` · probes `tools/probe-live-r29.mjs` (local) + `tools/probe-live-r29-live.mjs` (live) · **APK nahi** (r29 me koi Android change nahi — v1.4.9 hi).
+
+- **Round-28 (26 Sep 2026):** black handoff panel + blue header user ko nahi (backend me) · passenger dock fix · 45s → 30s + "details khud bhar jaayengi" →
   1. **Bridge panel hataya:** `railbook-webview-bridge.js` me `banner()` badal kar `postNotice()/pill()` — page par sirf **one-line pill** (6s me khud hide; STOP wale 12s), poori detail `fill-result` + `ui-notice` se native (status + log + Toast). Kuch chhupta nahi.
   2. **Android header chhupa:** `activity_main.xml` me `topBar` `visibility="gone"` — version/BHASHA/status/RAILBOOK-IRCTC-CLEAR screen par nahi, **code + listeners zinda**; user updates chhote Toast (`setStatus`) se.
   3. **Passenger dock fix:** `.overlay-screen` ab `fixed` + `100vh/100dvh` (pehle `.app` ke andar absolute — chat lambi hone par dock screen ke neeche chala jaata tha). Probe: CTA top 1336px → **836px (bina scroll)**. CTA label: details adhoori → "Review journey (pehle details bharo)".
@@ -127,12 +134,12 @@ android-app/app/src/main/assets/autofill/
 
 | cheez | value |
 |---|---|
-| vitest | **107 files / 1070 tests PASS** (~120-175 s) |
+| vitest | **108 files / 1091 tests PASS** (~110 s) |
 | server tsc | clean |
 | client tsc | 67 errors (purane, baseline — koi naya nahi) |
-| live commit | `20be5c2` (Round-28) |
-| preview | `RailBook-round28-2026-09-26.html` (Round-26: `RailBook-round26-*.html`, Round-25: `RailBook-round25-*.html` + live phone screenshots) |
-| APK | v1.4.9 `RailBook-v1.4.9-release.apk` (versionCode 32) sha256 `4ea684c3…8e1ce` — Round-28 me Android change (panel hataya, header chhupa, 30s) |
+| live commit | `686a88f` (Round-29) |
+| preview | `RailBook-round29-2026-09-26.html` (Round-28: `RailBook-round28-2026-09-26.html` + Round-26/25/…) |
+| APK | v1.4.9 `RailBook-v1.4.9-release.apk` (versionCode 32) sha256 `4ea684c3…8e1ce` — Round-29 me koi Android change nahi (web fix; app live URL load karta hai) |
 
 ### Chhote gotchas
 

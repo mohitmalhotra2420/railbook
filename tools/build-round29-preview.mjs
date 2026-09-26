@@ -34,9 +34,12 @@ const img = (p) => (fs.existsSync(p) ? b64(p) : "");
 
 const shotBefore = img(path.join(UPLOADS, "Screenshot_20260926-163335_RailBook.png"));
 const shotGroups = img(path.join(PRE, "round29-chat-groups.png"));
-const shotTap = img(path.join(PRE, "round29-class-tap-pax.png"));
+const shotTap = img(path.join(PRE, "round29-live-class-tap.png"));
 const shotAuto = img(path.join(PRE, "round29-auto-book-pax.png"));
 const shotNoData = img(path.join(PRE, "round29-auto-book-nodata.png"));
+/* Live deploy (686a88f) ke screenshots — asli AI + asli provider data */
+const shotLiveGroups = img(path.join(PRE, "round29-live-groups.png"));
+const shotLiveAuto = img(path.join(PRE, "round29-live-autobook.png"));
 
 /* ── asli component (grouped card) SSR se ────────────────────────────── */
 const dom = new JSDOM("<!doctype html><html><body><div id='app'></div></body></html>", {
@@ -124,6 +127,11 @@ table.checks th { background: #f7f9fc; font-size: 11.5px; text-transform: upperc
       <p class="cap"><span class="pill">ab</span> asli probe (<code>tools/probe-live-r29.mjs</code>): <b>3 cards</b> (14606, 19804, 22432), <code>nameOccurrences = [0, 1, 1]</code> — naam card me sirf ek baar, andar har class ki apni row + apna status/fare, har row par tap-able <b>Book</b>.</p>
     </div>
   </div>
+  <div class="figbox" style="margin-top:14px">
+    <img src="${shotLiveGroups}" alt="live: 19 trains, har train ek hi card me" />
+    <p class="cap"><span class="pill">live ${"686a88f"}</span> asli deploy par ("Vaishno devi se Ludhiana kal ke liye seat wali trains"): <b>19 board cards</b> (har train ek hi baar — <code>duplicateTrains: []</code>), 65 class chips, header me <code>SVDK → LDH, 2026-09-27</code> — chhota naam "Vaishno devi" bhi SVDK par resolve hua.</p>
+  </div>
+
   <h3>Wahi card, asli component se (yeh HTML neeche live render hua hai — same class names jo app me hain)</h3>
   <div class="phone"><div class="msg">${renderedCard}</div></div>
   <p class="sub">Render check: <code>.rp-row</code> cards = <b>${renderedClasses.length}</b> (${renderedClasses.join(", ")}) · har card me <code>.rp-crow</code> class rows · <code>Book</code> button sirf available/RAC/WL/unknown par (N/A par jhootha button nahi).</p>
@@ -146,6 +154,10 @@ table.checks th { background: #f7f9fc; font-size: 11.5px; text-transform: upperc
     <div class="figbox">
       <img src="${shotAuto}" alt="'22432 mein 3A book krdo' → khud passenger form" />
       <p class="cap"><span class="pill">book krdo</span> chat me <code>22432 mein 3A book krdo</code> → AI jawab ke saath hi form khul jaata hai (train+class+tareekh+fare pehle se bhare). "Check hui?" poochhne ki zaroorat nahi.</p>
+    </div>
+    <div class="figbox">
+      <img src="${shotLiveAuto}" alt="live: '12208 mein 3A book krdo' → khud passenger form" />
+      <p class="cap"><span class="pill">live</span> asli deploy par wahi cheez: <code>12208 mein 3A book krdo</code> → khud passenger form (12208 · 3A · SVDK → LDH · 📅 2026-09-27) + r28 ki assurance line + "Review journey (pehle details bharo)" CTA screen par.</p>
     </div>
   </div>
 
@@ -178,6 +190,7 @@ shri mata vaishno devi (katra) · smvd katra · वैष्णो देवी 
   <h2>5 · Tests + probe (asli output)</h2>
   <div class="card">
     <p><span class="pill">tests</span> <b>108 files / 1091 tests PASS</b> (naya <code>tests/round29-group-same-train-book.test.tsx</code> — 22 tests: grouping, per-class data, duplicates, tap, booking-intent, auto-book resolution, aliases). <span class="pill info">tsc</span> server clean · client 67 (baseline wahi). <span class="pill info">build</span> <code>${js.file}</code> ${(js.bytes / 1024).toFixed(1)} kB.</p>
+    <p><span class="pill">live</span> <b>live turn 1:</b> <code>textCards 0 · boardGroups 19 · trains 19 · duplicateTrains [] · svdkRoute true</code> — <b>class chip tap:</b> <code>12208 KGM GARIB RATH · 3A · SVDK → LDH · 2026-09-27 · ₹470</code> → passenger form. <b>"12208 mein 3A book krdo":</b> form khud khul gaya (12208 · 3A · 2026-09-27; fare row me na hone par honest line "Fare abhi confirm nahi — Review journey par provider se aayega"). Chat me r28 ki line bhi zinda: "Aapki details IRCTC par khud bhar jaayengi…".</p>
     <pre>CHAT GROUPS: cards=3  heads=[14606, 19804, 22432]  classRows=[1,2,2]  tappable=[1,2,2]
              nameOccurrences=[0,1,1]
 CLASS TAP  → passengers-overlay · "22432 SFG MCTM SF EXP · 3A · SVDK → LDH · 2026-09-27 · ₹565"
@@ -194,7 +207,7 @@ PROBE_DONE</pre>
     <li>Android app: koi native change nahi — app wahi live web URL load karta hai, isliye <b>naya APK ki zaroorat nahi</b>.</li>
   </ul>
 
-  <p class="sub" style="margin-top:26px">Screenshots: <code>RailBook/previews/round29-chat-groups.png</code>, <code>round29-class-tap-pax.png</code>, <code>round29-auto-book-pax.png</code>, <code>round29-auto-book-nodata.png</code> · probe: <code>node tools/probe-live-r29.mjs</code> · ye preview: <code>node tools/build-round29-preview.mjs</code></p>
+  <p class="sub" style="margin-top:26px">Live commit: <code>686a88f</code> (railbook-gegs.onrender.com) · Screenshots: <code>RailBook/previews/round29-chat-groups.png</code>, <code>round29-class-tap-pax.png</code>, <code>round29-auto-book-pax.png</code>, <code>round29-auto-book-nodata.png</code> · probe: <code>node tools/probe-live-r29.mjs</code> · ye preview: <code>node tools/build-round29-preview.mjs</code></p>
 </div></body></html>`;
 
 fs.mkdirSync(path.dirname(OUT), { recursive: true });
