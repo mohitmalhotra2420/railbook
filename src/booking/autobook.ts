@@ -116,5 +116,12 @@ export function isBookingIntent(text: string, intent?: string | null): boolean {
   if (/[?？]/.test(t) && !imperative) return false;
   const asked = /\b(?:book|booking|reserve)\b[\s\S]{0,28}?\b(?:kar|kro|kardo|krdo|kr|karo|kijiye|do|de|dena|chahiye|chaiye)\b/.test(t);
   if (asked) return true;
+  /* Round-34 (user screenshot: "Book 12380" — AI ne phir passengers poochh liye aur seat list dobara
+   * dekhne chala, jabki seats pehle hi dikh chuki thi): seedha "book <train-number>" bhi ek hukm hai —
+   * isme koi "kar/krdo" shabd nahi hota. Train number ke bina akele "book" par trigger NAHI hota
+   * (warna "book karna hai?" jaise sawaal/speculation pakde jayenge — wo upar ke guards se bhi
+   * rukte hain, par yahan safe rehna hai). */
+  if (/\b(?:book|booking|reserve)\b[\s\S]{0,24}?\b\d{4,5}\b/.test(t) && !/[?？]/.test(t)) return true;
+  if (/\b\d{4,5}\b[\s\S]{0,18}?\b(?:book|booking|reserve)\b/.test(t) && !/[?？]/.test(t)) return true;
   return /\bticket\b[\s\S]{0,20}?\b(?:kar|book|kro|kardo|krdo|chahiye|chaiye|do|dena)\b/.test(t);
 }

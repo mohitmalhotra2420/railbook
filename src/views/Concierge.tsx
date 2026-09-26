@@ -219,6 +219,15 @@ export function Concierge() {
     { id: "alt", label: "Best Alternatives", text: "best alternatives dikhao" },
   ];
   const lastFactTrainRef = useRef<string | null>(null);
+  /* Round-34 (user screenshot: seat list pehle dikh chuki thi, phir "Book 12380" par AI ne dobara
+   * poochh liya): jo seat rows ek baar screen par aa chuki hain wo YAAD rehti hain — booking intent
+   * par form usi asli data se bharta hai (naya check karne ka bahana nahi). Kuch invent nahi hota. */
+  const lastSeatRowsRef = useRef<{
+    from: string;
+    to: string;
+    date: string;
+    rows: { number: string; name: string; classCode: string; status: string; seats: number | null; rac: number | null; waitlist: number | null; fare: number | null; departure: string | null; durationMinutes: number | null }[];
+  } | null>(null);
   /** Last server-side AI agent context — sent back each turn so multi-turn state survives.
    * Round-8: persisted memory se initialize — refresh par bhi train/topic yaad. */
   /* Round-18m-30w (user screenshot 00:27: fresh open, "ludhiana se mathura" → seedha 138 seat checks, na date na
@@ -997,7 +1006,17 @@ export function Concierge() {
              * hai"): PEHLE model ka chuna hua agla kadam (reply ki [NEXT] lines se; server ne tool-evidence
              * se validate kiya). Model ne na diya ho to verified data se bana fallback (Round-31) — taaki
              * agla kadam phir bhi mile, par kabhi jhootha na mile. */
-            const modelActions = agentRes.nextActions ?? [];
+            /* Round-34: is turn ke seat rows yaad rakho (agli baar form bharne ke liye). */
+          if (agentRes.seatFilter && ((agentRes.seatFilter.rows?.length ?? 0) || (agentRes.seatFilter.wlRows?.length ?? 0))) {
+            const sf0 = agentRes.seatFilter as typeof agentRes.seatFilter & { from?: string | null; to?: string | null; date?: string | null };
+            lastSeatRowsRef.current = {
+              from: String(sf0.from ?? c?.origin?.code ?? ""),
+              to: String(sf0.to ?? c?.destination?.code ?? ""),
+              date: String(sf0.date ?? c?.date ?? ""),
+              rows: [...(sf0.rows ?? []), ...(sf0.wlRows ?? [])],
+            };
+          }
+          const modelActions = agentRes.nextActions ?? [];
             if (modelActions.length) {
               blocks.push({
                 type: "nextstep",
@@ -1053,7 +1072,14 @@ export function Concierge() {
             const already = state.selectedTrain?.number === tno && (!clsWanted || state.selectedClass?.code === clsWanted);
             if (tno && !already && routeFrom && routeTo && routeDate) {
               const sf = agentRes.seatFilter;
-              const live = [...(sf?.rows ?? []), ...(sf?.wlRows ?? [])];
+              /* Round-34: is turn ki rows pehle; na hon to wahi rows jo user ko pehle DIKHAYI gayi thi —
+               * aur wahi route/date ho (warna purane turn ka fare/status nayi journey par nahi lagta). */
+              const remembered = lastSeatRowsRef.current;
+              const rememberedOk =
+                remembered && remembered.from === routeFrom.code && remembered.to === routeTo.code && remembered.date === routeDate
+                  ? remembered.rows
+                  : [];
+              const live = [...(sf?.rows ?? []), ...(sf?.wlRows ?? []), ...rememberedOk];
               const pickRow = pickRowForBooking(live, tno, clsWanted || null);
               const seat = buildAutoBookSeat({
                 trainNumber: tno,

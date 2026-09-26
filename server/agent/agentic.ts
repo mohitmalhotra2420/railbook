@@ -2075,7 +2075,7 @@ function systemPrompt(
       "24. UNIVERSAL WEB FALLBACK (user request 2026-09-06: 'ChatGPT jaisa — koi bhi railway sawaal, API se jawab na mile to khud web se dhoondh lo'): koi bhi railway ka sawaal (catering/pantry/rules/facilities/history/facts/general knowledge) jiska jawab railway data tools (timetable/live/fare/seats) se NAHI aata — WEB_SEARCH se dhoondo aur 'web se mila' + source label ke saath do. Railway-irrelevant web results (cars/automobiles jaise) skip karo, railway-relevant hi do. Na mile to honest 'nahi mil paya' bolo — guess kabhi nahi. Live status/fare/seats/availability/PNR ke liye web search kabhi use mat karna — wahan sirf railway tools.",
       "27. SAARE TOOLS KHULE HAIN (user rule 2026-09-26: 'AI ko jitne bhi tools available hai wo sabh provide kro, no restriction on using any tool'): jo bhi tool jawab ke liye chahiye, jitni baar chahiye, use karo — SEARCH_TRAINS, JOURNEY_ANALYZE, RANK_JOURNEY_OPTIONS, FIND_SEATS, CHECK_AVAILABILITY, GET_FARE, GET_TIMETABLE, TRACK_TRAIN, GET_TRAIN_INFO, FIND_ALTERNATIVE_TRAINS, FIND_CONNECTIONS, WEB_SEARCH… koi rok nahi, koi count-limit nahi. SIRF DO CHEEZEIN TUM KABHI NAHI KAROGE: (i) 'Continue to IRCTC' par click (RailBook app ka handoff button user khud dabayega), (ii) passenger details/passenger form khud se bharna ya booking confirm karna — wo user ka kaam hai. Baaki sab tumhare haath me hai.",
     "28. SAWAAL KA MATLAB PEHLE (user 2026-09-26: 'kya AI meri baat samajh nahi paaya?'): 'plan banao / journey plan / kya best rahega' = RANK_JOURNEY_OPTIONS ya JOURNEY_ANALYZE (timings + fare + best option) — seat board ki list NAHI. 'alternative trains / doosri trains / koi aur option / iske alawa' = FIND_ALTERNATIVE_TRAINS (us train ke aage/peeche wali trains, timing+fare ke saath) — wahi purani list dobara NAHI. 'trains batao / kaunsi trains chalti hain' = SEARCH_TRAINS. 'seat/berth/AVL/kitni seat khali' = FIND_SEATS ya CHECK_AVAILABILITY. Har TRAIN LIST jawab me timing (departure → arrival + duration) aur fare (jo tool ne diya ho) ZAROOR likho — 'sirf train ke naam' wali list adhoori hai (user ki shikayat: 'trains list krdi without fare and timings').",
-    "26. AGLA KADAM (user requirement 2026-09-26: 'answer ke baad AI ko next step pe leke jaana chahiye'): jawab ke EKDUM aakhir me 1-2 line likho — bilkul is format me, kuch aur nahi: [NEXT] <chhota label> => <wahi baat jo user bhej sakta hai>. Jaise: '[NEXT] Book 12013 · CC (AVL 354 ₹675) => 12013 mein CC book krdo'. Rules: (a) sirf ISI turn ke tool data se banao — koi naya train number/naam/fare/count nahi; (b) label me wahi number jo data me hai; (c) max 2 lines, sabse zaroori pehle; (d) next kadam us sawaal ke hisaab se ho (seat data aaya to booking; train list aayi to 'kis train me seat hai'; kuch verified na ho to koi [NEXT] line nahi — zaroori nahi har baar); (e) reply ke andar [NEXT] ke alawa agla kadam dobara mat likho (UI khud dikhata hai).",
+    "26. AGLA KADAM (user requirement 2026-09-26: 'answer ke baad AI ko next step pe leke jaana chahiye'): jawab ke EKDUM aakhir me 1-2 line likho — bilkul is format me, kuch aur nahi: [NEXT] <chhota label> => <wahi baat jo user bhej sakta hai>. Jaise: '[NEXT] Book 12013 · CC (AVL 354 ₹675) => 12013 mein CC book krdo'. Rules: (a) sirf ISI turn ke tool data se banao — koi naya train number/naam/fare/count nahi; (b) label me wahi number jo data me hai; (c) max 2 lines, sabse zaroori pehle; (d) user requirement 26 Sep (round 34): jab bhi is turn me koi KAAM KA data aaya ho (train/seat/fare/timing/status/plan/route), [NEXT] ZAROOR likho — agla kadam TUM socho aur suggest karo (jaise us train ka booking, doosri class, doosri date, seat availability, timings, live status); user ka data-derived fallback tabhi chalta hai jab tumne kuch na diya ho, isliye use kabhi majboori na banao — sirf tab [NEXT] chhod do jab sach me koi agla kaam ka step na banta ho; (e) reply ke andar [NEXT] ke alawa agla kadam dobara mat likho (UI khud dikhata hai).",
   ]
     .filter(Boolean)
     .join("\n");
@@ -2736,6 +2736,11 @@ export async function runAgenticTurn(input: {
   // Model chain poor fail ho to upar caller (runAgent) deterministic fallback chalata hai.
   const modelChain = transport.models;
   let repaired = false;
+  /* Round-34 (user: "agla kadam na humesha AI hi chunne sabh sochke… agla kadam fallback pe verified
+   * data se mat aaye"): agar model ne [NEXT] nahi di par is turn me kaam ka tool data hai, to EK
+   * chhoti repair call se model se hi agla kadam maanga jaata hai — reply wahi purana rehta hai. */
+  let nextRepairReply: string | null = null;
+  let nextRepaired = false;
   /* Round-18m-29: deferred planner decision (validated from the final answer). */
   let pendingDecision: { plan: JourneyPlan; cands: JourneyCandidate[] } | null = null;
 
@@ -3350,6 +3355,20 @@ export async function runAgenticTurn(input: {
     }
 
     let content = (msg?.content ?? msg?.reasoning_content ?? "").trim();
+    /* Round-34: ye NEXT-repair ka jawab hai — asli reply pehle se ready hai, yahan se sirf agla kadam lo. */
+    if (nextRepairReply !== null) {
+      const rex = extractNextActions(redact(content));
+      const acts = rex.actions.filter((a) => groundingCheck(`${a.label} ${a.utterance}`, steps, [...evidenceParts, ...messages.map((m) => m.content ?? "")]).grounded);
+      return {
+        ok: true,
+        reply: nextRepairReply,
+        grounded: true,
+        steps,
+        modelUsed, modelFallbacks, latencyMs: Date.now() - startedAll,
+        failureReason: acts.length ? "next_step_from_model_repair" : "next_step_repair_empty",
+        nextActions: acts.length ? acts : null,
+      };
+    }
     /* Round-18m-29 guard: content khaali + sirf reasoning_content (model ne saara budget
      * sochne mein kha liya) → ye jawab NAHI hai; user ko "We need to parse…" jaisa
      * chain-of-thought kabhi na dikhe. Empty treat karo → tool summaries (grounded). */
@@ -3490,6 +3509,27 @@ export async function runAgenticTurn(input: {
     const check = groundingCheck(clean, steps, evidenceAll);
     /* Round-32: model ka "agla kadam" bhi evidence se verify — jo number/naam is turn me nahi aaya, drop. */
     const nextActions = extracted.actions.filter((a) => groundingCheck(`${a.label} ${a.utterance}`, steps, evidenceAll).grounded);
+    /* Round-34: model ne agla kadam nahi diya par is turn me verified data hai → model se hi maango. */
+    if (
+      !nextActions.length &&
+      !nextRepaired &&
+      /* Sirf tab jab final jawab grounded hai — ungrounded replies ka apna (purana) treatment hai. */
+      check.grounded &&
+      okSteps.length > 0 &&
+      step < MAX_STEPS &&
+      timeLeft() > 9000 &&
+      !/^\s*(?:#{1,3}\s*)?(?:kaun|kis|which|kahan|kitne)\b/i.test(clean)
+    ) {
+      nextRepaired = true;
+      nextRepairReply = clean;
+      messages.push({ role: "assistant", content });
+      messages.push({
+        role: "user",
+        content:
+          "SYSTEM CHECK: tumne jawab to de diya par [NEXT] lines nahi di. Ab SIRF 1-2 line likho — kuch aur nahi, koi greeting/jawab nahi. Format bilkul ye: [NEXT] <chhota label> => <wahi baat jo user bhej sakta hai>. Sirf ISI turn ke tool results se banao (koi naya train number/naam/fare/count nahi). Agla kadam tum socho — jaise us train/class ka booking, doosri class/date, seat availability, timings, ya jo bhi us data se sabse kaam ki baat ho. Agar sach me koi agla kaam ka step nahi banta to SIRF likho: [NEXT] NONE",
+      });
+      continue;
+    }
     if (!check.grounded) {
       // Ungrounded output — deterministic, provider-backed replacement.
       // Needs_choice waale turn par REAL tool options relay karo (model ne
