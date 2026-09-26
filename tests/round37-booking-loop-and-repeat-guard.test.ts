@@ -13,7 +13,7 @@ import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 
-import { resolveBookingTarget, type BookingTargetSources } from "../src/booking/autobook";
+import { extractRouteDateFromChat, resolveBookingTarget, type BookingTargetSources } from "../src/booking/autobook";
 
 const read = (rel: string) => fs.readFileSync(path.join(process.cwd(), rel), "utf8");
 
@@ -165,5 +165,79 @@ describe("Round-37 · server: picker capture + repeat guard + rule 29", () => {
     expect(blk).toContain("!repeatRepaired");
     expect(blk).toContain("timeLeft() > 8000");
     expect(blk).toContain("step < MAX_STEPS");
+  });
+});
+
+describe("Round-37b · user ke apne chat se route/date nikaalna (server ctx reset ho jaata hai)", () => {
+  const today = "2026-09-27";
+  const add = (ymd: string, d: number) => {
+    const [y, m, dd] = ymd.split("-").map(Number);
+    const t = new Date(Date.UTC(y, m - 1, dd + d));
+    return t.toISOString().slice(0, 10);
+  };
+
+  it("codes wala route + 'kal' → dono milte hain (ASR se HW kal ke liye)", () => {
+    const r = extractRouteDateFromChat(
+      [{ role: "user", text: "12054 ki seat availability batao ASR se HW kal ke liye" }],
+      { todayYmd: today, addDays: add },
+    );
+    expect(r.from).toBe("ASR");
+    expect(r.to).toBe("HW");
+    expect(r.date).toBe("2026-09-28");
+  });
+
+  it("station ke naam se bhi (ludhiana se amritsar kal)", () => {
+    const r = extractRouteDateFromChat(
+      [{ role: "user", text: "ludhiana se amritsar kal ki trains batao" }],
+      { todayYmd: today, addDays: add, matchStationFuzzy: (raw) => ({ code: /ludhiana/i.test(raw) ? "LDH" : "ASR" }) },
+    );
+    expect(r.from).toBe("LDH");
+    expect(r.to).toBe("ASR");
+    expect(r.date).toBe("2026-09-28");
+  });
+
+  it("date formats bhi (28-09-2026)", () => {
+    const r = extractRouteDateFromChat(
+      [{ role: "user", text: "LDH → NDLS 28-09-2026 ko seat" }],
+      { todayYmd: today, addDays: add },
+    );
+    expect(r.date).toBe("2026-09-28");
+  });
+
+  it("kuch na mile to khaali (koi andaza nahi)", () => {
+    const r = extractRouteDateFromChat([{ role: "user", text: "12054 mein 2S book krdo" }], { todayYmd: today, addDays: add });
+    expect(r).toEqual({ from: undefined, to: undefined, date: undefined });
+  });
+
+  it("aakhri (sabse taaza) message jeetta hai", () => {
+    const r = extractRouteDateFromChat(
+      [
+        { role: "user", text: "LDH se NDLS kal" },
+        { role: "assistant", text: "theek hai" },
+        { role: "user", text: "ASR se HW aaj" },
+      ],
+      { todayYmd: today, addDays: add },
+    );
+    expect(r.from).toBe("ASR");
+    expect(r.to).toBe("HW");
+    expect(r.date).toBe("2026-09-27");
+  });
+
+  it("resolver 'said' source ko fallback ke roop me use karta hai (ctx khaali ho)", () => {
+    const t = resolveBookingTarget({
+      ...base,
+      ctx: { origin: null, destination: null, date: null, dateProvided: false },
+      said: { from: "ASR", to: "HW", date: "2026-09-28" },
+    });
+    expect(t.from).toBe("ASR");
+    expect(t.to).toBe("HW");
+    expect(t.date).toBe("2026-09-28");
+    expect(t.missing).toEqual([]);
+  });
+
+  it("client extractor ko wire karta hai (messages se)", () => {
+    const c = read("src/views/Concierge.tsx");
+    expect(c).toContain("said: extractRouteDateFromChat(");
+    expect(c).toContain("matchStationFuzzy: (r) => matchStationFuzzy(r),");
   });
 });

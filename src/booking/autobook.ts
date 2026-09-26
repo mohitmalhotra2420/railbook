@@ -160,6 +160,8 @@ export type BookingTargetSources = {
   remembered: { from: string; to: string; date: string; rows: { number: string }[] } | null;
   /** Is turn ki train list rows (route ke liye). */
   trains: { number: string; from?: { code: string } | null; to?: { code: string } | null }[] | null;
+  /** Round-37b: user ke apne pichhle messages se nikaala hua route/date (jaise "ASR se HW kal"). */
+  said?: { from?: string; to?: string; date?: string } | null;
 };
 
 export type BookingTarget = {
@@ -190,6 +192,7 @@ export function resolveBookingTarget(s: BookingTargetSources): BookingTarget {
     (remembered ? { from: remembered.from, to: remembered.to } : null) ??
     (trainRow?.from?.code && trainRow?.to?.code ? { from: trainRow.from.code, to: trainRow.to.code } : null) ??
     (s.ctx?.origin?.code && s.ctx?.destination?.code ? { from: s.ctx.origin.code, to: s.ctx.destination.code } : null) ??
+    (s.said?.from && s.said?.to ? { from: s.said.from, to: s.said.to } : null) ??
     (s.state.from?.code && s.state.to?.code ? { from: s.state.from.code, to: s.state.to.code } : null);
 
   /* Date: user/server ne jo di — form ka default (aaj) kabhi nahi. */
@@ -199,6 +202,7 @@ export function resolveBookingTarget(s: BookingTargetSources): BookingTarget {
     (s.seat?.date ?? "") ||
     (remembered?.date ?? "") ||
     (picked?.date ?? "") ||
+    (s.said?.date ?? "") ||
     (sel?.date ?? "") ||
     (s.ctx?.date ?? "") ||
     (s.state.date ?? "");
@@ -216,4 +220,69 @@ export function resolveBookingTarget(s: BookingTargetSources): BookingTarget {
     date: date || null,
     missing,
   };
+}
+
+
+/* ── Round-37b ─────────────────────────────────────────────────────────────────────────────────
+ * Server ka context har turn par route/date reset kar deta hai (kai baar dono null ho jaate hain —
+ * "12054 mein 2S book krdo" ke turn me origin/destination/date sab null the), aur phir client ka form
+ * gate route/date na hone par chup-chaap kuch nahi karta. Isliye user ke APNE pichhle messages se
+ * route/date nikaala jaata hai (jo usne khud bola: "ASR se HW kal ke liye") — koi andaza nahi, sirf
+ * user ke shabdon ka matlab. Station ke naam local catalogue se code me map hote hain. */
+export type ChatTurn = { role: string; text: string };
+
+const DATE_WORDS: { re: RegExp; days: number }[] = [
+  { re: /\b(aaj|today|aj)\b/i, days: 0 },
+  { re: /\b(kal|tomorrow|kl)\b/i, days: 1 },
+  { re: /\b(parso|parson|day after)\b/i, days: 2 },
+];
+
+export function extractRouteDateFromChat(
+  messages: ChatTurn[],
+  opts: {
+    todayYmd: string;
+    addDays: (ymd: string, days: number) => string;
+    stationByCode?: (code: string) => { code: string } | undefined;
+    matchStationFuzzy?: (raw: string) => { code: string } | undefined;
+  },
+): { from?: string; to?: string; date?: string } {
+  const users = messages.filter((m) => m.role === "user" && m.text).slice(-8).reverse();
+  let from: string | undefined;
+  let to: string | undefined;
+  let date: string | undefined;
+  const codeOk = (c: string) => (/^[A-Z]{2,5}$/.test(c) && (opts.stationByCode ? Boolean(opts.stationByCode(c)) : true));
+  for (const m of users) {
+    const t = m.text;
+    if (!from || !to) {
+      /* 1) codes: "ASR se HW", "LDH → NDLS", "LDH to NDLS" */
+      const codes = /\b([A-Z]{2,5})\s*(?:se|to|→|->|—>)\s*([A-Z]{2,5})\b/.exec(t);
+      if (codes && codeOk(codes[1]) && codeOk(codes[2]) && codes[1] !== codes[2]) {
+        from = from ?? codes[1];
+        to = to ?? codes[2];
+      } else {
+        /* 2) station ke naam: "ludhiana se amritsar", "ambala se delhi" */
+        const names = /\b([a-z][a-z .]{2,22}?)\s*(?:se|to|→|->)\s*([a-z][a-z .]{2,22}?)\b(?!.*\b(?:se|to)\b)/i.exec(t);
+        if (names && opts.matchStationFuzzy) {
+          const a = opts.matchStationFuzzy(names[1].trim());
+          const b = opts.matchStationFuzzy(names[2].trim());
+          if (a && b && a.code !== b.code) {
+            from = from ?? a.code;
+            to = to ?? b.code;
+          }
+        }
+      }
+    }
+    if (!date) {
+      const dmy = /\b(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})\b/.exec(t);
+      if (dmy) {
+        const [dd, mm, yy] = [dmy[1].padStart(2, "0"), dmy[2].padStart(2, "0"), dmy[3].length === 2 ? `20${dmy[3]}` : dmy[3]];
+        date = `${yy}-${mm}-${dd}`;
+      } else {
+        const hit = DATE_WORDS.find((w) => w.re.test(t));
+        if (hit) date = opts.addDays(opts.todayYmd, hit.days);
+      }
+    }
+    if (from && to && date) break;
+  }
+  return { from, to, date };
 }

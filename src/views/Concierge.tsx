@@ -3,6 +3,7 @@ import { planTurn, type AssistantTurn, type Block } from "../ai/orchestrate";
 import type { DialogSlot, NluResult } from "../ai/nlu";
 import type { Prefs } from "../ai/filter";
 import { matchingClasses } from "../ai/filter";
+import { matchStationFuzzy, stationByCode } from "../ai/stations";
 /* Round-37 (screenshot bug: "12054 mein 2S book krdo" 3 baar, form khula hi nahi): picker tap par chuni
  * hui train ka route module-scope me yaad rakha jaata hai — BlockView (picker) likhta hai, Concierge
  * (booking gate) padhta hai. Ref ki jagah plain object kyunki ye do alag components me share hota hai. */
@@ -17,7 +18,7 @@ import type { AgentTrainTable } from "../ai/agent";
 import { JourneyOptions } from "../components/JourneyOptions";
 import { bookingFromChipPayload, bookingFromSeatRow, stationOf } from "../booking/fromOption";
 /* Round-29: booking intent par seedha passenger form (pure resolution logic — test ke liye alag). */
-import { buildAutoBookSeat, isBookingIntent, isOpenableStatus, pickRowForBooking, resolveBookingTarget } from "../booking/autobook";
+import { buildAutoBookSeat, extractRouteDateFromChat, isBookingIntent, isOpenableStatus, pickRowForBooking, resolveBookingTarget } from "../booking/autobook";
 import { detectSeatIntent, type SeatIntent, type SeatRow } from "../seatfinder";
 import { focusSeatRows, seatListGroups, stripSeatCardPointer, trainNumbersInText } from "../chatText";
 /* Round-31: jawab ke baad agla kadam (verified data se — kuch invent nahi). */
@@ -1087,6 +1088,16 @@ export function Concierge() {
               })(),
               remembered: lastSeatRowsRef.current,
               trains: agentRes.trains?.rows ?? null,
+              /* Round-37b: server ctx route/date reset kar deta hai — user ke apne shabdon se bharo. */
+              said: extractRouteDateFromChat(
+                [...messages.filter((m) => m.role === "user").map((m) => ({ role: "user" as const, text: m.text ?? "" })), { role: "user" as const, text: trimmed }],
+                {
+                  todayYmd: todayYmd(),
+                  addDays,
+                  stationByCode: (c) => stationByCode(c),
+                  matchStationFuzzy: (r) => matchStationFuzzy(r),
+                },
+              ),
             });
             if (target.trainNumber && target.from && target.to && target.date) {
               const tno = target.trainNumber;
