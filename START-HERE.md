@@ -90,11 +90,17 @@ android-app/app/src/main/assets/autofill/
   4. **Tools:** `tools/probe-device-scroll.mjs` (live site ko phone-size Chromium me khol kar layout/scroll naapta hai; `playwright` dev-dependency) · `tools/probe-live-review.mjs` (deploy ke baad asli screenshots) · `tools/build-round24-preview.mjs` → `RailBook-round24-2026-09-26.html`.
   5. **Naya APK zaroori nahi** — is round me Android code change nahi (app WebView me live site load karta hai, wahi naya UI dikhega). App v1.4.7 hi current hai.
 
-- **Round-25 (latest, 26 Sep 2026):** "baki trains Seat Finder card mein kyu le jaata?" →
+- **Round-25 (26 Sep 2026):** "baki trains Seat Finder card mein kyu le jaata?" →
   1. `seatFilter.seatSummaryLine()` ab saari seat rows likhti hai (12 tak; aage honest "+N aur bhi hain") — purana `(Seat Finder card me)` pointer hataya (wo card Round-21c me chat se hata tha, isliye jhootha tha).
   2. Naya `missingSeatLines()` + `server/app.ts` turn assembly: jo trains AI ke jawab me chhoot gayi, unki asli lines usi jawab me jud jaati hain (chat me rows ban kar dikhti hain). AI fail → wahi compact 💺 line (usme saari trains).
   3. Prompt + tool summary me saaf rule: saari trains likho, koi "card" pointer nahi. Client par `src/chatText.ts` `stripSeatCardPointer()` safety net (Concierge render se pehle).
   4. Tests: `tests/round25-seat-answer-all-trains.test.tsx` (7, turn-level sahit) · preview `RailBook-round25-2026-09-26.html` · builder `tools/build-round25-preview.mjs`. APK change nahi (WebView live).
+
+- **Round-26 (latest, 26 Sep 2026):** "WL trains bhi dikhao" + "10 trains par 9 kyu" →
+  1. **Count fix:** `ReplyText` label-match 40 → **140 akshar** — AI ne pehli train intro line me likhi ho to bhi wo row banti hai (10 trains = 10 rows). Summary line ab **total + seat/WL farq** batati hai (`💺 14 trains: 10 me seat (…) · 4 WL/N-A`).
+  2. **Default me WL/N-A bhi:** `parseSeatIntent` me naya `EXPLICIT_AVAILABLE_WORDS` — `onlyAvailable` true sirf jab user khud *available / khali / vacant / confirmed* bole; warna saari trains (AVL/RAC + WL/N-A) status ke saath.
+  3. `seatSummaryLine` all-mode branch (ek line me saari trains + "10 me seat (AVL/RAC), 8 me WL/N-A"), `seatFinderTool`/`autoTools`/`toolSpecs` me `only_available` default false, dono prompts me rule. `server/app.ts` me chhoot gayi rows AVL+WL dono se.
+  4. Tests: `tests/round26-seat-all-classes.test.tsx` (7) + round-25 test update → **105 files / 1043 PASS** · preview `RailBook-round26-2026-09-26.html` · builder `tools/build-round26-preview.mjs`. APK change nahi.
 
 ### Standing rules (inhe todna nahi)
 
@@ -108,11 +114,11 @@ android-app/app/src/main/assets/autofill/
 
 | cheez | value |
 |---|---|
-| vitest | **104 files / 1036 tests PASS** (~120-175 s) |
+| vitest | **105 files / 1043 tests PASS** (~120-175 s) |
 | server tsc | clean |
 | client tsc | 67 errors (purane, baseline — koi naya nahi) |
-| live commit | `34d3315` (Round-24) → Round-25 deploy |
-| preview | `RailBook-round25-2026-09-26.html` (Round-24: `RailBook-round24-*.html` + live phone screenshots) |
+| live commit | `630c6f9` (Round-26) |
+| preview | `RailBook-round26-2026-09-26.html` (Round-25: `RailBook-round25-*.html`, Round-24: `RailBook-round24-*.html` + live phone screenshots) |
 | APK | v1.4.7 `RailBook-v1.4.7-release.apk` (versionCode 30) sha256 `bd347c5e…c43d37` (Round-24 me Android change nahi) |
 
 ### Chhote gotchas

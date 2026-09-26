@@ -447,3 +447,29 @@ User ke teen points (2 screenshots + 1 filter screenshot):
 
 **Tests:** naya `tests/round25-seat-answer-all-trains.test.tsx` (7 — summary line saari rows, honest tail, `missingSeatLines`, ReplyText me lines → rows, client strip, aur **turn-level** `/api/agent` assembly: AI ne 1 train likhi → baaki 2 ki lines judi, duplicate nahi, koi card pointer nahi; AI fail → sirf compact line) → kul **104 files / 1036 tests PASS**; server `tsc` clean; client TS 67 (baseline). **Preview:** `RailBook-round25-2026-09-26.html` (pehle/ab, asli ReplyText + asli server helpers se render). **Builder:** `tools/build-round25-preview.mjs`.
 **APK:** Android change nahi (WebView live site load karta hai) — v1.4.7 hi current.
+
+### 9.18 Round-26 (26 Sep) — "WL trains bhi dikhao" (sirf-available filter sirf maangne par) + "10 trains par 9 kyu"
+
+**User (screenshot):** "trains total 10 hai lekin mere ko 9 show kar rhi" + "SL ho ya koi bhi class, usmein sirf available mat show karo — W/L trains bhi show karo kyunki user ne specifically nahi bola ki available SL dikhao".
+
+**1) Count mismatch (10 → 9)**
+
+- Wajah: AI aksar **pehli train ko hi intro line me** likh deta hai — "27 Sep 2026, SL class, 1 passenger ke liye seat available wali trains: 19611 All ASR EXP — SL — AVAILABLE 174 seats — ₹150". `ReplyText` ka label-match (`^([^:]{2,40}):`) sirf 40 akshar tak tha, isliye wo poori line **head** me chali jaati thi aur us row ko rows me nahi ginnti thi → summary "9 me seat" (jabki 10 trains).
+- Fix: `src/components/ReplyText.tsx` me label limit **140 akshar** — ab wo row alag row hai, count match karta hai. Saath me summary line ab **total + seat/WL ka farq** batati hai: `💺 14 trains: 10 me seat (174, 107, …) · 4 WL/N-A · fare ₹150–₹180` (pehle sirf "N me seat").
+- Ek aur case bhi cover hua: row ke baad usi line par tail sentence ("… ₹150 Ye 10 trains SL me abhi available hain.") — row ginn me aati hai, sentence tail me chali jaati hai (kuch chhupta nahi).
+
+**2) Default me WL/N-A bhi (filter sirf jab user khud maange)**
+
+- `server/understand/seatIntent.ts`: naya `EXPLICIT_AVAILABLE_WORDS` (`available|availability|avl|vacant|khali|khaali`, Hindi उपलब्ध/खाली) + `confirmed` — **sirf tabhi** `onlyAvailable = true`. Warna false (default). Pehle har seat-sawaal par true ho jaata tha — isi wajah se WL trains gayab thi.
+- `server/agent/seatFilter.ts` → `seatSummaryLine()` me **all-mode branch**: ek hi line me saari trains (pehle AVL/RAC, phir WL/N-A) + saaf count — `💺 SL me 14 trains — 10 me seat (AVL/RAC), 4 me WL/N-A: … · +N aur bhi hain. (LDH → ASR · live board)`. Rows ki cap `SEAT_LINE_MAX = 12` (aage honest tail), `maxRows` default bhi 12.
+- `server/app.ts`: `seatOnlyAvailable = slots.onlyAvailable` (default false) — AI ke jawab me chhoot gayi trains ki lines tab **AVL/RAC + WL/N-A dono** se banती hain.
+- `server/agent/seatFinderTool.ts` + `autoTools.ts` + `toolSpecs.ts`: `only_available` ka default ab **false** (WL bhi) — true sirf jab user ne khud available/confirmed maanga ho. Prompt (`agentic.ts` SEAT RULE, `autonomous.ts` 8b) me bhi wahi rule likha.
+
+**Live proof (deploy `630c6f9`):**
+
+- Asli sawaal "Ludhiana se Amritsar 27 Sep SL class me seat wali trains batao" (bina "available" shabd) → jawab me **18 trains**: 10 AVL/RAC + 8 WL/N-A, aur line `💺 SL me 18 trains — 10 me seat (AVL/RAC), 8 me WL/N-A: …`. Browser (Pixel-size) par bhi: **18 rows**, summary `💺 18 trains: 10 me seat (174, 107, 50, 22, 5, 4, 4, 3, 2, 1) · 8 WL/N-A · fare ₹150–₹180`, koi card pointer nahi.
+- Filter tabhi lagta hai jab user khud maange: "sirf available SL trains dikhao" → **sirf 10 available** (koi WL/N-A row nahi), line "Ye 10 trains SL me abhi available hain".
+
+**Tests:** naya `tests/round26-seat-all-classes.test.tsx` (7 — intent default vs explicit, all-mode summary line, purana filtered branch, intro-line row count 10/10, trailing-sentence row, WL ke saath summary) + `tests/round25-seat-answer-all-trains.test.tsx` update (WL row ab usi jawab me aati hai) → kul **105 files / 1043 tests PASS**; server `tsc` clean; client TS 67 (baseline).
+**Preview:** `RailBook-round26-2026-09-26.html` (pehle vs ab + live screenshots) · builder `tools/build-round26-preview.mjs`.
+**APK:** Android change nahi (WebView live site) — v1.4.7 hi current.
