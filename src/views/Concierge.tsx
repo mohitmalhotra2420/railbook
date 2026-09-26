@@ -870,11 +870,20 @@ export function Concierge() {
      * go back to the model → it may chain more tools → grounded reply.
      * The deterministic flow further below is the FALLBACK only. */
     const follow = classifyFollowUp(trimmed);
+    /* Round-34 (user ka standing rule: "har query PEHLE model ke paas jaani chahiye" + probe me dikha:
+     * passenger form khula hone par "12013 ki seat availability batao" jaisa naya sawaal bhi local
+     * rasta pakad leta tha): booking-flow ka local rasta sirf BOOKING ki baaton ke liye rahe —
+     * confirm/back/class-pick/details. Naya sawaal (train number ya seat/fare/time/status jaise shabd)
+     * hamesha model ke paas jaata hai, chahe form khula ho. */
+    const freshQuestionDuringBooking =
+      /\b\d{4,5}\b|\b(seat|seats|availability|avl|rac|waitlist|fare|kiraya|timing|time|schedule|status|platform|stops|route|kahan|kaha|kab|kitni)\b/i.test(trimmed) &&
+      !/\b(confirm|book\s*kar|krdo|kardo|continue|aage|back|wapas|haan|ok|theek|details|passenger|naam|age|gender|berth)\b/i.test(trimmed);
     const criticalBookingFlow =
-      state.flow === "PASSENGERS_PENDING" ||
-      state.flow === "FARE_REVIEW" ||
-      state.flow === "PAYMENT_PENDING" ||
-      state.flow === "BOOKING_PENDING";
+      !freshQuestionDuringBooking &&
+      (state.flow === "PASSENGERS_PENDING" ||
+        state.flow === "FARE_REVIEW" ||
+        state.flow === "PAYMENT_PENDING" ||
+        state.flow === "BOOKING_PENDING");
     const classPickWhileSelected =
       Boolean(state.selectedTrain) && /\b(cc|ec|1a|2a|3a|sl|2s|ea)\b/i.test(trimmed) && trimmed.length <= 28;
     const localUiQuery =

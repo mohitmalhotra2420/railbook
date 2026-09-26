@@ -125,3 +125,18 @@ describe("Round-34 · agla kadam hamesha model chune (fallback aakhri upay)", ()
     expect(c).toContain('source: "data"');
   });
 });
+
+describe("Round-34 · booking form khula ho to bhi naya sawaal model ke paas jaata hai", () => {
+  const src = read("src/views/Concierge.tsx");
+  it("fresh sawaal par local critical path skip hota hai (user ka standing rule: har query pehle model)", () => {
+    expect(src).toContain("const freshQuestionDuringBooking =");
+    expect(src).toContain("!freshQuestionDuringBooking &&");
+    expect(src).toContain("Naya sawaal (train number ya seat/fare/time/status jaise shabd)");
+  });
+  it("booking ki baatein (confirm/aage/back) local hi rehti hain", () => {
+    const idx = src.indexOf("const freshQuestionDuringBooking =");
+    const block = src.slice(idx, idx + 700);
+    expect(block).toContain("confirm|book\\s*kar");
+    expect(block).toContain("continue|aage|back|wapas");
+  });
+});
