@@ -44,6 +44,28 @@ export type Block =
       /** Round-32: "model" = AI ne khud chuna; "data" = verified data se banaya (AI ne nahi diya). */
       source?: "model" | "data";
     }
+  /* Round-35 (user: "19028 mein book krdo" par AI ne class nahi poochhi — seedha ek class ka form
+   * khol diya, jabki us train me kai classes khuli thi): booking se pehle class ambiguous ho to user
+   * se poochho — chips sirf un classes ke jo board par sach me khuli hain (AVL/RAC), fare ke saath.
+   * Chip tap → wahi class wala booking sentence, jo normal flow se form kholta hai. */
+  | {
+      type: "classchoice";
+      trainNumber: string;
+      trainName?: string | null;
+      from: string;
+      to: string;
+      date: string;
+      options: {
+        id: string;
+        classCode: string;
+        label: string;
+        utterance: string;
+        status: string;
+        seats?: number | null;
+        fare?: number | null;
+      }[];
+      hint?: string | null;
+    }
   | { type: "stations"; options: { code: string; name: string; city: string }[]; slot: "from" | "to" }
   | { type: "dates"; options: { date: string; label: string }[] }
   | { type: "train"; train: TrainResult; badge?: string; reason?: string; primary?: boolean }

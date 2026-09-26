@@ -13,7 +13,7 @@ import type { AgentTrainTable } from "../ai/agent";
 import { JourneyOptions } from "../components/JourneyOptions";
 import { bookingFromChipPayload, bookingFromSeatRow, stationOf } from "../booking/fromOption";
 /* Round-29: booking intent par seedha passenger form (pure resolution logic — test ke liye alag). */
-import { buildAutoBookSeat, isBookingIntent, pickRowForBooking } from "../booking/autobook";
+import { buildAutoBookSeat, isBookingIntent, isOpenableStatus, pickRowForBooking } from "../booking/autobook";
 import { detectSeatIntent, type SeatIntent, type SeatRow } from "../seatfinder";
 import { focusSeatRows, seatListGroups, stripSeatCardPointer, trainNumbersInText } from "../chatText";
 /* Round-31: jawab ke baad agla kadam (verified data se — kuch invent nahi). */
@@ -1089,6 +1089,48 @@ export function Concierge() {
                   ? remembered.rows
                   : [];
               const live = [...(sf?.rows ?? []), ...(sf?.wlRows ?? []), ...rememberedOk];
+              /* Round-35 (user: "19028 mein book krdo" — AI ne class nahi poochhi, seedha ek class ka
+               * form khol diya, jabki us train me kai classes khuli thi; "AI khud kyu nhi soch rha,
+               * har cheez thodi btani padegi"): class boli hi na ho aur us train me EK SE ZYADA class
+               * khuli ho (AVL/RAC) → pehle us se poochho, uski marzi ke bina form mat kholo. */
+              const thisTrain = live.filter((r) => String(r.number) === tno);
+              const withSeat = thisTrain.filter((r) => /^(AVAILABLE|RAC)$/i.test(String(r.status ?? "")));
+              const classKey = (r: (typeof withSeat)[number]) => String(r.classCode ?? "").toUpperCase();
+              const uniqClasses = withSeat.filter((r, i) => withSeat.findIndex((x) => classKey(x) === classKey(r)) === i);
+              if (!clsWanted && uniqClasses.length >= 2) {
+                const nm = uniqClasses[0]?.name ?? agentRes.trains?.rows?.find((t) => String(t.number) === tno)?.name ?? null;
+                setMessages((m) => [
+                  ...m,
+                  {
+                    id: newId(),
+                    role: "assistant",
+                    text: `${tno}${nm ? ` ${nm}` : ""} me ${uniqClasses.length} classes khuli hain — ${uniqClasses
+                      .map((r) => `${r.classCode}${r.seats != null ? ` (${r.status} ${r.seats})` : ""}`)
+                      .join(", ")}. Kaunsi class me book karun? Neeche chip par tap karo.`,
+                    blocks: [
+                      {
+                        type: "classchoice",
+                        trainNumber: tno,
+                        trainName: nm,
+                        from: routeFrom.code,
+                        to: routeTo.code,
+                        date: routeDate,
+                        options: uniqClasses.map((r, i) => ({
+                          id: `c${i}`,
+                          classCode: String(r.classCode ?? "").toUpperCase(),
+                          label: `${String(r.classCode ?? "").toUpperCase()} · ${r.status}${r.seats != null ? ` ${r.seats}` : ""}${r.fare != null ? ` · ₹${r.fare}` : ""}`,
+                          utterance: `${tno} mein ${String(r.classCode ?? "").toUpperCase()} book krdo`,
+                          status: String(r.status ?? ""),
+                          seats: r.seats ?? null,
+                          fare: r.fare ?? null,
+                        })),
+                        hint: "Class chip par tap → seedha passenger form (jo data dikha wahi jayega)",
+                      },
+                    ],
+                  },
+                ]);
+                return;
+              }
               const pickRow = pickRowForBooking(live, tno, clsWanted || null);
               const seat = buildAutoBookSeat({
                 trainNumber: tno,
@@ -2043,6 +2085,32 @@ export function NextStepCard({
   );
 }
 
+/* Round-35: "19028 mein book krdo" par class ambiguous → pehle USER se class poochho.
+ * Chips sirf un classes ke jo board par sach me khuli thi (AVL/RAC) — fare/status wahi, kuch invent nahi. */
+export function ClassChoiceCard({
+  block,
+  onChip,
+}: {
+  block: Extract<Block, { type: "classchoice" }>;
+  onChip: (u: string) => void;
+}) {
+  return (
+    <div className="ns-card" id="class-choice">
+      <div className="ns-label">
+        <span className="ns-dot" aria-hidden>🪑</span> {block.trainNumber} — kaunsi class me book karun?
+      </div>
+      <div className="ns-chips">
+        {block.options.map((o, i) => (
+          <button key={o.id} className={`ns-chip${i === 0 ? " primary" : ""}`} onClick={() => onChip(o.utterance)}>
+            {o.label}
+          </button>
+        ))}
+      </div>
+      {block.hint && <div className="ns-hint muted">{block.hint}</div>}
+    </div>
+  );
+}
+
 export function SeatListBlock({
   block,
   onPick,
@@ -2176,6 +2244,9 @@ function BlockView({
         }
       />
     );
+  }
+  if (block.type === "classchoice") {
+    return <ClassChoiceCard block={block} onChip={onChip} />;
   }
   if (block.type === "traintable") {
     /* Round-21c: chat se Seat Finder card hata (user: "seat finder aur direct trains ab same hi hain").

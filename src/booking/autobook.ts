@@ -64,7 +64,11 @@ export function pickRowForBooking(
       ) ?? null
     );
   }
-  return same.find((r) => isOpenableStatus(r.status)) ?? null;
+  /* Round-35 (user: "19028 mein multiple class me seats available thi... AI ne class nahi poochhi"):
+   * class boli hi na ho to pehle SEAT WALI class chuno (AVAILABLE/RAC) — WL/N-A row pehle aa jaye to
+   * uspe form nahi kholna. Ek se zyada seat-wali class ho to client user se poochhta hai (classchoice). */
+  const withSeats = same.filter((r) => String(r.status ?? "").toUpperCase() === "AVAILABLE" || String(r.status ?? "").toUpperCase() === "RAC");
+  return withSeats.find((r) => isOpenableStatus(r.status)) ?? same.find((r) => isOpenableStatus(r.status)) ?? null;
 }
 
 /**
