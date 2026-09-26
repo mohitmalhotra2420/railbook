@@ -439,5 +439,11 @@ User ke teen points (2 screenshots + 1 filter screenshot):
 3. Prompt/tool honesty: `agentic.ts` SEAT RULE me saaf likha — "SAARI seat wali trains ki lines likho (top 3-5 nahi) … 'baaki trains kisi card/Seat Finder me hain' jaisi baat kabhi mat likho, chat me aisa koi card nahi dikhta"; `seatFinderTool.ts` ki summary me bhi wahi rule + SEAT rows 8 → 12.
 4. Client safety net: naya `src/chatText.ts` → `stripSeatCardPointer()`; `Concierge.tsx` assistant text render se pehle isse guzarta hai, isliye kabhi model phir bhi "Seat Finder card" likhe to **screen par woh jhoothi baat nahi jaati** (baaki text jaisa tha waisa rehta hai — kuch chhupta nahi).
 
+**Live proof (deploy `fe9f372` ke baad, asli site par):**
+
+- `/api/agent` par wahi screenshot wala sawaal ("Ludhiana se Amritsar 27 Sep SL class me seat wali trains batao") → jawab me **saari 10 seat-wali trains** (19611 AVL 174 … 15707 AVL 1) + `💺 SL me seat wali 10 trains … (LDH → ASR · live board)`; text me **"Seat Finder card" ka zikr nahi**.
+- Asli browser (Pixel-size Chromium, live site) par wahi sawaal → chat me **10 rows** (19611, 14615, 14631, 14663, 13005, 12903, 14653, 20807, 11057, 15707), summary "💺 10 me seat (174, 50, 26, 22, 7, 5, 4, 4, 3, 1) · fare ₹150–₹180", aur aakhri line par koi jhootha pointer nahi. Screenshots: `previews/round25-live-seat-answer-top.png` / `-bottom.png` (tool: `tools/probe-live-seat-answer.mjs`).
+- Round-25b refinement (live check me pakda gaya): pehle WL/N-A rows bhi jawab me jud rahi thi (18 lines) — ab sirf **jo query ne maanga** wahi (seat rows). Tabhi jodi gayi rows 10, WL alag se nahi.
+
 **Tests:** naya `tests/round25-seat-answer-all-trains.test.tsx` (7 — summary line saari rows, honest tail, `missingSeatLines`, ReplyText me lines → rows, client strip, aur **turn-level** `/api/agent` assembly: AI ne 1 train likhi → baaki 2 ki lines judi, duplicate nahi, koi card pointer nahi; AI fail → sirf compact line) → kul **104 files / 1036 tests PASS**; server `tsc` clean; client TS 67 (baseline). **Preview:** `RailBook-round25-2026-09-26.html` (pehle/ab, asli ReplyText + asli server helpers se render). **Builder:** `tools/build-round25-preview.mjs`.
 **APK:** Android change nahi (WebView live site load karta hai) — v1.4.7 hi current.
