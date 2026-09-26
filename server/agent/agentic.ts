@@ -1251,13 +1251,25 @@ export async function executeApprovedTool(
             });
           }
         }
+        /* Round-37g (user: "ChatGPT jaisa ek dum sahi jawab"): COMPARISON sawaal ("Vande Bharat aur
+         * Rajdhani me kya fark hai") par ek hi page ka data adhoora rehta tha — doosri cheez ka topic
+         * page bhi laao taaki model dono taraf se sahi tulna kar sake. */
+        const cmpParts = comparisonSubjects(userText || q);
         for (const t of tries) {
           const ans = await findTopicAnswer(t);
           if (!ans) continue;
+          let extra: { title: string; text: string; url: string } | null = null;
+          if (cmpParts && !cmpParts.some((p2) => ans.title.toLowerCase().includes(p2.split(" ")[0].toLowerCase()))) {
+            const other = await findTopicAnswer(cmpParts[0]).catch(() => null);
+            if (other && other.title !== ans.title) extra = { title: other.title, text: other.text, url: other.url };
+          }
+          const body = extra ? `${ans.text}\n\nDOOSRI CHEEZ (${extra.title}): ${extra.text}` : ans.text;
+          const src = extra ? `${ans.url}; ${extra.url}` : ans.url;
+          const title = extra ? `${ans.title} + ${extra.title}` : ans.title;
           const summary =
             ans.kind === "table"
-              ? `Web se mila (Wikipedia — ${ans.title}, top rows):\n${ans.text}\n(Source: ${ans.url})`
-              : `Web se mila (Wikipedia — ${ans.title}): ${ans.text}\n(Source: ${ans.url})`;
+              ? `Web se mila (Wikipedia — ${title}, top rows):\n${body}\n(Source: ${src})`
+              : `Web se mila (Wikipedia — ${title}): ${body}\n(Source: ${src})`;
           return okResult("web", summary, {
             query: q,
             answer_found: true,
@@ -2661,6 +2673,18 @@ async function composeWebAnswer(userText: string, facts: string, title: string |
    * answer-ready text rakhega (kabhi bhi "SAAF" ya adhoora dump user ko nahi jaata). */
   if (!text || /^saf+\b/i.test(text) || text.length < 25 || /jawab nahi mila|not in the (?:given )?facts/i.test(text.slice(0, 120))) return null;
   return text;
+}
+
+/* Round-37g: "X aur Y me kya fark hai" / "X vs Y" / "X ya Y" → dono subjects (page dhoondhne ke liye). */
+export function comparisonSubjects(text: string): [string, string] | null {
+  const t = String(text ?? "").replace(/\s+/g, " ").trim();
+  if (!/\b(fark|difference|compare|comparison|better|behtar|versus|vs)\b/i.test(t)) return null;
+  const m = /^([A-Za-z0-9][A-Za-z0-9 .&-]{1,30}?)\s+(?:aur|and|vs\.?|versus)\s+([A-Za-z0-9][A-Za-z0-9 .&-]{1,30}?)(?=\s+(?:me|mein|in|ke|ka|ki|difference|fark|better|behtar|compare)\b|[\s,.?!]|$)/i.exec(t);
+  if (!m) return null;
+  const a = m[1].trim().replace(/\s+(?:ke|ka|ki)$/i, "");
+  const b = m[2].trim().replace(/\s+(?:ke|ka|ki)$/i, "");
+  if (!a || !b || a.toLowerCase() === b.toLowerCase()) return null;
+  return [a, b];
 }
 
 /* Round-37d: final jawab banate waqt web-answer ko polish karo — raw Wikipedia extract ki jagah

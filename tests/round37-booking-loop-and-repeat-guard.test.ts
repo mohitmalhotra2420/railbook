@@ -328,3 +328,20 @@ describe("Round-37f · general sawaal par ChatGPT-jaisa saaf jawab (raw dump / u
     expect(agentic).toContain("reply: hasWebAnswer");
   });
 });
+
+describe("Round-37g · comparison sawaal par dono taraf ka data (ek page se adhoora jawab nahi)", () => {
+  it("comparison subjects nikalta hai (aur / vs)", async () => {
+    const { comparisonSubjects } = await import("../server/agent/agentic");
+    expect(comparisonSubjects("Vande Bharat aur Rajdhani me kya fark hai? short me")).toEqual(["Vande Bharat", "Rajdhani"]);
+    expect(comparisonSubjects("Sleeper vs 3A difference kya hai")).toEqual(["Sleeper", "3A"]);
+    expect(comparisonSubjects("12054 ki seat availability batao")).toBeNull();
+  });
+
+  it("tool doosri cheez ka topic page bhi laata hai aur summary me dono daalta hai", () => {
+    const a = read("server/agent/agentic.ts");
+    expect(a).toContain("const cmpParts = comparisonSubjects(userText || q);");
+    expect(a).toContain("const other = await findTopicAnswer(cmpParts[0]).catch(() => null);");
+    expect(a).toContain("DOOSRI CHEEZ (${extra.title}): ${extra.text}");
+    expect(a).toContain("const src = extra ? `${ans.url}; ${extra.url}` : ans.url;");
+  });
+});
