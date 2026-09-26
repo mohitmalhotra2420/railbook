@@ -2592,6 +2592,68 @@ function agenticTransport(): AgenticTransport | null {
  * par WORDING ab AI (Muse primary) likhta hai. Bounded (≤ 6 s), facts prompt mein LOCKED —
  * model naya station/date/number invent nahi kar sakta (validator check karta hai);
  * fail/timeout → deterministic text (pehle jaisa). */
+/* ── Round-36b (user: "agla kadam AI se aaye … fallback pe verified data se na aaye, AI har baar apna
+ * brain use kare") ─────────────────────────────────────────────────────────────────────────────
+ * Main loop ka NEXT-repair har turn me nahi chalta (plan/seat turns 60-70s ka budget kha jaate hain).
+ * Ye ek chhota, dedicated model call hai — sirf agla kadam poochhne ke liye, apne (chhote) timeout ke
+ * saath. Jo model dega wahi client ko jaayega (grounding se validate hoke); na de to KUCH NAHI jaayega —
+ * data se banaya hua fallback chip kabhi nahi (user ka saaf rule). */
+export async function nextStepFromModelOnly(args: {
+  userText: string;
+  reply: string;
+  steps: ToolTraceStep[];
+}): Promise<{ label: string; utterance: string; primary?: boolean }[]> {
+  const transport = agenticTransport();
+  if (!transport) return [];
+  /* Chhote/fast model se poochho (chain ka aakhri model), warna primary. */
+  const model = transport.models.length > 1 ? transport.models[transport.models.length - 1] : transport.primaryModel;
+  const data = args.steps
+    .filter((st) => st.ok)
+    .map((st) => `${st.tool}: ${(st.dataPreview ?? st.summary ?? "").slice(0, 500)}`)
+    .join("\n")
+    .slice(0, 2200);
+  if (!data) return [];
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), Math.max(3000, Number(process.env.AI_NEXT_STEP_TIMEOUT_MS ?? 12000)));
+  try {
+    const res = await fetchImpl()(transport.url, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${transport.apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model,
+        temperature: 0,
+        max_tokens: 700,
+        messages: [
+          {
+            role: "system",
+            content:
+              "Tum RailBook AI ho. Neeche user ka sawaal, tumhara diya hua jawab, aur is turn ke VERIFIED tool results hain. " +
+              "Tumhara EK kaam: user ke liye sabse kaam ka AGLA KADAM chun kar ek line me likhna — jaise ChatGPT/Gemini karte hain " +
+              "(socho ki ab user kya poochhna/chaahna chahega: us train ka booking, doosri class, doosri date, seat availability, timings, " +
+              "live status, ya koi saaf sawaal). Format bilkul: [NEXT] <chhota label> => <wahi baat jo user bhej sakta hai>. " +
+              "SIRF 1 line, kuch aur nahi (koi greeting, koi jawab, koi explanation). Sirf in tool results ka data use karo — " +
+              "koi naya train number/naam/fare/count mat likho. Agar sach me koi agla kaam ka step nahi banta to likho: [NEXT] NONE",
+          },
+          {
+            role: "user",
+            content: `USER SAWAAL: ${args.userText.slice(0, 240)}\n\nJAWAB: ${args.reply.slice(0, 600)}\n\nVERIFIED TOOL RESULTS:\n${data}`,
+          },
+        ],
+      }),
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    if (!res.ok) return [];
+    const parsed = (await res.json()) as NvidiaChatJson;
+    const content = String(parsed?.choices?.[0]?.message?.content ?? "").trim();
+    if (!content) return [];
+    return extractNextActions(content).actions;
+  } catch {
+    clearTimeout(timer);
+    return [];
+  }
+}
+
 export async function aiPhraseGate(kind: "passengers" | "date" | "station", facts: { fallback: string; mustContain: string[]; context: string }): Promise<{ text: string; model: string | null }> {
   const transport = agenticTransport();
   if (!transport || process.env.VITEST) return { text: facts.fallback, model: null };
@@ -3362,16 +3424,22 @@ export async function runAgenticTurn(input: {
     /* Round-34: ye NEXT-repair ka jawab hai — asli reply pehle se ready hai, yahan se sirf agla kadam lo. */
     if (nextRepairReply !== null) {
       const rex = extractNextActions(redact(content));
-      const acts = rex.actions.filter((a) => groundingCheck(`${a.label} ${a.utterance}`, steps, [...evidenceParts, ...messages.map((m) => m.content ?? "")]).grounded);
+      const ev = [...evidenceParts, ...messages.map((m) => m.content ?? "")];
+      let acts = rex.actions.filter((a) => groundingCheck(`${a.label} ${a.utterance}`, steps, ev).grounded);
+      let reason = acts.length ? `next_step_from_model_repair${nextRepairAttempts > 1 ? "2" : ""}` : "next_step_repair_empty_no_fallback";
+      /* Round-36b: repair ke jawab me bhi [NEXT] na mila → dedicated chhota call (model se hi). */
+      if (!acts.length) {
+        const dedicated = await nextStepFromModelOnly({ userText: input.text, reply: nextRepairReply, steps });
+        acts = dedicated.filter((a) => groundingCheck(`${a.label} ${a.utterance}`, steps, ev).grounded);
+        reason = acts.length ? "next_step_from_dedicated_call" : "next_step_dedicated_empty_no_fallback";
+      }
       return {
         ok: true,
         reply: nextRepairReply,
         grounded: true,
         steps,
         modelUsed, modelFallbacks, latencyMs: Date.now() - startedAll,
-        failureReason: acts.length
-          ? `next_step_from_model_repair${nextRepairAttempts > 1 ? "2" : ""}`
-          : "next_step_repair_empty_no_fallback",
+        failureReason: reason,
         nextActions: acts.length ? acts : null,
       };
     }
@@ -3620,14 +3688,24 @@ export async function runAgenticTurn(input: {
         failureReason: `ungrounded_numbers:${check.evidence}`,
       };
     }
+    /* Round-36b: model ne [NEXT] nahi diya (aur main-loop repair bhi budget/step ki wajah se nahi chala) —
+     * ab ek dedicated chhota call: sirf agla kadam. Model na de to koi fallback nahi. */
+    let nextActionsFinal = nextActions;
+    let nextFailure: string | null = null;
+    if (!nextActionsFinal.length && okSteps.length > 0 && check.grounded) {
+      const dedicated = await nextStepFromModelOnly({ userText: input.text, reply: clean, steps });
+      const val = dedicated.filter((a) => groundingCheck(`${a.label} ${a.utterance}`, steps, evidenceAll).grounded);
+      nextActionsFinal = val;
+      nextFailure = val.length ? "next_step_from_dedicated_call" : "next_step_dedicated_empty_no_fallback";
+    }
     return {
       ok: true,
       reply: clean,
       grounded: true,
       steps,
       modelUsed, modelFallbacks, latencyMs: Date.now() - startedAll,
-      failureReason: null,
-      nextActions: nextActions.length ? nextActions : null,
+      failureReason: nextFailure,
+      nextActions: nextActionsFinal.length ? nextActionsFinal : null,
     };
   }
 

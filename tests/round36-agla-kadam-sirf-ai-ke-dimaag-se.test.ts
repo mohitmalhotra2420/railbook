@@ -60,6 +60,19 @@ describe("Round-36 · model se agla kadam — do koshish, phir bhi fallback nahi
     expect(agentic).toContain('nextRepairAttempts > 1 ? "2" : ""');
   });
 
+  it("Round-36b: dedicated chhota NEXT call (budget khatam hone par bhi model se hi agla kadam)", () => {
+    expect(agentic).toContain("export async function nextStepFromModelOnly(");
+    expect(agentic).toContain("AI_NEXT_STEP_TIMEOUT_MS ?? 12000");
+    /* chhota/fast model (chain ka aakhri) — reasoning model ka time waste nahi */
+    expect(agentic).toContain("transport.models.length > 1 ? transport.models[transport.models.length - 1] : transport.primaryModel");
+    /* sirf tool data se, aur na mile to kuch nahi */
+    expect(agentic).toContain("if (!data) return [];");
+    expect(agentic).toContain('"next_step_from_dedicated_call"');
+    expect(agentic).toContain('"next_step_dedicated_empty_no_fallback"');
+    /* dedicated jawab bhi evidence se validate hota hai */
+    expect(agentic).toContain("const val = dedicated.filter((a) => groundingCheck(`${a.label} ${a.utterance}`, steps, evidenceAll).grounded);");
+  });
+
   it("grounded turn me hi repair (ungrounded replies ka apna treatment hai)", () => {
     const idx = agentic.indexOf("!nextActions.length &&");
     const block = agentic.slice(idx, idx + 420);

@@ -86,7 +86,8 @@ describe("Round-32 · prompt: model ko agle kadam ka hukm milta hai (rule 13 + 2
   it("server actions ko evidence se validate karta hai (jhootha chip UI par nahi)", () => {
     const src = read("server/agent/agentic.ts");
     expect(src).toContain("const nextActions = extracted.actions.filter((a) => groundingCheck(");
-    expect(src).toContain("nextActions: nextActions.length ? nextActions : null,");
+    /* Round-36b: dedicated NEXT call ke baad final list — model ne kuch na diya to null (koi data fallback nahi). */
+    expect(src).toContain("nextActions: nextActionsFinal.length ? nextActionsFinal : null,");
   });
 
   it("response contract me nextActions har layer par jaata hai (run → app → client)", () => {
