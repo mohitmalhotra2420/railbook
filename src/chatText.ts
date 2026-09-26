@@ -20,23 +20,52 @@ const SEAT_CARD_POINTER =
  * lines hatane se page saaf rehta hai — data kahin chhupta nahi (block me saari classes dikhti hain,
  * aur zyada detail ke saath). 💺 summary line aur baaki prose waise hi rehte hain.
  */
+const SEAT_ROW_CLASS = "1A|2A|3A|3E|SL|CC|2S|EC|EA|FC";
+const SEAT_ROW_STATUS = "AVL|AVAILABLE|AVAIL|RAC|WL|WAITLIST|N\\/A|NOT[ _]?AVAILABLE|REGRET|CANCELLED|DEPARTED";
+/* Ek "row chunk": train number se shuru hone wali row (`* 12013 NAAM · CC · AVAILABLE 418 seats · ₹675`)
+ * ya separator ke baad aane wali class (`· EC AVL 23 ₹1,015` — dense summary line me). */
+const SEAT_ROW_CHUNK = new RegExp(
+  "(?:" +
+    "(?:[*•]\\s*)?\\d{4,5}\\s[^\\n]*?\\b(?:" + SEAT_ROW_CLASS + ")\\b[^A-Za-z0-9]{0,6}(?:" + SEAT_ROW_STATUS + ")\\b" +
+    "|" +
+    "[·•|]\\s*\\b(?:" + SEAT_ROW_CLASS + ")\\b[^A-Za-z0-9]{0,6}(?:" + SEAT_ROW_STATUS + ")\\b" +
+  ")" +
+  "(?:\\s*\\d{1,4})?(?:\\s*seats?)?(?:\\s*[·•|,;:—–\\-]{0,4}\\s*₹\\s?[\\d,]+)?",
+  "gi",
+);
+
+/** Row-list lines (jo block me behtar shakal me hain) hataata hai — line ke saath chipka prose bacha ke. */
 export function stripDuplicatedSeatRows(text: string): string {
-  const lines = String(text ?? "").split("\n");
-  const kept = lines.filter((l) => {
-    const t = l.trim();
-    if (!t) return true;
-    /* Seat row ki shakal: "* 12013 NAAM — SL — AVAILABLE 444 seats — ₹675" */
-    if (/^\*\s*\d{4,5}\s+.+?\s[—-]\s*(?:1A|2A|3A|3E|SL|CC|2S|EC|EA|FC)\b/i.test(t)) return false;
-    /* Round-27: server ka dense summary bhi rows ka list hai — "… 12013 CC AVL 424 ₹675 · EC AVL 23
-     * ₹1,015 | 19611 SL AVL 174 ₹150 …". Block me wahi (aur behtar) rows dikhti hain, isliye aisi line
-     * chat ke text me dobara nahi (warna ek hi class wala adhoora list dikhta hai). Sirf compact
-     * "CLASS + status" tokens ginte hain — "2A me WL 14 hai" jaisi prose safe rehti hai. */
-    const tokens = t.match(/\b(?:1A|2A|3A|3E|SL|CC|2S|EC|EA|FC)\s*(?:—|-|:)?\s*(?:AVL|AVAILABLE|AVAIL|RAC|WL|WAITLIST|N\/A|NOT[ _]?AVAILABLE|REGRET|REGRET|CANCELLED|DEPARTED)\b/gi);
-    if (tokens && tokens.length >= 2) return false;
-    if (tokens && /^\s*(?:\*|•|💺)?\s*\d{4,5}\s/.test(t)) return false;
-    return true;
-  });
-  return kept.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  /* AI aksar pehli row ko intro line ke saath chipka deta hai ("… hain: * 12013 …") — pehle usse
+   * apni line par le aao, taaki intro sentence bachi rahe aur row alag hat sake. */
+  const normalized = String(text ?? "").replace(/\s+(?=[*•]\s*\d{4,5}[\s·•|—-])/g, "\n");
+  const out: string[] = [];
+  for (const raw of normalized.split("\n")) {
+    const t = raw.trim();
+    if (!t) {
+      out.push(raw);
+      continue;
+    }
+    /* Purani shakal: "* 12013 NAAM — SL — AVAILABLE 444 seats — ₹675" */
+    if (/^\*\s*\d{4,5}\s+.+?\s[—-]\s*(?:1A|2A|3A|3E|SL|CC|2S|EC|EA|FC)\b/i.test(t)) continue;
+    const chunks = t.match(SEAT_ROW_CHUNK);
+    if (chunks && chunks.length) {
+      /* Seat-list ki headline line (💺 wali summary ya "18 seat wali trains — …"): rows hatt gayi to
+       * sirf adhoora header bachta hai — poori line hi hata do. */
+      if (t.startsWith("💺") || /seat wali \d+ trains|trains? (?:me|mẽ) seat/i.test(t)) continue;
+      const leftover = t
+        .replace(SEAT_ROW_CHUNK, " ")
+        .replace(/[\s·•|,;:]+/g, " ")
+        .replace(/\s+([.,!?])/g, "$1")
+        .trim();
+      if ((leftover.match(/[A-Za-z]{3,}/g) ?? []).length >= 1) out.push(leftover);
+      continue;
+    }
+    const tokens = t.match(new RegExp("\\b(?:" + SEAT_ROW_CLASS + ")\\b[^A-Za-z0-9]{0,6}(?:" + SEAT_ROW_STATUS + ")\\b", "gi"));
+    if (tokens && tokens.length >= 2) continue;
+    out.push(raw);
+  }
+  return out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
 export function stripSeatCardPointer(text: string, withSeatBlock = false): string {
