@@ -17,7 +17,6 @@ import { buildAutoBookSeat, isBookingIntent, isOpenableStatus, pickRowForBooking
 import { detectSeatIntent, type SeatIntent, type SeatRow } from "../seatfinder";
 import { focusSeatRows, seatListGroups, stripSeatCardPointer, trainNumbersInText } from "../chatText";
 /* Round-31: jawab ke baad agla kadam (verified data se — kuch invent nahi). */
-import { nextStepsFor } from "../ai/nextstep";
 import { VoiceSheet, type VoiceSuggestion } from "../components/VoiceSheet";
 import { AlternativesCard } from "../components/AlternativesCard";
 import { TrainPicker } from "../components/TrainPicker";
@@ -1025,24 +1024,19 @@ export function Concierge() {
               rows: [...(sf0.rows ?? []), ...(sf0.wlRows ?? [])],
             };
           }
+          /* Round-36 (user: "agla kadam AI se aaye, wo khud ka dimaag lagaye jaise ChatGPT/Gemini lagata
+           * hai — fallback pe verified data se na aaye, AI har baar apna brain use kare"): "Agla kadam"
+           * ab SIRF model ke chune hue steps se banta hai (server ne tool-evidence par validate kiye hue).
+           * Model na de to ye card dikhta hi nahi — data se banaya hua jhootha/nakli next step nahi. */
           const modelActions = agentRes.nextActions ?? [];
-            if (modelActions.length) {
-              blocks.push({
-                type: "nextstep",
-                source: "model",
-                options: modelActions.map((a, i) => ({ id: `m${i}`, label: a.label, utterance: a.utterance, primary: a.primary ?? i === 0 })),
-                hint: null,
-              });
-            } else {
-              const ns = nextStepsFor({
-              seats: [...(agentRes.seatFilter?.rows ?? []), ...(agentRes.seatFilter?.wlRows ?? [])],
-              focus: askedTrains,
-              trains: agentRes.trains?.rows ?? null,
-              journey: agentRes.journey ?? null,
-                trainHint: askedTrains[0] ?? lastFactTrainRef.current ?? null,
-              });
-              if (ns.options.length) blocks.push({ type: "nextstep", source: "data", options: ns.options, hint: ns.hint });
-            }
+          if (modelActions.length) {
+            blocks.push({
+              type: "nextstep",
+              source: "model",
+              options: modelActions.map((a, i) => ({ id: `m${i}`, label: a.label, utterance: a.utterance, primary: a.primary ?? i === 0 })),
+              hint: null,
+            });
+          }
           }
           const tableBlock: Block[] | undefined = blocks.length ? blocks : undefined;
           setMessages((m) => [

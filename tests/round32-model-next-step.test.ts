@@ -8,7 +8,8 @@
  * apne reply ke aakhir me `[NEXT] label => utterance` line(s) likh kar (prompt rule 26). Server unhe
  * reply text se ALAG karta hai (user ko raw line nahi dikhti), tool-evidence se VALIDATE karta hai
  * (jo number/naam is turn me nahi aaya wo drop), aur client unhi ko chips me dikhata hai. Model ne na
- * diya ho to verified-data fallback chalta hai — kabhi khaali nahi, kabhi jhootha nahi.
+ * diya ho to Round-36 se koi data-fallback nahi — card dikhta hi nahi (user: "fallback pe verified data
+ * se na aaye, AI har baar apna brain use kare").
  */
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";
@@ -115,15 +116,19 @@ describe("Round-32 · client: model ka decision pehle, data fallback doosra", ()
     expect(c).toContain("options: modelActions.map((a, i) => ({ id: `m${i}`, label: a.label, utterance: a.utterance, primary: a.primary ?? i === 0 }))");
   });
 
-  it("model ne na diya ho to verified-data fallback (Round-31) chalta hai (source: data)", () => {
+  it("Round-36: model ne na diya ho to koi data-fallback chip NAHI (card dikhta hi nahi)", () => {
     const c = src();
-    expect(c).toContain("const ns = nextStepsFor({");
-    expect(c).toContain('blocks.push({ type: "nextstep", source: "data", options: ns.options, hint: ns.hint });');
+    expect(c).not.toContain("const ns = nextStepsFor({");
+    expect(c).not.toContain('source: "data"');
+    expect(c).toMatch(/if \(modelActions\.length\) \{/);
   });
 
-  it("card par saaf likha hai ki agla kadam AI ne chuna ya data se bana (chhupa nahi)", () => {
+  it("card par saaf likha hai ki agla kadam AI ne chuna (data tag ab kabhi nahi)", () => {
     const c = src();
     expect(c).toContain('{block.source === "model" ? "AI ne chuna" : "verified data se"}');
+    /* Round-36: "verified data se" label dono jagah dikhta hai lekin source kabhi "data" set nahi hota
+     * (client sirf model ka block banata hai) — isliye practically sirf "AI ne chuna" hi rehta hai. */
+    expect(c).not.toContain('source: "data"');
     const css = read("src/styles.css");
     expect(css).toContain(".ns-tag.model");
   });

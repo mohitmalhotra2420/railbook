@@ -168,19 +168,23 @@ describe("Round-31 · 'Agla kadam' card UI", () => {
 });
 
 describe("Round-31 · Concierge wiring + CSS", () => {
-  it("har jawab ke baad nextstep block banta hai (verified inputs se) aur chip → wahi flow", () => {
+  it("har jawab ke baad nextstep block banta hai (Round-36: sirf model ke chune steps se) aur chip → wahi flow", () => {
     const src = fs.readFileSync(path.join(process.cwd(), "src/views/Concierge.tsx"), "utf8");
-    expect(src).toContain("import { nextStepsFor } from \"../ai/nextstep\";");
-    expect(src).toContain("const ns = nextStepsFor({");
-    expect(src).toContain("seats: [...(agentRes.seatFilter?.rows ?? []), ...(agentRes.seatFilter?.wlRows ?? [])],");
-    expect(src).toContain("trains: agentRes.trains?.rows ?? null,");
-    expect(src).toContain("journey: agentRes.journey ?? null,");
-    /* Round-32: model ka chuna hua agla kadam pehle; data-derived fallback tab jab model ne na diya ho. */
-    expect(src).toContain('blocks.push({ type: "nextstep", source: "data", options: ns.options, hint: ns.hint });');
+    /* Round-36 (user: "fallback pe verified data se na aaye"): data-derived branch hata di gayi —
+     * agla kadam sirf model ke validated steps (server: nextActions) se banta hai. */
+    expect(src).not.toContain("const ns = nextStepsFor({");
+    expect(src).not.toContain('blocks.push({ type: "nextstep", source: "data", options: ns.options, hint: ns.hint });');
+    expect(src).toContain("const modelActions = agentRes.nextActions ?? [];");
+    expect(src).toContain('source: "model"');
     /* render branch + component */
     expect(src).toContain('if (block.type === "nextstep") {');
     expect(src).toContain("<NextStepCard block={block} onChip={onChip} />");
     expect(src).toContain("export function NextStepCard(");
+  });
+
+  it("Round-36: nextstep module (data se labels) ab UI me use nahi hota — sirf model", () => {
+    const src = fs.readFileSync(path.join(process.cwd(), "src/views/Concierge.tsx"), "utf8");
+    expect(src).not.toContain('import { nextStepsFor }');
   });
 
   it("block type Block union me hai (orchestrate) + CSS maujood", () => {

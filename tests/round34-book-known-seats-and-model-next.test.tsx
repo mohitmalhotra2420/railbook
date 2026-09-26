@@ -91,23 +91,28 @@ describe("Round-34 · agla kadam hamesha model chune (fallback aakhri upay)", ()
 
   it("NEXT-repair pass maujood hai (model se hi agla kadam)", () => {
     expect(src).toContain("let nextRepairReply: string | null = null;");
-    expect(src).toContain("let nextRepaired = false;");
+    /* Round-36: ek hi boolean ki jagah DO koshish ka counter (model se agla kadam lene ke liye). */
+    expect(src).toContain("let nextRepairAttempts = 0;");
     expect(src).toContain("tumne jawab to de diya par [NEXT] lines nahi di");
     expect(src).toContain("nextRepairReply !== null");
-    expect(src).toContain('failureReason: acts.length ? "next_step_from_model_repair" : "next_step_repair_empty"');
+    expect(src).toContain("`next_step_from_model_repair${nextRepairAttempts > 1 ? \"2\" : \"\"}`");
+    /* Round-36: repair ke baad bhi kuch na mile to koi data-fallback nahi — saaf code. */
+    expect(src).toContain('"next_step_repair_empty_no_fallback"');
   });
 
   it("repair sirf tab jab is turn me kaam ka data aaya ho (khaali turn par zabardasti nahi)", () => {
     const idx = src.indexOf("if (\n      !nextActions.length &&");
     const block = src.slice(idx, idx + 320);
     expect(block).toContain("okSteps.length > 0");
+    expect(block).toContain("nextRepairAttempts < 2");
     expect(block).toContain("timeLeft() > 9000");
     expect(block).toContain("step < MAX_STEPS");
   });
 
   it("prompt rule 26 ab kehta hai: data ho to [NEXT] ZAROOR (suggestions AI ke)", () => {
     expect(src).toContain("jab bhi is turn me koi KAAM KA data aaya ho (train/seat/fare/timing/status/plan/route), [NEXT] ZAROOR likho");
-    expect(src).toContain("user ka data-derived fallback tabhi chalta hai jab tumne kuch na diya ho");
+    /* Round-36: fallback poora band — prompt bhi kehta hai ki [NEXT] na do to card dikhega hi nahi. */
+    expect(src).toContain("Ab koi data-derived fallback nahi hai: [NEXT] nahi diya to user ko agla kadam dikhega hi nahi");
   });
 
   it("repair response sirf agla kadam leta hai, jawab purana hi rehta hai", () => {
@@ -115,14 +120,15 @@ describe("Round-34 · agla kadam hamesha model chune (fallback aakhri upay)", ()
     expect(src).toContain("nextActions: acts.length ? acts : null,");
   });
 
-  it("client model-first hi rehta hai (tag 'AI ne chuna') — fallback sirf [NEXT] na hone par", () => {
+  it("client model-first hi rehta hai (tag 'AI ne chuna') — Round-36: data fallback poora hata", () => {
     const c = read("src/views/Concierge.tsx");
     const a = c.indexOf("const modelActions = agentRes.nextActions ?? [];");
-    const n = c.indexOf("const ns = nextStepsFor({", a);
     expect(a).toBeGreaterThan(0);
-    expect(n).toBeGreaterThan(a);
     expect(c).toContain('source: "model"');
-    expect(c).toContain('source: "data"');
+    /* Round-36 (user: "fallback pe verified data se na aaye"): data branch aur import dono gaye. */
+    expect(c.indexOf("const ns = nextStepsFor({", a)).toBe(-1);
+    expect(c).not.toContain('source: "data"');
+    expect(c).not.toContain('import { nextStepsFor }');
   });
 });
 
