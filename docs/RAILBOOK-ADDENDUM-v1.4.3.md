@@ -611,3 +611,29 @@ User ke 2 screenshots (@`686a88f`): sawaal tha **"12013 ki seat availability bta
 **Live proof (deploy `0b36c52`):** A) 12013 ka sawaal → `blocks=1 · focused=true · groups=1 · chips=2` ("Aapki maangi train (live board) 12013 · 1 train · 1 me seat" · `CC AVL 354 ₹675` · `EC AVL 23 ₹1,015`) · B) usi chat me "kal ke liye seat wali trains batao" → `blocks=2 · groups=20 · chips=59` (pehle jaisa poora board). Local probe: 14610 (list me nahi) → koi block nahi.
 **Tests:** naya `tests/round30-focused-train-seat-block.test.tsx` (11) → **109 files / 1103 tests PASS**; server tsc clean · client 67 (baseline) · build `index-BF7JVy_K.js` 478.55 kB.
 **Preview:** `RailBook-round30-2026-09-26.html` (`tools/build-round30-preview.mjs`) · probes `tools/probe-live-r30.mjs` (local) + `tools/probe-live-r30-live.mjs` (live). **APK nahi** — koi Android change nahi.
+
+### 9.23 Round-31 (26 Sep) — "answer ke baad AI ko next step pe leke jaana chahiye… AI khud dimaag kyu nahi lagata?"
+
+User: *"maine specific train ki availability poochi and AI ne sahi answer bhi diya — ab AI ko passenger ko next step pe leke jaana chahiye na… not specific to seat availability but any question asked and answered… To AI khud ka dimaag kyu nahi lagata?"*
+
+**Jawab (design):** model ke paas booking/payment ka koi tool nahi hai (`confirmBook` hamesha false) — usse "khud soch kar" agla kadam (screen kholna/ticket banwana) lene dena wahi jagah thi jahan pehle galat screen khulti thi (Round-18m-7) aur numbers ban jaate the (standing rule: **kuch bhi fake nahi**). Isliye agla kadam ab **data se** banta hai, model ke andaze se nahi.
+
+**Kya lagaya:** `src/ai/nextstep.ts` (naya, pure + tested) + Concierge me har jawab ke baad ek **"➡️ Agla kadam"** card (1–2 tappable chips + honest hint):
+
+| Jawab me kya aaya | Agla kadam |
+|---|---|
+| seat rows (khaas train) | `Book <train> · <class> (AVL/RAC/WL # ₹fare)` — AVL > RAC > WL, phir zyada seats; doosra chip: `doosri classes (…)` (sirf usi train ki) |
+| seat rows (generic) | sabse achhi seat wali train ka Book chip + `Baaki trains bhi (N)` |
+| sab N/A/Regret | `Jahan seat hai wahi dikhao` + honest hint |
+| sirf WL | WL ka sach + "ticket waitlist me rahega" (jhootha available nahi) |
+| train list (seat data nahi) | `Kis train me seat hai?` |
+| journey plan | pehle bookable leg ka Book chip; kuch bookable na ho → `Doosri date dekho` |
+| live status/schedule/stops | `<train> ki seat availability` |
+| kuch verified nahi | **koi chip nahi** |
+
+Chip wahi utterance bhejta hai jo pehle se chalte flows ko trigger karti hai — `Book 12013 · CC (AVL 354 ₹675)` → `12013 mein CC book krdo` → Round-29 ka auto-advance **seedha passenger form** (live: form me `12013 · CC · LDH → ASR · 📅 2026-09-27` + "details IRCTC par khud bhar jaayengi" + Review journey). Koi naya number/naam/fare invent nahi hota — jo row me dikha wahi label me.
+
+**Files:** `src/ai/nextstep.ts` (naya) · `src/ai/orchestrate.ts` (block type `nextstep`) · `src/views/Concierge.tsx` (`askedTrains` ek jagah + block push + `NextStepCard` export) · `src/styles.css` (`.ns-card/.ns-chip`).
+**Live proof (`de97b12`):** seat ka jawab → chips `Book 12013 · CC (AVL 354 ₹675)` + `12013 ki doosri classes (EC)`; tap → passenger form (12013 · CC · LDH → ASR · 2026-09-27). Local probe: list → `Kis train me seat hai?`; stops → `12013 ki seat availability`; koi data nahi → koi card nahi.
+**Tests:** naya `tests/round31-next-step.test.tsx` (18) → **110 files / 1121 tests** (1120 pass; 3 RailCore network-flaky tests alag chalane par pass) · server tsc clean · client 67 (baseline) · build `index-C4mTfzQI.js` 478.7 kB. Round-30 ka test bhi update (`askedTrains` ek jagah).
+**Preview:** `RailBook-round31-2026-09-26.html` (`tools/build-round31-preview.mjs`) · probes `tools/probe-live-r31.mjs` (local) + `tools/probe-live-r31-live.mjs` (live). **APK nahi** — koi Android change nahi.
