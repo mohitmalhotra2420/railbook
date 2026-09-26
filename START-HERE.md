@@ -108,7 +108,17 @@ android-app/app/src/main/assets/autofill/
   3. **Native mic:** Android WebView me Web Speech API **nahi hota** — naya `VoiceBridge.kt` (SpeechRecognizer, hi-IN, `window.__railbookVoice.dispatch`) + `MainActivity` me `addJavascriptInterface(…, "RailBookVoice")` + manifest `<queries>`; client `src/voice/nativeSpeech.ts` + `speech.ts`/`useVoiceInput.ts` native-aware (native par `getUserMedia` call nahi).
   4. Tests: `tests/round27-seat-classes-and-mic.test.tsx` (12) + round-25 test format update → **106 files / 1055 PASS** · preview `RailBook-round27-2026-09-26.html` · builders `tools/build-round27-preview.mjs`, probe `tools/probe-live-r27.mjs`. **APK v1.4.8 (vc 31)** — native mic ke liye zaroori.
 
-- **Round-35 (latest, 26 Sep 2026):** user — *"maine bola vaishno devi se ludhiana ki seat availability btao … uske baad 19028 train mein multiple class mein seats available thi to maine bola '19028 mein book krdo' to AI ne yeh nahi poocha kon si class mein book karun … AI khud kyu nhi soch rha, har cheez thodi btani padegi"* →
+- **Round-36 (latest, 26 Sep 2026):** user — *"agla kadam AI se aaye, wo khud ka dimag lagaye jaise ChatGPT/Gemini lagata hai, waisa hi next question poochhe aur soche kya poochna hai, fallback pe verified data se na aaye, AI har baar apna brain use kare"* →
+  1. **Data-fallback poora band:** client ka `nextStepsFor` branch + import hata — "Agla kadam" card SIRF model ke validated `nextActions` se; model na de to card dikhta hi nahi (nakli next step nahi).
+  2. **Main-loop repair ab 2 koshish** (pehli "apna dimaag lagao — jaise ChatGPT/Gemini", doosri sakht sirf-[NEXT]) — dono fail → `next_step_repair_empty_no_fallback`.
+  3. **Dedicated chhota NEXT call (`nextStepFromModelOnly`)** — plan/seat turns 60-70s budget kha jaate hain to bhi model se hi agla kadam: compact prompt (user sawaal + jawab + verified tool data), provider-aware candidates (HF model apne endpoint par — pehle NVIDIA par 404 ho raha tha), fast model pehle, 12s timeout, evidence se validate.
+  4. **Plan fast-path par bhi NEXT** ("Kal,1" ke plan par pehle card nahi aata tha).
+  5. **Prompt:** Hinglish label/utterance; clarifying turns me bhi chip (model ne sawaal poochha ho to us sawaal ka sambhavit jawab).
+  6. Live proof (`05622f4`, 6 turns): T2 "Kal,1" → card "Book 22478 · CC (AVL 2 ₹1830)" · T3 alternatives → "Book 22486 · 2S (AVL 504 ₹155)" · T4/T5/T6 → cards · **model 5 · data-fallback 0 · 1 turn (AI ka clarifying sawaal, data nahi) bina card**.
+  7. Tests: naya `tests/round36-agla-kadam-sirf-ai-ke-dimaag-se.test.ts` (13) + round31/32/34/toolcalling updates → **115 files / 1214 ALL PASS** · build `index-k0C8DtSn.js` 482.5 kB · preview `RailBook-round36-2026-09-26.html` · probe `tools/probe-live-r36-live.mjs` · **APK nahi**.
+  8. Render note: `clearCache:"clear"` ke saath deploy karo — `do_not_clear` par purana image serve hua tha (frontend stale).
+
+- **Round-35 (26 Sep 2026):** user — *"maine bola vaishno devi se ludhiana ki seat availability btao … uske baad 19028 train mein multiple class mein seats available thi to maine bola '19028 mein book krdo' to AI ne yeh nahi poocha kon si class mein book karun … AI khud kyu nhi soch rha, har cheez thodi btani padegi"* →
   1. **Naya block `classchoice`:** booking hukm + class na boli + us train me 2+ class khuli (AVL/RAC) → form RUK jaata hai, card aata hai (`13042 … Kaunsi class me book karun?`) chips = sirf wo classes jo board par sach me khuli (`3A · AVAILABLE 29 · ₹520`); chip tap → seedha us class ka passenger form.
   2. **Ek hi class khuli ho** to seedha wahi (faltu sawaal nahi). **`pickRowForBooking` seat-wali class prefer** karta hai (WL se pehle).
   3. **Rule 28 (server):** class ambiguous par pehle SAAF poochho aur `[NEXT]` me class chips do — live me model ne khud bhi poochha ("Class confirm karo…").
@@ -178,11 +188,11 @@ android-app/app/src/main/assets/autofill/
 
 | cheez | value |
 |---|---|
-| vitest | **114 files / 1200 tests** (ALL PASS — Round-35 ke 15 naye) |
+| vitest | **115 files / 1214 tests** (ALL PASS — Round-36 ke 13 naye) |
 | server tsc | clean |
 | client tsc | 67 errors (purane, baseline — koi naya nahi) |
-| live commit | `b97b3c7` (Round-35) |
-| preview | `RailBook-round35-2026-09-26.html` (Round-34/33/32 ke bhi previews/ me hain) |
+| live commit | `05622f4` (Round-36) |
+| preview | `RailBook-round36-2026-09-26.html` (Round-35/34/33 ke bhi previews/ me hain) |
 | APK | v1.4.9 `RailBook-v1.4.9-release.apk` (versionCode 32) sha256 `4ea684c3…8e1ce` — Round-29 me koi Android change nahi (web fix; app live URL load karta hai) |
 
 ### Chhote gotchas

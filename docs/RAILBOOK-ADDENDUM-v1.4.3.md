@@ -736,3 +736,31 @@ User: *"mainay bola vaishno devi se ludhiana ki seat availability btao to AI ne 
 **Files:** `src/ai/orchestrate.ts` (Block `classchoice`) · `src/views/Concierge.tsx` (gate + `ClassChoiceCard`) · `src/booking/autobook.ts` (seat-wali class prefer) · `server/agent/agentic.ts` (rule 28 class-ambiguous).
 **Tests:** naya `tests/round35-ask-class-when-ambiguous.test.tsx` (15) → **114 files / 1200 ALL PASS** · server tsc clean · client 69 (baseline) · build `index-DcFTsEZG.js` 485.8 kB.
 **Preview:** `RailBook-round35-2026-09-26.html` (`tools/build-round35-preview.mjs`). **APK nahi** (koi Android change nahi).
+
+### 9.28 Round-36 (26 Sep) — "agla kadam AI se aaye, ChatGPT/Gemini jaisa khud soche; fallback pe verified data se na aaye"
+
+User: *"Bhai agla kadam AI se aaye wo khud ka dimag lagaye jaise chatgpt yan gemini lagata hai waisa hi next question pooche or soche kya poochna hai, fallback pe verified data se na aaye, and AI har baar apna brain use kre."*
+
+**Root causes (live probe se pakde):**
+1. **Data-derived fallback** ab bhi maujood tha: model `[NEXT]` na de to client `nextStepsFor` (verified data se bane chips) dikha deta tha — tag "verified data se".
+2. **Model ka NEXT-repair** sirf tab chalta tha jab main loop me 9s+ budget bachta ho — plan/seat turns 60-70s kha jaate the, isliye wo trigger hi nahi hota.
+3. **Plan fast-path** (`RANK_JOURNEY_OPTIONS`/`JOURNEY_ANALYZE`) reply ke saath hi early-return karta tha — `[NEXT]` extraction tak pahunchta hi nahi (isi liye "Kal,1" ke poore plan par bhi card nahi aata tha).
+4. **Dedicated NEXT call ka provider bug:** chain ke aakhri model (HF/GLM) ko **NVIDIA endpoint** par bheja ja raha tha → 404 → chup-chaap kuch nahi.
+
+**Fixes:**
+- **Client:** data-derived branch + import poora hata — "Agla kadam" card SIRF `nextActions` (model ke, server par tool-evidence se validated) se banta hai. Model na de to **card dikhta hi nahi** (nakli/jhootha next step nahi).
+- **Server (main loop):** repair ab **do koshish** karta hai — pehli *"apna dimaag lagao — jaise ChatGPT/Gemini karte hain: socho ki user ke liye is jawab ke BAAD sabse kaam ka agla kadam kya hai (sawaal bhi ho sakta hai)"*, doosri sakht (sirf ek `[NEXT]` line). Dono fail → koi fallback nahi (`next_step_repair_empty_no_fallback`).
+- **Dedicated NEXT call (naya `nextStepFromModelOnly`)**: chhota, sasta, apna timeout (`AI_NEXT_STEP_TIMEOUT_MS`, default 12s) — sirf user sawaal + jawab + verified tool results (dataPreview) ka compact prompt. **Provider-aware candidates** (HF model apne URL/key par), **fast model pehle** (chain ka chhota model), phir primary — per-candidate timeout. Jawab bhi `groundingCheck` se validate hota hai (jhootha number/naam drop). Na mile to `null` — kuch nahi.
+- **Plan fast-path** par bhi wahi dedicated call (ab plan turn par bhi agla kadam aata hai).
+- **Prompt (label/utterance):** Hinglish aur seedha bhejne layak; agar model ne khud sawaal poochha ho to us sawaal ka sambhavit jawab bhi chip ban jaata hai.
+
+**Live proof (`05622f4`, probe `tools/probe-live-r36-live.mjs`, asli model + asli data — 6 turns):**
+- T1 "plan bana sakte ho?" → AI ka apna clarifying sawaal (koi tool data nahi → koi chip nahi, sahi);
+- **T2 "Kal,1"** → plan + card **"Book 22478 · CC (AVL 2 ₹1830)"** (AI ka chuna, Hinglish);
+- **T3 "alternative trains"** → card **"Book 22486 · 2S (AVL 504 ₹155)"**;
+- T4 seat list → card **"12013 · LDH"**; T5 timetable → card; T6 web answer → card;
+- **NEXT tags → AI (model): 5 · data-fallback: 0 · koi card nahi: 1/6** (wo ek turn AI ka apna clarifying sawaal tha, jisme koi tool data hi nahi aaya).
+
+**Files:** `src/views/Concierge.tsx` (fallback branch + import removed) · `server/agent/agentic.ts` (`nextStepFromModelOnly`, repair 2-attempts, plan fast-path NEXT, rule 26 (d)/(f)) · tests: `tests/round36-agla-kadam-sirf-ai-ke-dimaag-se.test.ts` (13) + round31/32/34 + agentic-toolcalling updates.
+**Tests:** **115 files / 1214 ALL PASS** · server tsc clean · client 69 (baseline) · build `index-k0C8DtSn.js` 482.5 kB.
+**Preview:** `RailBook-round36-2026-09-26.html` (`tools/build-round36-preview.mjs`). **APK nahi** (Android change nahi).
