@@ -345,7 +345,10 @@ export async function seatFilterFor(opts: {
   const board = await routedRouteBoard(from, to, date, []).catch(() => null);
   if (!board || !board.trains.length) return null;
 
-  const needTimes = slots.departAfterMinute != null || slots.departBeforeMinute != null || slots.sortBy === "fastest";
+  /* Round-33 (user 26 Sep: "trains list krdi without fare and timings"): pehle times sirf tab aate the
+   * jab time-window/fastest-sort maanga ho — ab HAR seat turn par (wahi ek search call, deduped) taaki
+   * har card me departure + duration dikh sake. Rail ke timetable data ke bina timing invent nahi hoti. */
+  const needTimes = true;
   let times: Map<string, SeatTrainTimes> | undefined;
   if (needTimes) {
     try {

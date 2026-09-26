@@ -2043,8 +2043,12 @@ export function SeatListBlock({
               name={g.name}
               /* Board rows me schedule time nahi hota — jhootha time nahi likhte, "live board" hi. */
               timeText={(() => {
+                /* Round-33: timings har card par (dep + duration) — jo provider ne diya wahi, warna honest "live board". */
                 const dep = g.rows.find((r) => r.departure)?.departure;
-                return dep ? `🕑 ${dep}` : "🕑 live board";
+                const dur = g.rows.find((r) => r.durationMinutes != null)?.durationMinutes ?? null;
+                if (!dep) return "🕑 live board";
+                const durLabel = dur != null ? `${Math.floor(dur / 60)}h ${String(dur % 60).padStart(2, "0")}m` : null;
+                return durLabel ? `🕑 ${dep} · ${durLabel}` : `🕑 ${dep}`;
               })()}
               countText={`${g.rows.length} class${g.rows.length === 1 ? "" : "es"} (${g.seatCount} me seat)`}
               rows={g.rows.map((r) => ({

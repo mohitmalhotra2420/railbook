@@ -2425,6 +2425,15 @@ export function userStatedPax(text: string | undefined, n: number, opts: { bareD
   if (!t) return false;
   /* Akela "1"/"2" station-pick ya train-pick bhi ho sakta hai — sirf tab pax jab pichhla sawaal passengers ka tha. */
   if (/^\s*\d\s*$/.test(t)) return opts.bareDigitIsPax === true && Number(t.trim()) === n;
+  /* Round-33 (user: "Kal,1" — date aur passengers ek hi message me, aur AI ne dobara poochh liya):
+   * pichhla sawaal passengers ka tha to is message ka akela number pax hai. Date/train-number ke
+   * hisse pehle hata diye jaate hain (warna 2026 ya 12013 ko pax samajh leta). */
+  if (opts.bareDigitIsPax === true) {
+    const stripped = t
+      .replace(/\b\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}\b/g, " ")
+      .replace(/\b\d{4,5}\b/g, " ");
+    if (new RegExp(`(^|[^\\d])${n}([^\\d]|$)`).test(stripped)) return true;
+  }
   if (new RegExp(`(^|[^\\d])${n}([^\\d]|$)`).test(t) && !/\b\d{4,}\b/.test(String(n))) {
     /* "2 passengers", "hum 2", "2 log", ya akela "2" (gate ka jawab) — par date/train-number ka hissa nahi */
     const bare = false;

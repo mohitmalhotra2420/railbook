@@ -16,6 +16,7 @@ import path from "node:path";
 
 import { WEB_PROVIDER_ORDER, WEB_CAPABILITY_SUPPORT, webChain, webRank, orderWebRows, pickWebSource, webSiteName } from "../server/railway/webOrder";
 import { boardRowsToTrainResults } from "../server/railway/router";
+import { userStatedPax } from "../server/agent/agentic";
 
 const read = (rel: string) => fs.readFileSync(path.join(process.cwd(), rel), "utf8");
 
@@ -177,5 +178,23 @@ describe("Round-33 · model ko saare tools khule hain (sirf 2 cheezein mana)", (
 
   it("train list ke data me ab class-wise fares bhi jaate hain", () => {
     expect(src).toContain("fares: t.classes.filter((c) => c.fare > 0).map((c) => ({ code: c.code, fare: c.fare, source: c.source ?? null })),");
+  });
+});
+
+describe("Round-33 · 'Kal,1' jaisa jawab (date + passengers ek saath)", () => {
+  it("pichhla sawaal passengers ka tha → message ka akela number pax hai", () => {
+    expect(userStatedPax("Kal,1", 1, { bareDigitIsPax: true })).toBe(true);
+    expect(userStatedPax("Kal,1", 2, { bareDigitIsPax: true })).toBe(false);
+    expect(userStatedPax("kal 1", 1, { bareDigitIsPax: true })).toBe(true);
+  });
+
+  it("bina pax-sawaal ke number ko pax nahi maanta (koi assumption nahi)", () => {
+    expect(userStatedPax("Kal,1", 1, { bareDigitIsPax: false })).toBe(false);
+    expect(userStatedPax("2", 2)).toBe(false);
+  });
+
+  it("date aur train number ke hisse pax nahi bante", () => {
+    expect(userStatedPax("27-09-2026 ko 1", 1, { bareDigitIsPax: true })).toBe(true);
+    expect(userStatedPax("12013 dekho", 1, { bareDigitIsPax: true })).toBe(false);
   });
 });
