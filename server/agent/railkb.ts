@@ -224,9 +224,19 @@ export function railKbAnswer(questionText: string): string | null {
   let best: { score: number; entry: KbEntry } | null = null;
   for (const entry of ENTRIES) {
     let score = 0;
+    const qtok = new Set(q.split(" ").filter((w) => w.length > 1));
     for (const key of entry.keys) {
       const k = key.toLowerCase();
       if (k.includes(" ") ? q.includes(k) : new RegExp(`\\b${k}\\b`).test(q)) score += k.includes(" ") ? 3 : 2;
+      /* Round-37f: user alag shabdon me poochhta hai ("waiting list TICKET CONFIRM hone ke RULES") —
+       * key ke zyada-tar token q me hon to wahi entry (sirf multi-word keys par, 60%+ overlap). */
+      else if (k.includes(" ")) {
+        const kt = k.split(" ").filter((w) => w.length > 1);
+        if (kt.length >= 2) {
+          const hit = kt.filter((w) => qtok.has(w)).length / kt.length;
+          if (hit >= 0.6) score += 3;
+        }
+      }
     }
     if (score > 0 && (!best || score > best.score)) best = { score, entry };
   }

@@ -1,14 +1,20 @@
 /* R37d debug: T3 (dobara hukm) par client branch kyun nahi chala — saare messages + requests dump. */
 import { chromium } from "playwright";
 
-const URL = "https://railbook-gegs.onrender.com/";
+const APP = "https://railbook-gegs.onrender.com/";
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 430, height: 950 } });
 const reqs = [];
+const t0 = Date.now();
 page.on("request", (r) => {
-  if (r.url().includes("/api/agent")) reqs.push({ t: Date.now(), body: (r.postData() ?? "").slice(0, 200) });
+  const path = new URL(r.url()).pathname;
+  if (/agent|concierge|nlu/i.test(path)) reqs.push({ t: Date.now() - t0, path, body: (r.postData() ?? "").slice(0, 120) });
 });
-await page.goto(URL, { waitUntil: "domcontentloaded" });
+page.on("response", async (r) => {
+  const path = new URL(r.url()).pathname;
+  if (/agent|confirm/i.test(path)) reqs.push({ t: Date.now() - t0, path, resp: r.status() });
+});
+await page.goto(APP, { waitUntil: "domcontentloaded" });
 await page.waitForSelector(".composer input", { timeout: 90000 });
 
 const dump = async (tag) => {
@@ -17,7 +23,7 @@ const dump = async (tag) => {
     n: [...document.querySelectorAll(".msg.assistant")].length,
     msgs: [...document.querySelectorAll(".msg.assistant")].map((el) => (el.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 110)),
   }));
-  console.log(`\n[${tag}] screen=${d.screen} assistantMsgs=${d.n}`);
+  console.log(`\n[${tag}] (+${Math.round((Date.now() - t0) / 1000)}s) screen=${d.screen} assistantMsgs=${d.n}`);
   d.msgs.forEach((m, i) => console.log(`   ${i}: ${m}`));
 };
 

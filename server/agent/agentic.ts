@@ -2662,7 +2662,20 @@ async function composeWebAnswer(userText: string, facts: string, title: string |
     `SAWAAL: ${userText.slice(0, 300)}\n${title ? `PAGE: ${title}\n` : ""}FACTS:\n${facts.slice(0, 1800)}`,
     { maxTokens: 450, timeoutMs: 12000 },
   );
-  return out ? out.replace(/\s*\n\s*/g, "\n").trim() : null;
+  const text = out ? out.replace(/\s*\n\s*/g, "\n").trim() : "";
+  /* Model ne saaf inkaar kiya (facts me jawab nahi) — us surat me poora raw dump dene ki jagah
+   * sirf shuru ke 2 jumle (concise, source ke saath). "SAAF" jaise token kabhi user ko na dikhein. */
+  if (!text || /^saf+\b/i.test(text) || /jawab nahi mila|nahi mila is page|not in the (?:given )?facts/i.test(text.slice(0, 120))) {
+    const short = facts
+      .replace(/\s+/g, " ")
+      .split(/(?<=[.!?])\s+/)
+      .slice(0, 2)
+      .join(" ")
+      .slice(0, 300)
+      .trim();
+    return short || null;
+  }
+  return text;
 }
 
 export async function nextStepFromModelOnly(args: {
@@ -3745,9 +3758,14 @@ export async function runAgenticTurn(input: {
           };
         }
       }
+      /* Round-37f: agar steps me web/KB jawab hai (general sawaal) to "providers ke data se match nahi hua"
+       * wali line user ko uljhaati hai — wahan apne source ka label hi kaafi hai. */
+      const hasWebAnswer = steps.some((s) => s.ok && (s.tool === "WEB_SEARCH" || s.source === "web" || s.source === "kb"));
       return {
         ok: steps.some((s) => s.ok),
-        reply: `${deterministicSummary(steps)}\n(AI ka jawab providers ke data se match nahi hua — sirf verified data dikha raha hoon.)`,
+        reply: hasWebAnswer
+          ? deterministicSummary(steps)
+          : `${deterministicSummary(steps)}\n(AI ka jawab providers ke data se match nahi hua — sirf verified data dikha raha hoon.)`,
         grounded: false,
         steps,
         modelUsed, modelFallbacks, latencyMs: Date.now() - startedAll,

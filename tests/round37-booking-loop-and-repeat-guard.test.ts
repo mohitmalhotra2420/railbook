@@ -303,3 +303,23 @@ describe("Round-37e · form khula ho to dobara hukm par turant saaf jawab (serve
     expect(c).toContain('main aapke liye passenger details nahi bharta.');
   });
 });
+
+describe("Round-37f · general sawaal par ChatGPT-jaisa saaf jawab (raw dump / uljhane wali lines nahi)", () => {
+  const kb = read("server/agent/railkb.ts");
+  const agentic = read("server/agent/agentic.ts");
+
+  it("KB ab alag shabdon wali query bhi pakadta hai (60%+ token overlap)", () => {
+    expect(kb).toContain("const hit = kt.filter((w) => qtok.has(w)).length / kt.length;");
+    expect(kb).toContain("if (hit >= 0.6) score += 3;");
+  });
+
+  it("composer inkaar kare to short excerpt (raw dump nahi) aur 'SAAF' jaisa token user ko na dikhe", () => {
+    expect(agentic).toContain("if (!text || /^saf+\\b/i.test(text)");
+    expect(agentic).toContain("slice(0, 2)");
+  });
+
+  it("'providers ke data se match nahi hua' line web/KB jawab par nahi lagti", () => {
+    expect(agentic).toContain("const hasWebAnswer = steps.some((s) => s.ok && (s.tool === \"WEB_SEARCH\" || s.source === \"web\" || s.source === \"kb\"));");
+    expect(agentic).toContain("reply: hasWebAnswer");
+  });
+});
