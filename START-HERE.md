@@ -9,12 +9,12 @@ railbook-full/
 ├── railbook/                  ← asli repo (Vite + React + TS client + Express/TS server + tests)
 │   ├── src/                   ← client (views/, components/, booking/, ai/, irctc/, seatfinder.ts…)
 │   ├── server/                ← server (app.ts, agent/, railway/ scrapers…)
-│   ├── tests/                 ← 108 files (vitest) — source-of-truth behaviour
+│   ├── tests/                 ← 109 files (vitest) — source-of-truth behaviour
 │   ├── docs/                  ← RAILBOOK-ADDENDUM (round-by-round history, §9.21 = latest)
 │   ├── provas/                ← real payload samples (live se liye gaye)
 │   ├── tools/                 ← preview/verification tools (Round-29: build-round29-preview.mjs, probe-live-r29*.mjs)
 │   ├── .env                   ← GITHUB_TOKEN + RENDER_API_KEY (deploy ke liye — isko commit NAHI karna)
-│   └── .git/                  ← poori history (HEAD: cc2f8d3)
+│   └── .git/                  ← poori history (HEAD: 0b36c52)
 ├── android-app/               ← Android WebView app (Kotlin + autofill assets, keystore ke saath)
 ├── host-scripts/              ← apk-build-v149.sh (APK banane ka script, latest = v149)
 ├── previews/                  ← har round ke real-render previews (HTML)
@@ -108,7 +108,13 @@ android-app/app/src/main/assets/autofill/
   3. **Native mic:** Android WebView me Web Speech API **nahi hota** — naya `VoiceBridge.kt` (SpeechRecognizer, hi-IN, `window.__railbookVoice.dispatch`) + `MainActivity` me `addJavascriptInterface(…, "RailBookVoice")` + manifest `<queries>`; client `src/voice/nativeSpeech.ts` + `speech.ts`/`useVoiceInput.ts` native-aware (native par `getUserMedia` call nahi).
   4. Tests: `tests/round27-seat-classes-and-mic.test.tsx` (12) + round-25 test format update → **106 files / 1055 PASS** · preview `RailBook-round27-2026-09-26.html` · builders `tools/build-round27-preview.mjs`, probe `tools/probe-live-r27.mjs`. **APK v1.4.8 (vc 31)** — native mic ke liye zaroori.
 
-- **Round-29 (latest, 26 Sep 2026):** "same train ki classes alag alag cards me kyun" + "class pe tap" + "22432 mein 3A book krdo" + "vaishno devi" →
+- **Round-30 (latest, 26 Sep 2026):** "12013 ki seat availability btana … yeh question pe board kyu le aata, maine to maanga hi nahi" →
+  1. **Focus scope:** `src/chatText.ts` ke naye pure helpers `trainNumbersInText()` (saal/tareekh/time ko train nahi samajhta) + `focusSeatRows()`; `Concierge.tsx` ka `seatlist` block ab message ke train number(s) par scoped — block sirf maangi hui train ka, header "Aapki maangi train (live board)". Generic sawaal par poora board pehle jaisa; maangi train list me na ho → block hi nahi.
+  2. **Round-29 auto-advance** bhi wahi helper use karta hai (number extraction ek jagah).
+  3. Tests: `tests/round30-focused-train-seat-block.test.tsx` (11) → **109 files / 1103 PASS** · preview `RailBook-round30-2026-09-26.html` · builder `tools/build-round30-preview.mjs` · probes `tools/probe-live-r30.mjs` (local) + `tools/probe-live-r30-live.mjs` (live) · **APK nahi** (koi Android change nahi).
+  4. Live proof (`0b36c52`): 12013 → 1 card (focused, 2 chips) · generic → 20 trains/59 chips.
+
+- **Round-29 (26 Sep 2026):** "same train ki classes alag alag cards me kyun" + "class pe tap" + "22432 mein 3A book krdo" + "vaishno devi" →
   1. **Ek train = ek card (chat):** `ReplyText.tsx` me `groupReplyRowsByTrain()` — trainNumber par grouping, header me number+naam ek baar, andar har class ki apni row (apna AVL/RAC/WL + fare), **order preserve**, exact duplicate record ek hi baar, input rows mutate nahi (sirf display view-model).
   2. **Class row tap → seedha passenger form:** `openBookingFromReplyRow()` → wahi `selectTrainAndClassGo()` (N/A/REGRET par button nahi).
   3. **"book krdo" → khud passenger form:** naya `src/booking/autobook.ts` (`isBookingIntent` · `pickRowForBooking` · `buildAutoBookSeat`) + Concierge gate; UNKNOWN status par bhi form (live check "Review journey" par), `booking/state.ts` UNKNOWN allow; `Passengers.tsx` honest fare/timings lines ("₹0" nahi).
@@ -134,11 +140,11 @@ android-app/app/src/main/assets/autofill/
 
 | cheez | value |
 |---|---|
-| vitest | **108 files / 1091 tests PASS** (~110 s) |
+| vitest | **109 files / 1103 tests PASS** (~100 s) |
 | server tsc | clean |
 | client tsc | 67 errors (purane, baseline — koi naya nahi) |
-| live commit | `686a88f` (Round-29) |
-| preview | `RailBook-round29-2026-09-26.html` (Round-28: `RailBook-round28-2026-09-26.html` + Round-26/25/…) |
+| live commit | `0b36c52` (Round-30) |
+| preview | `RailBook-round30-2026-09-26.html` (Round-29/28/26/25 ke bhi previews/ me hain) |
 | APK | v1.4.9 `RailBook-v1.4.9-release.apk` (versionCode 32) sha256 `4ea684c3…8e1ce` — Round-29 me koi Android change nahi (web fix; app live URL load karta hai) |
 
 ### Chhote gotchas

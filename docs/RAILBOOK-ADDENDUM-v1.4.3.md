@@ -591,3 +591,23 @@ User ke do screenshots (@`20be5c2`) ke chaar points. Grouping **sirf display lev
 **Tests:** naya `tests/round29-group-same-train-book.test.tsx` (**22**) + round-20/round-27 ke ReplyText asserts grouped markup par update → **108 files / 1091 tests PASS**; server tsc clean · client tsc 67 (baseline) · build `index-DIw-tok9.js` 477.97 kB.
 **Live proof (`686a88f`):** turn 1 — `boardGroups 19 · trains 19 · duplicateTrains [] · svdkRoute true` (har train ek hi card me; chhota naam resolve hua) · class chip tap → `12208 · 3A · SVDK → LDH · 2026-09-27 · ₹470` · "12208 mein 3A book krdo" → form khud khula (train+class+date; row me fare na hone par honest line). Chat me Round-28 ki assurance line + "Review journey (pehle details bharo)" CTA bhi zinda.
 **Preview:** `RailBook-round29-2026-09-26.html` (`tools/build-round29-preview.mjs`) · probes `tools/probe-live-r29.mjs` (local, mock) + `tools/probe-live-r29-live.mjs` (live). **APK nahi** — r29 me koi Android/native change nahi (app wahi live web URL load karta hai), isliye v1.4.9 hi chalti rahegi.
+
+### 9.22 Round-30 (26 Sep) — "12013 ki seat availability" maanga, poori 21-train ki board kyun khul gayi
+
+User ke 2 screenshots (@`686a88f`): sawaal tha **"12013 ki seat availability btana kal ke liye ludhiana se amritsar ke liye"** — par chat me **poori live board (21 trains × saari classes, 12 me seat)** khul gayi; 12013 ka asli jawab uske baad aaya. User: *"yeh question pe board kyu le aata … maine to maanga hi nahi"*.
+
+**Wajah:** Round-27 se chat me `seatlist` block banta hai jo **hamesha server ke poore `seatFilter` payload** (poori board) se render hota tha — chahe user ne ek train poochi ho. Jaan-boojh kar "sab dikhao" tha (r25/26/27 ke rules), lekin focus wale sawaal me wo "unmaangi list" ban jaata tha.
+
+**Fix (display-level scope):**
+
+- `src/chatText.ts`: naye pure helpers —
+  - `trainNumbersInText(text)`: message me se train number(s), order preserve + duplicate ek baar. **Saal (2026), tareekh (`2026-09-27`, `27/09/2026`), time (`18:01`, `7 baje`) chhod deta hai** (warna wo 4-5 ank ke number train jaise lagte hain).
+  - `focusSeatRows(rows, focus)`: focus khaali → poori list **waisi hi**; focus ho → sirf usi train ki rows; maangi train list me na ho → kuch nahi (unrelated board nahi thopte). Input mutate nahi hoti.
+- `src/views/Concierge.tsx`: `seatlist` block ab `trainNumbersInText(trimmed)` se scoped — `focus: [12013]` + sirf usi train ki rows. Block sirf tab banta hai jab rows bachi hon.
+- `SeatListBlock` header: focus par **"Aapki maangi train (live board) · 12013 · 1 train · 1 me seat"** (halka green pehchaan `sf-focused`); generic par pehle jaisa "Seat wali trains (live board) · N trains".
+- Round-29 ka booking auto-advance bhi wahi helper use karta hai (`trainNumbersInText(trimmed)[0]`) — "2026" ko train samajhne ka risk khatam.
+- Server/provider/booking: kuch nahi chhua — payload, rows, fares waisi hi aati hain; sirf dikhaya kam hota hai (aur maang na ho to poora).
+
+**Live proof (deploy `0b36c52`):** A) 12013 ka sawaal → `blocks=1 · focused=true · groups=1 · chips=2` ("Aapki maangi train (live board) 12013 · 1 train · 1 me seat" · `CC AVL 354 ₹675` · `EC AVL 23 ₹1,015`) · B) usi chat me "kal ke liye seat wali trains batao" → `blocks=2 · groups=20 · chips=59` (pehle jaisa poora board). Local probe: 14610 (list me nahi) → koi block nahi.
+**Tests:** naya `tests/round30-focused-train-seat-block.test.tsx` (11) → **109 files / 1103 tests PASS**; server tsc clean · client 67 (baseline) · build `index-BF7JVy_K.js` 478.55 kB.
+**Preview:** `RailBook-round30-2026-09-26.html` (`tools/build-round30-preview.mjs`) · probes `tools/probe-live-r30.mjs` (local) + `tools/probe-live-r30-live.mjs` (live). **APK nahi** — koi Android change nahi.
