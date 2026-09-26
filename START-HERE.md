@@ -108,7 +108,15 @@ android-app/app/src/main/assets/autofill/
   3. **Native mic:** Android WebView me Web Speech API **nahi hota** — naya `VoiceBridge.kt` (SpeechRecognizer, hi-IN, `window.__railbookVoice.dispatch`) + `MainActivity` me `addJavascriptInterface(…, "RailBookVoice")` + manifest `<queries>`; client `src/voice/nativeSpeech.ts` + `speech.ts`/`useVoiceInput.ts` native-aware (native par `getUserMedia` call nahi).
   4. Tests: `tests/round27-seat-classes-and-mic.test.tsx` (12) + round-25 test format update → **106 files / 1055 PASS** · preview `RailBook-round27-2026-09-26.html` · builders `tools/build-round27-preview.mjs`, probe `tools/probe-live-r27.mjs`. **APK v1.4.8 (vc 31)** — native mic ke liye zaroori.
 
-- **Round-33 (latest, 26 Sep 2026):** user (3 screenshots) — *"AI ko jitne bhi tools available hai wo sabh provide kro (no restriction), bss AI continue to IRCTC pe click nhi karega na hi passenger details khud se fill krega, don't fake anything sab real and live data, first use confirm tkt, then rail yatri, then e rail on API fallback (fare, seat availability, timings, route, station codes, live status…)"* + "trains list krdi without fare and timings" + "alternative trains poocha, wahi list" + "'Kal,1' ke baad passengers dobara poochh liye" →
+- **Round-34 (latest, 26 Sep 2026):** user (2 screenshots) — *"12380 mein seats available hai and then I said book 12380 to eske pass seats to pehle hi hain to fir kyu dubara pooch rha… agla kadam na humesha AI hi chunne sabh sochke and suggestions bhi de user ko, agla kadam fallback pe verified data se mat aaye"* →
+  1. **"Book <train>" bare hukm:** `isBookingIntent` me `book|booking|reserve` + 4-5 digit train number (bina `?`) — pehle sirf "book … krdo" regex tha, isliye seat list dikhne ke baad bhi message server gaya aur pax gate ne "kitne passengers?" poochh liya.
+  2. **Seat rows yaad:** client `lastSeatRowsRef` (route+date ke saath) — booking hukm par form usi asli data se bharta hai (status/seats/fare/timing); route/date match na ho to purani rows use nahi.
+  3. **NEXT-repair pass:** model ke jawab grounded ho + turn me ok tool data ho par `[NEXT]` missing → ek chhoti repair call model ko ("sirf 1-2 line [NEXT] …, isi turn ke data se") → chips model ke. Prompt rule 26 sakht: data ho to [NEXT] ZAROOR; data-fallback aakhri upay.
+  4. **Local booking path sirf booking ki baaton ka:** `freshQuestionDuringBooking` — form khula hone par bhi naya sawaal (train number/seat/fare/time/status) model ke paas jaata hai; confirm/aage/back/details local.
+  5. Tests: naya `tests/round34-book-known-seats-and-model-next.test.tsx` (16) + mock call-count update → **113 files / 1185 ALL PASS** · server tsc clean · build `index-BLb0w2Ig.js` 483.9 kB · preview `RailBook-round34-2026-09-26.html` · probe `tools/probe-live-r34-live.mjs` · **APK nahi**.
+  6. Live proof (`a1aff0d`): "Book 12053" → seedha form (12053 · 2S · LDH→ASR · 2026-09-28 · 🕑 19:48 · ₹110/pax, paxAsk=false); form khula hone par bhi seat sawaal → model ka jawab; **NEXT tags: model 4 · data-fallback 0**.
+
+- **Round-33 (26 Sep 2026):** user (3 screenshots) — *"AI ko jitne bhi tools available hai wo sabh provide kro (no restriction), bss AI continue to IRCTC pe click nhi karega na hi passenger details khud se fill krega, don't fake anything sab real and live data, first use confirm tkt, then rail yatri, then e rail on API fallback (fare, seat availability, timings, route, station codes, live status…)"* + "trains list krdi without fare and timings" + "alternative trains poocha, wahi list" + "'Kal,1' ke baad passengers dobara poochh liye" →
   1. **Tools ki azadi (rule 27):** saare tools khule, koi count-limit nahi (web search ka max-1 cap bhi gaya) — sirf 2 cheezein mana: "Continue to IRCTC" click aur passenger form khud bharna (booking deterministic, confirmBook hamesha false).
   2. **Sawaal ka matlab pehle (rule 28):** plan → RANK_JOURNEY_OPTIONS/JOURNEY_ANALYZE · alternative/doosri trains → FIND_ALTERNATIVE_TRAINS · trains batao → SEARCH_TRAINS · seat → seat tools; har list me timings + fare zaroor.
   3. **Provider order central:** naya `server/railway/webOrder.ts` — CONFIRMTKT → RAILYATRI → ERAIL, capability-wise chains (availability/fare/trains-between/schedule/station/live); router ki dono availability branches + withFareFilled + erailFareBreakdown + searchTrainsRouted ab isi chain se.
@@ -163,11 +171,11 @@ android-app/app/src/main/assets/autofill/
 
 | cheez | value |
 |---|---|
-| vitest | **112 files / 1169 tests** (ALL PASS — Round-33 ke 26 naye) |
+| vitest | **113 files / 1185 tests** (ALL PASS — Round-34 ke 16 naye) |
 | server tsc | clean |
 | client tsc | 67 errors (purane, baseline — koi naya nahi) |
-| live commit | `a96ed83` (Round-33) |
-| preview | `RailBook-round33-2026-09-26.html` (Round-32/31/30/29 ke bhi previews/ me hain) |
+| live commit | `a1aff0d` (Round-34) |
+| preview | `RailBook-round34-2026-09-26.html` (Round-33/32/31 ke bhi previews/ me hain) |
 | APK | v1.4.9 `RailBook-v1.4.9-release.apk` (versionCode 32) sha256 `4ea684c3…8e1ce` — Round-29 me koi Android change nahi (web fix; app live URL load karta hai) |
 
 ### Chhote gotchas

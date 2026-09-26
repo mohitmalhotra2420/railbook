@@ -688,3 +688,30 @@ User (3 screenshots): *"mainay esko yeh bola … esne trains list krdi without f
 **Files:** `server/railway/webOrder.ts` (naya) · `server/railway/router.ts` (chains + confirmtkt trains-between) · `server/providers/types.ts` (fareSource) · `server/agent/agentic.ts` (rules 27/28, pax gate, capture.passengers, userStatedPax, SEARCH_TRAINS fares) · `server/agent/run.ts` (capture→ctx) · `server/agent/seatFilter.ts` (times hamesha) · `src/views/Concierge.tsx` (card timing text).
 **Tests:** naya `tests/round33-tool-freedom-and-provider-order.test.ts` (26) + 4 purane update (toolcalling MULTI-TURN, round18m30h gate, route-board stale, round18g fareSource) → **112 files / 1169 ALL PASS** · server tsc clean · client 67 baseline · build `index-C0QGbnrE.js` 483.0 kB.
 **Preview:** `RailBook-round33-2026-09-26.html` (`tools/build-round33-preview.mjs`) · live probe `tools/probe-live-r33-live.mjs`. **APK nahi** (koi Android change nahi).
+
+### 9.26 Round-34 (26 Sep) — "seats to pehle hi hain, phir kahe passengers poochh raha?" + "agla kadam hamesha AI chune"
+
+User (2 screenshots): *"First screenshot mein 12380 mein seats available hai and then I said book 12380 to eske pass seats to pehle hi hain to fir kyu dubara pooch rha kya AI apna brain use nhi kar raha ? And Agla kadam na humesha AI hi chunne sabh sochke and suggestions bhi de user ko, agla kadam fallback pe verified data se mat aaye"* (+ ek sawaal: "kya tumne AI logic / tools calling way / thinking mein kuch change kiya?")
+
+**Root causes:**
+1. **"Book 12380"** client ke `isBookingIntent` me **fail** ho raha tha — purana regex sirf `book … kar/krdo/karo…` pakadta tha, "Book <number>" (bare hukm) nahi. Isliye message server ko gaya, jahan model ne resolve + seat-check kiya aur pax gate ne "kitne passengers?" poochh liya — jabki **seat data us chat me pehle hi dikh chuka tha**.
+2. **Agla kadam** model ke `[NEXT]` na dene par data-derived fallback ("verified data se") dikha deta tha — user chahta hai agla kadam **hamesha AI khud sochke** chune.
+3. (Probe me pakda) passenger form khula hone par koi bhi naya sawaal client ke local booking path me chala jaata tha ("Nahi, seat availability ki jankari mere paas nahi hai") — jabki user ka standing rule: **har query pehle model ke paas**.
+
+**Fixes (Round-34):**
+- **`isBookingIntent` me bare booking hukm:** `book|booking|reserve` + 4-5 digit train number (aage/peeche, `?` ke bina) → booking intent. Train number ke bina akele "book" par trigger nahi (koi jhootha form nahi).
+- **Seat rows yaad:** client ab pichhle seat turn ki rows `lastSeatRowsRef` me rakhta hai (route+date ke saath) — booking hukm par form **usi asli data se** bharta hai (status/seats/fare/timing), dobara check karne ka bahana nahi. Route/date match na ho to purani rows use nahi hoti (nayi journey par purana fare nahi lagta).
+- **NEXT-repair pass (server):** model ka jawab grounded ho, turn me ok tool data ho, par `[NEXT]` na ho → **ek chhoti repair call** model ko jaati hai: *"SIRF 1-2 line: [NEXT] <label> => <utterance>, sirf isi turn ke tool results se"* → chips model ke hi bante hain (agar wo bhi na de to data fallback, aakhri upay). Prompt **rule 26** bhi sakht: data aaya ho to `[NEXT]` ZAROOR — "user ka data-derived fallback tabhi chalta hai jab tumne kuch na diya ho".
+- **Local booking path sirf booking ki baaton ka:** `criticalBookingFlow` me naya guard `freshQuestionDuringBooking` — train number ya seat/fare/time/status/stops wala sawaal form khula hone par bhi **model ke paas** jaata hai; confirm/aage/back/details local hi rehte hain.
+
+**Live proof (`a1aff0d`):**
+- "kal ke liye ludhiana se amritsar seat wali trains batao" → seat board + agla kadam **"AI ne chuna"**;
+- **"Book 12053"** → seedha passenger form: *12053 ASR JANSHATABDI · 2S · LDH → ASR · 📅 2026-09-28 · 🕑 19:48 → 💰 ₹110 per passenger* — koi pax sawaal nahi (`paxAsk:false`), purani seat list ke data se;
+- form khula hone par "12013 ki seat availability batao" → **model ka jawab**: 12013 CC AVL 650 ₹675 · EC AVL 32 ₹1,015 (pehle local path "jankari nahi hai" bolta tha);
+- poore probe me **NEXT tags: model 4 · data-fallback 0** (agla kadam har turn model ka).
+
+**User ke sawaal ka jawab (AI logic/tools calling me kya badla?):** is round me **model, provider tools, execution path (model tool chunta hai → server allowlist+zod se chalata hai), booking safety (`confirmBook` hamesha false) — kuch nahi badla**. Badla: (a) client ka booking-intent detection (UI-level), (b) client ki seat-rows memory (UI-level), (c) **prompt rules 26/27/28** (AI ke sochne ke rules — Round-33/34 me add/tighten), (d) Round-34 me `userStatedPax`/pax-precondition jaise **tool *preconditions*** (kab tool chalta hai) — tool ka *kaam* wahi hai, (e) provider chain sirf **data source order** (user ke aadesh par confirmtkt → railyatri → erail).
+
+**Files:** `src/booking/autobook.ts` (isBookingIntent) · `src/views/Concierge.tsx` (lastSeatRowsRef + freshQuestionDuringBooking) · `server/agent/agentic.ts` (NEXT-repair pass + rule 26 tighten).
+**Tests:** naya `tests/round34-book-known-seats-and-model-next.test.tsx` (16) + `agentic-toolcalling` ka call-count update (mock model [NEXT] deta hi nahi → repair call bhi ginti hai) → **113 files / 1185 ALL PASS** · server tsc clean · client 69 (baseline) · build `index-BLb0w2Ig.js` 483.9 kB.
+**Preview:** `RailBook-round34-2026-09-26.html` (`tools/build-round34-preview.mjs`) · live probe `tools/probe-live-r34-live.mjs`. **APK nahi** (koi Android change nahi).
