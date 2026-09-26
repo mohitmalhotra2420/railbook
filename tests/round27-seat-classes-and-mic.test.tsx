@@ -148,8 +148,21 @@ describe("Round-27 · ek train ki SAARI classes (ek hi class nahi)", () => {
     const clean = stripDuplicatedSeatRows(text);
     expect(clean).not.toContain("* 12013");
     expect(clean).not.toContain("* 19611");
-    expect(clean).toContain("💺 18 trains"); /* summary line rehti hai */
     expect(clean).toContain("Ye sab live board se hain."); /* prose rehti hai */
+    /* Dense summary line bhi hatti hai (block me wahi rows behtar shakal me hain) — warna
+     * screenshot jaisa "ek hi class per train" ka adhoora list dikhta tha. */
+    const dense =
+      "Haan, kal 27 Sep ke liye ye seat wali trains hain:\n" +
+      "💺 sab class me seat wali 18 trains — 12013 CC AVL 424 ₹675 · EC AVL 23 ₹1,015 | 19611 SL AVL 174 ₹150 · 3A AVL 71 ₹520 | +6 trains aur bhi hain. (LDH → ASR · live board)";
+    const cleanDense = stripDuplicatedSeatRows(dense);
+    expect(cleanDense).toContain("Haan, kal 27 Sep ke liye ye seat wali trains hain:");
+    expect(cleanDense).not.toContain("💺");
+    expect(cleanDense).not.toContain("AVL 424");
+    /* Compact rp-sum line (rows nahi) bachi rehti hai */
+    expect(stripDuplicatedSeatRows("💺 18 trains: 12 me seat · 6 WL/N-A")).toBe("💺 18 trains: 12 me seat · 6 WL/N-A");
+    /* Prose jinme class+WL zikr hai par rows nahi — safe */
+    const prose = "2A me WL 14 hai aur 3A me WL 22 hai, isliye jaldi book karo.";
+    expect(stripDuplicatedSeatRows(prose)).toBe(prose);
   });
 
   it("ReplyText: grouped line se us train ki SAARI classes ki rows banti hain (AVL compact bhi)", () => {

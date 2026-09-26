@@ -24,9 +24,17 @@ export function stripDuplicatedSeatRows(text: string): string {
   const lines = String(text ?? "").split("\n");
   const kept = lines.filter((l) => {
     const t = l.trim();
-    if (!t.startsWith("*")) return true;
+    if (!t) return true;
     /* Seat row ki shakal: "* 12013 NAAM — SL — AVAILABLE 444 seats — ₹675" */
-    return !/^\*\s*\d{4,5}\s+.+?\s[—-]\s*(?:1A|2A|3A|3E|SL|CC|2S|EC|EA|FC)\b/i.test(t);
+    if (/^\*\s*\d{4,5}\s+.+?\s[—-]\s*(?:1A|2A|3A|3E|SL|CC|2S|EC|EA|FC)\b/i.test(t)) return false;
+    /* Round-27: server ka dense summary bhi rows ka list hai — "… 12013 CC AVL 424 ₹675 · EC AVL 23
+     * ₹1,015 | 19611 SL AVL 174 ₹150 …". Block me wahi (aur behtar) rows dikhti hain, isliye aisi line
+     * chat ke text me dobara nahi (warna ek hi class wala adhoora list dikhta hai). Sirf compact
+     * "CLASS + status" tokens ginte hain — "2A me WL 14 hai" jaisi prose safe rehti hai. */
+    const tokens = t.match(/\b(?:1A|2A|3A|3E|SL|CC|2S|EC|EA|FC)\s*(?:—|-|:)?\s*(?:AVL|AVAILABLE|AVAIL|RAC|WL|WAITLIST|N\/A|NOT[ _]?AVAILABLE|REGRET|REGRET|CANCELLED|DEPARTED)\b/gi);
+    if (tokens && tokens.length >= 2) return false;
+    if (tokens && /^\s*(?:\*|•|💺)?\s*\d{4,5}\s/.test(t)) return false;
+    return true;
   });
   return kept.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
