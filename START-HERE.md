@@ -108,7 +108,15 @@ android-app/app/src/main/assets/autofill/
   3. **Native mic:** Android WebView me Web Speech API **nahi hota** — naya `VoiceBridge.kt` (SpeechRecognizer, hi-IN, `window.__railbookVoice.dispatch`) + `MainActivity` me `addJavascriptInterface(…, "RailBookVoice")` + manifest `<queries>`; client `src/voice/nativeSpeech.ts` + `speech.ts`/`useVoiceInput.ts` native-aware (native par `getUserMedia` call nahi).
   4. Tests: `tests/round27-seat-classes-and-mic.test.tsx` (12) + round-25 test format update → **106 files / 1055 PASS** · preview `RailBook-round27-2026-09-26.html` · builders `tools/build-round27-preview.mjs`, probe `tools/probe-live-r27.mjs`. **APK v1.4.8 (vc 31)** — native mic ke liye zaroori.
 
-- **Round-31 (latest, 26 Sep 2026):** "answer ke baad AI ko next step pe leke jaana chahiye… AI khud dimaag kyu nahi lagata?" →
+- **Round-32 (latest, 26 Sep 2026):** user correction — *"har query pehle model ke pass jaani chahiye and wo decide kare kon sa tool use karna yan kya karna hai, user ka answer kahan se laana hai"* → matlab **agla kadam bhi model chalaye**, data sirf validate/fallback (Round-31 ka data-derived framing user ne reject kiya). →
+  1. **Model-first verify:** har query pehle se hi model ke paas jaati hai (client sirf 3 local exception) aur server par model tool chunta hai — deterministic routing sirf fallback, booking mutations deterministic, model ke paas booking tool nahi (`confirmBook` false).
+  2. **Rule 26:** jawab ke aakhir me `[NEXT] <label> => <utterance>` (max 2, sirf isi turn ke tool data se, kuch verified na ho to koi line nahi). Server `extractNextActions()` unhe reply se alag karta hai + har action `groundingCheck(label+utterance)` se filter — ungrounded **drop**.
+  3. **Client:** model ke chips pehle (tag **"AI ne chuna"**), na mile to data fallback (tag **"verified data se"**), kuch bhi verified na ho to **koi card nahi**.
+  4. **Round-32b (live par pakda gaya):** model ke tool ka data (web_railyatri `CC AVL 334 ₹490`) aur screen ka board (web_confirmtkt `CC AVL 341 ₹675`) ek hi screen par takra rahe the → naya pure `reconcileNextActions(actions, boardRows)`: action model ka hi rehta hai, sirf takraate seat/fare numbers chip se hat jaate hain (train number kabhi nahi).
+  5. Tests: naya `tests/round32-model-next-step.test.ts` (22) + round-31 update → **111 files / 1143 ALL PASS** · server tsc clean · build `index-CW1i71n2.js` 482.8 kB · preview `RailBook-round32-2026-09-26.html` · probes `tools/probe-live-r32.mjs` (local 6/6) + `tools/probe-live-r32-live.mjs` (live all-pass) · **APK nahi**.
+  6. Live proof (`dc257a0`): asli model `nextActions=[Book 12013 · CC (AVL 334)]` → tag "AI ne chuna"; schedule turn → "verified data se" `12013 ki seat availability`; suvidha sawaal → koi card nahi.
+
+- **Round-31 (26 Sep 2026):** "answer ke baad AI ko next step pe leke jaana chahiye… AI khud dimaag kyu nahi lagata?" →
   1. **"➡️ Agla kadam" card:** `src/ai/nextstep.ts` (naya pure helper `nextStepsFor`) + Concierge me har jawab ke neeche 1–2 tappable chips, **sirf usi turn ke verified data se** (seat rows/train list/journey plan) — Book (→ Round-29 auto passenger form), doosri classes, baaki trains, seat availability, ya doosri date. Kuch verified na ho → **koi chip nahi**.
   2. Model ke paas booking tool nahi (confirmBook false) — isliye agla kadam data se banta hai, andaze se nahi (fake screen/number ka risk zero).
   3. Tests: `tests/round31-next-step.test.tsx` (18) → **110 files / 1121** (1120 pass; 3 RailCore flaky alag pass) · preview `RailBook-round31-2026-09-26.html` · probes `tools/probe-live-r31*.mjs` · **APK nahi**.
@@ -146,11 +154,11 @@ android-app/app/src/main/assets/autofill/
 
 | cheez | value |
 |---|---|
-| vitest | **110 files / 1121 tests** (1120 pass; 3 RailCore network-flaky alag chalane par pass) |
+| vitest | **111 files / 1143 tests** (ALL PASS — Round-32 ke 22 naye) |
 | server tsc | clean |
 | client tsc | 67 errors (purane, baseline — koi naya nahi) |
-| live commit | `de97b12` (Round-31) |
-| preview | `RailBook-round31-2026-09-26.html` (Round-30/29/28/26/25 ke bhi previews/ me hain) |
+| live commit | `dc257a0` (Round-32) |
+| preview | `RailBook-round32-2026-09-26.html` (Round-31/30/29/28/26 ke bhi previews/ me hain) |
 | APK | v1.4.9 `RailBook-v1.4.9-release.apk` (versionCode 32) sha256 `4ea684c3…8e1ce` — Round-29 me koi Android change nahi (web fix; app live URL load karta hai) |
 
 ### Chhote gotchas
