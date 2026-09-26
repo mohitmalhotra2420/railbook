@@ -250,7 +250,13 @@ describe("Round-27 · mic — native bridge (Android WebView me Web Speech nahi 
   });
 
   it("app ka native bridge sach me maujood hai (Kotlin + manifest)", () => {
-    const root = path.resolve(process.cwd(), "..", "app/android-app/app/src/main");
+    const root = (() => {
+      for (const rel of ["../app/android-app/app/src/main", "../android-app/app/src/main", "android-app/app/src/main"]) {
+        const p = path.resolve(process.cwd(), rel);
+        if (fs.existsSync(p)) return p;
+      }
+      return path.resolve(process.cwd(), "..", "app/android-app/app/src/main");
+    })();
     const kt = fs.readFileSync(path.join(root, "java/com/railbook/assist/VoiceBridge.kt"), "utf8");
     expect(kt).toContain("SpeechRecognizer.createSpeechRecognizer");
     expect(kt).toContain("RecognizerIntent.EXTRA_PARTIAL_RESULTS");

@@ -25,7 +25,14 @@ import { BookingProvider } from "../src/booking/context";
 import { autoFillNotice, isRailBookAppContext } from "../src/components/IrctcHandoff";
 
 const css = fs.readFileSync(path.join(process.cwd(), "src/styles.css"), "utf8");
-const android = path.resolve(process.cwd(), "..", "app/android-app/app/src/main");
+/* Android source do layouts me mil sakta hai: dev workspace me ../app/android-app, zip me ../android-app. */
+const android = (() => {
+  for (const rel of ["../app/android-app/app/src/main", "../android-app/app/src/main", "android-app/app/src/main"]) {
+    const p = path.resolve(process.cwd(), rel);
+    if (fs.existsSync(p)) return p;
+  }
+  return path.resolve(process.cwd(), "..", "app/android-app/app/src/main");
+})();
 const kotlin = fs.readFileSync(path.join(android, "java/com/railbook/assist/MainActivity.kt"), "utf8");
 const layout = fs.readFileSync(path.join(android, "res/layout/activity_main.xml"), "utf8");
 const strings = fs.readFileSync(path.join(android, "res/values/strings.xml"), "utf8");
