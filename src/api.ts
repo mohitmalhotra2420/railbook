@@ -28,6 +28,37 @@ export type AgentResponse = {
       latencyMs?: number;
       failureReason?: string | null;
       engine?: "agentic_tool_calling" | "deterministic" | null;
+      /** Round-27: live board ki seat rows (chat ka seat/availability jawab) — train-wise chips ke liye. */
+      seatFilter?: {
+        classCodes: string[];
+        line: string | null;
+        rows: {
+          number: string;
+          name: string;
+          classCode: string;
+          status: string;
+          seats: number | null;
+          rac: number | null;
+          waitlist: number | null;
+          fare: number | null;
+          departure: string | null;
+          durationMinutes: number | null;
+        }[];
+        wlRows: {
+          number: string;
+          name: string;
+          classCode: string;
+          status: string;
+          seats: number | null;
+          rac: number | null;
+          waitlist: number | null;
+          fare: number | null;
+          departure: string | null;
+          durationMinutes: number | null;
+        }[];
+        trainsSeen: number;
+        source: string | null;
+      } | null;
       trains?: import("./ai/agent").AgentTrainTable | null;
       journey?: import("./ai/agent").AgentJourneyPlan | null;
       alternatives?: import("./ai/agent").AgentAlternatives | null;

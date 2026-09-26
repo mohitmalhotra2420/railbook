@@ -1,3 +1,5 @@
+import { createNativeRecognizer, hasNativeVoice } from "./nativeSpeech";
+
 export type VoiceErrorKind =
   | "unsupported"
   | "insecure"
@@ -59,10 +61,14 @@ export function getSpeechCtor(): SpeechCtor | null {
 
 export function isSecureVoiceContext(): boolean {
   if (typeof window === "undefined") return false;
+  /* Native bridge (RailBook app) secure-context check maangta hi nahi — mic app ke andar chalta hai. */
+  if (hasNativeVoice()) return true;
   return window.isSecureContext === true;
 }
 
 export function isSpeechSupported(): boolean {
+  /* Round-27: app (WebView) me Web Speech API nahi hota — wahan native bridge kaam karta hai. */
+  if (hasNativeVoice()) return true;
   return isSecureVoiceContext() && getSpeechCtor() !== null;
 }
 
@@ -119,6 +125,9 @@ export const CHAT_VOICE_ERRORS = new Set<VoiceErrorKind>([
 ]);
 
 export function createRecognizer(lang = "hi-IN"): SpeechRecognitionLike | null {
+  /* RailBook app: native recognizer pehle (Web Speech WebView me hota hi nahi). */
+  const native = createNativeRecognizer(lang);
+  if (native) return native;
   const Ctor = getSpeechCtor();
   if (!Ctor) return null;
   const rec = new Ctor();

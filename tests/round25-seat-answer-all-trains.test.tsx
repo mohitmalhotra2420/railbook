@@ -1,4 +1,6 @@
-/* Round-25 (26 Sep 2026, user screenshot) — "Yeh baki trains seat finder card mein kyu le jaata?
+/* Round-25 (26 Sep 2026, user screenshot) — format Round-27 me per-train (saari classes ek saath)
+ * ho gaya hai, isliye row-shape wale assertions update hue; baaki matlab (saari trains, koi card
+ * pointer nahi, duplicate nahi) waisa hi hai. — "Yeh baki trains seat finder card mein kyu le jaata?
  * last line dekho".
  *
  * Problem do hisson me thi:
@@ -61,7 +63,7 @@ describe("Round-25 · seat jawab me SAARI trains (koi 'Seat Finder card' pointer
       { classCodes: ["SL"], classGroup: null, sortBy: null, departAfterMinute: null },
       { from: "LDH", to: "ASR" },
     );
-    expect(line).toContain("+3 aur bhi hain");
+    expect(line).toContain("+3 trains aur bhi hain");
     expect(line).not.toMatch(/card/i);
   });
 
@@ -75,8 +77,9 @@ describe("Round-25 · seat jawab me SAARI trains (koi 'Seat Finder card' pointer
     const lines = missingSeatLines("19611 All ASR EXP — SL — AVAILABLE 174 seats — ₹150", rows);
     expect(lines).toHaveLength(2);
     expect(lines[0]).toContain("14615");
-    expect(lines[0]).toContain("AVAILABLE 50 seats");
-    expect(lines[0]).toContain("₹150");
+    /* Round-27: line me compact "SL AVL 50 ₹150" (har train ki saari classes ek saath). */
+    expect(lines[0]).toContain("SL AVL 50 ₹150");
+    expect(lines[0]).toContain("06:10 departure");
     expect(lines[1]).toContain("WL 21");
     /* Saari trains pehle se likhi hon to kuch nahi jodte (duplicate nahi) */
     expect(missingSeatLines("19611, 14615, 13005 sab", rows)).toEqual([]);
@@ -154,14 +157,14 @@ describe("Round-25 · /api/agent turn assembly — saari trains isi jawab me", (
     /* jo AI ne likha wo waisa hi (kuch badla nahi) */
     expect(res.body.reply).toContain("19611 All ASR EXP");
     /* aur baaki do trains ki asli lines usi jawab me */
-    expect(res.body.reply).toContain("14615 LKU ASR EXP — SL — AVAILABLE 50 seats");
-    expect(res.body.reply).toContain("13005 HWH ASR MAIL — SL — AVAILABLE 7 seats");
+    expect(res.body.reply).toContain("* 14615 LKU ASR EXP — SL AVL 50 ₹150 — 06:10 departure");
+    expect(res.body.reply).toContain("* 13005 HWH ASR MAIL — SL AVL 7 ₹150 — 06:10 departure");
     /* 19611 ki line dobara nahi (duplicate nahi) */
     expect((res.body.reply.match(/19611/g) ?? []).length).toBe(1);
     /* koi jhootha card pointer nahi */
     expect(res.body.reply).not.toMatch(/seat\s*finder/i);
     /* Round-26: user ne "sirf available" nahi maanga → WL row bhi isi jawab me aati hai (status ke saath) */
-    expect(res.body.reply).toContain("14617 JANSEWA EXP — SL — WL 14");
+    expect(res.body.reply).toContain("14617 JANSEWA EXP — SL WL 14");
   });
 
   it("AI ka jawab fail → sirf compact seat line (jisme saari trains hain), duplicate rows nahi", async () => {

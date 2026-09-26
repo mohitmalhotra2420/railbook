@@ -51,6 +51,30 @@ export type Block =
   | { type: "journey"; plan: import("./agent").AgentJourneyPlan }
   | { type: "alternatives"; alt: import("./agent").AgentAlternatives }
   | { type: "trainpicker"; picker: import("./agent").AgentTrainPicker }
+  /* Round-27 (user: "yahan koi class pe tap kare to seedha passenger form"): chat me seat/availability
+   * ka jawab ab train-wise block me bhi aata hai — har train ki SAARI classes ek saath, har class chip
+   * tappable (tap = wahi class, wahi train → passenger form). Data live board ka hi hai (server ka
+   * seatFilter payload) — kuch naya/invent nahi. */
+  | {
+      type: "seatlist";
+      from: string;
+      to: string;
+      toName?: string | null;
+      date: string;
+      source?: string | null;
+      rows: {
+        number: string;
+        name: string;
+        classCode: string;
+        status: string;
+        seats: number | null;
+        rac: number | null;
+        waitlist: number | null;
+        fare: number | null;
+        departure: string | null;
+        durationMinutes: number | null;
+      }[];
+    }
   | { type: "choice"; choice: { kind: "station" | "run_date" | "train"; title: string; options: { label: string; value: string; sub?: string | null }[]; sendTemplate: string } };
 
 export interface AssistantTurn {

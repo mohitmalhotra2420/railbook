@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { hasNativeVoice } from "./nativeSpeech";
 import {
   CHAT_VOICE_ERRORS,
   VOICE_MESSAGES,
@@ -216,12 +217,16 @@ export function useVoiceInput(
       else if (wantListenRef.current && bufferRef.current.trim()) finishWith(bufferRef.current.trim());
     }, manual ? MANUAL_MAX_LISTEN_MS : MAX_LISTEN_MS);
 
-    /* Permission prompt sirf pehli baar (helper khud tracks band kar deta hai) — koi lambi doosri stream nahi. */
-    try {
-      await requestMicrophoneAccess();
-    } catch (err) {
-      startingRef.current = false;
-      return fail(mapGetUserMediaError(err));
+    /* Permission prompt sirf pehli baar (helper khud tracks band kar deta hai) — koi lambi doosri stream nahi.
+     * Round-27: native bridge (RailBook app) apna audio khud leta hai — wahan getUserMedia call hi nahi karte
+     * (WebView me wo atak jaata tha aur mic kabhi start nahi hota tha). */
+    if (!hasNativeVoice()) {
+      try {
+        await requestMicrophoneAccess();
+      } catch (err) {
+        startingRef.current = false;
+        return fail(mapGetUserMediaError(err));
+      }
     }
     /* Optional TTS greet — DEFAULT OFF (Android par recognizer ko block karta tha). */
     if (manual && opts.greet === true && import.meta.env?.VITE_VOICE_TTS === "1" && typeof window !== "undefined" && "speechSynthesis" in window) {

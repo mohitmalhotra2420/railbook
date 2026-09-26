@@ -155,6 +155,34 @@ export const SEAT_LINE_MAX = 12;
 
 const inr = (n: number | null) => (n == null ? "—" : `₹${n.toLocaleString("en-IN")}`);
 const trainCount = (rows: SeatFilterRow[]) => new Set(rows.map((r) => r.number)).size;
+const statusText = (r: SeatFilterRow): string =>
+  r.status === "AVAILABLE"
+    ? `AVL ${r.seats ?? "—"}`
+    : r.status === "RAC"
+      ? `RAC ${r.rac ?? "—"}`
+      : r.status === "WAITLIST"
+        ? `WL ${r.waitlist ?? "—"}`
+        : "N/A";
+
+/** Ek hi train ki rows ko ek text me — "12013 CC AVL 444 ₹675 · 3A AVL 71 ₹520".
+ *  Round-27 (user: "yeh ek hi class dikha raha, jabki aur bhi classes me seat available hai same train me"). */
+export function trainClassesText(rows: SeatFilterRow[]): string {
+  return rows
+    .map((r) => `${r.classCode} ${statusText(r)}${r.fare != null ? ` ${inr(r.fare)}` : ""}`)
+    .join(" · ");
+}
+
+/** Rows ko train-wise group karo (aane ke order me) — har train ki saari classes ek saath. */
+export function groupRowsByTrain(rows: SeatFilterRow[]): { number: string; name: string; classes: SeatFilterRow[] }[] {
+  const map = new Map<string, { number: string; name: string; classes: SeatFilterRow[] }>();
+  for (const r of rows) {
+    const g = map.get(r.number) ?? { number: r.number, name: r.name, classes: [] };
+    g.classes.push(r);
+    map.set(r.number, g);
+  }
+  return [...map.values()];
+}
+
 const fmtRow = (r: SeatFilterRow) => {
   const status = r.status === "AVAILABLE" ? `AVL ${r.seats ?? "—"}` : r.status === "RAC" ? `RAC ${r.rac ?? "—"}` : r.status === "WAITLIST" ? `WL ${r.waitlist ?? "—"}` : "N/A";
   return `${r.number} ${r.classCode} ${status}${r.fare != null ? ` ${inr(r.fare)}` : ""}${r.departure ? ` (${r.departure})` : ""}`;
@@ -192,8 +220,14 @@ export function seatSummaryLine(
     const trains = trainCount(all);
     const withSeat = trainCount(pick.seat);
     const wlOnly = trains - withSeat;
-    const shown = all.slice(0, SEAT_LINE_MAX).map(fmtRow).join(" · ");
-    const more = all.length > SEAT_LINE_MAX ? ` · +${all.length - SEAT_LINE_MAX} aur bhi hain` : "";
+    const grouped = groupRowsByTrain(all);
+    /* Round-27: ek line me har train ki SAARI classes (pehle ek class per row thi — user ko laga
+     * sirf wahi class available hai). */
+    const shown = grouped
+      .slice(0, SEAT_LINE_MAX)
+      .map((g) => `${g.number} ${trainClassesText(g.classes)}`)
+      .join(" | ");
+    const more = grouped.length > SEAT_LINE_MAX ? ` | +${grouped.length - SEAT_LINE_MAX} trains aur bhi hain` : "";
     const countBit =
       pick.seat.length && pick.wl.length
         ? `${withSeat} me seat (AVL/RAC), ${wlOnly} me WL/N-A`
@@ -210,8 +244,12 @@ export function seatSummaryLine(
      * us card ko Round-21c me chat se hata diya gaya tha, isliye pointer jhootha tha (aur AI wahi
      * line copy karke "…Seat Finder card mein hain" likh deta tha). Ab SAARI seat rows isi line me
      * aati hain (koi card pointer nahi) — bahut zyada hon to hi "+N aur bhi hain" (bina kisi card ke). */
-    const shown = pick.seat.slice(0, SEAT_LINE_MAX).map(fmtRow).join(" · ");
-    const more = pick.seat.length > SEAT_LINE_MAX ? ` · +${pick.seat.length - SEAT_LINE_MAX} aur bhi hain` : "";
+    const grouped = groupRowsByTrain(pick.seat);
+    const shown = grouped
+      .slice(0, SEAT_LINE_MAX)
+      .map((g) => `${g.number} ${trainClassesText(g.classes)}`)
+      .join(" | ");
+    const more = grouped.length > SEAT_LINE_MAX ? ` | +${grouped.length - SEAT_LINE_MAX} trains aur bhi hain` : "";
     return `💺 ${cls} me seat wali ${trains} train${trains === 1 ? "" : "s"}${when}${sortNote} — ${shown}${more}. (${head})`;
   }
   if (pick.wl.length) {
@@ -252,14 +290,16 @@ function replyLine(r: SeatFilterRow): string {
 export function missingSeatLines(replyText: string, rows: SeatFilterRow[]): string[] {
   const text = String(replyText ?? "");
   const out: string[] = [];
-  const seen = new Set<string>();
-  for (const r of rows) {
-    const key = `${r.number}:${r.classCode}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
+  /* Round-27 (user: "ek hi class dikha raha, jabki same train me aur bhi classes me seat hai"):
+   * ab har train ki line me uski SAARI classes ek saath — "12013 AMRITSAR SHTABDI — CC AVL 444 ₹675 ·
+   * 3A AVL 71 ₹520 · EC AVL 23 ₹1,015 — 06:10 departure". */
+  for (const g of groupRowsByTrain(rows)) {
     /* Number jawab me kahin bhi ho to us train ki line dobara nahi likhte. */
-    if (new RegExp(`\\b${r.number}\\b`).test(text)) continue;
-    out.push(replyLine(r));
+    if (new RegExp(`\\b${g.number}\\b`).test(text)) continue;
+    const dep = g.classes.find((c) => c.departure)?.departure ?? null;
+    out.push(
+      `* ${g.number} ${g.name} — ${trainClassesText(g.classes)}` + (dep ? ` — ${dep} departure` : ""),
+    );
   }
   return out;
 }

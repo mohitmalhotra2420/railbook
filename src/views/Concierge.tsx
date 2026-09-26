@@ -13,11 +13,12 @@ import type { AgentTrainTable } from "../ai/agent";
 import { JourneyOptions } from "../components/JourneyOptions";
 import { bookingFromChipPayload, bookingFromSeatRow, stationOf } from "../booking/fromOption";
 import { detectSeatIntent, type SeatIntent, type SeatRow } from "../seatfinder";
-import { stripSeatCardPointer } from "../chatText";
+import { seatListGroups, stripSeatCardPointer } from "../chatText";
 import { VoiceSheet, type VoiceSuggestion } from "../components/VoiceSheet";
 import { AlternativesCard } from "../components/AlternativesCard";
 import { TrainPicker } from "../components/TrainPicker";
 import { ReplyText } from "../components/ReplyText";
+import { TrainClassBlock } from "../components/TrainClassBlock";
 
 import type { ChatMessage } from "../conversation/types";
 import { useVoiceInput } from "../voice/useVoiceInput";
@@ -955,6 +956,24 @@ export function Concierge() {
           }
           // Round-18: YOU MAY ALSO CONSIDER (only when server found verified alternatives).
           if (agentRes.alternatives && agentRes.alternatives.reason !== "fine") blocks.push({ type: "alternatives", alt: agentRes.alternatives });
+          /* Round-27 (user: "ek hi class dikha raha … aur class pe tap kare to seedha passenger form"):
+           * live board ki rows se train-wise block — har train ki saari classes, har chip tappable.
+           * Chips alag se nahi dikhte (dono jagah same data) — chat me sirf ye block. */
+          {
+            const sf = agentRes.seatFilter;
+            const rows = [...(sf?.rows ?? []), ...(sf?.wlRows ?? [])];
+            if (sf && rows.length) {
+              blocks.push({
+                type: "seatlist",
+                from: agentRes.nlu?.from?.code ?? state.from?.code ?? "",
+                to: agentRes.nlu?.to?.code ?? state.to?.code ?? "",
+                toName: agentRes.nlu?.to?.name ?? state.to?.name ?? null,
+                date: agentRes.nlu?.date ?? state.date,
+                source: sf.source,
+                rows,
+              });
+            }
+          }
           const tableBlock: Block[] | undefined = blocks.length ? blocks : undefined;
           setMessages((m) => [
             ...m,
@@ -1604,7 +1623,8 @@ export function Concierge() {
               /* Round-25: "…Seat Finder card mein hain" jaisa jhootha pointer screen par na aaye
                * (wo card Round-21c me chat se hat chuka hai). Server ab saari trains isi jawab me
                * likhta hai; ye sirf safety net hai. */
-              const text = stripSeatCardPointer(String(msg.text ?? ""));
+              const hasSeatBlock = Boolean(msg.blocks?.some((b) => b.type === "seatlist"));
+              const text = stripSeatCardPointer(String(msg.text ?? ""), hasSeatBlock);
               const seatLines = text.split("\n").filter((l) => l.trim().startsWith("💺"));
               const rest = seatLines.length ? text.split("\n").filter((l) => !l.trim().startsWith("💺")).join("\n").trim() : text;
               const hasJourney = Boolean(msg.blocks?.some((b) => b.type === "journey"));
@@ -1841,6 +1861,60 @@ function VoiceWave({ level, live }: { level: number; live: boolean }) {
   );
 }
 
+/* Round-27 (26 Sep, user screenshot): chat me seat ka jawab train-wise — har train ki SAARI classes
+ * ek saath (jo live board me hain), aur har class chip tappable: tap → seedha passenger form (wahi
+ * bookingFromSeatRow flow jo Seat Finder/direct card ke chips par lagta hai). Data server ke
+ * seatFilter payload se — kuch invent nahi; WL/N-A chips halki (purana rule). */
+function SeatListBlock({
+  block,
+  onPick,
+}: {
+  block: Extract<Block, { type: "seatlist" }>;
+  onPick: (row: SeatRow) => void;
+}) {
+  /* Grouping pure helper me (src/chatText.ts → seatListGroups) taaki test ho sake. */
+  const groups = seatListGroups(block.rows);
+  const seatCount = groups.filter((g) => g.seatCount > 0).length;
+  return (
+    <div className="sf-card jx-sb" id="chat-seatlist">
+      <div className="sf-head">
+        <strong>Seat wali trains (live board)</strong>
+        <span className="muted">
+          {groups.length} trains · {seatCount} me seat{block.source ? ` · ${block.source.replace("web_", "")}` : ""}
+        </span>
+      </div>
+      <div className="sf-groups">
+        {groups.map((g) => {
+          const anySeat = g.rows.some((r) => r.status === "AVAILABLE" || r.status === "RAC");
+          return (
+            <TrainClassBlock
+              key={g.number}
+              number={g.number}
+              name={g.name}
+              timeText={g.rows.find((r) => r.departure)?.departure ? `🕑 ${g.rows.find((r) => r.departure)?.departure}` : null}
+              countText={`${g.rows.length} class${g.rows.length === 1 ? "" : "es"} (${g.seatCount} me seat)`}
+              rows={g.rows.map((r) => ({
+                code: r.classCode,
+                status: r.status,
+                seats: r.seats,
+                rac: r.rac,
+                waitlist: r.waitlist,
+                fare: r.fare,
+                seat: r.status === "AVAILABLE" || r.status === "RAC",
+                raw: r,
+              }))}
+              tone={anySeat ? "seat" : "wl"}
+              chipTitle={(c) => `${g.number} ${c.code} — passenger form kholo`}
+              onChip={(c) => onPick((c.raw as typeof block.rows[number]) as unknown as SeatRow)}
+            />
+          );
+        })}
+      </div>
+      <div className="sf-note muted">Class chip par tap karo → usi train/class ka passenger form (IRCTC jaisa) khul jaayega.</div>
+    </div>
+  );
+}
+
 function BlockView({
   block,
   state,
@@ -1900,6 +1974,16 @@ function BlockView({
   seatFinder?: { intent: SeatIntent; viaVoice: boolean } | null;
 }) {
   const { updatePassenger } = useBooking();
+  if (block.type === "seatlist") {
+    return (
+      <SeatListBlock
+        block={block}
+        onPick={(row) =>
+          onBookSeat?.(row, { from: block.from, to: block.to, toName: block.toName ?? null, date: block.date })
+        }
+      />
+    );
+  }
   if (block.type === "traintable") {
     /* Round-21c: chat se Seat Finder card hata (user: "seat finder aur direct trains ab same hi hain").
      * Train list table jaisa tha waisa hi rehta hai. */

@@ -36,7 +36,7 @@ const SEP = "[–\\-—|•:·]"; /* en-dash, hyphen, EM-DASH, pipe, bullet, col
 const ROW_RE = new RegExp(
   "^(?:\\*|•|\\d+[.)])?\\s*(?<number>\\d{4,5})\\s+(?<name>[^–\\-—|•*·]{2,60}?)\\s*" + SEP + "?\\s*(?<cls>" +
     CLASSES +
-    ")(?<clslabel>\\b(?!\\d))\\s*(?:" + SEP + "\\s*)?(?<status>AVAILABLE|RAC|WAITLIST|WL|NOT[ _]?AVAILABLE|N\\/A|REGRET|DEPARTED|CANCELLED)?\\s*(?<count>\\d{1,4})?\\s*(?<scale>seats?)?\\s*(?:" + SEP + "\\s*)?(?<fare>₹\\s?[\\d,]+)?\\s*,?\\s*(?:" + SEP + "\\s*)?(?<dep>(?:dep(?:arture)?\\.?\\s*:?)?\\s*\\d{1,2}:\\d{2}(?:\\s*(?:departure|dep\\.?))?)?",
+    ")(?<clslabel>\\b(?!\\d))\\s*(?:" + SEP + "\\s*)?(?<status>AVAILABLE|AVAIL|AVL|RAC|WAITLIST|WL|NOT[ _]?AVAILABLE|N\\/A|REGRET|DEPARTED|CANCELLED)?\\s*(?<count>\\d{1,4})?\\s*(?<scale>seats?)?\\s*(?:" + SEP + "\\s*)?(?<fare>₹\\s?[\\d,]+)?\\s*,?\\s*(?:" + SEP + "\\s*)?(?<dep>(?:dep(?:arture)?\\.?\\s*:?)?\\s*\\d{1,2}:\\d{2}(?:\\s*(?:departure|dep\\.?))?)?",
   "i",
 );
 
@@ -47,7 +47,10 @@ function rowOf(seg: string): { row: Row; tail: string } | null {
   const consumed = m[0].length;
   const tail = seg.trim().slice(consumed).replace(/^[\s,;.|–—\-]+/, "").trim();
   const statusRaw = String(g.status ?? "").toUpperCase().replace(/\s+/g, "_");
-  const status = statusRaw === "WL" ? "WAITLIST" : statusRaw === "N/A" ? "NOT_AVAILABLE" : statusRaw;
+  /* Round-27: chat/server ke compact jawab me "AVL"/"AVAIL" likha hota hai (jaise "CC AVL 444 ₹675")
+   * — pehle ye row hi nahi banta tha, poora answer plain text ban jaata tha. */
+  const status =
+    statusRaw === "WL" ? "WAITLIST" : statusRaw === "N/A" ? "NOT_AVAILABLE" : statusRaw === "AVL" || statusRaw === "AVAIL" ? "AVAILABLE" : statusRaw;
   const dep = g.dep ? (g.dep.match(/\d{1,2}:\d{2}/)?.[0] ?? null) : null;
   /* Ek 4-5 digit number + class code — bina status/count/fare ke bhi row hai (jaise "12926 PASCHIM 3A"). */
   const plausible = Boolean(g.status || g.count || g.fare || g.dep);
@@ -65,6 +68,54 @@ function rowOf(seg: string): { row: Row; tail: string } | null {
     },
     tail,
   };
+}
+
+/* Round-27 (user: "ek hi class dikha raha, jabki same train me aur bhi classes me seat hai"):
+ * ab jawab ki ek line me ek train ki SAARI classes hoti hain — "12013 AMRITSAR SHTABDI — CC AVL 444
+ * ₹675 · 3A AVL 71 ₹520 · EC AVL 23 ₹1,015 — 06:10 departure". Pehla class ROW_RE se row banta hai;
+ * baaki class-chips yahan se alag rows banti hain (wahi train) taaki list kuch chhupaye nahi. */
+const CLASS_CHIP_RE = new RegExp(
+  "^(?:[·•|,]|—|–|-)?\\s*(?<cls>" +
+    CLASSES +
+    ")\\b\\s*(?:" +
+    SEP +
+    "\\s*)?(?<status>AVAILABLE|AVAIL|AVL|RAC|WAITLIST|WL|NOT[ _]?AVAILABLE|N\\/A|REGRET|DEPARTED|CANCELLED)\\b\\s*(?<count>\\d{1,4})?\\s*(?<scale>seats?)?\\s*(?:" +
+    SEP +
+    "\\s*)?(?<fare>₹\\s?[\\d,]+)?\\s*(?:[·•|,]|—|–|-)?\\s*",
+  "i",
+);
+const DEP_RE = /^(?:dep(?:arture)?\.?\s*:?\s*)?(\d{1,2}:\d{2})(?:\s*(?:departure|dep\.?))?/i;
+
+function extraClassRows(tailRaw: string, base: Row): { rows: Row[]; rest: string } {
+  const rows: Row[] = [];
+  let rest = tailRaw.trim();
+  for (let guard = 0; guard < 12; guard += 1) {
+    const m = CLASS_CHIP_RE.exec(rest);
+    if (!m?.groups) break;
+    const g = m.groups as Record<string, string | undefined>;
+    const raw = String(g.status ?? "").toUpperCase();
+    const status = raw === "AVL" || raw === "AVAIL" ? "AVAILABLE" : raw === "WL" ? "WAITLIST" : raw;
+    rows.push({
+      train: base.train,
+      name: base.name,
+      cls: String(g.cls ?? "").toUpperCase(),
+      status,
+      count: g.count ? Number(g.count) : null,
+      fare: g.fare ? g.fare.replace(/\s+/g, "") : null,
+      dep: null,
+      scale: g.scale ? (g.scale.toLowerCase().startsWith("seats") ? "seats" : "seat") : null,
+    });
+    rest = rest.slice(m[0].length).trim();
+  }
+  if (rows.length) {
+    /* Line ke aakhir me departure ho to wo aakhri class ke row par (jaise server bhejta hai). */
+    const d = DEP_RE.exec(rest.replace(/^[–—\-·•|,]\s*/, ""));
+    if (d) {
+      rows[rows.length - 1].dep = d[1];
+      rest = rest.replace(/^[–—\-·•|,]\s*/, "").slice(d[0].length).trim();
+    }
+  }
+  return { rows, rest };
 }
 
 /** Ek line ko segments me todo: "*" bullets, "|" rows, ya poora line. */
@@ -107,7 +158,12 @@ function parseReply(text: string): Parsed {
       const r = rowOf(seg);
       if (r) {
         out.rows.push(r.row);
-        if (r.tail.length > 3) out.rest.push(r.tail);
+        /* Round-27: usi train ki baaki classes bhi apni-apni row banti hain (kuch chhupta nahi). */
+        const more = extraClassRows(r.tail, r.row);
+        if (more.rows.length) {
+          out.rows.push(...more.rows);
+          if (more.rest.length > 3) out.rest.push(more.rest);
+        } else if (r.tail.length > 3) out.rest.push(r.tail);
         continue;
       }
       const clean = seg.replace(/\*+/g, "").replace(/[:：]\s*$/, (m) => m.trim()).trim();
