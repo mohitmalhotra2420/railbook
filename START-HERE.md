@@ -77,11 +77,18 @@ android-app/app/src/main/assets/autofill/
   2. **Filters direct card ke shuru me** — naya shared `src/components/SeatFilterBar.tsx` (✅ Available · 🚆 Sabhi trains · Sab class · class chips · ❄️ AC · Time · ⚡ Sabse jaldi · 💰 Sabse sasta); SeatFinder card + JourneyOptions dono wahi ek component use karte hain. Filter **sirf direct list** par (connecting/alternatives untouched); class filter par block me sirf wahi class chip; "Sabse sasta" filtered class ke fare par.
   3. **IRCTC overlay simple** — Android app me sirf **"Redirecting to IRCTC…" + 45s countdown** (pehle 30s + extra 30s phase tha — ab ek hi 45s, uske baad seedha continue).
 
-- **Round-23 (latest, 26 Sep 2026):**
+- **Round-23 (26 Sep 2026):**
   1. **Available me sirf AVL/RAC** — `JourneyOptions.tsx` me ✅ Available mode par rows ab sirf AVL/RAC class chips dikhate hain; WL/N-A chips hidden, aur jis train me ek bhi AVL/RAC nahi wo list se hat jaati hai (jaise 11058 jaise trains WL-only gap wale). 🚆 Sabhi trains par sab kuch waise hi (saari classes, WL/N-A halki) — koi fake row nahi.
   2. **Review page ab sirf "Continue to IRCTC"** — `src/views/ReviewStatus.tsx` ke `FareReview` se booking summary, wallet box, "Nothing is confirmed…" note aur neeche ka sticky **Confirm Booking** hataye. `IrctcHandoff.tsx` se **Copy journey + passenger summary** button, copy-ready summary block aur payload preview hate. Continue click par journey+passenger summary **clipboard me best-effort copy** hoti hai (UI me nahi dikhti); honest note rehti hai — "Kuch bhi auto-submit nahi hota · login / OTP / CAPTCHA / payment RailBook ke paas nahi aate". RailBook ka apna booking flow (Passengers → IRCTC handoff jaisa) untouched.
   3. **App header ab asli version** — `MainActivity.appVersionLabel()` `versionName (versionCode)` dikhata hai (pehle `strings.xml` me hardcoded `v1.2.8` tha, isliye device par purana build chalne ka confusion hota tha). New debug ke liye: header padho → `v1.4.7 (30)` = latest.
   4. Tests: naya `tests/round23-avail-chips-and-review.test.tsx` (3) + `tests/irctc-handoff.test.tsx` update; full suite **102 files / 1021 PASS**.
+
+- **Round-24 (latest, 26 Sep 2026):**
+  1. **"Review fare" → "Review journey"** — `Passengers.tsx` ka CTA label + voice prompt line, aur `speakGuide.ts` ki bolne wali line.
+  2. **Review page = journey summary + uske neeche sirf Continue to IRCTC** — `FareReview` me receipt wapas: **Train · Date · From → To · Class · Seat · Passengers · Base fare · Service fee · Total**, aur neeche har passenger ki detail (naam · umar · gender · berth · khaana · ID · checkbox) + **Mobile / Email / WhatsApp**. DOM order: summary pehle, button neeche. Uske elawa kuch nahi (wallet, Confirm Booking, copy summary, extra note — sab nahi). `IrctcHandoff` card ab sirf button hai (honest baat button ke `title` par, jaise "auto-submit nahi hota · login/OTP/CAPTCHA/payment RailBook ke paas nahi aate").
+  3. **Passenger page khaali dikhne wala bug** — `passengers` list khaali mile to ab **apne aap ek blank card** ban jaata hai (pehle sirf background dikhta tha par "SAB READY" + enabled CTA the). Screen khulte hi scroller **top** par + `resize`/`visualViewport` (keyboard/IME) ke baad scroll **clamp** — isliye keyboard band hone ke baad blank hissa nahi dikhta. Purane WebView ke liye CSS fallback: `100vh` pehle phir `100dvh`, aur `inset:0` se pehle explicit `top/right/bottom/left:0`.
+  4. **Tools:** `tools/probe-device-scroll.mjs` (live site ko phone-size Chromium me khol kar layout/scroll naapta hai; `playwright` dev-dependency) · `tools/probe-live-review.mjs` (deploy ke baad asli screenshots) · `tools/build-round24-preview.mjs` → `RailBook-round24-2026-09-26.html`.
+  5. **Naya APK zaroori nahi** — is round me Android code change nahi (app WebView me live site load karta hai, wahi naya UI dikhega). App v1.4.7 hi current hai.
 
 ### Standing rules (inhe todna nahi)
 
@@ -95,17 +102,18 @@ android-app/app/src/main/assets/autofill/
 
 | cheez | value |
 |---|---|
-| vitest | **102 files / 1021 tests PASS** (~120-175 s) |
+| vitest | **103 files / 1029 tests PASS** (~120-175 s) |
 | server tsc | clean |
 | client tsc | 67 errors (purane, baseline — koi naya nahi) |
-| live commit | `fa7130d` (Round-23) |
-| preview | `RailBook-round23-2026-09-26.html` |
-| APK | v1.4.7 `RailBook-v1.4.7-release.apk` (versionCode 30 "1.4.7-version-label-avail-clean") sha256 `bd347c5e…c43d37` |
+| live commit | `34d3315` (Round-24) |
+| preview | `RailBook-round24-2026-09-26.html` (+ live phone screenshots `round24-live-*.png`) |
+| APK | v1.4.7 `RailBook-v1.4.7-release.apk` (versionCode 30) sha256 `bd347c5e…c43d37` (Round-24 me Android change nahi) |
 
 ### Chhote gotchas
 
 - Bash tool: `command` aur `cwd` **alag fields** me do (ek me poora nahi).
 - Patch karne se pehle `grep -n` se current text lo; patch ke baad turant syntax check (`node -e "new vm.Script(...)"` JS ke liye).
 - vitest background me `cwd=/home/user` se mat chalao — repo root se chalao.
+- **UI change verify karna ho to:** `node tools/probe-live-review.mjs /home/user/RailBook/previews` (live site ko phone-size Chromium me khol kar screenshots + text deta hai).
 - **App header = install proof:** "Redirecting to IRCTC…" ke saath **45s** + koi step line nahi dikhe to build current hai; 30s ya steps dikhe to purana APK — naya install karo (v1.4.7).
 - Preview me external CSS/JS load nahi hota (sandboxed iframe) — sab inline rakho.
