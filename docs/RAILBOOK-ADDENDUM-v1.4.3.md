@@ -396,3 +396,29 @@ User ke teen points (2 screenshots + 1 filter screenshot):
 - RailBook ke andar ka booking flow (Passengers → confirm) **waise hi maujood hai** — sirf review screen se wo buttons gaye (user ka flow: journey RailBook me, booking IRCTC par).
 
 **Tests:** naya `tests/round23-avail-chips-and-review.test.tsx` (3) · `tests/irctc-handoff.test.tsx` update (preview/copy UI hatne ke baad payload verify) → kul **102 files / 1021 tests PASS**; server `tsc` clean; client TS 67 (baseline). **APK v1.4.7** (versionCode 30) — dynamic version label ke saath.
+
+### 9.16 Round-24 (26 Sep) — "Review fare" → "Review journey", review page par journey summary + Continue, aur blank-screen fix
+
+**1) "Review fare ki jagah review journey aana chahiye"**
+
+- `src/views/Passengers.tsx`: sticky CTA label ab **"Review journey"**, voice prompt line bhi — "SAB READY — **Review journey** dabaiye."
+- `src/voice/speakGuide.ts`: bolne wali line bhi "Sab details fill ho gayi hain. **Review journey** dabaiye."
+- (Aage ka screen bhi "Review journey" title ke saath khulta hai.)
+
+**2) "Uski page pe journey summary — jo bhi user ne details fill ki hongi — show ho aur uske NEECHE Continue to IRCTC; uske elawa us page pe kuch mat rakhna"**
+
+- `src/views/ReviewStatus.tsx` (`FareReview`) me **journey receipt** wapas aaya (user ke screenshot-2 wale rows, wahi `.summary`/`.row` markup): **Train · Date · From → To · Class · Seat · Passengers · Base fare · Service fee · Total**.
+- Uske neeche ek doosra receipt card: **har passenger ki poori detail** (naam · umar · gender · berth · khaana (jab bhara ho) · ID proof (jab bhara ho) · "book only if confirm berth" / "auto up-gradation" (jab tick ho)) + **Mobile · Email · WhatsApp updates**. Data sirf wahi jo user ne bhara — kuch naya/invent nahi. Fare na aaya ho to "Fare unavailable" (guess nahi).
+- DOM order: receipt pehle, **Continue to IRCTC uske neeche** — aur page par uske elawa kuch nahi: wallet, sticky "Confirm Booking", copy summary, purana "Nothing is confirmed…" note aur handoff card ka heading/paragraph — sab nahi.
+- `src/components/IrctcHandoff.tsx`: card ab **sirf button** hai (koi heading/para/note line nahi). Honest baat button ke `title` par + click ke baad ke status message me (wahi pehle wali line: auto-submit nahi hota, login/OTP/CAPTCHA/payment user ke paas).
+
+**3) "Passenger details fill karne ke baad kaafi scroll down karna padta + page (bas background) dikh raha tha"**
+
+- Root-cause check (live site ko phone-size Chromium me chala kar + device screenshot ke pixel analysis): us screenshot me passenger page ka **content hi khaali** tha — `passengers` list khaali hone par page ke beech me kuch render hi nahi hota, par prompt "SAB READY" aur CTA enabled dikhte the.
+- Fix: `Passengers.tsx` me do guards — (a) list khaali mile to **apne aap ek blank passenger card** ban jaata hai, (b) screen khulte hi scroller **top** par aur `resize`/`visualViewport` (keyboard/IME) ke baad scroll ko content ke andar **clamp** kiya jaata hai — isliye keyboard band hone ke baad page khaali hisse par atka hua nahi dikhta.
+- Purane Android WebView ke liye CSS fallbacks: `min-height:100vh` pehle, phir `100dvh` (`.app`, `.concierge`), sheets me `88vh/92vh` pehle, aur `.overlay-screen` / `.jx-page` / `.vs-scrim` me `inset:0` se pehle explicit `top/right/bottom/left:0` (`inset` sirf Chrome 87+ me hota hai).
+- Review page ka content ab lamba hai isliye "verify karne ke liye" scroll ki zarurat nahi — summary page par hi milti hai; CTA dock me hamesha screen par rehta hai.
+
+**Tests:** naya `tests/round24-review-journey.test.tsx` (8 — receipt rows, passenger/contact lines, DOM order summary→button, "uske elawa kuch nahi", khaali list ka guard, scroll reset, CSS fallback) · `tests/round23-avail-chips-and-review.test.tsx` update (Round-24 ke saath align) · `tests/irctc-handoff.test.tsx` update (note line hata — title par) → kul **103 files / 1029 tests PASS**.
+**Tools:** `tools/probe-device-scroll.mjs` (live site ko phone-size Chromium me khol kar layout/scroll measure karta hai — `npm i -D playwright` chahiye) · `tools/build-round24-preview.mjs` → preview `RailBook-round24-2026-09-26.html`.
+**APK:** is round me Android code change nahi — app wahi v1.4.7 WebView se live site load karta hai, isliye naya APK zaroori nahi.
