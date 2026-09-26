@@ -1263,7 +1263,12 @@ export async function executeApprovedTool(
             /* Jo subject page ke title me NAHI hai, usi ka page laao (warna "Vande Bharat Sleeper" page
              * par "Vande" match hone se Rajdhani ka data chhoot jaata tha). */
             const missing = cmpParts.find((p2) => !ans.title.toLowerCase().includes(p2.split(" ")[0].toLowerCase()));
-            const other = missing ? await findTopicAnswer(missing).catch(() => null) : null;
+            /* Akela "Rajdhani" par Wikipedia page nahi milta — "Rajdhani Express" / "… train" variants try karo. */
+            let other: Awaited<ReturnType<typeof findTopicAnswer>> = null;
+            for (const cand of missing ? [missing, `${missing} Express`, `${missing} train`] : []) {
+              other = await findTopicAnswer(cand).catch(() => null);
+              if (other) break;
+            }
             if (other && other.title !== ans.title) extra = { title: other.title, text: other.text, url: other.url };
           }
           const body = extra ? `${ans.text}\n\nDOOSRI CHEEZ (${extra.title}): ${extra.text}` : ans.text;

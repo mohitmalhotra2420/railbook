@@ -341,7 +341,8 @@ describe("Round-37g · comparison sawaal par dono taraf ka data (ek page se adho
     const a = read("server/agent/agentic.ts");
     expect(a).toContain("const cmpParts = comparisonSubjects(userText || q);");
     expect(a).toContain('const missing = cmpParts.find((p2) => !ans.title.toLowerCase().includes(p2.split(" ")[0].toLowerCase()));');
-    expect(a).toContain("const other = missing ? await findTopicAnswer(missing).catch(() => null) : null;");
+    expect(a).toContain("for (const cand of missing ? [missing, `${missing} Express`, `${missing} train`] : []) {");
+    expect(a).toContain("other = await findTopicAnswer(cand).catch(() => null);");
     expect(a).toContain("DOOSRI CHEEZ (${extra.title}): ${extra.text}");
     expect(a).toContain("const src = extra ? `${ans.url}; ${extra.url}` : ans.url;");
   });
