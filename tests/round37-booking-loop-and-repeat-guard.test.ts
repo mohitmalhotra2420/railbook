@@ -282,3 +282,24 @@ describe("Round-37d · web/general sawaal par ChatGPT-jaisa COMPOSED jawab (raw 
     expect(blk).toContain("extractNextActions(content).actions");
   });
 });
+
+describe("Round-37e · form khula ho to dobara hukm par turant saaf jawab (server chakkar nahi)", () => {
+  const c = read("src/views/Concierge.tsx");
+
+  it("early already-open branch maujood hai (booking intent + selectedTrain)", () => {
+    expect(c).toContain("if (isBookingIntent(trimmed, null) && state.selectedTrain) {");
+    expect(c).toContain("const sameTrain = tno0 && String(state.selectedTrain.number ?? \"\") === tno0;");
+    expect(c).toContain("if (sameTrain && sameClass) {");
+  });
+
+  it("criticalBookingFlow booking-hukm wale message ko nahi khaata (pehle atak jaata tha)", () => {
+    const i = c.indexOf("const criticalBookingFlow =");
+    const blk = c.slice(i, i + 400);
+    expect(blk).toContain("!isBookingIntent(trimmed, null) &&");
+  });
+
+  it("jawab me saaf likha hai ki form khula hai + passenger details AI nahi bharta", () => {
+    expect(c).toContain("ka passenger form pehle se khula hai — usme passenger details bhar do.");
+    expect(c).toContain('main aapke liye passenger details nahi bharta.');
+  });
+});

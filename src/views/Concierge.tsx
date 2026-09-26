@@ -868,6 +868,29 @@ export function Concierge() {
       }
     }
 
+    /* ── Round-37e: form PEHLE SE khula hai aur user wahi booking hukm dobara bhejta hai ─────────
+     * Screenshot/probe (27 Sep): "12054 mein 2S book krdo" dobara → client ne agent call hi chhod diya
+     * (criticalBookingFlow ka local rasta) aur na koi jawab mila, na form; model ke paas jaane par bhi
+     * wo "main booking nahi kar sakta" keh deta. Ab seedha saaf jawab — koi server round-trip nahi. */
+    if (isBookingIntent(trimmed, null) && state.selectedTrain) {
+      const tno0 = (trainNumbersInText(trimmed)[0] ?? lastFactTrainRef.current ?? String(state.selectedTrain.number ?? "")).trim();
+      const cls0 = (/(?:^|[^A-Za-z0-9])(1A|2A|3A|3E|2S|SL|CC|EC|EA|FC|GN)(?![A-Za-z0-9])/i.exec(trimmed)?.[1] ?? "").toUpperCase();
+      const sameTrain = tno0 && String(state.selectedTrain.number ?? "") === tno0;
+      const sameClass = !cls0 || String(state.selectedClass?.code ?? "").toUpperCase() === cls0;
+      if (sameTrain && sameClass) {
+        setThinking(false);
+        setMessages((m) => [
+          ...m,
+          {
+            id: newId(),
+            role: "assistant",
+            text: `✅ ${tno0}${cls0 ? ` · ${cls0}` : ""} ka passenger form pehle se khula hai — usme passenger details bhar do. (Bhejne ke liye "Continue to IRCTC" aap khud dabayenge; main aapke liye passenger details nahi bharta.)`,
+          },
+        ]);
+        return;
+      }
+    }
+
   /* ── AI-FIRST TOOL CALLING ─────────────────────────────────────────
      * USER → NVIDIA GPT-OSS-20B → model selects approved tools → server
      * executes them on RailCore (primary) → RailKit (fallback) → results
@@ -884,6 +907,8 @@ export function Concierge() {
       !/\b(confirm|book\s*kar|krdo|kardo|continue|aage|back|wapas|haan|ok|theek|details|passenger|naam|age|gender|berth)\b/i.test(trimmed);
     const criticalBookingFlow =
       !freshQuestionDuringBooking &&
+      /* Round-37e: "book krdo/confirm" jaisa booking hukm local raste me na atke — jawab mile ya form khule. */
+      !isBookingIntent(trimmed, null) &&
       (state.flow === "PASSENGERS_PENDING" ||
         state.flow === "FARE_REVIEW" ||
         state.flow === "PAYMENT_PENDING" ||
