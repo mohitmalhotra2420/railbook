@@ -2172,6 +2172,18 @@ table.traintable {
  * number tha) to halka sa alag dikhe — taaki saaf pata chale ki ye baaki trains ki board nahi hai. */
 .sf-card.sf-focused { border-color: #cfe0d5; }
 .sf-card.sf-focused > .sf-head strong { color: var(--green); }
+
+/* Round-31 (user: "answer ke baad next step pe leke jaana chahiye"): har jawab ke neeche ek chhota
+ * "Agla kadam" card — tappable chips (Book → passenger form, doosri classes, baaki trains). */
+.ns-card { margin-top: 9px; border: 1px dashed #cdd8e6; background: #f7faff; border-radius: 12px; padding: 8px 10px; }
+.ns-label { font-size: 11px; font-weight: 800; letter-spacing: .02em; text-transform: uppercase; color: #365b8a; display: flex; align-items: center; gap: 5px; }
+.ns-dot { font-size: 11px; }
+.ns-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.ns-chip { font: inherit; font-size: 12px; font-weight: 600; border: 1px solid var(--line); background: #fff; color: #22304a;
+  border-radius: 999px; padding: 5px 11px; cursor: pointer; }
+.ns-chip.primary { background: #22304a; color: #fff; border-color: #22304a; }
+.ns-chip:active { transform: translateY(1px); }
+.ns-hint { font-size: 11px; margin-top: 6px; line-height: 1.4; }
 .sf-tag { border-radius: 999px; font-size: 10.5px; font-weight: 700; padding: 2px 8px; }
 .sf-tag.seat { background: var(--green-soft); color: var(--green); border: 1px solid #bfe3d1; }
 .sf-tag.wl { background: var(--amber-soft); color: var(--amber); border: 1px solid #f0d8b4; }

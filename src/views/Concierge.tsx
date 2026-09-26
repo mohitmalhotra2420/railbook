@@ -16,6 +16,8 @@ import { bookingFromChipPayload, bookingFromSeatRow, stationOf } from "../bookin
 import { buildAutoBookSeat, isBookingIntent, pickRowForBooking } from "../booking/autobook";
 import { detectSeatIntent, type SeatIntent, type SeatRow } from "../seatfinder";
 import { focusSeatRows, seatListGroups, stripSeatCardPointer, trainNumbersInText } from "../chatText";
+/* Round-31: jawab ke baad agla kadam (verified data se — kuch invent nahi). */
+import { nextStepsFor } from "../ai/nextstep";
 import { VoiceSheet, type VoiceSuggestion } from "../components/VoiceSheet";
 import { AlternativesCard } from "../components/AlternativesCard";
 import { TrainPicker } from "../components/TrainPicker";
@@ -935,6 +937,8 @@ export function Concierge() {
           // User feedback (2026-09-05): train list chat-text nahi — proper organized TABLE.
           // Round-17: RANK_JOURNEY_OPTIONS → BEST OPTION card (table ki jagah); warna table.
           const blocks: Block[] = [];
+          /* Round-31: is turn me user ne jo train number likha (dikhane aur agle kadam, dono ke liye). */
+          const askedTrains = trainNumbersInText(trimmed);
           // Round-18: SELECT TRAIN picker (number/name → real matches, user taps).
           if (agentRes.trainPicker && agentRes.trainPicker.matches.length) blocks.push({ type: "trainpicker", picker: agentRes.trainPicker });
           /* Round-18m-33: choice (station / run-day) → dropdown block; reply text mein "1. X 2. Y" bhi ho to dropdown hi primary. */
@@ -969,7 +973,7 @@ export function Concierge() {
              * train ka — poori 21-train ki board nahi. Generic sawaal ("seat wali trains batao") par
              * pehle jaisa poora board hi rehta hai. Rows server ke payload se hi — kuch invent nahi,
              * sirf dikhaya kam jaata hai (aur maangi train list me na ho to block hi nahi banta). */
-            const focus = trainNumbersInText(trimmed);
+            const focus = askedTrains;
             const rows = focusSeatRows(all, focus);
             if (sf && rows.length) {
               blocks.push({
@@ -983,6 +987,20 @@ export function Concierge() {
                 rows,
               });
             }
+          }
+          /* Round-31 (user: "AI ko answer ke baad next step pe leke jaana chahiye… AI khud dimaag kyu
+           * nahi lagata"): jawab ke neeche "Agla kadam" — usi turn ke verified data se. Booking wala
+           * chip tap karne par Round-29 ka auto-advance seedha passenger form kholta hai. Kuch na ho to
+           * koi chip nahi (jhoothi suggestion se behtar kuch na kehna). */
+          {
+            const ns = nextStepsFor({
+              seats: [...(agentRes.seatFilter?.rows ?? []), ...(agentRes.seatFilter?.wlRows ?? [])],
+              focus: askedTrains,
+              trains: agentRes.trains?.rows ?? null,
+              journey: agentRes.journey ?? null,
+              trainHint: askedTrains[0] ?? lastFactTrainRef.current ?? null,
+            });
+            if (ns.options.length) blocks.push({ type: "nextstep", options: ns.options, hint: ns.hint });
           }
           const tableBlock: Block[] | undefined = blocks.length ? blocks : undefined;
           setMessages((m) => [
@@ -1945,6 +1963,32 @@ function VoiceWave({ level, live }: { level: number; live: boolean }) {
  * ek saath (jo live board me hain), aur har class chip tappable: tap → seedha passenger form (wahi
  * bookingFromSeatRow flow jo Seat Finder/direct card ke chips par lagta hai). Data server ke
  * seatFilter payload se — kuch invent nahi; WL/N-A chips halki (purana rule). */
+/* Round-31: "Agla kadam" card — jawab ke baad ka natural next step (Book → passenger form, doosri
+ * classes, baaki trains, ya seat availability). Chips sirf verified data se bante hain (nextstep.ts). */
+export function NextStepCard({
+  block,
+  onChip,
+}: {
+  block: Extract<Block, { type: "nextstep" }>;
+  onChip: (u: string) => void;
+}) {
+  return (
+    <div className="ns-card" id="next-step">
+      <div className="ns-label">
+        <span className="ns-dot" aria-hidden>➡️</span> Agla kadam
+      </div>
+      <div className="ns-chips">
+        {block.options.map((o) => (
+          <button key={o.id} className={`ns-chip${o.primary ? " primary" : ""}`} onClick={() => onChip(o.utterance)}>
+            {o.label}
+          </button>
+        ))}
+      </div>
+      {block.hint && <div className="ns-hint muted">{block.hint}</div>}
+    </div>
+  );
+}
+
 export function SeatListBlock({
   block,
   onPick,
@@ -2141,6 +2185,9 @@ function BlockView({
         }
       />
     );
+  }
+  if (block.type === "nextstep") {
+    return <NextStepCard block={block} onChip={onChip} />;
   }
   if (block.type === "chips") {
     return (

@@ -133,7 +133,9 @@ describe("Round-30 · chat block sirf maangi hui train ka", () => {
 
   it("Concierge wiring: message ke train number se block scope hota hai", () => {
     const src = fs.readFileSync(path.join(process.cwd(), "src/views/Concierge.tsx"), "utf8");
-    expect(src).toContain("const focus = trainNumbersInText(trimmed);");
+    /* Round-31 me number extraction ek hi jagah: askedTrains (dikhane aur agle kadam, dono ke liye). */
+    expect(src).toContain("const askedTrains = trainNumbersInText(trimmed);");
+    expect(src).toContain("const focus = askedTrains;");
     expect(src).toContain("const rows = focusSeatRows(all, focus);");
     expect(src).toContain("focus: focus.length ? focus : undefined,");
     /* block sirf tab banta hai jab rows bachi hon (maangi train list me na ho → koi board nahi) */
