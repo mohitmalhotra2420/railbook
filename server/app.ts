@@ -295,10 +295,11 @@ export function createApp() {
       /* Sirf tab jab AI ka apna jawab hai — AI fail hone par wahi compact seat line (💺 …) dikhti hai,
        * usme saari trains pehle se hain, isliye rows dobara nahi jodte. */
       const aiReplyText = String(result.reply ?? "").trim();
+      /* Sirf wahi rows jo query ne maangi thi (seatFilter.rows) — WL/N-A rows alag se nahi thopte,
+       * warna "seat wali trains" ke jawab me 18 lines aa jaati hain (live check me dikha). Agar user
+       * ne WL bhi poochha ho (only_available=false) to rows me WL pehle se hote hain. */
       const seatExtra =
-        seatFilter && !hasPlanCard && aiReplyText
-          ? missingSeatLines(aiReplyText, [...seatFilter.rows, ...seatFilter.wlRows])
-          : [];
+        seatFilter && !hasPlanCard && aiReplyText ? missingSeatLines(aiReplyText, seatFilter.rows) : [];
       const replyWithSeats =
         seatExtra.length > 0
           ? `${String(result.reply ?? "").trim()}\n${seatExtra.join("\n")}`.trim()

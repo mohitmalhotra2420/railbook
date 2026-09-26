@@ -143,7 +143,8 @@ describe("Round-25 · /api/agent turn assembly — saari trains isi jawab me", (
     seatFilterForMock.mockResolvedValue({
       line: "💺 SL me seat wali 3 trains — 19611 SL AVL 174 ₹150 · 14615 SL AVL 50 ₹150 · 13005 SL AVL 7 ₹150. (LDH → ASR · live board)",
       rows: [srow("19611", "All ASR EXP", 174), srow("14615", "LKU ASR EXP", 50), srow("13005", "HWH ASR MAIL", 7)],
-      wlRows: [],
+      /* WL row bhi payload me hai — par jawab me nahi thopna chahiye (user ne seat wali maangi thi) */
+      wlRows: [row("14617", "JANSEWA EXP", "SL", "WAITLIST", { waitlist: 14 })],
       trainsSeen: 10,
       source: "web_railyatri",
     });
@@ -159,6 +160,8 @@ describe("Round-25 · /api/agent turn assembly — saari trains isi jawab me", (
     expect((res.body.reply.match(/19611/g) ?? []).length).toBe(1);
     /* koi jhootha card pointer nahi */
     expect(res.body.reply).not.toMatch(/seat\s*finder/i);
+    /* WL rows alag se nahi thopte (jo maanga tha wahi) */
+    expect(res.body.reply).not.toContain("14617");
   });
 
   it("AI ka jawab fail → sirf compact seat line (jisme saari trains hain), duplicate rows nahi", async () => {
