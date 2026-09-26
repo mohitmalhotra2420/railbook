@@ -116,6 +116,17 @@ describe("Round-26 · count mismatch (10 trains par '9 me seat') fix", () => {
     expect(container.querySelector(".rp-sum")?.textContent).toMatch(/10 me seat/);
   });
 
+  it("row + usi line par trailing sentence — phir bhi row ginn me aati hai", () => {
+    /* live reply me aisa aata hai: "* 15707 KIR ASR EXPRESS — SL — AVAILABLE 1 seat — ₹150 Ye 10 trains SL me abhi available hain." */
+    const text = [bullets[6], "* 15707 KIR ASR EXPRESS — SL — AVAILABLE 1 seat — ₹150 Ye 10 trains SL me abhi available hain."].join("\n");
+    const { container } = render(<ReplyText text={text} />);
+    const nums = [...container.querySelectorAll(".rp-row .rp-no")].map((el) => el.textContent);
+    expect(nums).toEqual(["20807", "15707"]);
+    expect(container.querySelector(".rp-sum")?.textContent).toMatch(/2 me seat/);
+    /* trailing sentence neeche tail me rehta hai (chhupta nahi) */
+    expect(container.querySelector(".rp-tail")?.textContent).toMatch(/Ye 10 trains/);
+  });
+
   it("WL row ke saath summary total + seat/WL ka farq batati hai", () => {
     const text = [intro, bullets[0], "* 12357 DURGIANA EXP — SL — WL 10 — ₹180 — 06:10 departure"].join("\n");
     const { container } = render(<ReplyText text={text} />);
