@@ -24,9 +24,25 @@ import {
   storeHandoff,
 } from "../irctc/handoff";
 
+/* Round-28 (user: "user ko inform karo ki aapki details automatically fill ho jayengi IRCTC pe,
+ * dobara daalne ki zaroorat nahi"): RailBook app ke andar chal rahe hain ya normal browser — us hisaab
+ * se EK honest line (jhooth nahi: app me hi auto-fill hota hai, bare browser me nahi). */
+export function isRailBookAppContext(): boolean {
+  if (typeof window === "undefined") return false;
+  const w = window as unknown as { RailBookNative?: unknown; RailBookVoice?: unknown; __railbookAppCapture?: boolean };
+  return Boolean(w.RailBookNative || w.RailBookVoice || w.__railbookAppCapture);
+}
+
+export function autoFillNotice(inApp: boolean): string {
+  return inApp
+    ? "IRCTC khulte hi aapki journey + passenger details khud bhar jaayengi — wahan dobara daalne ki zaroorat nahi. Sirf login/OTP/payment aap karenge (security)."
+    : "RailBook app (Android) me ye details IRCTC par khud bhar jaati hain — browser me summary clipboard se paste kar sakte ho. Login/OTP/payment hamesha aap hi.";
+}
+
 export function IrctcHandoff(props: HandoffInput) {
   const built = useMemo(() => buildHandoffPayload(props), [props]);
   const [status, setStatus] = useState<string | null>(null);
+  const inApp = useMemo(() => isRailBookAppContext(), []);
 
   const onContinue = () => {
     const res = buildHandoffPayload(props);
@@ -107,6 +123,11 @@ export function IrctcHandoff(props: HandoffInput) {
           Handoff abhi nahi bana sakte: {built.errors[0]}
         </div>
       )}
+      {/* Round-28: auto-fill assurance — button ke neeche wahi honest line (app vs browser). */}
+      <div className="cta-note" id="irctc-autofill-note" style={{ marginTop: 10, marginBottom: 0 }}>
+        <span aria-hidden>✅</span>
+        <span>{autoFillNotice(inApp)}</span>
+      </div>
       {status && (
         <div className="muted" id="irctc-handoff-status" role="status" style={{ marginTop: 8 }}>
           {status}

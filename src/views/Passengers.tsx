@@ -453,6 +453,16 @@ export function Passengers() {
       </main>
       <VoiceBar prompt={prompt} onSpeak={onVoice} placeholder="Naam, phir umar, phir gender…" />
       <div className="sticky-cta">
+        {/* Round-28 (user: "user ko inform karo ki details IRCTC par khud bhar jaayengi, dobara
+         * daalne ki zaroorat nahi"): ye line bottom dock me hamesha dikhti hai — user ko page ke
+         * neeche tak scroll karne ki zaroorat hi nahi. */}
+        <div className="cta-note">
+          <span aria-hidden>✅</span>
+          <span>
+            Aapki details <b>IRCTC par khud bhar jaayengi</b> — yahan (RailBook par) jo bhara hai wo dobara
+            daalne ki zaroorat nahi. {ready ? "Neeche Review journey → Continue to IRCTC." : "Baaki details bhar ke Review journey dabaiye."}
+          </span>
+        </div>
         <button
           className="btn primary"
           disabled={!ready}
@@ -461,7 +471,7 @@ export function Passengers() {
             void goReview();
           }}
         >
-          Review journey
+          {ready ? "Review journey" : "Review journey (pehle details bharo)"}
         </button>
       </div>
       </div>

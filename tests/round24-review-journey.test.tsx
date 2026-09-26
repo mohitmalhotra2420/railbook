@@ -240,7 +240,8 @@ describe("Round-24 · purane Android WebView ke liye CSS fallback", () => {
   const css = fs.readFileSync(path.join(process.cwd(), "src/styles.css"), "utf8");
   it("dvh se pehle vh, inset se pehle explicit offsets", () => {
     expect(css).toMatch(/min-height: 100vh;\s*\n\s*min-height: 100dvh;/);
-    expect(css).toMatch(/\.overlay-screen \{[^}]*top: 0;[^}]*inset: 0;/);
+    /* Round-28: overlay ab viewport se bandha hai (fixed + vh/dvh fallback) — dekho round28 test. */
+    expect(css).toMatch(/\.overlay-screen \{[^}]*position: fixed;[^}]*height: 100vh;\s*\n\s*height: 100dvh;/);
     expect(css).toContain(".jx-page{position:fixed;top:0;right:0;bottom:0;left:0;inset:0;");
     expect(css).toContain(".vs-scrim{position:fixed;top:0;right:0;bottom:0;left:0;inset:0;");
   });

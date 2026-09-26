@@ -240,9 +240,27 @@ h2 { font-size: 17px; }
 .sticky-cta {
   position: sticky;
   bottom: 0;
+  flex-shrink: 0;                      /* Round-28: dock kabhi squeeze ho kar gayab na ho */
   padding: 10px 16px calc(12px + var(--safe-b));
   background: linear-gradient(180deg, transparent, var(--paper) 28%);
+  border-top: 1px solid var(--line);
 }
+/* Round-28: CTA ke saath chhoti assurance line — user ko pata rahe ki RailBook par bhari details
+ * IRCTC par dobara nahi daalni padti (auto-fill hoti hain). */
+.cta-note {
+  display: flex;
+  gap: 7px;
+  align-items: flex-start;
+  font-size: 11.5px;
+  line-height: 1.35;
+  color: #2f6b46;
+  background: var(--green-soft);
+  border: 1px solid #cfe6d8;
+  border-radius: 12px;
+  padding: 7px 10px;
+  margin-bottom: 8px;
+}
+.cta-note b { font-weight: 700; }
 
 .progress {
   display: flex;
@@ -814,13 +832,20 @@ h2 { font-size: 17px; }
   padding: 6px 12px calc(10px + var(--safe-b));
 }
 .overlay-screen {
-  position: absolute;
-  /* Round-24: `inset` (Chrome 87+) purane WebView me nahi hota — explicit offsets pehle. */
+  /* Round-28 (user screenshot: passenger form me bahut neeche scroll karne par pata chalta hai ki
+   * "Review journey" button bhi hai): pehle ye `.app` ke andar absolute tha. `.app` ki min-height
+   * 100dvh hai par chat lambi hone par wo usse bada ho jaata hai — aur absolute overlay ka height bhi
+   * utna hi ho jaata tha, isliye uska bottom dock (VoiceBar + Review journey) screen ke NEECHE chala
+   * jaata tha (bahut scroll karke hi milta tha). Ab overlay VIEWPORT se bandha hai (fixed + 100dvh):
+   * dock hamesha screen par. Purane WebView ke liye `inset` ki jagah explicit offsets. */
+  position: fixed;
   top: 0;
-  right: 0;
-  bottom: 0;
   left: 0;
-  inset: 0;
+  right: 0;
+  height: 100vh;
+  height: 100dvh;
+  max-width: 480px;
+  margin: 0 auto;
   z-index: 30;
   background: var(--paper);
   overflow: hidden;
