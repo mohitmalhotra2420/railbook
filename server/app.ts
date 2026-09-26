@@ -38,6 +38,7 @@ import { runAutonomousAgent } from "./agent/autonomous.js";
  * hain — AI ka search/tools/API/planner ko chhua nahi gaya. */
 import { parseSeatIntent } from "./understand/seatIntent.js";
 import { missingSeatLines, seatFilterFor, seatSummaryLine, type SeatFilterResult } from "./agent/seatFilter.js";
+import { reconcileNextActions } from "./agent/agentic.js";
 import { JOURNEY_CONFIG, findAlternativeTrains, findConnections, findPartialRouteSeats, findVacantSeats, planJourney } from "./journey/engine.js";
 import { pickTrains } from "./journey/trainpicker.js";
 import { publicCapabilityPayload } from "./providers/capabilities.js";
@@ -357,8 +358,13 @@ export function createApp() {
         trainPicker: result.trainPicker ?? null,
         choice: result.choice ?? null,
         liveDates: result.liveDates ?? null,
-        /* Round-32: model ka chuna hua agla kadam (client chips me dikhata hai). */
-        nextActions: result.nextActions ?? null,
+        /* Round-32: model ka chuna hua agla kadam (client chips me dikhata hai).
+         * Round-32b: board ke numbers se takraane wale numbers chip se hata diye jaate hain —
+         * action model ka hi rehta hai, par ek screen par do alag number nahi dikhte. */
+        nextActions: reconcileNextActions(result.nextActions ?? null, [
+          ...(seatFilter?.rows ?? []),
+          ...(seatFilter?.wlRows ?? []),
+        ]),
         grounded: result.grounded ?? null,
         agenticFailureReason: (result as { agenticFailureReason?: string | null }).agenticFailureReason ?? null,
         perf: summarize(scope),

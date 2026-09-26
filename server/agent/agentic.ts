@@ -2198,6 +2198,124 @@ export function extractNextActions(content: string): { text: string; actions: Ne
   return { text, actions };
 }
 
+/* ── Round-32b (26 Sep 2026, LIVE par pakda gaya) ─────────────────────────────────────────────
+ * User ne 12013 ka seat poochha: asli model ke tool ne EK provider se data liya (CC AVL 334 ₹490)
+ * aur screen ka live board DOOSRE provider se bana (CC AVL 341 ₹675) — dono asli, par ek hi screen
+ * par same train+class ke do alag number = dhokhe wali feeling (user ka standing rule: "kuch bhi
+ * conflicting/fake nahi"). Model ne jo agla kadam CHUNA wo rahega (chip = model ka), sirf usme
+ * likhe hue SEAT/FARE numbers hata diye jaate hain jab wo board ke asli data se na milte hon —
+ * board card upar se hi numbers dikha raha hota hai. Board me na ho (ya numbers match karein) to
+ * label waisa hi. Jargon-only chip bach jaaye to poora chip drop (jhoothi suggestion nahi).
+ * Pure function — koi tool/API call nahi. */
+export type SeatRowLite = {
+  number?: string | null;
+  classCode?: string | null;
+  seats?: number | null;
+  rac?: number | null;
+  waitlist?: number | null;
+  fare?: number | null;
+};
+
+const CLASS_CODES = ["1A", "2A", "3A", "3E", "2S", "SL", "CC", "EC", "FC", "1E"];
+/** Sirf wo numbers jo seat/fare ki "decoration" hain — "(24)" jaisa generic count nahi. */
+const DECORATED = [
+  /₹\s*(\d[\d,]*)/g,
+  /\b(?:AVL|AVAILABLE|RAC|WL|WAITLIST|REGRET)\b[^\d\n]{0,8}(\d[\d,]*)/gi,
+  /\(([^)]*(?:₹|AVL|RAC|WL|AVAILABLE)[^)]*)\)/gi,
+];
+
+function decoratedNumbers(text: string): string[] {
+  const out: string[] = [];
+  for (const re of DECORATED) {
+    for (const m of String(text ?? "").matchAll(re)) {
+      const chunk = m[1] ?? "";
+      for (const n of chunk.match(/\d[\d,]*/g) ?? []) out.push(n.replace(/,/g, ""));
+    }
+  }
+  return [...new Set(out)];
+}
+
+/** Chip/label se sirf wo seat-fare numbers hatao jo board se takra rahe hain (train number kabhi nahi). */
+function stripConflictingNumbers(label: string, keep: string[], conflicting: string[]): string {
+  let s = String(label ?? "");
+  for (const n of conflicting) {
+    if (keep.includes(n)) continue;
+    s = s.replace(new RegExp(`₹\\s*${n}\\b`, "g"), " ");
+    s = s.replace(new RegExp(`\\b(AVL|AVAILABLE|RAC|WL|WAITLIST|REGRET)\\b\\s*:?\\s*${n}\\b`, "gi"), " ");
+    s = s.replace(new RegExp(`\\([^)]*\\b${n}\\b[^)]*\\)`, "g"), " ");
+    s = s.replace(new RegExp(`\\b${n}\\b`, "g"), " ");
+  }
+  return s
+    .replace(/₹/g, " ")
+    .replace(/\(\s*\)/g, " ")
+    .replace(/\s*[·|,]\s*(?=[·|,])/g, " ")
+    .replace(/[·|,]\s*$/g, "")
+    .replace(/\s*\(\s*([^)]*?)\s*\)/g, " ($1)")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+/** Sirf seat-jargon bacha ho to chip ka koi matlab nahi — drop (train number ho to bacha rehta hai). */
+function hasMeat(label: string): boolean {
+  const s = String(label ?? "");
+  if (/\b\d{5}\b/.test(s)) return true;
+  const leftover = s.replace(/\b(AVL|AVAILABLE|RAC|WL|WAITLIST|REGRET|SEATS?|FARE|CLASS|BOOK|STATUS|₹)\b/gi, " ");
+  return (leftover.match(/[A-Za-z]{1,}/g) ?? []).join("").length >= 3;
+}
+
+/**
+ * Model ke chune hue agle kadam ko usi turn ke board rows ke saath reconcile karo:
+ *  - numbers board ke asli data se match karte hain → waise hi rehte hain;
+ *  - takraate hain (do provider ka farq) → sirf wo numbers hat jaate hain, action model ka hi;
+ *  - train board me hi na ho → kuch nahi chhedte (model ke apne tool data se aaya hai).
+ */
+export function reconcileNextActions(
+  actions: NextAction[] | null | undefined,
+  rows: SeatRowLite[] | null | undefined,
+): NextAction[] | null {
+  if (!actions?.length) return null;
+  const board = (rows ?? []).filter((r) => r && r.number);
+  if (!board.length) return actions;
+
+  const out: NextAction[] = [];
+  for (const a of actions) {
+    const label = String(a.label ?? "").trim();
+    const utterance = String(a.utterance ?? "").trim();
+    if (!label || !utterance) continue;
+    const text = `${label} ${utterance}`;
+    const mentioned = [...new Set((text.match(/\b\d{5}\b/g) ?? []).filter((n) => board.some((r) => String(r.number) === n)))];
+    /* Koi bhi 5-digit train number bola gaya ho jo board me hi nahi → model ke apne tool ka data, kuch nahi chhedte. */
+    const anyTrain = [...new Set(text.match(/\b\d{5}\b/g) ?? [])];
+    if (anyTrain.length && !mentioned.length) {
+      out.push(a);
+      continue;
+    }
+    const cls = mentioned.length ? CLASS_CODES.find((c) => new RegExp(`\\b${c}\\b`).test(text)) ?? null : null;
+    const scope = board.filter(
+      (r) => (!mentioned.length || mentioned.includes(String(r.number))) && (!cls || String(r.classCode ?? "").toUpperCase() === cls),
+    );
+    const allowed = new Set<string>();
+    for (const r of scope) {
+      for (const v of [r.seats, r.rac, r.waitlist, r.fare]) if (v !== null && v !== undefined) allowed.add(String(Number(v)));
+    }
+    /* Compare karne ke liye board ne is train/class ke numbers diye hi nahi → kuch nahi chhedte. */
+    if (!allowed.size) {
+      out.push(a);
+      continue;
+    }
+    const conflicting = decoratedNumbers(text).filter((n) => !allowed.has(n) && !mentioned.includes(n));
+    if (!conflicting.length) {
+      out.push(a);
+      continue;
+    }
+    const cleanLabel = stripConflictingNumbers(label, mentioned, conflicting);
+    const cleanUtterance = stripConflictingNumbers(utterance, mentioned, conflicting);
+    if (!hasMeat(cleanLabel)) continue; // sirf jargon bacha → chip drop
+    out.push({ label: cleanLabel, utterance: hasMeat(cleanUtterance) ? cleanUtterance : utterance, primary: a.primary });
+  }
+  return out.length ? out : null;
+}
+
 function groundingCheck(content: string, steps: ToolTraceStep[], evidenceParts: string[]): { grounded: boolean; evidence: string } {
   const evidence =
     JSON.stringify(steps.map((s) => s.summary)) +

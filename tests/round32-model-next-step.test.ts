@@ -14,7 +14,7 @@ import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 
-import { extractNextActions } from "../server/agent/agentic";
+import { extractNextActions, reconcileNextActions } from "../server/agent/agentic";
 
 const read = (rel: string) => fs.readFileSync(path.join(process.cwd(), rel), "utf8");
 
@@ -91,7 +91,7 @@ describe("Round-32 · prompt: model ko agle kadam ka hukm milta hai (rule 13 + 2
   it("response contract me nextActions har layer par jaata hai (run → app → client)", () => {
     expect(read("server/agent/run.ts")).toContain("nextActions: turn.nextActions ?? null,");
     expect(read("server/agent/run.ts")).toContain("nextActions?: import(\"./agentic.js\").NextAction[] | null;");
-    expect(read("server/app.ts")).toContain("nextActions: result.nextActions ?? null,");
+    expect(read("server/app.ts")).toContain("nextActions: reconcileNextActions(result.nextActions ?? null, [");
     expect(read("src/api.ts")).toContain("nextActions?: { label: string; utterance: string; primary?: boolean }[] | null;");
   });
 
@@ -130,5 +130,57 @@ describe("Round-32 · client: model ka decision pehle, data fallback doosra", ()
 
   it("block type me source field hai (orchestrate)", () => {
     expect(read("src/ai/orchestrate.ts")).toContain('source?: "model" | "data";');
+  });
+});
+
+/* ── Round-32b (26 Sep 2026, LIVE par pakda gaya) ──────────────────────────────────────────────
+ * Live: model ke tool ne ek provider se CC AVL 334 ₹490 liya, screen ka board doosre provider se
+ * CC AVL 341 ₹675 — dono asli, par ek hi screen par do alag number. Rule: action model ka hi
+ * rahega, sirf takraane wale numbers chip se hatenge (board card upar se hi numbers dikhata hai). */
+describe("Round-32b: model chip vs board rows (conflict par numbers strip)", () => {
+  const board = [
+    { number: "12013", classCode: "CC", seats: 341, fare: 675, rac: null, waitlist: null },
+    { number: "12013", classCode: "EC", seats: 23, fare: 1015, rac: null, waitlist: null },
+  ];
+  it("board ke numbers se takraane par sirf numbers hatte hain, action model ka hi rehta hai", () => {
+    const out = reconcileNextActions(
+      [{ label: "Book 12013 · CC (AVL 334 ₹490)", utterance: "12013 mein CC book krdo", primary: true }],
+      board,
+    );
+    expect(out).toHaveLength(1);
+    expect(out?.[0].label).toBe("Book 12013 · CC");
+    expect(out?.[0].label).toContain("12013"); // train number user ko dikhna chahiye
+    expect(out?.[0].utterance).toBe("12013 mein CC book krdo");
+    expect(out?.[0].primary).toBe(true);
+  });
+  it("numbers match karein to label bilkul waisa hi", () => {
+    const out = reconcileNextActions([{ label: "Book 12013 · CC (AVL 341 ₹675)", utterance: "12013 mein CC book krdo", primary: true }], board);
+    expect(out?.[0].label).toBe("Book 12013 · CC (AVL 341 ₹675)");
+  });
+  it("board me na ho (model ke apne tool ka data) → kuch nahi chhedte", () => {
+    const out = reconcileNextActions([{ label: "Book 14631 · SL (AVL 100 ₹150)", utterance: "14631 mein SL book krdo", primary: true }], board);
+    expect(out?.[0].label).toBe("Book 14631 · SL (AVL 100 ₹150)");
+  });
+  it("doosri class ka number galat class par nahi lagta (EC ka 23 CC par conflict nahi karta)", () => {
+    const out = reconcileNextActions([{ label: "Book 12013 · CC (AVL 23)", utterance: "12013 CC book krdo", primary: true }], board);
+    expect(out?.[0].label).toBe("Book 12013 · CC"); // CC ke liye 23 board me nahi (EC ka hai) → strip
+  });
+  it("chip me sirf numbers the → chip hi drop (jhoothi suggestion nahi)", () => {
+    const out = reconcileNextActions([{ label: "AVL 334 ₹490", utterance: "334 ₹490", primary: true }], board);
+    expect(out).toBeNull();
+  });
+  it("koi board row nahi (non-seat turn) → model ke chips waise hi", () => {
+    const acts = [{ label: "Kis train me seat hai?", utterance: "kis train me seat hai", primary: true }];
+    expect(reconcileNextActions(acts, [])).toEqual(acts);
+    expect(reconcileNextActions(null, board)).toBeNull();
+  });
+  it("utterance me bhi takraane wala seat number ho to wahan se bhi hat jaata hai", () => {
+    const out = reconcileNextActions([{ label: "Book 12013 · CC", utterance: "12013 CC AVL 334 wali book krdo", primary: true }], board);
+    expect(out?.[0].utterance).not.toContain("334");
+    expect(out?.[0].utterance).toContain("12013");
+  });
+  it("generic count (Baaki trains bhi (24)) ko conflict nahi samajhta", () => {
+    const out = reconcileNextActions([{ label: "Baaki trains bhi (24)", utterance: "baaki trains bhi dikhao", primary: false }], board);
+    expect(out?.[0].label).toBe("Baaki trains bhi (24)");
   });
 });
