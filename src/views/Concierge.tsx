@@ -15,7 +15,7 @@ import { bookingFromChipPayload, bookingFromSeatRow, stationOf } from "../bookin
 /* Round-29: booking intent par seedha passenger form (pure resolution logic — test ke liye alag). */
 import { buildAutoBookSeat, isBookingIntent, pickRowForBooking } from "../booking/autobook";
 import { detectSeatIntent, type SeatIntent, type SeatRow } from "../seatfinder";
-import { seatListGroups, stripSeatCardPointer } from "../chatText";
+import { focusSeatRows, seatListGroups, stripSeatCardPointer, trainNumbersInText } from "../chatText";
 import { VoiceSheet, type VoiceSuggestion } from "../components/VoiceSheet";
 import { AlternativesCard } from "../components/AlternativesCard";
 import { TrainPicker } from "../components/TrainPicker";
@@ -963,7 +963,14 @@ export function Concierge() {
            * Chips alag se nahi dikhte (dono jagah same data) — chat me sirf ye block. */
           {
             const sf = agentRes.seatFilter;
-            const rows = [...(sf?.rows ?? []), ...(sf?.wlRows ?? [])];
+            const all = [...(sf?.rows ?? []), ...(sf?.wlRows ?? [])];
+            /* Round-30 (user: "12013 ki seat availability btana … yeh question pe board kyu le aata,
+             * maine to maanga hi nahi"): user ne kisi khaas train ki baat ki ho to block SIRF usi
+             * train ka — poori 21-train ki board nahi. Generic sawaal ("seat wali trains batao") par
+             * pehle jaisa poora board hi rehta hai. Rows server ke payload se hi — kuch invent nahi,
+             * sirf dikhaya kam jaata hai (aur maangi train list me na ho to block hi nahi banta). */
+            const focus = trainNumbersInText(trimmed);
+            const rows = focusSeatRows(all, focus);
             if (sf && rows.length) {
               blocks.push({
                 type: "seatlist",
@@ -972,6 +979,7 @@ export function Concierge() {
                 toName: agentRes.nlu?.to?.name ?? state.to?.name ?? null,
                 date: agentRes.nlu?.date ?? state.date,
                 source: sf.source,
+                focus: focus.length ? focus : undefined,
                 rows,
               });
             }
@@ -1000,7 +1008,8 @@ export function Concierge() {
            * form. Jo data verified hai wahi bhejte hain (row ka status/fare/timing, warna list ka
            * naam/timing) — kuch invent nahi; status pata na ho to honest note ke saath form. */
           if (isBookingIntent(trimmed, c?.intent)) {
-            const tno = (/\b(\d{4,5})\b/.exec(trimmed)?.[1] ?? c?.selectedTrainNumber ?? lastFactTrainRef.current ?? "").trim();
+            /* Round-30: number nikaalne ke liye wahi helper — "2026" (saal) ko train nahi samajhta. */
+            const tno = (trainNumbersInText(trimmed)[0] ?? c?.selectedTrainNumber ?? lastFactTrainRef.current ?? "").trim();
             const clsWanted = (/\b(1A|2A|3A|3E|2S|SL|CC|EC|EA|FC|GN)\b/i.exec(trimmed)?.[1] ?? "").toUpperCase();
             const routeFrom = state.from ?? c?.origin ?? null;
             const routeTo = state.to ?? c?.destination ?? null;
@@ -1936,7 +1945,7 @@ function VoiceWave({ level, live }: { level: number; live: boolean }) {
  * ek saath (jo live board me hain), aur har class chip tappable: tap → seedha passenger form (wahi
  * bookingFromSeatRow flow jo Seat Finder/direct card ke chips par lagta hai). Data server ke
  * seatFilter payload se — kuch invent nahi; WL/N-A chips halki (purana rule). */
-function SeatListBlock({
+export function SeatListBlock({
   block,
   onPick,
 }: {
@@ -1946,12 +1955,19 @@ function SeatListBlock({
   /* Grouping pure helper me (src/chatText.ts → seatListGroups) taaki test ho sake. */
   const groups = seatListGroups(block.rows);
   const seatCount = groups.filter((g) => g.seatCount > 0).length;
+  const focus = block.focus ?? [];
   return (
-    <div className="sf-card jx-sb" id="chat-seatlist">
+    <div className={`sf-card jx-sb${focus.length ? " sf-focused" : ""}`} id="chat-seatlist">
       <div className="sf-head">
-        <strong>Seat wali trains (live board)</strong>
+        <strong>
+          {focus.length
+            ? `Aapki maangi train${focus.length > 1 ? "s" : ""} (live board)`
+            : "Seat wali trains (live board)"}
+        </strong>
         <span className="muted">
-          {groups.length} trains · {seatCount} me seat{block.source ? ` · ${block.source.replace("web_", "")}` : ""}
+          {focus.length ? `${groups.map((g) => g.number).join(", ")} · ` : ""}
+          {groups.length} train{groups.length === 1 ? "" : "s"} · {seatCount} me seat
+          {block.source ? ` · ${block.source.replace("web_", "")}` : ""}
         </span>
       </div>
       <div className="sf-groups">

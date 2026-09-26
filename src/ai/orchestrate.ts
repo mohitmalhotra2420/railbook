@@ -62,6 +62,8 @@ export type Block =
       toName?: string | null;
       date: string;
       source?: string | null;
+      /** Round-30: user ne kis train ki baat ki (message se) — block sirf usi train ka dikhta hai. */
+      focus?: string[];
       rows: {
         number: string;
         name: string;

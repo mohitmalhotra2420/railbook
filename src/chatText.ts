@@ -94,6 +94,36 @@ export interface SeatListRow {
   fare: number | null;
   departure: string | null;
 }
+/* Round-30 (26 Sep, user screenshot: "12013 ki seat availability btana kal ke liye ludhiana se amritsar
+ * ke liye" — aur chat me poori 21-train ki live board khul gayi; user: "yeh question pe board kyu le
+ * aata … maine to maanga hi nahi"). Wajah: seat ka block har baar POORI board dikhata tha.
+ *
+ * Ab: jab message me train number(s) ho, block sirf unhi trains ka — jo user ne maanga wahi.
+ * Ye nikaalne wala helper pure hai: saal (2026), tareekh (2026-09-27, 27/09/2026) aur time (18:01)
+ * chhod deta hai, kyunki wo 4-5 ank ke number train jaisa lagte hain par hote nahi. Koi data
+ * invent/mutate nahi hota — sirf pehchaan. */
+export function trainNumbersInText(text: string): string[] {
+  const cleaned = String(text ?? "")
+    .replace(/\b\d{4}-\d{1,2}-\d{1,2}\b/g, " ") /* ISO tareekh */
+    .replace(/\b\d{1,2}[./-]\d{1,2}[./-]\d{2,4}\b/g, " ") /* 27/09/2026, 27-09-26 */
+    .replace(/\b\d{1,2}:\d{2}\b/g, " ") /* time */
+    .replace(/\b\d{1,2}\s*(?:baje|bje)\b/gi, " ");
+  const out: string[] = [];
+  for (const m of cleaned.matchAll(/\b(\d{4,5})\b/g)) {
+    const n = m[1];
+    if (/^(?:18|19|20)\d{2}$/.test(n)) continue; /* saal nahi */
+    if (!out.includes(n)) out.push(n);
+  }
+  return out;
+}
+
+/** Focus (user ne jo train maangi) ke hisaab se rows — focus khaali ho to poori list waisi hi.
+ *  Maangi hui train list me na ho to kuch nahi dikhaate (unrelated trains ki board nahi thopte). */
+export function focusSeatRows<T extends { number: string }>(rows: T[], focus: string[]): T[] {
+  if (!focus.length) return rows;
+  return rows.filter((r) => focus.includes(String(r.number)));
+}
+
 export function seatListGroups(rows: SeatListRow[]): { number: string; name: string; rows: SeatListRow[]; seatCount: number }[] {
   const map = new Map<string, { number: string; name: string; rows: SeatListRow[]; seatCount: number }>();
   for (const r of rows) {
