@@ -63,8 +63,11 @@ describe("Round-36 · model se agla kadam — do koshish, phir bhi fallback nahi
   it("Round-36b: dedicated chhota NEXT call (budget khatam hone par bhi model se hi agla kadam)", () => {
     expect(agentic).toContain("export async function nextStepFromModelOnly(");
     expect(agentic).toContain("AI_NEXT_STEP_TIMEOUT_MS ?? 12000");
-    /* chhota/fast model (chain ka aakhri) — reasoning model ka time waste nahi */
-    expect(agentic).toContain("transport.models.length > 1 ? transport.models[transport.models.length - 1] : transport.primaryModel");
+    /* Round-36c: candidates provider-aware (HF model apne hi endpoint par) aur FAST model pehle */
+    expect(agentic).toContain("if (transport.hfFallback && m === transport.hfFallback.model) continue;");
+    expect(agentic).toContain("if (transport.hfFallback) candidates.push({ model: transport.hfFallback.model, url: transport.hfFallback.url, apiKey: transport.hfFallback.apiKey });");
+    expect(agentic).toContain("if (candidates.length > 1) candidates.unshift(candidates.splice(1, 1)[0]); // fast (fallback) model pehle");
+    expect(agentic).toContain("for (const cand of candidates.slice(0, 2)) {");
     /* sirf tool data se, aur na mile to kuch nahi */
     expect(agentic).toContain("if (!data) return [];");
     expect(agentic).toContain('"next_step_from_dedicated_call"');

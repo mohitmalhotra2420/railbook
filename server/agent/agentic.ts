@@ -2605,53 +2605,67 @@ export async function nextStepFromModelOnly(args: {
 }): Promise<{ label: string; utterance: string; primary?: boolean }[]> {
   const transport = agenticTransport();
   if (!transport) return [];
-  /* Chhote/fast model se poochho (chain ka aakhri model), warna primary. */
-  const model = transport.models.length > 1 ? transport.models[transport.models.length - 1] : transport.primaryModel;
+  /* Round-36c: chain me HF model bhi ho sakta hai (alag base URL + key) — usko NVIDIA endpoint par
+   * bhejna 404 deta tha (probe me chup-chaap kuch na aata). Isliye candidates provider ke hisaab se
+   * banao aur FAST model pehle try karo (chhota kaam, kam latency), phir primary, phir HF endpoint. */
+  const candidates: { model: string; url: string; apiKey: string }[] = [];
+  for (const m of transport.models) {
+    if (transport.hfFallback && m === transport.hfFallback.model) continue;
+    candidates.push({ model: m, url: transport.url, apiKey: transport.apiKey });
+  }
+  if (transport.hfFallback) candidates.push({ model: transport.hfFallback.model, url: transport.hfFallback.url, apiKey: transport.hfFallback.apiKey });
+  if (candidates.length > 1) candidates.unshift(candidates.splice(1, 1)[0]); // fast (fallback) model pehle
   const data = args.steps
     .filter((st) => st.ok)
     .map((st) => `${st.tool}: ${(st.dataPreview ?? st.summary ?? "").slice(0, 500)}`)
     .join("\n")
     .slice(0, 2200);
   if (!data) return [];
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), Math.max(3000, Number(process.env.AI_NEXT_STEP_TIMEOUT_MS ?? 12000)));
-  try {
-    const res = await fetchImpl()(transport.url, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${transport.apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model,
-        temperature: 0,
-        max_tokens: 700,
-        messages: [
-          {
-            role: "system",
-            content:
-              "Tum RailBook AI ho. Neeche user ka sawaal, tumhara diya hua jawab, aur is turn ke VERIFIED tool results hain. " +
-              "Tumhara EK kaam: user ke liye sabse kaam ka AGLA KADAM chun kar ek line me likhna — jaise ChatGPT/Gemini karte hain " +
-              "(socho ki ab user kya poochhna/chaahna chahega: us train ka booking, doosri class, doosri date, seat availability, timings, " +
-              "live status, ya koi saaf sawaal). Format bilkul: [NEXT] <chhota label> => <wahi baat jo user bhej sakta hai>. " +
-              "SIRF 1 line, kuch aur nahi (koi greeting, koi jawab, koi explanation). Sirf in tool results ka data use karo — " +
-              "koi naya train number/naam/fare/count mat likho. Agar sach me koi agla kaam ka step nahi banta to likho: [NEXT] NONE",
-          },
-          {
-            role: "user",
-            content: `USER SAWAAL: ${args.userText.slice(0, 240)}\n\nJAWAB: ${args.reply.slice(0, 600)}\n\nVERIFIED TOOL RESULTS:\n${data}`,
-          },
-        ],
-      }),
-      signal: controller.signal,
-    });
-    clearTimeout(timer);
-    if (!res.ok) return [];
-    const parsed = (await res.json()) as NvidiaChatJson;
-    const content = String(parsed?.choices?.[0]?.message?.content ?? "").trim();
-    if (!content) return [];
-    return extractNextActions(content).actions;
-  } catch {
-    clearTimeout(timer);
-    return [];
+  const messagesFor = (): { role: string; content: string }[] => [
+    {
+      role: "system",
+      content:
+        "Tum RailBook AI ho. Neeche user ka sawaal, tumhara diya hua jawab, aur is turn ke VERIFIED tool results hain. " +
+        "Tumhara EK kaam: user ke liye sabse kaam ka AGLA KADAM chun kar ek line me likhna — jaise ChatGPT/Gemini karte hain " +
+        "(socho ki ab user kya poochhna/chaahna chahega: us train ka booking, doosri class, doosri date, seat availability, timings, " +
+        "live status, ya koi saaf sawaal). Format bilkul: [NEXT] <chhota label> => <wahi baat jo user bhej sakta hai>. " +
+        "SIRF 1 line, kuch aur nahi (koi greeting, koi jawab, koi explanation). Sirf in tool results ka data use karo — " +
+        "koi naya train number/naam/fare/count mat likho. Agar sach me koi agla kaam ka step nahi banta to likho: [NEXT] NONE",
+    },
+    {
+      role: "user",
+      content: `USER SAWAAL: ${args.userText.slice(0, 240)}\n\nJAWAB: ${args.reply.slice(0, 600)}\n\nVERIFIED TOOL RESULTS:\n${data}`,
+    },
+  ];
+  const totalMs = Math.max(3000, Number(process.env.AI_NEXT_STEP_TIMEOUT_MS ?? 12000));
+  const perTry = Math.max(3000, Math.floor(totalMs / Math.max(1, Math.min(candidates.length, 2))));
+  for (const cand of candidates.slice(0, 2)) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), perTry);
+    try {
+      const res = await fetchImpl()(cand.url, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${cand.apiKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: cand.model,
+          temperature: 0,
+          max_tokens: 700,
+          messages: messagesFor(),
+        }),
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
+      if (!res.ok) continue;
+      const parsed = (await res.json()) as NvidiaChatJson;
+      const content = String(parsed?.choices?.[0]?.message?.content ?? "").trim();
+      if (!content) continue;
+      return extractNextActions(content).actions;
+    } catch {
+      clearTimeout(timer);
+      continue;
+    }
   }
+  return [];
 }
 
 export async function aiPhraseGate(kind: "passengers" | "date" | "station", facts: { fallback: string; mustContain: string[]; context: string }): Promise<{ text: string; model: string | null }> {
@@ -3406,6 +3420,11 @@ export async function runAgenticTurn(input: {
             .replace(/\s*\(Sources?:[^)]*\)\s*$/g, "")
             .trim();
         const planReply = cleanPlan(journeyStep.summary) || deterministicSummary(steps);
+        /* Round-36c (user: "agla kadam AI se aaye … har baar apna brain use kare"): plan ka jawab jaldi
+         * laut-ta hai (fast path) — usme [NEXT] extraction tak pahunchta hi nahi, isliye yahan bhi
+         * dedicated chhota model call se agla kadam maanga jaata hai. Model na de to kuch nahi. */
+        const planActions = await nextStepFromModelOnly({ userText: input.text, reply: planReply, steps });
+        const planVal = planActions.filter((a) => groundingCheck(`${a.label} ${a.utterance}`, steps, evidenceParts).grounded);
         return {
           ok: true,
           reply: scrubProactiveOffers(redact(planReply)),
@@ -3414,7 +3433,8 @@ export async function runAgenticTurn(input: {
           modelUsed,
           modelFallbacks,
           latencyMs: Date.now() - startedAll,
-          failureReason: null,
+          failureReason: planVal.length ? "next_step_from_dedicated_call" : "next_step_dedicated_empty_no_fallback",
+          nextActions: planVal.length ? planVal : null,
         };
       }
       continue; // model dekhega results aur decide karega next step

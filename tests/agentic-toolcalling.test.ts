@@ -469,8 +469,9 @@ describe("agentic tool-calling layer", () => {
     const turn = await runAgenticTurn({ text: "12014 ka cc fare btao", now: NOW, known: { passengers: 1 } });
     /* Round-34: +1 for the NEXT-repair call (model se hi agla kadam maanga jaata hai jab [NEXT]
      * missing ho aur turn me verified data ho) — mock model [NEXT] deta hi nahi, isliye wo call bhi gayi. */
-    /* Round-36b: +1 — model ne [NEXT] nahi diya to dedicated chhota NEXT call bhi gayi. */
-    expect(modelCalls).toBe(5); // tool-call + dumb reply + repaired reply + NEXT-repair demand + dedicated NEXT
+    /* Round-36b/c: model ne [NEXT] nahi diya to dedicated NEXT call gayi — aur usme 2 candidate
+     * (fast model pehle, phir primary) try hote hain, isliye 2 calls. */
+    expect(modelCalls).toBe(6); // tool-call + dumb reply + repaired reply + NEXT-repair demand + 2 dedicated NEXT tries
     expect(turn.reply).toContain(String(total));
     expect(turn.grounded).toBe(true);
   });
