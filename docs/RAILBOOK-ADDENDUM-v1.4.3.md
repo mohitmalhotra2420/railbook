@@ -473,3 +473,43 @@ User ke teen points (2 screenshots + 1 filter screenshot):
 **Tests:** naya `tests/round26-seat-all-classes.test.tsx` (7 — intent default vs explicit, all-mode summary line, purana filtered branch, intro-line row count 10/10, trailing-sentence row, WL ke saath summary) + `tests/round25-seat-answer-all-trains.test.tsx` update (WL row ab usi jawab me aati hai) → kul **105 files / 1043 tests PASS**; server `tsc` clean; client TS 67 (baseline).
 **Preview:** `RailBook-round26-2026-09-26.html` (pehle vs ab + live screenshots) · builder `tools/build-round26-preview.mjs`.
 **APK:** Android change nahi (WebView live site) — v1.4.7 hi current.
+
+### 9.19 Round-27 (26 Sep) — "ek hi class dikha raha" (har train ki SAARI classes) + tap → passenger form + native mic (WebView me Web Speech nahi hota)
+
+**User (2 screenshots + 4 points):**
+
+1. "yeh ek hi class dikha rha, jabhi ki aur bhi classes mein seat available hai same train mein — i check from confirmtkt" → jawab/block me har train ki **saari** classes (AVL/RAC/WL) ek saath.
+2. "baki ki trains live board par hai aa raha" → live board ki saari trains **usi jawab/block** me (koi jhootha pointer nahi).
+3. "agar yahan koi class pe tap kare to user ko fir sidha passenger form pe laajao booking ke liye" → chat ke seat chips tappable.
+4. "mic working nahi hai" → app ke WebView me mic chale.
+
+**1) Per-train grouping (server)**
+
+- `server/agent/seatFilter.ts`: naye helpers `groupRowsByTrain()` (train-wise groups, order barqarar), `trainClassesText()` (`CC AVL 444 ₹675 · 3A AVL 71 ₹520 · EC AVL 23 ₹1,015`) aur `statusText()`. `seatSummaryLine()` ke **dono** branch (seat-mode aur all-mode) ab per-train likhte hain — train ke andar ` · `, trains ke beech ` | `, aage `+N trains aur bhi hain` (cap `SEAT_LINE_MAX = 12` **trains** par).
+- `missingSeatLines()` bhi per-train: `* 12013 AMRITSAR SHTABDI — CC AVL 444 ₹675 · 3A AVL 71 ₹520 — 06:10 departure`.
+- **Cap fix (live probe me pakda gaya):** `SEAT_LINE_MAX` pehle `rows` (train × class) par lagta tha — isliye 12013 ki EC / 15707 ki 3E-3A-SL / 20807 ki 3E-2A-SL payload se kat jaati thi (text me dikhti thi, block/khaan me nahi). Ab `capRowsByTrain(rows, maxTrains)` se cap **trains** par — 12 trains aur unki saari classes (test: 12 × 3 = 36 rows).
+
+**2) Chat ka tappable block (client)**
+
+- `src/ai/orchestrate.ts`: naya `Block` type `seatlist`; `src/api.ts`: `AgentResponse.seatFilter`.
+- `src/views/Concierge.tsx`: agent path me `agentRes.seatFilter` (rows + wlRows) se `seatlist` block; naya `SeatListBlock` — train-wise `TrainClassBlock` groups (wahi component jo Seat Finder/direct card me lagta hai), header `Seat wali trains (live board) · N trains · M me seat · confirmtkt`, har class chip **tappable** → `openBookingFromSeatRow()` → usi train/class ka **passenger form** (wahi `bookingFromSeatRow` flow). Board rows me schedule time nahi hota, isliye time label **"🕑 live board"** (jhootha time nahi).
+- `src/chatText.ts`: `seatListGroups()` (pure grouping helper, testable) + `stripDuplicatedSeatRows()` — block hone par text se row-list lines hat jaati hain (dense 💺 summary line, AI ki apni `* 12013 … · CC · AVAILABLE 418 seats · ₹675` bullet rows, separator `·`/`—`/`|` kuch bhi ho) — **intro/closing prose bachi rehti hai**.
+- `src/components/ReplyText.tsx`: `AVL`/`AVAIL` status bhi row banta hai (pehle compact jawab plain text ban jaata tha) + ek line me ek train ki **saari classes** → alag-alag rows (`extraClassRows`).
+
+**3) Native mic (Android WebView me Web Speech API hota hi nahi)**
+
+- Naya `app/src/main/java/com/railbook/assist/VoiceBridge.kt` — `SpeechRecognizer` (hi-IN, partial results), `@JavascriptInterface` `RailBookVoice.isAvailable()/start(lang)/stop()/abort()`, aur `window.__railbookVoice.dispatch({type:start|partial|final|error|end, text, code})`; Android error names → Web Speech error names.
+- `MainActivity.kt`: `wv.addJavascriptInterface(VoiceBridge(this, wv), "RailBookVoice")` + `onDestroy` me cleanup; `AndroidManifest.xml` me `<queries><intent android:action="android.speech.RecognitionService">` (Android 11+ package visibility).
+- Client: naya `src/voice/nativeSpeech.ts` (bridge → Web Speech jaisa adapter: `onstart/onresult/onend/onerror`), `speech.ts` me `isSpeechSupported()`/`isSecureVoiceContext()`/`createRecognizer()` native-aware, `useVoiceInput.ts` native bridge hone par `getUserMedia` call nahi karta (WebView me wahi atak jaata tha).
+- APK **v1.4.8** (vc 31, `1.4.8-native-mic-all-classes`) isi round me bana.
+
+**Live proof (deploy `6e336cf` → `f16b799` → `7dd4c18` → `76d53c3`, sab `f16b799+` par verify):**
+
+- `/api/agent` "Kya kal ke liye koi available seat hai ludhiana se amritsar ke liye?" (LDH→ASR, 27 Sep, 1 pax) → `seatFilter: rows 30, wlRows 32, trainsSeen 25, source web_confirmtkt`; line `12013 CC AVL 424 ₹675 · EC AVL 23 ₹1,015 | 19611 SL AVL 174 ₹150 · 3A AVL 71 ₹520 · 3E AVL 15 ₹520 · 2A AVL 14 ₹725 | 20807 3A 62 · 3E 8 · 2A 6 · SL 4 | … | +6 trains aur bhi hain`.
+- Browser (Pixel-size, `tools/probe-live-r27.mjs`): **20 groups** — 12013 (CC+EC), 19611 (4 classes), 22487 (CC+EC), 14631 (SL + 3A WL 18), 20807 (4), 14615 (SL + 3E + 3A WL + "2A status nahi mila")… har train ki **saari** classes ek block me; text me duplicate row-list nahi.
+- **Chip tap → `Passengers` screen** (screenshot: 12013 AMRITSAR SHTABDI · LDH → ASR · 2026-09-27 · ₹675/passenger · passenger form) — exactly user ka point (c).
+- **Mic (native path):** probe me `window.RailBookVoice` bridge inject karke mic tap → `native calls: start:hi-IN`, koi "Mic band" message nahi, page errors `[]`; transcript sheet me aaya aur "OK ✓ Bhejo" par sawaal chala gaya.
+
+**Tests:** naya `tests/round27-seat-classes-and-mic.test.tsx` (12 — per-train grouping/text, summary line, `missingSeatLines` per-train, `capRowsByTrain` (12×3=36), `seatListGroups`, chips tap callback, text dedupe, ReplyText multi-class rows, Concierge wiring, native bridge adapter (browser vs app), Kotlin/manifest presence) + `tests/round25-seat-answer-all-trains.test.tsx` format update → kul **106 files / 1055 tests PASS**; server `tsc` clean; client TS 67 (baseline); build `dist/assets/index-CJnycmVY.js` 471.63 kB.
+**Preview:** `RailBook-round27-2026-09-26.html` (pehle vs ab block, server summary lines, live screenshots) · builder `tools/build-round27-preview.mjs` · probe `tools/probe-live-r27.mjs`.
+**APK:** v1.4.8 (`RailBook-v1.4.8-release.apk`, vc 31) — native mic ke liye zaroori.
