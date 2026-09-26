@@ -2075,6 +2075,7 @@ function systemPrompt(
       "24. UNIVERSAL WEB FALLBACK (user request 2026-09-06: 'ChatGPT jaisa — koi bhi railway sawaal, API se jawab na mile to khud web se dhoondh lo'): koi bhi railway ka sawaal (catering/pantry/rules/facilities/history/facts/general knowledge) jiska jawab railway data tools (timetable/live/fare/seats) se NAHI aata — WEB_SEARCH se dhoondo aur 'web se mila' + source label ke saath do. Railway-irrelevant web results (cars/automobiles jaise) skip karo, railway-relevant hi do. Na mile to honest 'nahi mil paya' bolo — guess kabhi nahi. Live status/fare/seats/availability/PNR ke liye web search kabhi use mat karna — wahan sirf railway tools.",
       "27. SAARE TOOLS KHULE HAIN (user rule 2026-09-26: 'AI ko jitne bhi tools available hai wo sabh provide kro, no restriction on using any tool'): jo bhi tool jawab ke liye chahiye, jitni baar chahiye, use karo — SEARCH_TRAINS, JOURNEY_ANALYZE, RANK_JOURNEY_OPTIONS, FIND_SEATS, CHECK_AVAILABILITY, GET_FARE, GET_TIMETABLE, TRACK_TRAIN, GET_TRAIN_INFO, FIND_ALTERNATIVE_TRAINS, FIND_CONNECTIONS, WEB_SEARCH… koi rok nahi, koi count-limit nahi. SIRF DO CHEEZEIN TUM KABHI NAHI KAROGE: (i) 'Continue to IRCTC' par click (RailBook app ka handoff button user khud dabayega), (ii) passenger details/passenger form khud se bharna ya booking confirm karna — wo user ka kaam hai. Baaki sab tumhare haath me hai.",
     "28. SAWAAL KA MATLAB PEHLE (user 2026-09-26: 'kya AI meri baat samajh nahi paaya?'): 'plan banao / journey plan / kya best rahega' = RANK_JOURNEY_OPTIONS ya JOURNEY_ANALYZE (timings + fare + best option) — seat board ki list NAHI. 'alternative trains / doosri trains / koi aur option / iske alawa' = FIND_ALTERNATIVE_TRAINS (us train ke aage/peeche wali trains, timing+fare ke saath) — wahi purani list dobara NAHI. 'trains batao / kaunsi trains chalti hain' = SEARCH_TRAINS. 'seat/berth/AVL/kitni seat khali' = FIND_SEATS ya CHECK_AVAILABILITY. Har TRAIN LIST jawab me timing (departure → arrival + duration) aur fare (jo tool ne diya ho) ZAROOR likho — 'sirf train ke naam' wali list adhoori hai (user ki shikayat: 'trains list krdi without fare and timings'). CLASS AMBIGUOUS HO TO PEHLE POOCHHO (user 2026-09-26: '19028 mein book krdo' par AI ne class nahi poochhi, seedha ek class ka form khol diya, jabki us train me kai classes khuli thi — 'AI khud kyu nhi soch rha, har cheez thodi btani padegi'): agar user booking maange ('book krdo', '<train> mein book') aur usne class NA boli ho aur us train me EK SE ZYADA class khuli ho, to pehle SAAF poochho 'kaunsi class me book karun?' aur [NEXT] me wahi classes chips ke roop me do (jaise '[NEXT] 19028 · 3A (AVL 26 ₹565) => 19028 mein 3A book krdo') — uski class ke bina aage mat badho; ek hi class khuli ho to seedha wahi class bata do (poochhne ki zaroorat nahi).",
+    "29. JAWAB EK DAMM SEEDHA (user 2026-09-26: 'jaise chatgpt/gemini/claude/manus ek dum se accurate answer dete hai … user ke questions ko samjhe aur ek dum perfect answer ya outcome de'): (a) pehle seedha jawab/outcome, phir chhota context — lecture ya purani baatein dohraana nahi; (b) agar user ne kisi turn me class/date/passengers/train/route bata diya ho to wo FINAL hai — wahi cheez dobara MAT poochho, usi ke hisaab se aage badho; (c) apna pichhla sawaal dobara mat likho (loop mat banao) — user ka naya message us sawaal ka jawab maano; (d) knowledge/general sawaal (railway, trains, rules, history, stations, booking process) ho to duniya ka sabse acha assistant ki tarah confident, sahi aur poora jawab do — zaroorat ho to WEB_SEARCH chala kar verify karo, apni memory se aise fact MAT likho jo verify na ho; (e) kuch pata na ho to SAFAI se bolo (jhoothi certainty kabhi nahi), aur ek chhota aage ka kadam suggest karo.",
     "26. AGLA KADAM (user requirement 2026-09-26: 'answer ke baad AI ko next step pe leke jaana chahiye'): jawab ke EKDUM aakhir me 1-2 line likho — bilkul is format me, kuch aur nahi: [NEXT] <chhota label> => <wahi baat jo user bhej sakta hai>. Jaise: '[NEXT] Book 12013 · CC (AVL 354 ₹675) => 12013 mein CC book krdo'. Rules: (a) sirf ISI turn ke tool data se banao — koi naya train number/naam/fare/count nahi; (b) label me wahi number jo data me hai; (c) max 2 lines, sabse zaroori pehle; (d) user requirement 26 Sep (round 34 + 36): jab bhi is turn me koi KAAM KA data aaya ho (train/seat/fare/timing/status/plan/route), [NEXT] ZAROOR likho — agla kadam TUM socho aur suggest karo (jaise us train ka booking, doosri class, doosri date, seat availability, timings, live status, ya zaroorat ho to sawaal). Ab koi data-derived fallback nahi hai: [NEXT] nahi diya to user ko agla kadam dikhega hi nahi — isliye sirf tab chhodo jab sach me koi agla kaam ka step na banta ho; (e) reply ke andar [NEXT] ke alawa agla kadam dobara mat likho (UI khud dikhata hai); (f) user requirement 26 Sep (round 36): 'Agla kadam' card SIRF tumhare [NEXT] se banta hai — data se banaya hua koi fallback chip nahi hota, isliye tumne [NEXT] NAHI diya to user ko agla kadam dikhega hi nahi. Isliye apna dimaag lagao jaise ChatGPT/Gemini lagate hain: socho ki user ke liye agla sabse kaam ka kadam kya hai — booking, doosri class/date, seat availability, timings, live status, ya koi saaf sawaal ('kaunsi class me book karun?') — aur wahi [NEXT] me do.",
   ]
     .filter(Boolean)
@@ -2825,6 +2826,11 @@ export async function runAgenticTurn(input: {
    * DO koshish milti hain — pehli normal, doosri sakht/sirf-NEXT. Dono fail hon to koi data-fallback
    * card nahi milta (client sirf model ke steps dikhata hai). */
   let nextRepairAttempts = 0;
+  /* Round-37 (user screenshot: "12054 mein 2S book krdo" teen baar, AI ne teen baar WAHI class-sawaal
+   * dohraya — ek feedback loop jo user ko pagal kar deta hai): same jawab dobara likha jaaye to EK
+   * corrective call ("tumne wahi baat dohrai hai — user ka naya message us sawaal ka jawab/aadesh hai,
+   * aage badho") aur uske baad jawab naye tool results se banao. */
+  let repeatRepaired = false;
   /* Round-18m-29: deferred planner decision (validated from the final answer). */
   let pendingDecision: { plan: JourneyPlan; cands: JourneyCandidate[] } | null = null;
 
@@ -3604,6 +3610,21 @@ export async function runAgenticTurn(input: {
     }
 
     const evidenceAll = [...evidenceParts, ...messages.map((m) => m.content ?? "")];
+    /* Round-37: repeat-guard (pichhla assistant jawab vs ye jawab). */
+    const normTxt = (t: string) => String(t ?? "").replace(/\s+/g, " ").replace(/[\u{1F300}-\u{1FAFF}\u2600-\u27BF]/gu, "").trim().toLowerCase();
+    const prevReply = normTxt(lastAssistantMsg).slice(0, 140);
+    const thisReply = normTxt(clean).slice(0, 140);
+    const isRepeat = prevReply.length > 40 && thisReply.length > 40 && (thisReply === prevReply || thisReply.startsWith(prevReply.slice(0, 60)) || prevReply.startsWith(thisReply.slice(0, 60)));
+    if (isRepeat && !repeatRepaired && step < MAX_STEPS && timeLeft() > 8000) {
+      repeatRepaired = true;
+      messages.push({ role: "assistant", content });
+      messages.push({
+        role: "user",
+        content:
+          "SYSTEM CHECK: tumne apne PICHHLE jawab ki wahi baat dobara likhi hai (loop). User ka naya message us sawaal ka JAWAB ya ek naya aadesh hai — usse dhyaan se padho aur maano. Jo cheez user ne is baar bata di (class/date/passengers/train/route) use FINAL maano: wo dobara mat poochho. Ab apne tools se jo data AA CHUKA hai uske hisaab se aage badho aur ek saaf, aage-le-jaane wala jawab likho (ya jo user ne maanga wo kaam karo). Bilkul wahi line dobara mat likho.",
+      });
+      continue;
+    }
     const check = groundingCheck(clean, steps, evidenceAll);
     /* Round-32: model ka "agla kadam" bhi evidence se verify — jo number/naam is turn me nahi aaya, drop. */
     const nextActions = extracted.actions.filter((a) => groundingCheck(`${a.label} ${a.utterance}`, steps, evidenceAll).grounded);

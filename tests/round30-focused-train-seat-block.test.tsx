@@ -141,7 +141,7 @@ describe("Round-30 · chat block sirf maangi hui train ka", () => {
     /* block sirf tab banta hai jab rows bachi hon (maangi train list me na ho → koi board nahi) */
     expect(src).toMatch(/if \(sf && rows\.length\) \{/);
     /* Round-29 ka booking auto-advance bhi wahi helper use kare (saal "2026" train na bane) */
-    expect(src).toContain("const tno = (trainNumbersInText(trimmed)[0] ??");
+    expect(src).toContain("trainNumber: (trainNumbersInText(trimmed)[0] ??");
     /* data server payload se hi — koi naya/invent kiya row nahi */
     expect(src).toContain("const all = [...(sf?.rows ?? []), ...(sf?.wlRows ?? [])];");
   });

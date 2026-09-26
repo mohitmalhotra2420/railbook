@@ -81,7 +81,7 @@ describe("Round-34 · pehle dikhayi gayi seat rows se hi form bharta hai", () =>
     const src = read("src/views/Concierge.tsx");
     expect(src).toContain("const lastSeatRowsRef = useRef<{");
     expect(src).toContain("lastSeatRowsRef.current = {");
-    expect(src).toContain("remembered.from === routeFrom.code && remembered.to === routeTo.code && remembered.date === routeDate");
+    expect(src).toContain("remembered.from === target.from && remembered.to === target.to && remembered.date === routeDate");
     expect(src).toContain("...(sf?.rows ?? []), ...(sf?.wlRows ?? []), ...rememberedOk");
   });
 });

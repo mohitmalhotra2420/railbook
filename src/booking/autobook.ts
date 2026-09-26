@@ -129,3 +129,91 @@ export function isBookingIntent(text: string, intent?: string | null): boolean {
   if (/\b\d{4,5}\b[\s\S]{0,18}?\b(?:book|booking|reserve)\b/.test(t) && !/[?？]/.test(t)) return true;
   return /\bticket\b[\s\S]{0,20}?\b(?:kar|book|kro|kardo|krdo|chahiye|chaiye|do|dena)\b/.test(t);
 }
+
+
+/* ── Round-37 (27 Sep, user screenshot: "12054 mein 2S book krdo" TEEN BAAR bheja, AI ne teen
+ * baar wahi class-sawaal dohraya aur passenger form khula hi nahi) ──────────────────────────────
+ * Root cause: form kholne wala client gate route/date sirf `state.from/to` + `ctx.origin/destination`
+ * se leta tha. Jab user ne train picker se train chuni thi (ya model ne seat data diya tha), ctx me
+ * origin/destination null reh jaate hain → gate fail → koi form nahi, aur model wahi sawaal dohra deta.
+ *
+ * `resolveBookingTarget` har verified source se train/class/route/date nikaalta hai (recency order,
+ * koi andaza nahi) aur batata hai kya missing hai — taaki UI sahi cheez maange, galat sawaal nahi. */
+export type BookingTargetSources = {
+  /** User ke message se / context se train number (pehle se nikaala hua). */
+  trainNumber: string | null;
+  /** User ne is message me class boli ho to. */
+  classWanted: string | null;
+  state: {
+    from: { code: string } | null;
+    to: { code: string } | null;
+    date: string;
+    dateProvided: boolean;
+    selectedTrain: { number: string; from?: { code: string } | null; to?: { code: string } | null; date?: string | null } | null;
+  };
+  ctx: { origin?: { code: string } | null; destination?: { code: string } | null; date?: string | null; dateProvided?: boolean | null } | null;
+  /** Aakhri picker tap (client ne khud bheja tha: "12054 … (ASR → HW) select ki"). */
+  picked: { number: string; from: string; to: string; date?: string | null } | null;
+  /** Is turn ka seatFilter (server) — asli seat data. */
+  seat: { from?: string | null; to?: string | null; date?: string | null } | null;
+  /** Pichhle seat turn ki yaad rakhi rows (route+date). */
+  remembered: { from: string; to: string; date: string; rows: { number: string }[] } | null;
+  /** Is turn ki train list rows (route ke liye). */
+  trains: { number: string; from?: { code: string } | null; to?: { code: string } | null }[] | null;
+};
+
+export type BookingTarget = {
+  trainNumber: string | null;
+  classCode: string | null;
+  from: string | null;
+  to: string | null;
+  date: string | null;
+  missing: ("train" | "route" | "date")[];
+};
+
+export function resolveBookingTarget(s: BookingTargetSources): BookingTarget {
+  const trainNumber = String(s.trainNumber ?? "").trim() || null;
+  const classCode = String(s.classWanted ?? "").trim().toUpperCase() || null;
+  const num = trainNumber ?? "";
+
+  const trainRow = (s.trains ?? []).find((t) => String(t.number) === num) ?? null;
+  const picked = s.picked && (!num || String(s.picked.number) === num) ? s.picked : null;
+  const sel = s.state.selectedTrain && (!num || String(s.state.selectedTrain.number) === num) ? s.state.selectedTrain : null;
+  const inRemembered = Boolean(s.remembered && num && s.remembered.rows.some((r) => String(r.number) === num));
+  const remembered = s.remembered && (!num || inRemembered) ? s.remembered : null;
+
+  /* Route: jo source sabse taaza/authoritative ho wahi — sab verified data se aate hain. */
+  const route =
+    (sel?.from?.code && sel?.to?.code ? { from: sel.from.code, to: sel.to.code } : null) ??
+    (s.seat?.from && s.seat?.to ? { from: s.seat.from, to: s.seat.to } : null) ??
+    (picked ? { from: picked.from, to: picked.to } : null) ??
+    (remembered ? { from: remembered.from, to: remembered.to } : null) ??
+    (trainRow?.from?.code && trainRow?.to?.code ? { from: trainRow.from.code, to: trainRow.to.code } : null) ??
+    (s.ctx?.origin?.code && s.ctx?.destination?.code ? { from: s.ctx.origin.code, to: s.ctx.destination.code } : null) ??
+    (s.state.from?.code && s.state.to?.code ? { from: s.state.from.code, to: s.state.to.code } : null);
+
+  /* Date: user/server ne jo di — form ka default (aaj) kabhi nahi. */
+  const date =
+    (s.state.dateProvided && s.state.date ? s.state.date : "") ||
+    (s.ctx?.dateProvided && s.ctx?.date ? s.ctx.date : "") ||
+    (s.seat?.date ?? "") ||
+    (remembered?.date ?? "") ||
+    (picked?.date ?? "") ||
+    (sel?.date ?? "") ||
+    (s.ctx?.date ?? "") ||
+    (s.state.date ?? "");
+
+  const missing: BookingTarget["missing"] = [];
+  if (!trainNumber) missing.push("train");
+  if (!route?.from || !route?.to) missing.push("route");
+  if (!date) missing.push("date");
+
+  return {
+    trainNumber,
+    classCode,
+    from: route?.from ?? null,
+    to: route?.to ?? null,
+    date: date || null,
+    missing,
+  };
+}

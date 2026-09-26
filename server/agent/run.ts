@@ -1724,6 +1724,24 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
       }
     }
 
+    /* Round-37 (user screenshot: train picker se "12054 … (ASR → HW) select ki" ke baad "12054 mein 2S
+     * book krdo" — server context me origin/destination NULL the, isliye booking gate (client) route
+     * na milne par form khol hi nahi paaya aur AI wahi class-sawaal dohraata raha). Picker tap ki
+     * message me route khud user ne chuna hota hai — use context me lock karo (koi andaza nahi). */
+    {
+      const pick = /\b(\d{4,5})\b[^()]{0,60}\(\s*([A-Za-z]{2,6})\s*(?:→|->|—>|to)\s*([A-Za-z]{2,6})\s*\)/.exec(String(req.text ?? ""));
+      if (pick) {
+        const [, num, fromCode, toCode] = pick;
+        const from = fromCode.toUpperCase();
+        const to = toCode.toUpperCase();
+        if (from !== to && !ctx.origin && !ctx.destination) {
+          ctx.origin = { code: from, name: from, city: from };
+          ctx.destination = { code: to, name: to, city: to };
+        }
+        if (!ctx.selectedTrainNumber) ctx.selectedTrainNumber = num;
+      }
+    }
+
     const capture: SearchCapture = { table: null };
     /* Round-18m-9: passenger-gate ka jawab ("2") akela model ko confuse karta
      * hai ("2 se kya matlab?") — slots poore hain to explicit search request

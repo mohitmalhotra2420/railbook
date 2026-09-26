@@ -42,12 +42,15 @@ describe("Round-35 · block type 'classchoice'", () => {
 describe("Round-35 · gate: class ambiguous ho to form se pehle poochho", () => {
   it("do ya zyada seat-wali class par form RUK jaata hai (class-choice card)", () => {
     expect(concierge).toContain("const withSeat = thisTrain.filter((r) => /^(AVAILABLE|RAC)$/i.test(String(r.status ?? \"\")));");
-    expect(concierge).toContain("if (!clsWanted && uniqClasses.length >= 2) {");
+    expect(concierge).toContain("if (clsWanted || uniqClasses.length < 2) {");
+    /* Round-37: gate ab resolver ke baad — class boli ho ya 1 hi class khuli ho to seedha form. */
+    expect(concierge).toContain("if (clsWanted || uniqClasses.length < 2) {");
+    expect(concierge).toContain("} else {");
     expect(concierge).toContain("Kaunsi class me book karun? Neeche chip par tap karo.");
   });
 
   it("gate sirf tab jab user ne class na boli ho (clsWanted khaali)", () => {
-    const idx = concierge.indexOf("if (!clsWanted && uniqClasses.length >= 2) {");
+    const idx = concierge.indexOf("if (clsWanted || uniqClasses.length < 2) {");
     const block = concierge.slice(idx, idx + 2600);
     expect(block).toContain('type: "classchoice"');
     expect(block).toContain("return;"); // form hold
@@ -55,12 +58,12 @@ describe("Round-35 · gate: class ambiguous ho to form se pehle poochho", () => 
 
   it("ek hi class khuli ho to seedha wahi (poochhna nahi)", () => {
     /* >= 2 par hi poochhte hain — 1 class par purana seedha-form behaviour chalta rehta hai. */
-    expect(concierge).toContain("uniqClasses.length >= 2");
-    expect(concierge).not.toContain("uniqClasses.length >= 1");
+    expect(concierge).toContain("uniqClasses.length < 2");
+    expect(concierge).not.toContain("uniqClasses.length < 1");
   });
 
   it("class boli gayi ho to gate skip (user ki marzi chalti hai)", () => {
-    expect(concierge).toContain("const clsWanted = (/\\b(1A|2A|3A|3E|2S|SL|CC|EC|EA|FC|GN)\\b/i.exec(trimmed)?.[1] ?? \"\").toUpperCase();");
+    expect(concierge).toContain("classWanted: /\\b(1A|2A|3A|3E|2S|SL|CC|EC|EA|FC|GN)\\b/i.exec(trimmed)?.[1] ?? null,");
   });
 });
 
@@ -114,6 +117,6 @@ describe("Round-35 · honest data hi chips me jaata hai", () => {
 
   it("rows route+date se match hoti hain (purani journey ka data nayi par nahi)", () => {
     expect(concierge).toContain("const rememberedOk =");
-    expect(concierge).toContain("remembered.from === routeFrom.code && remembered.to === routeTo.code && remembered.date === routeDate");
+    expect(concierge).toContain("remembered.from === target.from && remembered.to === target.to && remembered.date === routeDate");
   });
 });

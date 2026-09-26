@@ -250,11 +250,15 @@ describe("Round-29 · booking intent → khud passenger form (loop khatam)", () 
     expect(src).toMatch(/status !== "AVAILABLE" && status !== "RAC" && status !== "WAITLIST" && status !== "UNKNOWN"/);
     /* booking intent par auto-advance ka gate */
     expect(src).toContain("if (isBookingIntent(trimmed, c?.intent))");
-    expect(src).toContain("pickRowForBooking(live, tno, clsWanted || null)");
+    expect(src).toContain("const pickRow = clsWanted");
+    expect(src).toContain(": pickRowForBooking(live, tno, null);" );
     expect(src).toContain("buildAutoBookSeat({");
     expect(src).toContain('openBookingFromSeatRow(seat, { from: routeFrom.code, to: routeTo.code');
     /* Date sirf jo user/server ne di — form ka default (aaj) guess nahi. */
-    expect(src).toContain('const routeDate = (c?.dateProvided && c?.date ? c.date : "")');
+    /* Round-37: route/date ab resolver se (train/class/route/date har verified source se — picker tap,
+     * seat rows, trains list, ctx, booking state) — wahi purana intent, naya shape. */
+    expect(src).toContain("const target = resolveBookingTarget({");
+    expect(src).toContain("const routeDate = target.date;");
   });
 
   it("reducer: UNKNOWN class par bhi passenger screen khulti hai (N/A par nahi)", () => {

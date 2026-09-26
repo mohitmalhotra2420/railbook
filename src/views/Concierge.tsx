@@ -3,6 +3,10 @@ import { planTurn, type AssistantTurn, type Block } from "../ai/orchestrate";
 import type { DialogSlot, NluResult } from "../ai/nlu";
 import type { Prefs } from "../ai/filter";
 import { matchingClasses } from "../ai/filter";
+/* Round-37 (screenshot bug: "12054 mein 2S book krdo" 3 baar, form khula hi nahi): picker tap par chuni
+ * hui train ka route module-scope me yaad rakha jaata hai — BlockView (picker) likhta hai, Concierge
+ * (booking gate) padhta hai. Ref ki jagah plain object kyunki ye do alag components me share hota hai. */
+const lastPickedTrainRef: { current: { number: string; from: string; to: string; date?: string | null } | null } = { current: null };
 import { api, pickTrainsApi } from "../api";
 import { useBooking } from "../booking/context";
 import { validatePassengers } from "../booking/state";
@@ -13,7 +17,7 @@ import type { AgentTrainTable } from "../ai/agent";
 import { JourneyOptions } from "../components/JourneyOptions";
 import { bookingFromChipPayload, bookingFromSeatRow, stationOf } from "../booking/fromOption";
 /* Round-29: booking intent par seedha passenger form (pure resolution logic — test ke liye alag). */
-import { buildAutoBookSeat, isBookingIntent, isOpenableStatus, pickRowForBooking } from "../booking/autobook";
+import { buildAutoBookSeat, isBookingIntent, isOpenableStatus, pickRowForBooking, resolveBookingTarget } from "../booking/autobook";
 import { detectSeatIntent, type SeatIntent, type SeatRow } from "../seatfinder";
 import { focusSeatRows, seatListGroups, stripSeatCardPointer, trainNumbersInText } from "../chatText";
 /* Round-31: jawab ke baad agla kadam (verified data se — kuch invent nahi). */
@@ -1062,37 +1066,67 @@ export function Concierge() {
            * form. Jo data verified hai wahi bhejte hain (row ka status/fare/timing, warna list ka
            * naam/timing) — kuch invent nahi; status pata na ho to honest note ke saath form. */
           if (isBookingIntent(trimmed, c?.intent)) {
-            /* Round-30: number nikaalne ke liye wahi helper — "2026" (saal) ko train nahi samajhta. */
-            const tno = (trainNumbersInText(trimmed)[0] ?? c?.selectedTrainNumber ?? lastFactTrainRef.current ?? "").trim();
-            const clsWanted = (/\b(1A|2A|3A|3E|2S|SL|CC|EC|EA|FC|GN)\b/i.exec(trimmed)?.[1] ?? "").toUpperCase();
-            const routeFrom = state.from ?? c?.origin ?? null;
-            const routeTo = state.to ?? c?.destination ?? null;
-            /* Date: is turn me server ne jo batayi (ya user ne pehle di) wahi — form ka default
-             * (aaj) use nahi karte, warna galat date ka form khul jaata. Date hi na ho to advance
-             * nahi hota (wahan "kis date ko?" poochhna theek hai). */
-            const routeDate = (c?.dateProvided && c?.date ? c.date : "") || (state.dateProvided ? state.date : "") || (state.date && c?.dateProvided ? c.date : "");
-            /* Wahi train+class pehle se form me khuli hai to dobara kuch nahi karte. */
-            const already = state.selectedTrain?.number === tno && (!clsWanted || state.selectedClass?.code === clsWanted);
-            if (tno && !already && routeFrom && routeTo && routeDate) {
-              const sf = agentRes.seatFilter;
-              /* Round-34: is turn ki rows pehle; na hon to wahi rows jo user ko pehle DIKHAYI gayi thi —
-               * aur wahi route/date ho (warna purane turn ka fare/status nayi journey par nahi lagta). */
-              const remembered = lastSeatRowsRef.current;
-              const rememberedOk =
-                remembered && remembered.from === routeFrom.code && remembered.to === routeTo.code && remembered.date === routeDate
-                  ? remembered.rows
-                  : [];
-              const live = [...(sf?.rows ?? []), ...(sf?.wlRows ?? []), ...rememberedOk];
-              /* Round-35 (user: "19028 mein book krdo" — AI ne class nahi poochhi, seedha ek class ka
-               * form khol diya, jabki us train me kai classes khuli thi; "AI khud kyu nhi soch rha,
-               * har cheez thodi btani padegi"): class boli hi na ho aur us train me EK SE ZYADA class
-               * khuli ho (AVL/RAC) → pehle us se poochho, uski marzi ke bina form mat kholo. */
-              const thisTrain = live.filter((r) => String(r.number) === tno);
-              const withSeat = thisTrain.filter((r) => /^(AVAILABLE|RAC)$/i.test(String(r.status ?? "")));
-              const classKey = (r: (typeof withSeat)[number]) => String(r.classCode ?? "").toUpperCase();
-              const uniqClasses = withSeat.filter((r, i) => withSeat.findIndex((x) => classKey(x) === classKey(r)) === i);
-              if (!clsWanted && uniqClasses.length >= 2) {
-                const nm = uniqClasses[0]?.name ?? agentRes.trains?.rows?.find((t) => String(t.number) === tno)?.name ?? null;
+            /* Round-37: train/class/route/date har verified source se nikaalo (state → is turn ka seat data
+             * → picker tap → yaad rakhi rows → trains list → ctx → booking state). Gate fail hone par
+             * UI wahi missing cheez maangta hai — model ka ulta sawaal (class dobara) nahi dohraata. */
+            const target = resolveBookingTarget({
+              trainNumber: (trainNumbersInText(trimmed)[0] ?? c?.selectedTrainNumber ?? lastFactTrainRef.current ?? "").trim() || null,
+              classWanted: /\b(1A|2A|3A|3E|2S|SL|CC|EC|EA|FC|GN)\b/i.exec(trimmed)?.[1] ?? null,
+              state: {
+                from: state.from,
+                to: state.to,
+                date: state.date,
+                dateProvided: state.dateProvided,
+                selectedTrain: state.selectedTrain ? { number: String(state.selectedTrain.number), from: state.selectedTrain.from ?? null, to: state.selectedTrain.to ?? null, date: state.selectedTrain.date ?? null } : null,
+              },
+              ctx: c ?? null,
+              picked: lastPickedTrainRef.current,
+              seat: (() => {
+                const sfx = agentRes.seatFilter as (typeof agentRes.seatFilter & { from?: string | null; to?: string | null; date?: string | null }) | null | undefined;
+                return sfx ? { from: sfx.from ?? null, to: sfx.to ?? null, date: sfx.date ?? null } : null;
+              })(),
+              remembered: lastSeatRowsRef.current,
+              trains: agentRes.trains?.rows ?? null,
+            });
+            if (target.trainNumber && target.from && target.to && target.date) {
+              const tno = target.trainNumber;
+              const clsWanted = target.classCode ?? "";
+              const routeFrom = { code: target.from };
+              const routeTo = { code: target.to, name: null as string | null };
+              const routeDate = target.date;
+              const already = state.selectedTrain?.number === tno && (!clsWanted || state.selectedClass?.code === clsWanted);
+              if (!already) {
+                const sf = agentRes.seatFilter;
+                /* Round-34/37: is turn ki rows pehle; na hon to wahi rows jo user ko pehle DIKHAYI gayi thi
+                 * (aur wahi route ho) — warna trains list / picker ka verified naam-timing. */
+                const remembered = lastSeatRowsRef.current;
+                const rememberedOk =
+                  remembered && remembered.from === target.from && remembered.to === target.to && remembered.date === routeDate
+                    ? remembered.rows
+                    : [];
+                const live = [...(sf?.rows ?? []), ...(sf?.wlRows ?? []), ...rememberedOk];
+                const thisTrain = live.filter((r) => String(r.number) === tno);
+                const withSeat = thisTrain.filter((r) => /^(AVAILABLE|RAC)$/i.test(String(r.status ?? "")));
+                const classKey = (r: (typeof withSeat)[number]) => String(r.classCode ?? "").toUpperCase();
+                const uniqClasses = withSeat.filter((r, i) => withSeat.findIndex((x) => classKey(x) === classKey(r)) === i);
+                const pickedClass = clsWanted ? withSeat.find((r) => classKey(r) === clsWanted) ?? null : null;
+                /* Class boli ho to seedha usi ka form (user ki marzi). Class na boli ho aur 2+ class khuli
+                 * ho to pehle poochho (Round-35). Warna jo mila wahi. */
+                if (clsWanted || uniqClasses.length < 2) {
+                  const pickRow = clsWanted
+                    ? pickedClass ?? pickRowForBooking(live, tno, clsWanted)
+                    : pickRowForBooking(live, tno, null);
+                  const seat = buildAutoBookSeat({
+                    trainNumber: tno,
+                    classWanted: clsWanted || pickRow?.classCode || null,
+                    row: pickRow,
+                    trainRow: agentRes.trains?.rows?.find((t) => String(t.number) === tno) ?? null,
+                    source: sf?.source ?? null,
+                  });
+                  openBookingFromSeatRow(seat, { from: routeFrom.code, to: routeTo.code, toName: routeTo.name ?? null, date: routeDate });
+                  return;
+                }
+                const nm = uniqClasses[0]?.name ?? agentRes.trains?.rows?.find((t) => String(t.number) === tno)?.name ?? lastPickedTrainRef.current?.number === tno ? uniqClasses[0]?.name ?? null : null;
                 setMessages((m) => [
                   ...m,
                   {
@@ -1125,15 +1159,14 @@ export function Concierge() {
                 ]);
                 return;
               }
-              const pickRow = pickRowForBooking(live, tno, clsWanted || null);
-              const seat = buildAutoBookSeat({
-                trainNumber: tno,
-                classWanted: clsWanted || null,
-                row: pickRow,
-                trainRow: agentRes.trains?.rows?.find((t) => String(t.number) === tno) ?? null,
-                source: sf?.source ?? null,
-              });
-              openBookingFromSeatRow(seat, { from: routeFrom.code, to: routeTo.code, toName: routeTo.name ?? null, date: routeDate });
+            } else if (target.trainNumber && target.missing.length && target.missing.every((m) => m === "date")) {
+              /* Round-37: sirf date missing — class/route poochhna galat hai; saaf date maango. */
+              setMessages((m) => [
+                ...m,
+                { id: newId(), role: "assistant", text: `${target.trainNumber}${target.classCode ? ` · ${target.classCode}` : ""} — kis date ko jaana hai? (jaise: kal, aaj, ya 28-09-2026). Date milte hi passenger form khul jayega.` },
+              ]);
+              setLastAsked("date");
+              return;
             }
           }
           // Booking continuity: AI gathered all slots + booking intent → open the bookable TrainBoard.
@@ -2254,7 +2287,12 @@ function BlockView({
     return (
       <TrainPicker
         picker={block.picker}
-        onSelect={(t) => onChip(`${t.number} ${t.name}${t.from && t.to ? ` (${t.from} → ${t.to})` : ""} select ki — iska kya chahiye: status, timetable, seat ya fare?`)}
+        onSelect={(t) => {
+          /* Round-37: picker tap par route yaad rakho — isse agle booking hukm ("12054 mein 2S book krdo")
+           * ka form bina kisi dobara-sawaal ke khul jaata hai (screenshot bug ka root cause). */
+          if (t.from && t.to) lastPickedTrainRef.current = { number: String(t.number), from: t.from, to: t.to, date: null };
+          onChip(`${t.number} ${t.name}${t.from && t.to ? ` (${t.from} → ${t.to})` : ""} select ki — iska kya chahiye: status, timetable, seat ya fare?`);
+        }}
       />
     );
   }
