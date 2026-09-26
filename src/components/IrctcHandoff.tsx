@@ -85,21 +85,19 @@ export function IrctcHandoff(props: HandoffInput) {
   };
 
   return (
+    /* Round-24 (user): "journey summary dikhe aur uske NEECHE Continue to IRCTC — uske elawa us page
+     * pe kuch mat rakhna." Isliye yahan koi heading/paragraph/note nahi — sirf button (+ click ke baad
+     * ka honest status, aur payload ban na paaye to ek error line). */
     <section className="list-card" id="irctc-handoff" aria-label="Continue to IRCTC" style={{ marginTop: 12 }}>
-      <div className="muted">IRCTC par booking</div>
-      <div style={{ marginTop: 6 }}>
-        Aap wahi journey IRCTC par le ja sakte hain. <b>Continue</b> pe: official IRCTC khulta hai
-        (Android pe Rail Connect app try, warna website) aur passenger details wahan auto-fill ke liye
-        taiyaar rehti hain. Booking wahin, apne haath se.
-      </div>
-      <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
+      <div style={{ display: "grid", gap: 8 }}>
         <button
           className="btn navy"
           id="irctc-continue"
           type="button"
           onClick={onContinue}
           disabled={!built.ok}
-          aria-describedby="irctc-handoff-note"
+          aria-describedby="irctc-handoff-status"
+          title="Kuch bhi auto-submit nahi hota · login / OTP / CAPTCHA / payment RailBook ke paas nahi aate"
         >
           Continue to IRCTC
         </button>
@@ -114,12 +112,9 @@ export function IrctcHandoff(props: HandoffInput) {
           {status}
         </div>
       )}
-      {/* Round-23 (user): "copy journey + passenger summary user ko nahi dikhna chahiye" — copy button,
-          copy-ready summary aur technical payload preview UI se hata diye. Click par summary phir bhi
-          clipboard par jaati hai (best-effort) taaki IRCTC me type/paste karne me aasani ho. */}
-      <div className="muted" id="irctc-handoff-note" style={{ marginTop: 8, fontSize: 12 }}>
-        Kuch bhi auto-submit nahi hota · login / OTP / CAPTCHA / payment RailBook ke paas nahi aate.
-      </div>
+      {/* Round-23 (user): copy button/copy-ready summary/payload preview UI se hata diye — click par
+          summary phir bhi clipboard par jaati hai (best-effort) taaki IRCTC me paste karne me aasani ho.
+          Round-24 (user): koi extra note bhi nahi — honest baat button ke title + click ke status me hai. */}
     </section>
   );
 }

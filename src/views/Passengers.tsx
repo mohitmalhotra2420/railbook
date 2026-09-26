@@ -124,10 +124,44 @@ export function Passengers() {
     return (
       <>
         <strong className="vb-field">SAB READY</strong>
-        <span className="vb-rest"> — Review fare dabaiye.</span>
+        <span className="vb-rest"> — Review journey dabaiye.</span>
       </>
     );
   }, [focus.slot]);
+
+  /* Round-24 (user screenshot 1): device par page khaali (bas background) dikh raha tha —
+   * (a) agar passengers list khaali ho gayi ho to ek blank card khud bana do (warna "SAB READY"
+   *     dikhta hai par bharne ke liye kuch nahi hota), aur
+   * (b) keyboard/IME ya rotate ke baad scroll ko content ke andar clamp karo — warna scroller
+   *     khaali hisse par atak jaata hai. Screen khulte hi scroll top par. */
+  const scrollRef = useRef<HTMLElement | null>(null);
+  const ensuredPax = useRef(false);
+  useEffect(() => {
+    if (ensuredPax.current) return;
+    if (state.passengers.length === 0) {
+      ensuredPax.current = true;
+      addPassenger();
+    }
+  }, [state.passengers.length, addPassenger]);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTop = 0;
+    const clamp = () => {
+      const max = Math.max(0, el.scrollHeight - el.clientHeight);
+      if (el.scrollTop > max) el.scrollTop = max;
+    };
+    const vv = window.visualViewport;
+    window.addEventListener("resize", clamp);
+    vv?.addEventListener?.("resize", clamp);
+    const t = window.setTimeout(clamp, 400);
+    return () => {
+      window.removeEventListener("resize", clamp);
+      vv?.removeEventListener?.("resize", clamp);
+      window.clearTimeout(t);
+    };
+  }, []);
 
   useEffect(() => {
     if (!focus.id || !focus.slot) return;
@@ -170,7 +204,7 @@ export function Passengers() {
   return (
     <Shell title="Passengers" back>
       <div className="dock-screen">
-      <main className="page dock-scroll">
+      <main className="page dock-scroll" ref={scrollRef}>
         {state.error && <div className="banner err">{state.error}</div>}
 
         {/* ── Booking summary: train number · date · from → to — apne aap, chip tap se aaya data ── */}
@@ -427,7 +461,7 @@ export function Passengers() {
             void goReview();
           }}
         >
-          Review fare
+          Review journey
         </button>
       </div>
       </div>

@@ -42,6 +42,8 @@ button { cursor: pointer; border: 0; background: none; }
 img { max-width: 100%; display: block; }
 
 .app {
+  /* Round-24: purane Android WebView me `dvh` unit nahi hota — pehle vh fallback, phir dvh. */
+  min-height: 100vh;
   min-height: 100dvh;
   display: flex;
   flex-direction: column;
@@ -492,6 +494,8 @@ h2 { font-size: 17px; }
 .summary .row span:last-child { font-weight: 600; text-align: right; }
 .summary .total { font-size: 18px; background: #faf7f1; }
 .summary .k { color: var(--muted); font-weight: 500; }
+/* Round-24: review page (journey receipt) me passenger/contact ki lambi line — right align + wrap. */
+.summary .row .rv-v { overflow-wrap: anywhere; }
 
 .status-hero {
   text-align: center;
@@ -539,6 +543,7 @@ h2 { font-size: 17px; }
 .sheet {
   background: #fff;
   width: min(480px, 100%);
+  max-height: 88vh;
   max-height: 88dvh;
   border-radius: 22px 22px 0 0;
   padding: 12px 16px calc(20px + var(--safe-b));
@@ -621,7 +626,7 @@ h2 { font-size: 17px; }
 }
 
 @media (min-width: 880px) {
-  .app { min-height: 100dvh; }
+  .app { min-height: 100vh; min-height: 100dvh; }
 }
 
 @media (max-width: 360px) {
@@ -631,6 +636,7 @@ h2 { font-size: 17px; }
 
 /* ── AI concierge ───────────────────────────────── */
 .concierge {
+  min-height: 100vh;
   min-height: 100dvh;
   display: flex;
   flex-direction: column;
@@ -794,8 +800,8 @@ h2 { font-size: 17px; }
   border: 2px solid rgba(255,255,255,0.55);
   animation: mic-ring 1.4s ease-out infinite;
 }
-.mic-rings::before, .mic-rings::after { content: ""; inset: -8px; }
-.mic-rings::after { inset: -12px; animation-delay: 0.35s; }
+.mic-rings::before, .mic-rings::after { content: ""; top: -8px; right: -8px; bottom: -8px; left: -8px; inset: -8px; }
+.mic-rings::after { top: -12px; right: -12px; bottom: -12px; left: -12px; inset: -12px; animation-delay: 0.35s; }
 @keyframes mic-ring {
   0% { opacity: 0.7; transform: scale(0.92); }
   100% { opacity: 0; transform: scale(1.18); }
@@ -809,6 +815,11 @@ h2 { font-size: 17px; }
 }
 .overlay-screen {
   position: absolute;
+  /* Round-24: `inset` (Chrome 87+) purane WebView me nahi hota — explicit offsets pehle. */
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   inset: 0;
   z-index: 30;
   background: var(--paper);
@@ -1173,6 +1184,7 @@ h2 { font-size: 17px; }
 .route-sheet {
   background: #fff;
   width: min(480px, 100%);
+  max-height: 92vh;
   max-height: 92dvh;
   border-radius: 22px 22px 0 0;
   display: flex;
@@ -2053,7 +2065,7 @@ table.traintable {
 .jx-pagecard-go{flex:none;display:inline-flex;align-items:center;gap:3px;font-size:12.5px;font-weight:800;color:#0b3b66}
 
 /* full-screen page */
-.jx-page{position:fixed;inset:0;z-index:80;background:#f4f6f9;overflow-y:auto;overscroll-behavior:contain}
+.jx-page{position:fixed;top:0;right:0;bottom:0;left:0;inset:0;z-index:80;background:#f4f6f9;overflow-y:auto;overscroll-behavior:contain}
 .jx-page-head{position:sticky;top:0;z-index:2;display:flex;align-items:center;gap:10px;padding:11px 12px;background:#0f172a;color:#fff;box-shadow:0 2px 10px rgba(15,23,42,.18)}
 .jx-page-back{flex:none;display:inline-flex;align-items:center;gap:4px;border:0;border-radius:10px;padding:8px 11px;background:rgba(255,255,255,.14);color:#fff;font:inherit;font-size:13px;font-weight:800;cursor:pointer}
 .jx-page-title{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
@@ -2164,7 +2176,7 @@ table.traintable {
 /* ── 24 Sep 2026: "bolne wala" sheet (user: ConfirmTkt ka Listening screen jaisa) ─────────────
  * Live transcript + quick chips + bada mic + ✍️ Type + ✕. Bhejna OK par (auto-send nahi).
  * Sirf UI — AI/server/API ko chhua nahi. */
-.vs-scrim{position:fixed;inset:0;background:rgba(11,31,58,.45);display:flex;align-items:flex-end;justify-content:center;z-index:60}
+.vs-scrim{position:fixed;top:0;right:0;bottom:0;left:0;inset:0;background:rgba(11,31,58,.45);display:flex;align-items:flex-end;justify-content:center;z-index:60}
 .vs-sheet{width:100%;max-width:520px;margin:0 auto;background:linear-gradient(180deg,#fff,#fbf9f5);border-radius:22px 22px 0 0;padding:14px 16px calc(18px + var(--safe-b));box-shadow:0 -18px 50px rgba(11,31,58,.28);animation:vs-up .18s ease-out}
 @keyframes vs-up{from{transform:translateY(18px);opacity:.6}to{transform:none;opacity:1}}
 .vs-head{display:flex;align-items:center;gap:10px}

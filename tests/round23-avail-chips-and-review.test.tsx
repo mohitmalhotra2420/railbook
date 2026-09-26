@@ -149,7 +149,7 @@ function seedReview() {
   );
 }
 
-describe("Round-23 · review page par sirf Continue to IRCTC", () => {
+describe("Round-23/24 · review page — journey summary + sirf Continue to IRCTC", () => {
   beforeEach(() => {
     sessionStorage.clear();
     seedReview();
@@ -167,28 +167,27 @@ describe("Round-23 · review page par sirf Continue to IRCTC", () => {
   });
   afterEach(() => sessionStorage.clear());
 
-  it("sirf handoff card — summary/wallet/Confirm Booking/copy sab nahi", async () => {
+  /* Round-23: booking summary + wallet + Confirm Booking + copy hata. Round-24: journey receipt wapas
+   * aaya (user screenshot 2) par wahi do cheezein — summary upar, Continue uske neeche, baaki kuch nahi. */
+  it("journey summary + Continue to IRCTC — wallet/Confirm Booking/copy abhi bhi nahi", async () => {
     const { container } = render(
       <BookingProvider>
         <FareReview />
       </BookingProvider>,
     );
     await waitFor(() => expect(container.querySelector("#irctc-continue")).toBeTruthy());
-    /* Continue button hai (page title aur aria-label bhi wahi hai — role se pakdo) */
     expect(screen.getByRole("button", { name: "Continue to IRCTC" })).toBeTruthy();
-
-    /* ye sab hat gaye */
+    /* journey receipt (Round-24) maujood hai */
+    expect(container.querySelector("#rv-journey")).toBeTruthy();
+    expect(container.querySelector("#rv-passengers")).toBeTruthy();
+    /* ye sab hat gaye rehte hain */
     expect(container.querySelector(".sticky-cta")).toBeNull();
-    expect(container.querySelector(".summary")).toBeNull();
     expect(screen.queryByText(/Confirm Booking/)).toBeNull();
     expect(screen.queryByText(/Wallet/)).toBeNull();
-    expect(screen.queryByText(/Base fare/)).toBeNull();
-    expect(screen.queryByText(/Service fee/)).toBeNull();
-    expect(screen.queryByText(/^Total/)).toBeNull();
     expect(screen.queryByText(/Copy journey \+ passenger summary/)).toBeNull();
     expect(container.querySelector("#irctc-handoff-summary")).toBeNull();
     expect(screen.queryByText(/Copy-ready summary/i)).toBeNull();
-    /* honest line rehti hai */
-    expect(container.textContent).toMatch(/auto-submit nahi hota/i);
+    /* honest baat (Round-24: UI clutter nahi — button ke title par) */
+    expect(container.querySelector("#irctc-continue")?.getAttribute("title")).toMatch(/auto-submit nahi hota/i);
   });
 });

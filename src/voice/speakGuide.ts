@@ -105,7 +105,7 @@ export function passengerAskLine(slot: "name" | "age" | "gender" | "berth" | nul
   if (slot === "age") return "Umar bhariye. Sirf number, jaise 28.";
   if (slot === "gender") return "Gender bhariye. Male, female, ya other.";
   if (slot === "berth") return "Berth bhariye. Lower, upper, middle, ya window.";
-  return "Sab details fill ho gayi hain. Review fare dabaiye.";
+  return "Sab details fill ho gayi hain. Review journey dabaiye.";
 }
 
 export function afterPassengerFill(

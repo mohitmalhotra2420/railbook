@@ -289,7 +289,10 @@ describe("IRCTC handoff — review-screen card", () => {
     const { container } = render(<IrctcHandoff {...input()} />);
     expect(container.querySelectorAll("form, input, textarea, select")).toHaveLength(0);
     expect([...container.querySelectorAll("button")].every((b) => b.getAttribute("type") === "button")).toBe(true);
-    expect(container.textContent).toMatch(/auto-submit nahi/i);
+    /* Round-24 (user): card par koi extra note line nahi — honest baat button ke title me hai. */
+    const btn = container.querySelector("#irctc-continue") as HTMLButtonElement;
+    expect(btn.getAttribute("title")).toMatch(/auto-submit nahi/i);
+    expect(container.textContent).not.toMatch(/IRCTC par booking/);
   });
 
   it("blocks the handoff (tab stays shut) when the payload cannot be built", () => {
