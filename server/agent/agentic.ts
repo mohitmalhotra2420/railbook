@@ -1259,8 +1259,11 @@ export async function executeApprovedTool(
           const ans = await findTopicAnswer(t);
           if (!ans) continue;
           let extra: { title: string; text: string; url: string } | null = null;
-          if (cmpParts && !cmpParts.some((p2) => ans.title.toLowerCase().includes(p2.split(" ")[0].toLowerCase()))) {
-            const other = await findTopicAnswer(cmpParts[0]).catch(() => null);
+          if (cmpParts) {
+            /* Jo subject page ke title me NAHI hai, usi ka page laao (warna "Vande Bharat Sleeper" page
+             * par "Vande" match hone se Rajdhani ka data chhoot jaata tha). */
+            const missing = cmpParts.find((p2) => !ans.title.toLowerCase().includes(p2.split(" ")[0].toLowerCase()));
+            const other = missing ? await findTopicAnswer(missing).catch(() => null) : null;
             if (other && other.title !== ans.title) extra = { title: other.title, text: other.text, url: other.url };
           }
           const body = extra ? `${ans.text}\n\nDOOSRI CHEEZ (${extra.title}): ${extra.text}` : ans.text;
