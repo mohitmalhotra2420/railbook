@@ -178,6 +178,9 @@ export type SearchCapture = {
   alternatives?: AlternativeTrainsResult | null;
   /** Round-18: SELECT TRAIN smart picker list (real validated trains). */
   trainPicker?: TrainPickerResult | null;
+  /** Round-33: model ne pax khud samjha (jaise "Kal,1" → 1) aur gate ne accept kiya — ye
+   * client ko wapas jaata hai taaki agle turn me AI dobara "kitne passengers?" na poochhe. */
+  passengers?: number | null;
 };
 
 /* ── Injectable NVIDIA fetch (tests) ─────────────────────────────── */
@@ -3120,7 +3123,19 @@ export async function runAgenticTurn(input: {
             rejected: "date_required",
           };
         } else {
-          result = await executeApprovedTool(toolName, args, { userText: input.text, capture: input.capture ?? null, passengers: input.known?.passengers ?? (typeof args.passengers === "number" && args.passengers >= 1 && args.passengers <= 6 && userStatedPax(input.text, args.passengers, { bareDigitIsPax: lastAskedPax }) ? args.passengers : null), deferDecision: true });
+          /* Round-33: jo pax model ne diya aur user ne sach me bola (bare "1" bhi, jab pichhla sawaal pax ka tha),
+         * wo capture me record hota hai — client agle turn me pax bhool na jaye (warna "kya ab bhi 1 passenger?"). */
+        if (
+          input.capture &&
+          !input.capture.passengers &&
+          typeof args.passengers === "number" &&
+          args.passengers >= 1 &&
+          args.passengers <= 6 &&
+          userStatedPax(input.text, args.passengers, { bareDigitIsPax: lastAskedPax })
+        ) {
+          input.capture.passengers = args.passengers;
+        }
+        result = await executeApprovedTool(toolName, args, { userText: input.text, capture: input.capture ?? null, passengers: input.known?.passengers ?? (typeof args.passengers === "number" && args.passengers >= 1 && args.passengers <= 6 && userStatedPax(input.text, args.passengers, { bareDigitIsPax: lastAskedPax }) ? args.passengers : null), deferDecision: true });
         }
         // Structured table capture (user feedback 2026-09-05): SEARCH/JOURNEY
         // success par rows nikalo — client proper <table> render karega, aur

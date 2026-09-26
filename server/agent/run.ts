@@ -1797,6 +1797,12 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
         webRescueEligible(String(req.text ?? ""), turn.steps);
       if (unhelpfulGeneral) agenticFailureReason = "unhelpful_summary_general_question";
       if (turn.reply && !pickReasked && !unhelpfulNoData && !unhelpfulGeneral && !skippedStationStep) {
+        /* Round-33: model ne jo pax khud samjha (jaise "Kal,1" → 1) wo ctx me yaad rakho —
+         * agle turn me AI dobara "kitne passengers?" nahi poochhega. */
+        if (!(ctx.paxProvided && ctx.passengers) && capture.passengers) {
+          ctx.passengers = capture.passengers;
+          ctx.paxProvided = true;
+        }
         // Memory (2026-09-05): search hui to trains ctx mein yaad rakho.
         rememberSearch(ctx, capture.table);
         // User instruction (2026-09-05): "waise hum continue kar sakte hain"

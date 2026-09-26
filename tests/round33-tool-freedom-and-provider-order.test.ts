@@ -176,6 +176,13 @@ describe("Round-33 · model ko saare tools khule hain (sirf 2 cheezein mana)", (
     expect(src).toContain("args.passengers !== \"number\"");
   });
 
+  it("model ka samjha hua pax capture hota hai (agla turn dobara na poochhe)", () => {
+    expect(src).toContain("input.capture.passengers = args.passengers;");
+    const run = read("server/agent/run.ts");
+    expect(run).toContain("if (!(ctx.paxProvided && ctx.passengers) && capture.passengers) {");
+    expect(run).toContain("ctx.paxProvided = true;");
+  });
+
   it("train list ke data me ab class-wise fares bhi jaate hain", () => {
     expect(src).toContain("fares: t.classes.filter((c) => c.fare > 0).map((c) => ({ code: c.code, fare: c.fare, source: c.source ?? null })),");
   });
