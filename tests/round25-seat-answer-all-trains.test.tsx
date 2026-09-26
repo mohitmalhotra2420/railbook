@@ -160,8 +160,8 @@ describe("Round-25 · /api/agent turn assembly — saari trains isi jawab me", (
     expect((res.body.reply.match(/19611/g) ?? []).length).toBe(1);
     /* koi jhootha card pointer nahi */
     expect(res.body.reply).not.toMatch(/seat\s*finder/i);
-    /* WL rows alag se nahi thopte (jo maanga tha wahi) */
-    expect(res.body.reply).not.toContain("14617");
+    /* Round-26: user ne "sirf available" nahi maanga → WL row bhi isi jawab me aati hai (status ke saath) */
+    expect(res.body.reply).toContain("14617 JANSEWA EXP — SL — WL 14");
   });
 
   it("AI ka jawab fail → sirf compact seat line (jisme saari trains hain), duplicate rows nahi", async () => {

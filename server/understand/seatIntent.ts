@@ -63,6 +63,12 @@ export const AC_CLASSES = ["1A", "2A", "3A", "3E", "CC", "EC"] as const;
 const SEAT_WORDS =
   /\b(seat|seats|berth|berths|available|availability|avl|vacant|khali|khaali|jagah)\b|सीट|बर्थ|जगह|खाली|उपलब्ध/iu;
 const QUESTION_WORDS = /(hai|hain|है|हैं|क्या|kaun|which|konsi|konsi\s*si|dikha|दिखा|batao|बताओ|chahiye|चाहिए)/iu;
+/* Round-26 (26 Sep, user: "SL ho ya koi bhi class, usmein sirf available mat show karo — W/L trains
+ * bhi show karo, kyunki user ne specifically nahi bola ki available dikhao"): "available" wale shabd
+ * tabhi maane jaate hain jab user ne SAAF maanga ho. Warna default = saari trains (AVL/RAC + WL/N-A). */
+const EXPLICIT_AVAILABLE_WORDS =
+  /\b(available|availability|avl|vacant|khali|khaali)\b|उपलब्ध|खाली|उपलब्धता/iu;
+
 const CONFIRMED_WORDS =
   /(?:sirf|only|केवल|सिर्फ)[^.!?]{0,16}(?:confirm|confirmed|कन्फर्म)|(?:confirmed|confirm)\s*(?:seat|seats|ticket|tickets)|कन्फर्म/i;
 const FASTEST_WORDS =
@@ -182,6 +188,8 @@ export function parseSeatIntent(rawText: string): SeatIntentSlots {
   const seatWord = SEAT_WORDS.test(text);
   const hasQuestion = QUESTION_WORDS.test(text);
   const confirmedOnly = CONFIRMED_WORDS.test(text);
+  /* Sirf tab available-only filter, jab user ne available/khali/confirmed saaf maanga ho. */
+  const askedAvailableOnly = EXPLICIT_AVAILABLE_WORDS.test(text) || confirmedOnly;
   const earliest = FASTEST_WORDS.test(text);
   const cheapest = CHEAPEST_WORDS.test(text);
   const explicitAfter = departAfterMinute(text);
@@ -215,6 +223,7 @@ export function parseSeatIntent(rawText: string): SeatIntentSlots {
   if (classGroup) matched.push(`group:${classGroup}`);
   if (explicitClasses.length) matched.push(`class:${explicitClasses.join("+")}`);
   if (confirmedOnly) matched.push("confirmed");
+  if (askedAvailableOnly) matched.push("available-only");
   if (earliest) matched.push("sort:fastest");
   if (cheapest) matched.push("sort:cheapest");
   if (departAfterMinuteValue != null) matched.push(`after:${departAfterMinuteValue}`);
@@ -237,7 +246,8 @@ export function parseSeatIntent(rawText: string): SeatIntentSlots {
     seatIntent,
     classCodes,
     classGroup,
-    onlyAvailable: seatIntent,
+    /* Round-26: default me WL/N-A bhi (user ne specifically available nahi maanga). */
+    onlyAvailable: askedAvailableOnly,
     confirmedOnly,
     sortBy: cheapest ? "cheapest" : earliest ? "fastest" : null,
     departAfterMinute: departAfterMinuteValue,

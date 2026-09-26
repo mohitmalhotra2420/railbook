@@ -156,6 +156,7 @@ export async function runAutoTool(name: string, rawArgs: unknown): Promise<AutoT
           to: String(args.to ?? args.destination ?? ""),
           date: String(args.date ?? ""),
           class_code: (args.class_code ?? args.classCode ?? args.classes ?? null) as string | null,
+          /* Round-26: default null → tool khud decide karta hai (ab default = WL/N-A bhi). */
           only_available: typeof args.only_available === "boolean" ? args.only_available : typeof args.onlyAvailable === "boolean" ? args.onlyAvailable : null,
           depart_after: (args.depart_after ?? args.afterText ?? args.after ?? null) as string | null,
           depart_before: (args.depart_before ?? args.beforeText ?? args.before ?? null) as string | null,

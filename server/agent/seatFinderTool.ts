@@ -120,7 +120,10 @@ export async function runFindSeatsTool(args: FindSeatsArgs): Promise<FindSeatsRe
   }
 
   const classCodes = classesFromArg(args.class_code);
-  const onlyAvailable = args.only_available !== false; /* default: seat wali (AVL/RAC) */
+  /* Round-26 (user: "sirf available mat show karo — W/L trains bhi show karo, kyunki user ne
+   * specifically nahi bola"): default ab false — yaani WL/N-A bhi, jab tak user ne khud
+   * "available / khali / sirf available / confirmed" na maanga ho. */
+  const onlyAvailable = args.only_available === true;
   /* Round-19: AI ne "subah"/"shaam"/"raat" bheja ho to poora WINDOW banao (warna sirf "ke baad"). */
   const wordWindow = timeWindowFromWord(args.depart_after == null ? null : String(args.depart_after));
   const departAfterMinute = wordWindow ? wordWindow.after : minutesFromArg(args.depart_after);
@@ -281,7 +284,8 @@ export const FIND_SEATS_DESCRIPTION =
   "'AC trains dikhao', 'sabse sasti seat wali train', 'raat 9 ke baad sleeper me seat', 'sirf confirmed wali dikhao', " +
   "'12029 me seat hai kya' — to PEHLE ye tool call karo aur uske result se hi jawab do (kabhi memory se seat mat batao). " +
   "Args: class_code = 'ALL' | 'AC' (1A/2A/3A/3E/CC/EC) | '2A','3A','SL','CC','EC','2S','3E','1A' (comma se kai); " +
-  "only_available = true sirf AVAILABLE+RAC, false to WL/N-A bhi; " +
+  "only_available = true SIRF tab jab user ne khud 'available/khali/sirf available/confirmed seat' maanga ho; " +
+  "warna false bhejo (default) — tab WL/N-A trains bhi aati hain aur jawab me saari trains status ke saath likhni hain; " +
   "TIME FILTER — user ne waqt bola ho to ye ZAROOR bhejo: depart_after = 'subah' | 'dopahar' | 'shaam' | 'raat' (poora window) " +
   "YA '17:00' / '5 baje ke baad'; depart_before = '12:00' / '12 baje se pehle'. " +
   "'subah ki trains batao' jaisa sawaal aaye to poora din ka jawab MAT do — usi window ki trains batao. " +
@@ -295,7 +299,7 @@ export const FIND_SEATS_PARAMETERS = {
     to: { type: "string", description: "Destination station code (BEAS) ya city naam (Beas)" },
     date: { type: "string", description: "Journey date YYYY-MM-DD" },
     class_code: { type: "string", description: "'ALL' | 'AC' | '1A'|'2A'|'3A'|'3E'|'SL'|'CC'|'EC'|'2S' (comma-separated bhi)" },
-    only_available: { type: "boolean", description: "true = sirf AVAILABLE/RAC (default true); false = WL/N-A bhi dikhao" },
+    only_available: { type: "boolean", description: "true = sirf AVAILABLE/RAC (sirf jab user ne available/confirmed maanga ho); false (default) = WL/N-A bhi dikhao" },
     depart_after: { type: "string", description: "Window ka shabd ('subah' | 'dopahar' | 'shaam' | 'raat') ya '17:00' / '5 baje ke baad' / 'raat 9 ke baad'" },
     depart_before: { type: "string", description: "'12:00' ya '12 baje se pehle' (is waqt se pehle wali trains)" },
     sort_by: { type: "string", description: "'cheapest' (sabse sasta) ya 'fastest' (sabse kam time)" },

@@ -94,7 +94,12 @@ function parseReply(text: string): Parsed {
   for (const line of lines) {
     for (let seg of segmentsOf(line)) {
       /* "SEAT (15 rows): 12014 …" — lead-in label header chip me, row alag (kuch chhupta nahi). */
-      const lab = /^([^:]{2,40}):\s*(?=\d{4,5}\s)/.exec(seg);
+      /* Round-26 (user: "trains total 10 hai lekin mere ko 9 show kar rhi"): AI aksar pehli train
+       * ko hi intro line me likh deta hai ("… seat wali trains: 19611 All ASR EXP — SL — AVAILABLE
+       * 174 seats — ₹150"). Pehle label 40 akshar tak hi match hota tha, isliye wo row head me chali
+       * jaati thi aur summary usse ginnti nahi thi (10 trains par "9 me seat"). Ab label 140 tak —
+       * row alag ho jaati hai aur count match karta hai. */
+      const lab = /^([^:]{2,140}):\s*(?=\d{4,5}\s)/.exec(seg);
       if (lab) {
         if (!out.rows.length && out.head.length < 3) out.head.push(lab[1].trim());
         seg = seg.slice(lab[0].length);
@@ -158,15 +163,18 @@ export function ReplyText({ text }: { text: string }): JSX.Element {
       {(() => {
         /* Round-22: summary line — sirf usi text ke numbers se (jo dikh raha hai wahi; kuch invent nahi). */
         const seatRows = parsed.rows.filter((r) => r.status === "AVAILABLE" || r.status === "RAC");
-        if (!seatRows.length) return null;
+        const wlRows = parsed.rows.filter((r) => r.status !== "AVAILABLE" && r.status !== "RAC");
+        if (!seatRows.length && !wlRows.length) return null;
         const counts = seatRows.map((r) => r.count).filter((n): n is number => typeof n === "number");
         const fares = parsed.rows
           .map((r) => Number(String(r.fare ?? "").replace(/[^\d]/g, "")))
           .filter((n) => Number.isFinite(n) && n > 0);
         return (
           <div className="rp-sum">
-            💺 {seatRows.length} me seat
-            {counts.length ? ` (${counts.join(", ")})` : ""}
+            {/* Round-26: total + seat/WL ka farq saaf — warna "9 me seat" aur 10 rows ka mismatch. */}
+            {wlRows.length ? `💺 ${parsed.rows.length} trains: ` : "💺 "}
+            {seatRows.length ? `${seatRows.length} me seat${counts.length ? ` (${counts.join(", ")})` : ""}` : "koi seat nahi"}
+            {wlRows.length ? ` · ${wlRows.length} WL/N-A` : ""}
             {fares.length > 1 ? ` · fare ₹${Math.min(...fares)}–₹${Math.max(...fares)}` : fares.length === 1 ? ` · fare ₹${fares[0]}` : ""}
           </div>
         );

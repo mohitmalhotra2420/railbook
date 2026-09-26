@@ -164,7 +164,7 @@ const fmtRow = (r: SeatFilterRow) => {
 export function seatSummaryLine(
   pick: SeatPickResult,
   slots: Pick<SeatIntentSlots, "classCodes" | "classGroup" | "sortBy" | "departAfterMinute"> &
-    Partial<Pick<SeatIntentSlots, "windowLabel">>,
+    Partial<Pick<SeatIntentSlots, "windowLabel" | "onlyAvailable">>,
   where: { from: string; to: string },
 ): string {
   const cls =
@@ -183,6 +183,25 @@ export function seatSummaryLine(
         : ` (${String(Math.floor(whenMin / 60)).padStart(2, "0")}:${String(whenMin % 60).padStart(2, "0")} ke baad)`;
   const sortNote = slots.sortBy === "cheapest" ? " · sabse sasta pehle" : slots.sortBy === "fastest" ? " · sabse jaldi pehle" : "";
   const head = `${where.from} → ${where.to} · live board`;
+
+  /* Round-26 (user: "sirf available mat show karo — W/L trains bhi show karo"): jab user ne khud
+   * available nahi maanga (slots.onlyAvailable === false) to ek hi line me SAARI trains — pehle
+   * AVL/RAC, phir WL/N-A — aur count saaf: kitni me seat, kitni WL/N-A. Kuch invent nahi. */
+  if (slots.onlyAvailable === false && (pick.seat.length || pick.wl.length)) {
+    const all = [...pick.seat, ...pick.wl];
+    const trains = trainCount(all);
+    const withSeat = trainCount(pick.seat);
+    const wlOnly = trains - withSeat;
+    const shown = all.slice(0, SEAT_LINE_MAX).map(fmtRow).join(" · ");
+    const more = all.length > SEAT_LINE_MAX ? ` · +${all.length - SEAT_LINE_MAX} aur bhi hain` : "";
+    const countBit =
+      pick.seat.length && pick.wl.length
+        ? `${withSeat} me seat (AVL/RAC), ${wlOnly} me WL/N-A`
+        : pick.seat.length
+          ? `${withSeat} me seat (AVL/RAC)`
+          : `${wlOnly} me sirf WL/N-A`;
+    return `💺 ${cls} me ${trains} train${trains === 1 ? "" : "s"}${when}${sortNote} — ${countBit}: ${shown}${more}. (${head})`;
+  }
 
   if (pick.seat.length) {
     const trains = trainCount(pick.seat);

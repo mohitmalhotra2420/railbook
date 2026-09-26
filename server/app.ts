@@ -257,9 +257,12 @@ export function createApp() {
        */
       let seatFilter: SeatFilterResult | null = null;
       let seatClassCodes: string[] = [];
+      /* Round-26: "sirf available" maanga gaya hai ya nahi — default false (saari trains, WL bhi). */
+      let seatOnlyAvailable = false;
       if (env.seatFilterServer) {
         const slots = parseSeatIntent(String(body?.text ?? ""));
         seatClassCodes = slots.classCodes;
+        seatOnlyAvailable = slots.onlyAvailable;
         const from = result.nlu?.from?.code ?? (body?.known as { from?: { code?: string } } | undefined)?.from?.code ?? null;
         const to = result.nlu?.to?.code ?? (body?.known as { to?: { code?: string } } | undefined)?.to?.code ?? null;
         const date = result.nlu?.date ?? (body?.known as { date?: string } | undefined)?.date ?? null;
@@ -299,7 +302,13 @@ export function createApp() {
        * warna "seat wali trains" ke jawab me 18 lines aa jaati hain (live check me dikha). Agar user
        * ne WL bhi poochha ho (only_available=false) to rows me WL pehle se hote hain. */
       const seatExtra =
-        seatFilter && !hasPlanCard && aiReplyText ? missingSeatLines(aiReplyText, seatFilter.rows) : [];
+        seatFilter && !hasPlanCard && aiReplyText
+          ? missingSeatLines(
+              aiReplyText,
+              /* Round-26: jab user ne sirf-available nahi maanga, WL/N-A rows bhi usi jawab me aati hain. */
+              seatOnlyAvailable ? seatFilter.rows : [...seatFilter.rows, ...seatFilter.wlRows],
+            )
+          : [];
       const replyWithSeats =
         seatExtra.length > 0
           ? `${String(result.reply ?? "").trim()}\n${seatExtra.join("\n")}`.trim()
