@@ -993,14 +993,28 @@ export function Concierge() {
            * chip tap karne par Round-29 ka auto-advance seedha passenger form kholta hai. Kuch na ho to
            * koi chip nahi (jhoothi suggestion se behtar kuch na kehna). */
           {
-            const ns = nextStepsFor({
+            /* Round-32 (user: "har query pehle model ke pass jaani chahiye and wo decide kare kya karna
+             * hai"): PEHLE model ka chuna hua agla kadam (reply ki [NEXT] lines se; server ne tool-evidence
+             * se validate kiya). Model ne na diya ho to verified data se bana fallback (Round-31) — taaki
+             * agla kadam phir bhi mile, par kabhi jhootha na mile. */
+            const modelActions = agentRes.nextActions ?? [];
+            if (modelActions.length) {
+              blocks.push({
+                type: "nextstep",
+                source: "model",
+                options: modelActions.map((a, i) => ({ id: `m${i}`, label: a.label, utterance: a.utterance, primary: a.primary ?? i === 0 })),
+                hint: null,
+              });
+            } else {
+              const ns = nextStepsFor({
               seats: [...(agentRes.seatFilter?.rows ?? []), ...(agentRes.seatFilter?.wlRows ?? [])],
               focus: askedTrains,
               trains: agentRes.trains?.rows ?? null,
               journey: agentRes.journey ?? null,
-              trainHint: askedTrains[0] ?? lastFactTrainRef.current ?? null,
-            });
-            if (ns.options.length) blocks.push({ type: "nextstep", options: ns.options, hint: ns.hint });
+                trainHint: askedTrains[0] ?? lastFactTrainRef.current ?? null,
+              });
+              if (ns.options.length) blocks.push({ type: "nextstep", source: "data", options: ns.options, hint: ns.hint });
+            }
           }
           const tableBlock: Block[] | undefined = blocks.length ? blocks : undefined;
           setMessages((m) => [
@@ -1976,6 +1990,11 @@ export function NextStepCard({
     <div className="ns-card" id="next-step">
       <div className="ns-label">
         <span className="ns-dot" aria-hidden>➡️</span> Agla kadam
+        {block.source ? (
+          <span className={`ns-tag ${block.source}`} title={block.source === "model" ? "AI ne khud ye agla kadam chuna" : "AI ne nahi diya — verified data se banaya"}>
+            {block.source === "model" ? "AI ne chuna" : "verified data se"}
+          </span>
+        ) : null}
       </div>
       <div className="ns-chips">
         {block.options.map((o) => (

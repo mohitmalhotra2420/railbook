@@ -357,6 +357,8 @@ export function createApp() {
         trainPicker: result.trainPicker ?? null,
         choice: result.choice ?? null,
         liveDates: result.liveDates ?? null,
+        /* Round-32: model ka chuna hua agla kadam (client chips me dikhata hai). */
+        nextActions: result.nextActions ?? null,
         grounded: result.grounded ?? null,
         agenticFailureReason: (result as { agenticFailureReason?: string | null }).agenticFailureReason ?? null,
         perf: summarize(scope),

@@ -134,6 +134,8 @@ export type AgenticTurn = {
   modelFallbacks?: { model: string; reason: string; ms: number; round: number }[];
   latencyMs: number;
   failureReason: string | null;
+  /** Round-32: model ka khud chuna hua "agla kadam" (reply ki [NEXT] lines se, evidence-validated). */
+  nextActions?: NextAction[] | null;
 };
 
 /* ── Structured train table (user feedback 2026-09-05: chat-text list
@@ -2056,7 +2058,7 @@ function systemPrompt(
     "14. Train ka NAAM user ne bola (jaise 'swarn shatabdi', 'vande bharat') to USI train ka jawab do — known context mein trainNumber aaya hai ya list mein se naam match hua hai. Pichhli selected train se mix mat karo. Naam se train identify na ho to honestly poochho, galat train ka data mat do.",
     "15. 'Kitne time leti hai / kitna samay lagta hai' = user ke origin→destination SEGMENT ka duration (GET_TIMETABLE summary mein 'FROM→TO dep→arr (Xh YYm)' segment line hai). Poora-route duration sirf tab batao jab user 'poora route' maange.",
     "12. Jab bhi train LIST dikha rahe ho (SEARCH_TRAINS/JOURNEY_ANALYZE results): reply TEXT mein sirf 2-3 line ka summary do — count + 'Sabse fast: <number> <name> (<duration>)' top par highlight. POORI train-by-train list reply text mein MAT likho — app khud organized TABLE mein saari trains dikhata hai. User ko dobara poochna na pade. Cheapest/earliest bhi isi tarah jab relevant ho. Jab train agle din ya usse baad pahunchti ho (arrivalDay 'Day 2'/'Day 3'), arrival ke saath wahi label likho — jaise '11:35 (Day 2)' — kabhi skip mat karo.",
-    "13. Reply ke end mein PROACTIVE offer/continuation KABHI mat likho (jaise 'waise hum continue kar sakte hain', 'aap chahe to…', 'kya aapko aur kuch chahiye?', 'shall I continue?'). Sirf user ke sawaal ka jawab do — aage ka step tabhi batao jab user poochhe. (Zaroori slot-filling questions — date/station/passengers/booking-confirm — exempt hain, woh poochte raho.)",
+    "13. Reply ke end mein generic chit-chat offer/continuation KABHI mat likho (jaise 'waise hum continue kar sakte hain', 'kya aapko aur kuch chahiye?', 'shall I continue?'). Par user ka ASLI agla kadam HAMESHA aage badhao — jawab ke turant baad [NEXT] line(s) me (rule 26), aur booking/passenger/date jaise zaroori slot-filling sawaal reply ke andar poochte raho.",
     "18. CONTEXT-SWITCH (sabse zaroori): user ka CURRENT message hi priority hai. Agar aapne pichhle reply mein kuch poochha tha (station options/date/confirm) par user ne uska jawab NAHI diya aur koi alag cheez/train poochh li — to PEHLE naye sawaal ka jawab do (tool call karke). Apna pending sawaal naye reply mein dobara repeat ya attach mat karo; jab user khud wapas usi journey ki baat kare tab options yaad dilao. Same chat mein topic/train badalna normal hai — 'chhodo/arré chhad' jaise words ko ignore-marker ki tarah samjho.",
     "19. Purani search ki trains se current sawaal ka jawab MAT banao (jaise user ne fastest train poocha aur aap pichhli list ki kisi train par 'nahi, ye wahin stop nahi karti' bolo). Current sawaal ka data na mile to: pehle relevant TOOL call karo; phir bhi na mile to 1-2 line mein saaf bolo kya unavailable hai — flat 'is question ka jawab evidence mein nahi hai' jaisa kabhi nahi.",
     "20. Timetable/stops/route poora poochha jaye ('poora timetable do', 'kon kon se stops hain', 'har stop ka naam', 'route kya hai', 'kahan kahan rukti hai') to GET_TIMETABLE ke data se SABHI stops list karo — naam + arrival/departure (max ~25, numbered). Sirf '11 stops' jaisa COUNT mat bolna. Ye sawaal journey-slot (origin/date) ka nahi hai — 'kahan se jana hai?' MAT poochna. 'Kon kon se/kaun kaun se' jaise question-words TRAIN KE NAAM nahi hote — bina number ke follow-up par pichhli train (history/known context) use karo, TRAIN_NAME_SEARCH par ye phrase mat bhejo.",
@@ -2065,6 +2067,7 @@ function systemPrompt(
       "23. GENERAL-FACT sawaal (top speed/max speed/kitni tez/average speed/kab chalu hui/kab shuru/history/kitne coach) par WEB_SEARCH PEHLA tool hai — train ka naam/number dhoondh kar train-list 'kaunsi?' bilkul mat poochho. Query mein train/topic ka POORA naam do (jaise 'Vande Bharat Express top speed', 'Konkan Railway history'). WEB_SEARCH ka result summary mein AKSAR seedha jawab hota hai ('Web se mila (Wikipedia — …): …' + Source) — us text ko 2-4 line Hinglish mein user ko do, numbers/dates/names bilkul waise hi, 'Web se mila (Wikipedia — <title>)' label + '(Source: <url>)' ke saath. EK search kaafi hai — result aane ke baad dobara/alag query se search MAT karo, seedha reply likho. Web results ko verified railway data jaisa present na karo. Baaki cases mein WEB_SEARCH last-resort hai (railway tools/KB jawab na dein YA sawaal general railway background/history/news ka ho). Live time/fare/seats/availability/booking ke liye web data kabhi use na karo. Ek reply mein max 1 web search.",
     "25. Reply mein KABHI 'tool', 'tool result', 'tool se mila', 'API', 'function', 'evidence' jaise internal words mat likho — user ko sirf railway data chahiye, tumhara internal process nahi. Bas seedha jawab: 'LDH → ASR kal 27 trains hain…'. Source label sirf tab jab summary mein '(Source: …)' aaye — use waise hi rakho.",
       "24. UNIVERSAL WEB FALLBACK (user request 2026-09-06: 'ChatGPT jaisa — koi bhi railway sawaal, API se jawab na mile to khud web se dhoondh lo'): koi bhi railway ka sawaal (catering/pantry/rules/facilities/history/facts/general knowledge) jiska jawab railway data tools (timetable/live/fare/seats) se NAHI aata — WEB_SEARCH se dhoondo aur 'web se mila' + source label ke saath do. Railway-irrelevant web results (cars/automobiles jaise) skip karo, railway-relevant hi do. Na mile to honest 'nahi mil paya' bolo — guess kabhi nahi. Live status/fare/seats/availability/PNR ke liye web search kabhi use mat karna — wahan sirf railway tools.",
+      "26. AGLA KADAM (user requirement 2026-09-26: 'answer ke baad AI ko next step pe leke jaana chahiye'): jawab ke EKDUM aakhir me 1-2 line likho — bilkul is format me, kuch aur nahi: [NEXT] <chhota label> => <wahi baat jo user bhej sakta hai>. Jaise: '[NEXT] Book 12013 · CC (AVL 354 ₹675) => 12013 mein CC book krdo'. Rules: (a) sirf ISI turn ke tool data se banao — koi naya train number/naam/fare/count nahi; (b) label me wahi number jo data me hai; (c) max 2 lines, sabse zaroori pehle; (d) next kadam us sawaal ke hisaab se ho (seat data aaya to booking; train list aayi to 'kis train me seat hai'; kuch verified na ho to koi [NEXT] line nahi — zaroori nahi har baar); (e) reply ke andar [NEXT] ke alawa agla kadam dobara mat likho (UI khud dikhata hai).",
   ]
     .filter(Boolean)
     .join("\n");
@@ -2165,6 +2168,35 @@ const SAFE_UPPER_TOKENS = new Set([
    * poora jawab reject. Format placeholders/common words station codes nahi hain. */
   "YYYY", "MM", "DD", "HH", "YY", "DDMM", "MMYY", "AAJ", "KAL", "WL", "AVL", "NA", "TBD", "ETA", "ETD", "DEP", "ARR", "GMT", "KM", "KMPH", "HRS", "MIN", "MINS", "AND", "OR", "THE", "TO", "FROM", "VIA", "JN", "NR", "NER", "NWR", "NCR", "ECR", "WCR", "SCR", "SER", "SECR", "SWR", "WR", "CR", "ER", "NFR", "KR", "SR", "NE",
 ]);
+
+/** Round-32: model ka chuna hua "agla kadam" (reply ke aakhir ki [NEXT] lines se). */
+export type NextAction = { label: string; utterance: string; primary?: boolean };
+
+/**
+ * Round-32 (user: "har query pehle model ke pass jaani chahiye and wo decide kare… kya karna hai" +
+ * "answer ke baad AI ko next step pe leke jaana chahiye"): agla kadam ab MODEL decide karta hai —
+ * reply ke aakhir me `[NEXT] label => utterance` line(s) likh kar. Ye function unhe alag karta hai
+ * (reply text se hata kar, taaki raw line user ko na dikhe) aur max 2 rakhta hai. Safety: har action
+ * ke numbers/tokens baad me tool-evidence se verify hote hain — data me na ho to drop.
+ */
+export function extractNextActions(content: string): { text: string; actions: NextAction[] } {
+  const actions: NextAction[] = [];
+  const text = String(content ?? "")
+    .split(/\r?\n/)
+    .filter((line) => {
+      const m = /^\s*\[\s*NEXT\s*\]\s*(.+?)\s*(?:=>|→|:)\s*(.+?)\s*$/i.exec(line);
+      if (!m) return true;
+      if (actions.length >= 2) return false;
+      const label = m[1].replace(/[*_`]/g, "").trim();
+      const utterance = m[2].replace(/[*_`]/g, "").trim();
+      if (label && utterance) actions.push({ label, utterance, primary: actions.length === 0 });
+      return false;
+    })
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  return { text, actions };
+}
 
 function groundingCheck(content: string, steps: ToolTraceStep[], evidenceParts: string[]): { grounded: boolean; evidence: string } {
   const evidence =
@@ -3194,7 +3226,9 @@ export async function runAgenticTurn(input: {
         failureReason: "empty_content",
       };
     }
-    const clean = scrubProactiveOffers(redact(content));
+    /* Round-32: model ke [NEXT] (agla kadam) pehle alag — warna wo line user ko dikh jaati. */
+    const extracted = extractNextActions(redact(content));
+    const clean = scrubProactiveOffers(extracted.text);
 
     // Repair pass (one-shot): model ne tools chala kar data le liya, phir bhi
     // "info maango" wala jawab de diya? Ek corrective call do — data upar hai.
@@ -3288,7 +3322,10 @@ export async function runAgenticTurn(input: {
       }
     }
 
-    const check = groundingCheck(clean, steps, [...evidenceParts, ...messages.map((m) => m.content ?? "")]);
+    const evidenceAll = [...evidenceParts, ...messages.map((m) => m.content ?? "")];
+    const check = groundingCheck(clean, steps, evidenceAll);
+    /* Round-32: model ka "agla kadam" bhi evidence se verify — jo number/naam is turn me nahi aaya, drop. */
+    const nextActions = extracted.actions.filter((a) => groundingCheck(`${a.label} ${a.utterance}`, steps, evidenceAll).grounded);
     if (!check.grounded) {
       // Ungrounded output — deterministic, provider-backed replacement.
       // Needs_choice waale turn par REAL tool options relay karo (model ne
@@ -3371,7 +3408,15 @@ export async function runAgenticTurn(input: {
         failureReason: `ungrounded_numbers:${check.evidence}`,
       };
     }
-    return { ok: true, reply: clean, grounded: true, steps, modelUsed, modelFallbacks, latencyMs: Date.now() - startedAll, failureReason: null };
+    return {
+      ok: true,
+      reply: clean,
+      grounded: true,
+      steps,
+      modelUsed, modelFallbacks, latencyMs: Date.now() - startedAll,
+      failureReason: null,
+      nextActions: nextActions.length ? nextActions : null,
+    };
   }
 
   // Step budget kharch — honest deterministic summary.

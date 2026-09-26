@@ -2178,6 +2178,9 @@ table.traintable {
 .ns-card { margin-top: 9px; border: 1px dashed #cdd8e6; background: #f7faff; border-radius: 12px; padding: 8px 10px; }
 .ns-label { font-size: 11px; font-weight: 800; letter-spacing: .02em; text-transform: uppercase; color: #365b8a; display: flex; align-items: center; gap: 5px; }
 .ns-dot { font-size: 11px; }
+/* Round-32: card par saaf likha ho ki agla kadam AI ne chuna ya verified data se bana (kuch chhupa nahi). */
+.ns-tag { margin-left: 6px; font-size: 9.5px; font-weight: 700; letter-spacing: .02em; text-transform: none; border-radius: 999px; padding: 1px 7px; border: 1px solid #cdd8e6; color: #365b8a; background: #fff; }
+.ns-tag.model { border-color: #bcd6c5; color: var(--green); }
 .ns-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .ns-chip { font: inherit; font-size: 12px; font-weight: 600; border: 1px solid var(--line); background: #fff; color: #22304a;
   border-radius: 999px; padding: 5px 11px; cursor: pointer; }

@@ -175,7 +175,8 @@ describe("Round-31 · Concierge wiring + CSS", () => {
     expect(src).toContain("seats: [...(agentRes.seatFilter?.rows ?? []), ...(agentRes.seatFilter?.wlRows ?? [])],");
     expect(src).toContain("trains: agentRes.trains?.rows ?? null,");
     expect(src).toContain("journey: agentRes.journey ?? null,");
-    expect(src).toContain('if (ns.options.length) blocks.push({ type: "nextstep", options: ns.options, hint: ns.hint });');
+    /* Round-32: model ka chuna hua agla kadam pehle; data-derived fallback tab jab model ne na diya ho. */
+    expect(src).toContain('blocks.push({ type: "nextstep", source: "data", options: ns.options, hint: ns.hint });');
     /* render branch + component */
     expect(src).toContain('if (block.type === "nextstep") {');
     expect(src).toContain("<NextStepCard block={block} onChip={onChip} />");
@@ -184,7 +185,9 @@ describe("Round-31 · Concierge wiring + CSS", () => {
 
   it("block type Block union me hai (orchestrate) + CSS maujood", () => {
     const orch = fs.readFileSync(path.join(process.cwd(), "src/ai/orchestrate.ts"), "utf8");
-    expect(orch).toContain('| { type: "nextstep"; options: { id: string; label: string; utterance: string; primary?: boolean }[]; hint?: string | null }');
+    /* Round-32 me block me source field bhi aaya (model vs data) — union multiline hai. */
+    expect(orch).toContain('type: "nextstep";');
+    expect(orch).toContain('source?: "model" | "data";');
     const css = fs.readFileSync(path.join(process.cwd(), "src/styles.css"), "utf8");
     expect(css).toContain(".ns-card");
     expect(css).toContain(".ns-chip.primary");

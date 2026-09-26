@@ -37,7 +37,13 @@ export type Block =
   | { type: "chips"; options: { id: string; label: string; utterance?: string }[] }
   /* Round-31 (user: "answer ke baad AI ko next step pe leke jaana chahiye"): har jawab ke neeche
    * "Agla kadam" — sirf usi turn ke verified data se bane 1-2 tappable chips. Koi andaza nahi. */
-  | { type: "nextstep"; options: { id: string; label: string; utterance: string; primary?: boolean }[]; hint?: string | null }
+  | {
+      type: "nextstep";
+      options: { id: string; label: string; utterance: string; primary?: boolean }[];
+      hint?: string | null;
+      /** Round-32: "model" = AI ne khud chuna; "data" = verified data se banaya (AI ne nahi diya). */
+      source?: "model" | "data";
+    }
   | { type: "stations"; options: { code: string; name: string; city: string }[]; slot: "from" | "to" }
   | { type: "dates"; options: { date: string; label: string }[] }
   | { type: "train"; train: TrainResult; badge?: string; reason?: string; primary?: boolean }

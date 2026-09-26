@@ -428,6 +428,8 @@ export type AgentResponse = {
   grounded?: boolean;
   /** Agentic turn chala par model/provider fail hua to wajah (observability; success par null). */
   agenticFailureReason?: string | null;
+  /** Round-32: model ka khud chuna hua "agla kadam" (us turn ke verified data se validate hokar). */
+  nextActions?: import("./agentic.js").NextAction[] | null;
 };
 
 /**
@@ -1831,6 +1833,8 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
           toolTrace: turn.steps,
           agenticFailureReason: turn.ok ? null : (turn.failureReason ?? null),
           grounded: turn.grounded,
+          /* Round-32: model ne khud jo agla kadam chuna (agar diya ho). */
+          nextActions: turn.nextActions ?? null,
         };
       }
       // Agentic chala par reply nahi bana — wajah record karo, fallback chalo.

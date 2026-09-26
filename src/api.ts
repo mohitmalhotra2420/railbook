@@ -59,6 +59,8 @@ export type AgentResponse = {
         trainsSeen: number;
         source: string | null;
       } | null;
+      /** Round-32: model ka khud chuna hua "agla kadam" (chips) — verified data se validate hokar. */
+      nextActions?: { label: string; utterance: string; primary?: boolean }[] | null;
       trains?: import("./ai/agent").AgentTrainTable | null;
       journey?: import("./ai/agent").AgentJourneyPlan | null;
       alternatives?: import("./ai/agent").AgentAlternatives | null;
