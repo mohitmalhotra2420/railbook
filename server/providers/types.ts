@@ -44,7 +44,9 @@ export interface ClassAvailability {
   /** Honest note jo UI dikhata hai — jaise "Train Cancelled" (ConfirmTkt board). */
   note?: string;
   /** Round-18g: fare ka alag source jab seats kisi aur provider se aaye (provenance mix nahi). */
-  fareSource?: "web_erail" | "railradar" | "indianrailapi";
+  /* Round-33: fare ka web chain CONFIRMTKT → RAILYATRI → ERAIL (webOrder.ts) — dono naye
+   * sources bhi honest label ke saath aa sakte hain. */
+  fareSource?: "web_confirmtkt" | "web_railyatri" | "web_erail" | "railradar" | "indianrailapi";
   webNote?: string;
   /** Round-18m: web cache SA_MAX_AGE (24h) se purani — "last known", ⚠ stale. */
   stale?: boolean;

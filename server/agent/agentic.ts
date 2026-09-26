@@ -429,7 +429,7 @@ export const AGENTIC_TOOLS = [
       parameters: {
         type: "object",
         properties: {
-          passengers: { type: "number", description: "Kitne log (1-6). ZAROORI — seat/journey tools bina iske reject ho jaate hain; user ne na bataya ho to pehle poochho, 1 assume mat karo." },
+          passengers: { type: "number", description: "Kitne log (1-6). OPTIONAL — train LIST ke liye zaroori nahi (seat/journey/plan tools me zaroori hai)." },
           origin: { type: "string", description: "Origin station code (ASR) ya naam (Amritsar). Code sirf known context ya pichle tool result se lo — guess mat karo." },
           destination: { type: "string", description: "Destination: city NAAM (jaise Delhi) best hai ya known rail code (NDLS). Airport-style codes galat hain — DEL DENDULURU hai, Delhi nahi." },
           date: { type: "string", description: "Journey date YYYY-MM-DD" },
@@ -1525,6 +1525,9 @@ export async function executeApprovedTool(
               durationMinutes: t.durationMinutes,
               durationLabel: t.durationLabel,
               classes: t.classes.map((c) => c.code),
+              /* Round-33: user ki shikayat "list without fare and timings" — timings upar hai,
+               * ab har train ki class-wise fare bhi (jo provider ne di). Fare 0 = provider ne nahi diya. */
+              fares: t.classes.filter((c) => c.fare > 0).map((c) => ({ code: c.code, fare: c.fare, source: c.source ?? null })),
             })),
           },
         );
@@ -2064,10 +2067,12 @@ function systemPrompt(
     "20. Timetable/stops/route poora poochha jaye ('poora timetable do', 'kon kon se stops hain', 'har stop ka naam', 'route kya hai', 'kahan kahan rukti hai') to GET_TIMETABLE ke data se SABHI stops list karo — naam + arrival/departure (max ~25, numbered). Sirf '11 stops' jaisa COUNT mat bolna. Ye sawaal journey-slot (origin/date) ka nahi hai — 'kahan se jana hai?' MAT poochna. 'Kon kon se/kaun kaun se' jaise question-words TRAIN KE NAAM nahi hote — bina number ke follow-up par pichhli train (history/known context) use karo, TRAIN_NAME_SEARCH par ye phrase mat bhejo.",
     "21. Do trains compare karne ko kahe ('12014 and 12054 mein se kon si better', 'X vs Y') to DONO par GET_TIMETABLE call karo aur duration/stops/classes/timing compare karke 2-4 line mein data-based verdict do. Ek train ka data na mile to doosre ka jo mila wo do + saaf bolo kaunsa nahi mila — poora compare 'data nahi mila' se cancel MAT karo. Route alag ho (last stop different) to pehle batao.",
     "22. User ne clearly kaha ki travel NAHI karna, sirf information chahiye ('jaana nahi hai', 'sirf details chahiye', 'bas batao') to journey slots (origin/destination/date) kabhi mat poochho — seedha info tool se do. Travel-denial wale message ko station/journey input ki tarah parse MAT karna.",
-      "23. GENERAL-FACT sawaal (top speed/max speed/kitni tez/average speed/kab chalu hui/kab shuru/history/kitne coach) par WEB_SEARCH PEHLA tool hai — train ka naam/number dhoondh kar train-list 'kaunsi?' bilkul mat poochho. Query mein train/topic ka POORA naam do (jaise 'Vande Bharat Express top speed', 'Konkan Railway history'). WEB_SEARCH ka result summary mein AKSAR seedha jawab hota hai ('Web se mila (Wikipedia — …): …' + Source) — us text ko 2-4 line Hinglish mein user ko do, numbers/dates/names bilkul waise hi, 'Web se mila (Wikipedia — <title>)' label + '(Source: <url>)' ke saath. EK search kaafi hai — result aane ke baad dobara/alag query se search MAT karo, seedha reply likho. Web results ko verified railway data jaisa present na karo. Baaki cases mein WEB_SEARCH last-resort hai (railway tools/KB jawab na dein YA sawaal general railway background/history/news ka ho). Live time/fare/seats/availability/booking ke liye web data kabhi use na karo. Ek reply mein max 1 web search.",
+      "23. GENERAL-FACT sawaal (top speed/max speed/kitni tez/average speed/kab chalu hui/kab shuru/history/kitne coach) par WEB_SEARCH PEHLA tool hai — train ka naam/number dhoondh kar train-list 'kaunsi?' bilkul mat poochho. Query mein train/topic ka POORA naam do (jaise 'Vande Bharat Express top speed', 'Konkan Railway history'). WEB_SEARCH ka result summary mein AKSAR seedha jawab hota hai ('Web se mila (Wikipedia — …): …' + Source) — us text ko 2-4 line Hinglish mein user ko do, numbers/dates/names bilkul waise hi, 'Web se mila (Wikipedia — <title>)' label + '(Source: <url>)' ke saath. EK search kaafi hai — result aane ke baad dobara/alag query se search MAT karo, seedha reply likho. Web results ko verified railway data jaisa present na karo. Baaki cases mein WEB_SEARCH jab bhi kaam aaye tab use karo (railway tools/KB jawab na dein YA sawaal general railway background/history/news ka ho) — search count ki koi limit nahi, par har search ke baad uska source label dena zaroori hai. Live time/fare/seats/availability/booking ke liye web data kabhi use na karo (wahan railway tools hi final hain).",
     "25. Reply mein KABHI 'tool', 'tool result', 'tool se mila', 'API', 'function', 'evidence' jaise internal words mat likho — user ko sirf railway data chahiye, tumhara internal process nahi. Bas seedha jawab: 'LDH → ASR kal 27 trains hain…'. Source label sirf tab jab summary mein '(Source: …)' aaye — use waise hi rakho.",
       "24. UNIVERSAL WEB FALLBACK (user request 2026-09-06: 'ChatGPT jaisa — koi bhi railway sawaal, API se jawab na mile to khud web se dhoondh lo'): koi bhi railway ka sawaal (catering/pantry/rules/facilities/history/facts/general knowledge) jiska jawab railway data tools (timetable/live/fare/seats) se NAHI aata — WEB_SEARCH se dhoondo aur 'web se mila' + source label ke saath do. Railway-irrelevant web results (cars/automobiles jaise) skip karo, railway-relevant hi do. Na mile to honest 'nahi mil paya' bolo — guess kabhi nahi. Live status/fare/seats/availability/PNR ke liye web search kabhi use mat karna — wahan sirf railway tools.",
-      "26. AGLA KADAM (user requirement 2026-09-26: 'answer ke baad AI ko next step pe leke jaana chahiye'): jawab ke EKDUM aakhir me 1-2 line likho — bilkul is format me, kuch aur nahi: [NEXT] <chhota label> => <wahi baat jo user bhej sakta hai>. Jaise: '[NEXT] Book 12013 · CC (AVL 354 ₹675) => 12013 mein CC book krdo'. Rules: (a) sirf ISI turn ke tool data se banao — koi naya train number/naam/fare/count nahi; (b) label me wahi number jo data me hai; (c) max 2 lines, sabse zaroori pehle; (d) next kadam us sawaal ke hisaab se ho (seat data aaya to booking; train list aayi to 'kis train me seat hai'; kuch verified na ho to koi [NEXT] line nahi — zaroori nahi har baar); (e) reply ke andar [NEXT] ke alawa agla kadam dobara mat likho (UI khud dikhata hai).",
+      "27. SAARE TOOLS KHULE HAIN (user rule 2026-09-26: 'AI ko jitne bhi tools available hai wo sabh provide kro, no restriction on using any tool'): jo bhi tool jawab ke liye chahiye, jitni baar chahiye, use karo — SEARCH_TRAINS, JOURNEY_ANALYZE, RANK_JOURNEY_OPTIONS, FIND_SEATS, CHECK_AVAILABILITY, GET_FARE, GET_TIMETABLE, TRACK_TRAIN, GET_TRAIN_INFO, FIND_ALTERNATIVE_TRAINS, FIND_CONNECTIONS, WEB_SEARCH… koi rok nahi, koi count-limit nahi. SIRF DO CHEEZEIN TUM KABHI NAHI KAROGE: (i) 'Continue to IRCTC' par click (RailBook app ka handoff button user khud dabayega), (ii) passenger details/passenger form khud se bharna ya booking confirm karna — wo user ka kaam hai. Baaki sab tumhare haath me hai.",
+    "28. SAWAAL KA MATLAB PEHLE (user 2026-09-26: 'kya AI meri baat samajh nahi paaya?'): 'plan banao / journey plan / kya best rahega' = RANK_JOURNEY_OPTIONS ya JOURNEY_ANALYZE (timings + fare + best option) — seat board ki list NAHI. 'alternative trains / doosri trains / koi aur option / iske alawa' = FIND_ALTERNATIVE_TRAINS (us train ke aage/peeche wali trains, timing+fare ke saath) — wahi purani list dobara NAHI. 'trains batao / kaunsi trains chalti hain' = SEARCH_TRAINS. 'seat/berth/AVL/kitni seat khali' = FIND_SEATS ya CHECK_AVAILABILITY. Har TRAIN LIST jawab me timing (departure → arrival + duration) aur fare (jo tool ne diya ho) ZAROOR likho — 'sirf train ke naam' wali list adhoori hai (user ki shikayat: 'trains list krdi without fare and timings').",
+    "26. AGLA KADAM (user requirement 2026-09-26: 'answer ke baad AI ko next step pe leke jaana chahiye'): jawab ke EKDUM aakhir me 1-2 line likho — bilkul is format me, kuch aur nahi: [NEXT] <chhota label> => <wahi baat jo user bhej sakta hai>. Jaise: '[NEXT] Book 12013 · CC (AVL 354 ₹675) => 12013 mein CC book krdo'. Rules: (a) sirf ISI turn ke tool data se banao — koi naya train number/naam/fare/count nahi; (b) label me wahi number jo data me hai; (c) max 2 lines, sabse zaroori pehle; (d) next kadam us sawaal ke hisaab se ho (seat data aaya to booking; train list aayi to 'kis train me seat hai'; kuch verified na ho to koi [NEXT] line nahi — zaroori nahi har baar); (e) reply ke andar [NEXT] ke alawa agla kadam dobara mat likho (UI khud dikhata hai).",
   ]
     .filter(Boolean)
     .join("\n");
@@ -2907,6 +2912,21 @@ export async function runAgenticTurn(input: {
           args = {};
         }
         const toolName = sanitizeToolName(tc.function.name);
+        /* Round-33 (user: "Kal,1" → AI ne dobara passengers poochh liye): jab pichhle turn me passengers
+         * poochhe gaye the aur user ka jawab sirf ek number hai ("Kal,1", "1", "2 log"), to wahi number
+         * args.known me seed karo — model ko dobara poochhne ki zaroorat nahi. Sirf 1-6; range ke bahar
+         * kuch nahi (galat assumption se behtar hai dobara poochhna). */
+        if (
+          (toolName === "SEARCH_TRAINS" || toolName === "JOURNEY_ANALYZE" || toolName === "RANK_JOURNEY_OPTIONS" ||
+            toolName === "CHECK_AVAILABILITY" || toolName === "FIND_SEATS" || toolName === "FIND_ALTERNATIVE_TRAINS" ||
+            toolName === "FIND_CONNECTIONS" || toolName === "FIND_VACANT_SEATS" || toolName === "FIND_PARTIAL_ROUTE_SEATS") &&
+          typeof args.passengers !== "number" &&
+          !(input.known?.passengers && input.known.passengers >= 1) &&
+          lastAskedPax
+        ) {
+          const m = /(?:^|[^\d])([1-6])(?:[^\d]|$)/.exec(String(input.text ?? ""));
+          if (m) args.passengers = Number(m[1]);
+        }
         // Airport guard: user ne "airport" bola (jaise "Delhi airport") to koi
         // rail station silently substitute nahi hoga — airports railway stations
         // nahi hote; user se railway station/city poochna hi honest hai.
@@ -3056,7 +3076,9 @@ export async function runAgenticTurn(input: {
             rejected: "date_required",
           };
         } else if (
-          (toolName === "SEARCH_TRAINS" || toolName === "JOURNEY_ANALYZE" || toolName === "RANK_JOURNEY_OPTIONS" || toolName === "FIND_CONNECTIONS" || toolName === "CHECK_AVAILABILITY" || toolName === "FIND_VACANT_SEATS" || toolName === "FIND_PARTIAL_ROUTE_SEATS" || toolName === "FIND_ALTERNATIVE_TRAINS") &&
+          /* Round-33 (user: "Kal,1" par list hi nahi aayi — AI ne passengers dobara poochh liye): SEARCH_TRAINS
+           * ek LIST tool hai — usme passengers ki zaroorat hi nahi (seat/plan tools me hai). */
+          (toolName === "JOURNEY_ANALYZE" || toolName === "RANK_JOURNEY_OPTIONS" || toolName === "FIND_CONNECTIONS" || toolName === "CHECK_AVAILABILITY" || toolName === "FIND_VACANT_SEATS" || toolName === "FIND_PARTIAL_ROUTE_SEATS" || toolName === "FIND_ALTERNATIVE_TRAINS") &&
           !(input.known?.passengers && input.known.passengers >= 1) &&
           !(typeof args.passengers === "number" && args.passengers >= 1 && userStatedPax(input.text, args.passengers, { bareDigitIsPax: lastAskedPax })) &&
           !(input.known?.dateProvided === false && dateHint?.kind !== "date") /* date pehle poochhegi (upar/neeche wala guard) */

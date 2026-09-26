@@ -21,7 +21,10 @@ describe("Round-18g fare fill for extra-API seat rows", () => {
   it("fills fare via railradarFare → erail and records fareSource separately", () => {
     expect(src).toContain("async function withFareFilled(");
     expect(src).toMatch(/fareSource: "railradar"/);
-    expect(src).toMatch(/fareSource: "web_erail"/);
+    /* Round-33: web fare chain CONFIRMTKT → RAILYATRI → ERAIL (webOrder.ts) — source wahi rehta hai
+     * jo sach me diya (mix/guess nahi). */
+    expect(src).toContain("{ ...row, fare: web.fare, fareSource: web.source }");
+    expect(src).toContain('for (const src of webChain("fare"))');
     expect(src).toMatch(/if \(row\.fare > 0\) return row;/);
   });
 });

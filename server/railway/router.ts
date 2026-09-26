@@ -36,7 +36,9 @@ import {
   indianRailApiStationSearch,
   indianRailApiTrainNameSearch,
 } from "./indianrailapi.js";
-import { confirmTktRouteBoard, confirmTktTrainClasses } from "./confirmtkt.js";
+import { confirmTktRouteBoard, confirmTktTrainClasses, type ConfirmTktBoardRow } from "./confirmtkt.js";
+import { getStation } from "../data/stations.js";
+import { webChain, type WebProviderId } from "./webOrder.js";
 import { wikipediaTrainFacts, type WikiTrainFacts } from "./wikitrain.js";
 import { env } from "../env.js";
 import { searchStations as searchLocalStations } from "../data/stations.js";
@@ -148,6 +150,13 @@ function webTrainsToResults(rows: ScrapedTrainRow[], query: SearchQuery): TrainR
   out.sort((a, b) => a.departure.localeCompare(b.departure));
   return out;
 }
+
+/** ConfirmTkt route board se train list (network wrapper — mapping pure function me hai). */
+async function confirmTktTrainsBetween(query: SearchQuery): Promise<TrainResult[]> {
+  const board = await confirmTktRouteBoard(query.from, query.to, query.date).catch(() => null);
+  if (!board?.trains?.length) return [];
+  return boardRowsToTrainResults(board.trains, query);
+}
 const KNOWN_CLASSES: ClassCode[] = ["1A", "2A", "3A", "3E", "SL", "CC", "EC", "2S", "EA"];
 
 export type ServedProvider =
@@ -242,7 +251,9 @@ async function erailFareBreakdown(
   from?: string | null,
   to?: string | null,
 ): Promise<FareBreakdown | null> {
-  const perPax = await erailFareForClass(trainNumber, classCode, "GN", from, to);
+  /* Round-33: fare pehle confirmtkt board se, phir railyatri, phir erail (webOrder chain). */
+  const chained = await webFareForClass(trainNumber, String(date ?? ""), from ?? "", to ?? "", classCode, "GN");
+  const perPax = chained?.fare ?? null;
   if (perPax == null) return null;
   const pax = Math.max(1, passengerCount || 1);
   return {
@@ -366,6 +377,104 @@ async function confirmTktAvailability(
   }
 }
 
+/* ── Round-33 (26 Sep 2026, user: "first use confirm tkt, then rail yatri, then e rail on API
+ * fallback to fetch relevant data, like fare, seat availability, timings, route, station codes,
+ * live status, etc.") ─────────────────────────────────────────────────────────────────────────
+ * Web fallback ka order ab central hai (webOrder.ts): CONFIRMTKT → RAILYATRI → ERAIL. Neeche wale
+ * helpers usi chain ko chalte hain — jo site wo cheez deti hi nahi, wo chain me aati hi nahi
+ * (webOrder.WEB_CAPABILITY_SUPPORT), isliye koi jhootha attempt ya galat source-naam nahi. */
+
+/** Ek web source se availability row (chain ka ek qadam). */
+async function webAvailabilityFrom(
+  src: WebProviderId,
+  trainNumber: string,
+  date: string,
+  from: string,
+  to: string,
+  classCode: ClassCode,
+  quotaCode: string,
+  fallbackRow: ClassAvailability,
+): Promise<ClassAvailability | null> {
+  if (src === "web_confirmtkt") return confirmTktAvailability(trainNumber, date, from, to, classCode);
+  if (src === "web_railyatri") return railyatriAvailability(trainNumber, date, from, to, classCode, quotaCode);
+  /* erail ke paas seat/status nahi hota — sirf fare (fare-only row; source alag rehta hai). */
+  const fareOnly = await erailFareForClass(trainNumber, classCode, quotaCode, from, to);
+  return fareOnly != null ? { ...fallbackRow, fare: fareOnly, source: "web_erail" } : null;
+}
+
+/** Fare chain: confirmtkt (board fare) → railyatri (IRCTC ticket fare) → erail (segment fare page). */
+async function webFareForClass(
+  trainNumber: string,
+  date: string,
+  from: string,
+  to: string,
+  classCode: ClassCode,
+  quotaCode: string,
+): Promise<{ fare: number; source: WebProviderId } | null> {
+  for (const src of webChain("fare")) {
+    try {
+      if (src === "web_confirmtkt") {
+        const classes = await confirmTktTrainClasses(trainNumber, from, to, date);
+        const row = classes?.find((c) => c.code === classCode);
+        if (row && row.fare > 0) return { fare: row.fare, source: src };
+      } else if (src === "web_railyatri") {
+        const ry = await railyatriAvailability(trainNumber, date, from, to, classCode, quotaCode);
+        if (ry && ry.fare > 0) return { fare: ry.fare, source: src };
+      } else {
+        const fare = await erailFareForClass(trainNumber, classCode, quotaCode, from, to);
+        if (fare != null && fare > 0) return { fare, source: src };
+      }
+    } catch {
+      /* agla source */
+    }
+  }
+  return null;
+}
+
+/** Station naamo ke saath from/to (local station DB — code hi naam ban kar UI me na dikhe). */
+function stationRefOf(code: string, fallbackName?: string | null): Station {
+  const key = code.toUpperCase();
+  const hit = getStation(key);
+  return hit ? { code: hit.code, name: hit.name, city: hit.city ?? hit.name } : { code: key, name: fallbackName ?? key, city: fallbackName ?? key };
+}
+
+/**
+ * ConfirmTkt route board se train LIST (timings + classes + fare) — web fallback chain ka pehla
+ * qadam. Board me departure/arrival aur per-class fare dono hote hain. Bina timing wali row chhod
+ * di jaati hai (aadha sach dene se behtar hai na dena).
+ */
+export function boardRowsToTrainResults(rows: ConfirmTktBoardRow[], query: SearchQuery): TrainResult[] {
+  const want = { from: query.from.toUpperCase(), to: query.to.toUpperCase() };
+  const out: TrainResult[] = [];
+  for (const t of rows) {
+    if (!t.departure) continue;
+    if (t.fromCode && t.fromCode.toUpperCase() !== want.from) continue;
+    if (t.toCode && t.toCode.toUpperCase() !== want.to) continue;
+    const depMin = hhmmMinutes(t.departure) ?? 0;
+    const arrMin = hhmmMinutes(t.arrival);
+    const dur = arrMin == null ? 0 : arrMin >= depMin ? arrMin - depMin : arrMin + 1440 - depMin;
+    const classes = (t.classes ?? []).filter((c) => (KNOWN_CLASSES as string[]).includes(String(c.code)));
+    out.push({
+      number: t.trainNumber,
+      name: t.trainName,
+      type: t.trainType ?? "",
+      from: stationRefOf(t.fromCode ?? want.from),
+      to: stationRefOf(t.toCode ?? want.to),
+      date: query.date,
+      departure: t.departure,
+      arrival: t.arrival ?? "",
+      arrivalDayOffset: Math.floor((depMin + dur) / 1440),
+      durationMinutes: dur,
+      durationLabel: durationLabel(dur),
+      runsOn: [0, 1, 2, 3, 4, 5, 6],
+      classes,
+      haltVerified: true,
+    });
+  }
+  out.sort((a, b) => a.departure.localeCompare(b.departure));
+  return out;
+}
+
 /* Round-16: fare bhi RailYatri SA se (segment-specific, erail se better —
  * erail poore route ka fare deta hai). */
 async function railyatriFareBreakdown(
@@ -459,9 +568,10 @@ async function withFareFilled(
   } catch {
     /* fall through */
   }
+  /* Round-33: fare ka web chain bhi CONFIRMTKT → RAILYATRI → ERAIL. */
   try {
-    const web = await erailFareForClass(trainNumber, classCode, quotaCode, from, to);
-    if (web != null && web > 0) return { ...row, fare: web, fareSource: "web_erail" };
+    const web = await webFareForClass(trainNumber, date, from, to, classCode, quotaCode);
+    if (web) return { ...row, fare: web.fare, fareSource: web.source };
   } catch {
     /* fall through */
   }
@@ -1559,11 +1669,16 @@ export class FallbackRailwayProvider implements RailwayProvider {
         return rows;
       }
     }
-    /* Round-16n (user: "daily limit hit → fallback par bhi trains nahi, web
-     * scraping lagayi thi na?"): train SEARCH ka web fallback ab hai — erail.in
-     * trains-between list (IRCTC timetable data). Date ke hisaab se running-day
-     * filter yahin; exact boarding codes (DLI≠NDLS) source se aate hain to
-     * timetable-verify ki zaroorat nahi (quota bhi nahi jalta). */
+    /* Round-33 (user: "first use confirm tkt, then rail yatri, then e rail on API fallback"):
+     * web fallback ka PEHLA qadam ab confirmtkt route board hai — usme trains ke saath
+     * departure/arrival + per-class fare bhi hota hai (user 26 Sep: "trains list krdi without
+     * fare and timings"). RailYatri ke paas trains-between web endpoint nahi (chain me nahi);
+     * erail (IRCTC timetable list) aakhri qadam hai — wahi purana behaviour, wahi honest label. */
+    const ctWeb = await confirmTktTrainsBetween(query);
+    if (ctWeb.length) {
+      logServed("web_confirmtkt", "trainSearch", started, true, `${reason}+railkit_failed`);
+      return ctWeb;
+    }
     const web = await scrapeTrainsBetweenWeb(query.from, query.to);
     if (web && web.trains.length) {
       const wd = weekday(query.date);
@@ -1625,22 +1740,13 @@ export class FallbackRailwayProvider implements RailwayProvider {
         logServed(extraNoKit.source as ServedProvider, "availability", started, true, "railcore_failed");
         return extraNoKit;
       }
-      /* Round-16: railkit key nahi — RailYatri SA se seats+status+fare. */
-      const ry = await railyatriAvailability(trainNumber, date, from, to, classCode, quotaCode);
-      if (ry) {
-        logServed("web_railyatri", "availability", started, true, "railcore_failed → web-scrape");
-        return ry;
-      }
-      /* Round-7: erail.in se fare to nikaal lo. */
-      const ctNoKit = await confirmTktAvailability(trainNumber, date, from, to, classCode);
-      if (ctNoKit) {
-        logServed("web_confirmtkt", "availability", started, true, "railyatri_empty → confirmtkt board");
-        return ctNoKit;
-      }
-      const webFareNoKit = await erailFareForClass(trainNumber, classCode, quotaCode, from, to);
-      if (webFareNoKit != null) {
-        logServed("web_erail", "availability", started, false, "fare_only_no_seats");
-        return { ...unknown, fare: webFareNoKit, source: "web_erail" };
+      /* Round-33 (user: "first use confirm tkt, then rail yatri, then e rail"): web chain isi order me. */
+      for (const src of webChain("availability")) {
+        const hit = await webAvailabilityFrom(src, trainNumber, date, from, to, classCode, quotaCode, unknown);
+        if (hit) {
+          logServed(src, "availability", started, hit.status !== "UNKNOWN", `railcore_failed → ${src}`);
+          return hit;
+        }
       }
       logServed("none", "availability", started, false, "both_unavailable");
       return unknown;
@@ -1656,24 +1762,13 @@ export class FallbackRailwayProvider implements RailwayProvider {
       logServed(extra.source as ServedProvider, "availability", started, true, "railcore+railkit_failed");
       return extra;
     }
-    /* Round-16: dono API fail — RailYatri SA JSON (IRCTC-sourced) se
-     * seats+status+fare. */
-    const ry = await railyatriAvailability(trainNumber, date, from, to, classCode, quotaCode);
-    if (ry) {
-      logServed("web_railyatri", "availability", started, true, "railcore+railkit_failed → web-scrape");
-      return ry;
-    }
-    /* 23 Sep 2026: confirmtkt route board — ek call, poora route, cancelled/regret/WL bhi. */
-    const ctBoard = await confirmTktAvailability(trainNumber, date, from, to, classCode);
-    if (ctBoard) {
-      logServed("web_confirmtkt", "availability", started, true, "railcore+kit+railyatri_failed → confirmtkt board");
-      return ctBoard;
-    }
-    /* Round-7: erail.in se class-ka fare to nikaal lo — fare-only row. */
-    const webFare = await erailFareForClass(trainNumber, classCode, quotaCode, from, to);
-    if (webFare != null) {
-      logServed("web_erail", "availability", started, false, "fare_only_no_seats");
-      return { ...fb, fare: webFare, source: "web_erail" };
+    /* Round-33: dono API fail — web chain: CONFIRMTKT → RAILYATRI → ERAIL (fare-only). */
+    for (const src of webChain("availability")) {
+      const hit = await webAvailabilityFrom(src, trainNumber, date, from, to, classCode, quotaCode, fb);
+      if (hit) {
+        logServed(src, "availability", started, hit.status !== "UNKNOWN", `railcore+railkit_failed → ${src}`);
+        return hit;
+      }
     }
     logServed("none", "availability", started, false, "railcore_unusable");
     return fb;

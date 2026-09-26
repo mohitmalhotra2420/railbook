@@ -122,16 +122,20 @@ describe("Round-18m-30s: deterministic station-pick path (AI reply rejected) als
   }, 30000);
 });
 
-describe("Round-18m-30s(b): model-invented passengers arg is ignored — tool still rejects", () => {
-  it("SEARCH_TRAINS with passengers=1 the user never said → PASSENGERS MISSING", async () => {
+/* Round-33 (26 Sep 2026, user: "'Kal,1' ke baad AI ne trains list nahi di — passengers dobara poochh liye"):
+ * SEARCH_TRAINS ek LIST tool hai, usme passengers ka koi role nahi — isliye wahi test ab naye rule ke
+ * hisaab se likha gaya hai. Pax-precondition un tools par ab bhi hai jo sach me party-size par depend
+ * karte hain (seat/plan), aur wahan model ka "invented" number bhi reject hota hai. */
+describe("Round-33: SEARCH_TRAINS (list tool) bina passengers chalta hai", () => {
+  it("SEARCH_TRAINS bina pax unknown → list chal jaati hai (reject nahi)", async () => {
     process.env.NVIDIA_API_KEY = "nvapi-test"; process.env.RAILWAY_PROVIDER = "mock";
     const { runAgenticTurn } = await import("../server/agent/agentic");
     let n = 0;
     setAgenticNvidiaFetch(async () => { n++; return new Response(JSON.stringify({ choices: [{ message: n === 1 ? { content: null, tool_calls: [{ id: "a", type: "function", function: { name: "SEARCH_TRAINS", arguments: JSON.stringify({ origin: "LDH", destination: "MTJ", date: "2026-09-14", passengers: 1 }) } }] } : { content: "Kitne passengers?" } }] }), { status: 200, headers: { "content-type": "application/json" } }); });
     const turn = await runAgenticTurn({ text: "1", now: "2026-09-13T18:00:00.000Z", known: { origin: "LDH", destination: "MTJ", date: "2026-09-14", dateProvided: true, stationPicked: "destination" } } as never);
     const st = turn.steps.find((s) => s.tool === "SEARCH_TRAINS");
-    expect(st?.ok).toBe(false);
-    expect(st?.summary).toMatch(/PASSENGERS MISSING/);
+    expect(st?.ok).toBe(true);
+    expect(st?.summary ?? "").not.toMatch(/PASSENGERS MISSING/);
     process.env.NVIDIA_API_KEY = "";
   }, 30000);
 });

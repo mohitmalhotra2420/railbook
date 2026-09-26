@@ -742,11 +742,12 @@ describe("agent integration: agentic path + deterministic fallback", () => {
         { role: "assistant", content: "Kis date ko jaana hai?" },
       ],
     });
-    /* Round-18m-30q (user: "AI khud samjhe ki passengers poochne hain"): gate ab deterministic nahi —
-     * SEARCH_TRAINS tool PASSENGERS MISSING par reject hota hai (koi search nahi chalti), model poochhta hai. */
+    /* Round-33 (user: "'Kal,1' par trains list hi nahi aayi"): SEARCH_TRAINS ek LIST tool hai — usme
+     * passengers ki zaroorat nahi, isliye date milne par list chalti hai (seat/plan tools ab bhi pax
+     * maangte hain, aur wahi wo sawaal poochhte hain). */
     expect(gated.context.date).toBe("2026-09-05");
-    expect(gated.trains).toBeNull();
-    expect((gated.toolTrace ?? []).some((t) => t.tool === "SEARCH_TRAINS" && t.ok)).toBe(false);
+    expect(gated.trains).not.toBeNull();
+    expect((gated.toolTrace ?? []).some((t) => t.tool === "SEARCH_TRAINS" && t.ok)).toBe(true);
     searches.length = 0;
     const result = await runAgent({
       text: "Saturday",

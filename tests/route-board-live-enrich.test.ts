@@ -107,12 +107,15 @@ describe("route board: stale/UNKNOWN rows live ho jati hain", () => {
     expect(threeA.stale).toBeUndefined();
   });
 
-  it("17 ghante purani SL row bhi live ho jati hai (stale label chala jata hai)", async () => {
+  /* Round-33 (user: "first use confirm tkt, then rail yatri"): web chain ka pehla qadam confirmtkt hai,
+   * isliye haazir board ki SL row (AVL 226) ab confirmtkt se hi aati hai — railway API block hone par
+   * bhi asli data, sirf source badla. */
+  it("17 ghante purani SL row bhi live ho jati hai — ab confirmtkt pehle (chain order), stale label hatta hai", async () => {
     const app = createApp();
     const res = await request(app).get(`/api/availability?from=LDH&to=BEAS&date=${DATE}&trains=14631`);
     const t = res.body.trains.find((x: { trainNumber: string }) => x.trainNumber === "14631");
     const sl = t.classes.find((c: { code: string }) => c.code === "SL");
-    expect(sl).toMatchObject({ status: "AVAILABLE", seats: 160, source: "web_railyatri" });
+    expect(sl).toMatchObject({ status: "AVAILABLE", seats: 226, source: "web_confirmtkt" });
     expect(sl.stale).toBeUndefined();
   });
 
