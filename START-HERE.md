@@ -108,7 +108,14 @@ android-app/app/src/main/assets/autofill/
   3. **Native mic:** Android WebView me Web Speech API **nahi hota** — naya `VoiceBridge.kt` (SpeechRecognizer, hi-IN, `window.__railbookVoice.dispatch`) + `MainActivity` me `addJavascriptInterface(…, "RailBookVoice")` + manifest `<queries>`; client `src/voice/nativeSpeech.ts` + `speech.ts`/`useVoiceInput.ts` native-aware (native par `getUserMedia` call nahi).
   4. Tests: `tests/round27-seat-classes-and-mic.test.tsx` (12) + round-25 test format update → **106 files / 1055 PASS** · preview `RailBook-round27-2026-09-26.html` · builders `tools/build-round27-preview.mjs`, probe `tools/probe-live-r27.mjs`. **APK v1.4.8 (vc 31)** — native mic ke liye zaroori.
 
-- **Round-34 (latest, 26 Sep 2026):** user (2 screenshots) — *"12380 mein seats available hai and then I said book 12380 to eske pass seats to pehle hi hain to fir kyu dubara pooch rha… agla kadam na humesha AI hi chunne sabh sochke and suggestions bhi de user ko, agla kadam fallback pe verified data se mat aaye"* →
+- **Round-35 (latest, 26 Sep 2026):** user — *"maine bola vaishno devi se ludhiana ki seat availability btao … uske baad 19028 train mein multiple class mein seats available thi to maine bola '19028 mein book krdo' to AI ne yeh nahi poocha kon si class mein book karun … AI khud kyu nhi soch rha, har cheez thodi btani padegi"* →
+  1. **Naya block `classchoice`:** booking hukm + class na boli + us train me 2+ class khuli (AVL/RAC) → form RUK jaata hai, card aata hai (`13042 … Kaunsi class me book karun?`) chips = sirf wo classes jo board par sach me khuli (`3A · AVAILABLE 29 · ₹520`); chip tap → seedha us class ka passenger form.
+  2. **Ek hi class khuli ho** to seedha wahi (faltu sawaal nahi). **`pickRowForBooking` seat-wali class prefer** karta hai (WL se pehle).
+  3. **Rule 28 (server):** class ambiguous par pehle SAAF poochho aur `[NEXT]` me class chips do — live me model ne khud bhi poochha ("Class confirm karo…").
+  4. Tests: naya `tests/round35-ask-class-when-ambiguous.test.tsx` (15) → **114 files / 1200 ALL PASS** · server tsc clean · build `index-DcFTsEZG.js` 485.8 kB · preview `RailBook-round35-2026-09-26.html` · probe `tools/probe-live-r35-live.mjs` · **APK nahi**.
+  5. Live proof (`b97b3c7`): "vaishno devi se ludhiana" seat board; **"Book 13042"** → form ruk gaya + class-choice card (3A ₹520 / 2A ₹725); chip tap → form 13042 · 3A · SVDK→LDH · 2026-09-28 · ₹520/pax.
+
+- **Round-34 (26 Sep 2026):** user (2 screenshots) — *"12380 mein seats available hai and then I said book 12380 to eske pass seats to pehle hi hain to fir kyu dubara pooch rha… agla kadam na humesha AI hi chunne sabh sochke and suggestions bhi de user ko, agla kadam fallback pe verified data se mat aaye"* →
   1. **"Book <train>" bare hukm:** `isBookingIntent` me `book|booking|reserve` + 4-5 digit train number (bina `?`) — pehle sirf "book … krdo" regex tha, isliye seat list dikhne ke baad bhi message server gaya aur pax gate ne "kitne passengers?" poochh liya.
   2. **Seat rows yaad:** client `lastSeatRowsRef` (route+date ke saath) — booking hukm par form usi asli data se bharta hai (status/seats/fare/timing); route/date match na ho to purani rows use nahi.
   3. **NEXT-repair pass:** model ke jawab grounded ho + turn me ok tool data ho par `[NEXT]` missing → ek chhoti repair call model ko ("sirf 1-2 line [NEXT] …, isi turn ke data se") → chips model ke. Prompt rule 26 sakht: data ho to [NEXT] ZAROOR; data-fallback aakhri upay.
@@ -171,11 +178,11 @@ android-app/app/src/main/assets/autofill/
 
 | cheez | value |
 |---|---|
-| vitest | **113 files / 1185 tests** (ALL PASS — Round-34 ke 16 naye) |
+| vitest | **114 files / 1200 tests** (ALL PASS — Round-35 ke 15 naye) |
 | server tsc | clean |
 | client tsc | 67 errors (purane, baseline — koi naya nahi) |
-| live commit | `a1aff0d` (Round-34) |
-| preview | `RailBook-round34-2026-09-26.html` (Round-33/32/31 ke bhi previews/ me hain) |
+| live commit | `b97b3c7` (Round-35) |
+| preview | `RailBook-round35-2026-09-26.html` (Round-34/33/32 ke bhi previews/ me hain) |
 | APK | v1.4.9 `RailBook-v1.4.9-release.apk` (versionCode 32) sha256 `4ea684c3…8e1ce` — Round-29 me koi Android change nahi (web fix; app live URL load karta hai) |
 
 ### Chhote gotchas

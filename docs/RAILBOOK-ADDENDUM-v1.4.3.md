@@ -715,3 +715,24 @@ User (2 screenshots): *"First screenshot mein 12380 mein seats available hai and
 **Files:** `src/booking/autobook.ts` (isBookingIntent) · `src/views/Concierge.tsx` (lastSeatRowsRef + freshQuestionDuringBooking) · `server/agent/agentic.ts` (NEXT-repair pass + rule 26 tighten).
 **Tests:** naya `tests/round34-book-known-seats-and-model-next.test.tsx` (16) + `agentic-toolcalling` ka call-count update (mock model [NEXT] deta hi nahi → repair call bhi ginti hai) → **113 files / 1185 ALL PASS** · server tsc clean · client 69 (baseline) · build `index-BLb0w2Ig.js` 483.9 kB.
 **Preview:** `RailBook-round34-2026-09-26.html` (`tools/build-round34-preview.mjs`) · live probe `tools/probe-live-r34-live.mjs`. **APK nahi** (koi Android change nahi).
+
+### 9.27 Round-35 (26 Sep) — "19028 mein book krdo" par AI ne class kyun nahi poochhi?
+
+User: *"mainay bola vaishno devi se ludhiana ki seat availability btao to AI ne bta di … uske baad maine 19028 train mein na multiple class mein seats available thi to maine bola '19028 mein book krdo' to AI ne yeh nahi poocha kon si class mein book karun, bhai esa kyu ho rha abh mai kya ek ek cheez check krun? AI khud kyu nhi soch rha kya sahi logic se poochhna chahiye, khud kyu nhi dimag laga raha wo, har cheez thodi btani padegi use."*
+
+**Root cause:** booking intent par client `pickRowForBooking` chup-chaap **pehli openable row** utha kar passenger form khol deta tha — us train me agar 3–5 classes khuli thi (jaise 19028), to AI ka koi sawaal hi nahi aata tha; user ko andaza bhi na chalta ki konsi class khul gayi. (Aur agar list me SL/WL row pehle hoti to WL ka form khul sakta tha.)
+
+**Fixes (Round-35):**
+- **Naya block `classchoice`** (`src/ai/orchestrate.ts` + Concierge): jab booking hukm aaye, **class boli na ho**, aur us train me **ek se zyada class khuli ho** (AVAILABLE/RAC) → form **ruk jaata hai** aur card aata hai: *"13042 HIMGIRI EXPRESS me 2 classes khuli hain — 3A (AVAILABLE 29), 2A (AVAILABLE 7). Kaunsi class me book karun?"* Chips = **sirf wo classes jo board par sach me khuli hain**, label me wahi status/seats/fare jo provider ne diya (`3A · AVAILABLE 29 · ₹520`). Chip tap → wahi class wala booking sentence → **seedha us class ka passenger form**.
+- **Ek hi class khuli ho** to poochhne ki zaroorat nahi (seedha wahi class) — user ko faltu sawaal nahi.
+- **`pickRowForBooking` ab seat-wali class prefer karta hai** (AVAILABLE/RAC pehle, phir WL) — class na boli ho to WL/`N/A` row ka form nahi khulta.
+- **Model ko bhi sikhaya (rule 28):** booking maangi gayi ho, class na boli ho, aur ek se zyada class khuli ho → **pehle SAAF poochho "kaunsi class me book karun?"** aur `[NEXT]` me wahi classes chips ke roop me do (jaise `[NEXT] 19028 · 3A (AVL 26 ₹565) => 19028 mein 3A book krdo`); uski class ke bina aage mat badho. Isi turn me model ne khud bhi poochha ("Class confirm karo — is train mein kaunsi class chahiye?") aur khud ke chips diye.
+
+**Live proof (`b97b3c7`, probe `tools/probe-live-r35-live.mjs` — user ka route):**
+- "vaishno devi se ludhiana kal ki seat availability batao" → seat board (18 trains · 12 me seat);
+- **"Book 13042"** (us board se, 2 classes me seat) → **form RUK gaya**, model ne khud poochha *"Class confirm karo — kaunsi class chahiye?"* aur card: `🪑 13042 — KAUNSI CLASS ME BOOK KARUN?` chips **3A · AVAILABLE 29 · ₹520** / **2A · AVAILABLE 7 · ₹725**;
+- chip tap → passenger form **13042 HIMGIRI EXPRESS · 3A · SVDK → LDH · 📅 2026-09-28 · 💰 ₹520/pax** (jo dikha wahi gaya; jis class ka timing provider ke data me nahi tha wahan honest line "Timings provider ke data me nahi the").
+
+**Files:** `src/ai/orchestrate.ts` (Block `classchoice`) · `src/views/Concierge.tsx` (gate + `ClassChoiceCard`) · `src/booking/autobook.ts` (seat-wali class prefer) · `server/agent/agentic.ts` (rule 28 class-ambiguous).
+**Tests:** naya `tests/round35-ask-class-when-ambiguous.test.tsx` (15) → **114 files / 1200 ALL PASS** · server tsc clean · client 69 (baseline) · build `index-DcFTsEZG.js` 485.8 kB.
+**Preview:** `RailBook-round35-2026-09-26.html` (`tools/build-round35-preview.mjs`). **APK nahi** (koi Android change nahi).
