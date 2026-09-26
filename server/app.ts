@@ -37,7 +37,7 @@ import { runAutonomousAgent } from "./agent/autonomous.js";
  * (agentic), jahan seat samajh nahi thi. Ye do import SIRF padhne + maujooda board filter karne ke liye
  * hain — AI ka search/tools/API/planner ko chhua nahi gaya. */
 import { parseSeatIntent } from "./understand/seatIntent.js";
-import { seatFilterFor, seatSummaryLine, type SeatFilterResult } from "./agent/seatFilter.js";
+import { missingSeatLines, seatFilterFor, seatSummaryLine, type SeatFilterResult } from "./agent/seatFilter.js";
 import { JOURNEY_CONFIG, findAlternativeTrains, findConnections, findPartialRouteSeats, findVacantSeats, planJourney } from "./journey/engine.js";
 import { pickTrains } from "./journey/trainpicker.js";
 import { publicCapabilityPayload } from "./providers/capabilities.js";
@@ -286,6 +286,23 @@ export function createApp() {
        * seat ka asli jawab chhup jaata hai. Bina card wale sawaal par purana rule hi (duplicate nahi). */
       const hasPlanCard = Boolean(result.journey || result.alternatives);
       const seatLine = aiUsedSeatTool && !hasPlanCard ? null : seatFilter?.line ?? null;
+      /* ── Round-25 (26 Sep, user screenshot: "Yeh baki trains seat finder card mein kyu le jaata?
+       * last line dekho") ─────────────────────────────────────────────────────────────────────
+       * Chat me Seat Finder card Round-21c se dikhta hi nahi, par AI apne jawab me "+N aur … Seat
+       * Finder card mein hain" likh deta tha (us line ka source seatFilter ke summary me tha) —
+       * yaani pointer jhootha. Ab: jo seat-wali trains AI ke jawab me nahi aayi, unki asli lines
+       * (wahi live board rows) usi jawab me jod di jaati hain — koi card, koi andaza nahi. */
+      /* Sirf tab jab AI ka apna jawab hai — AI fail hone par wahi compact seat line (💺 …) dikhti hai,
+       * usme saari trains pehle se hain, isliye rows dobara nahi jodte. */
+      const aiReplyText = String(result.reply ?? "").trim();
+      const seatExtra =
+        seatFilter && !hasPlanCard && aiReplyText
+          ? missingSeatLines(aiReplyText, [...seatFilter.rows, ...seatFilter.wlRows])
+          : [];
+      const replyWithSeats =
+        seatExtra.length > 0
+          ? `${String(result.reply ?? "").trim()}\n${seatExtra.join("\n")}`.trim()
+          : result.reply;
       /* AI ne jawab nahi diya (ya generic "provider se nahi mil" line di) → seat line akele bhi kaafi hai. */
       const aiFailed =
         !result.reply ||
@@ -298,10 +315,10 @@ export function createApp() {
         toolOk: result.toolOk,
         /* Seat line AI ke jawab ke SAATH (ya AI fail ho to akele) — dono case me asli board data. */
         reply: seatLine
-          ? result.reply
-            ? `${result.reply}\n\n${seatLine}`
+          ? replyWithSeats
+            ? `${replyWithSeats}\n\n${seatLine}`
             : seatLine
-          : result.reply,
+          : replyWithSeats,
         seatFilter: seatFilter
           ? {
               classCodes: seatClassCodes,

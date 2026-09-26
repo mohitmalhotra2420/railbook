@@ -422,3 +422,22 @@ User ke teen points (2 screenshots + 1 filter screenshot):
 **Tests:** naya `tests/round24-review-journey.test.tsx` (8 — receipt rows, passenger/contact lines, DOM order summary→button, "uske elawa kuch nahi", khaali list ka guard, scroll reset, CSS fallback) · `tests/round23-avail-chips-and-review.test.tsx` update (Round-24 ke saath align) · `tests/irctc-handoff.test.tsx` update (note line hata — title par) → kul **103 files / 1029 tests PASS**.
 **Tools:** `tools/probe-device-scroll.mjs` (live site ko phone-size Chromium me khol kar layout/scroll measure karta hai — `npm i -D playwright` chahiye) · `tools/build-round24-preview.mjs` → preview `RailBook-round24-2026-09-26.html`.
 **APK:** is round me Android code change nahi — app wahi v1.4.7 WebView se live site load karta hai, isliye naya APK zaroori nahi.
+
+### 9.17 Round-25 (26 Sep) — "baki trains seat finder card mein kyu le jaata?" → saari trains isi jawab me
+
+**User (screenshot 2, aakhri line):** "+5 aur SL available trains Seat Finder card mein hain. ⚙️ find seats"
+
+**Wajah (root cause):**
+
+- Ye line AI ne apne aap nahi banayi — wo **server ki summary line se copy** hui thi: `server/agent/seatFilter.ts` ke `seatSummaryLine()` me `· +N aur (Seat Finder card me)` likha tha.
+- Wo pointer **purane rounds me sach tha** (tab chat ke andar Seat Finder card mount hota tha). Round-21c me card chat se hata diya gaya (user: "seat finder aur direct trains ab same hi hain") — par line aise hi reh gayi, isliye (a) AI wahi baat likhta raha, aur (b) **baki trains kahin dikhti hi nahi thi**.
+
+**Fix (teen layer, koi naya endpoint/AI-logic change nahi):**
+
+1. `server/agent/seatFilter.ts` — `seatSummaryLine()` ab **saari** seat rows isi line me likhti hai (`SEAT_LINE_MAX = 12`; bahut zyada hon to honest tail `+N aur bhi hain`, koi card pointer nahi). WL wali branch bhi 12 tak + honest tail. `seatFilterFor()` ka default `maxRows` 8 → 12 (wahi board data, koi extra call nahi).
+2. `server/agent/seatFilter.ts` — naya `missingSeatLines(replyText, rows)`: jo seat-wali trains AI ke jawab me **nahi** aayi, unki lines bana deta hai (format wahi jo chat ka `ReplyText` rows me todta hai: `* 19611 All ASR EXP — SL — AVAILABLE 174 seats — ₹150 — 06:25 departure`). `server/app.ts` ke turn assembly me ye lines **usi jawab me** jod di jaati hain (sirf jab AI ka apna jawab ho aur plan card na ho — AI fail hone par wahi compact `💺` line dikhti rehti hai, jisme saari trains pehle se hain). Kuch invent nahi — sirf live board rows.
+3. Prompt/tool honesty: `agentic.ts` SEAT RULE me saaf likha — "SAARI seat wali trains ki lines likho (top 3-5 nahi) … 'baaki trains kisi card/Seat Finder me hain' jaisi baat kabhi mat likho, chat me aisa koi card nahi dikhta"; `seatFinderTool.ts` ki summary me bhi wahi rule + SEAT rows 8 → 12.
+4. Client safety net: naya `src/chatText.ts` → `stripSeatCardPointer()`; `Concierge.tsx` assistant text render se pehle isse guzarta hai, isliye kabhi model phir bhi "Seat Finder card" likhe to **screen par woh jhoothi baat nahi jaati** (baaki text jaisa tha waisa rehta hai — kuch chhupta nahi).
+
+**Tests:** naya `tests/round25-seat-answer-all-trains.test.tsx` (7 — summary line saari rows, honest tail, `missingSeatLines`, ReplyText me lines → rows, client strip, aur **turn-level** `/api/agent` assembly: AI ne 1 train likhi → baaki 2 ki lines judi, duplicate nahi, koi card pointer nahi; AI fail → sirf compact line) → kul **104 files / 1036 tests PASS**; server `tsc` clean; client TS 67 (baseline). **Preview:** `RailBook-round25-2026-09-26.html` (pehle/ab, asli ReplyText + asli server helpers se render). **Builder:** `tools/build-round25-preview.mjs`.
+**APK:** Android change nahi (WebView live site load karta hai) — v1.4.7 hi current.

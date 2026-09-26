@@ -13,6 +13,7 @@ import type { AgentTrainTable } from "../ai/agent";
 import { JourneyOptions } from "../components/JourneyOptions";
 import { bookingFromChipPayload, bookingFromSeatRow, stationOf } from "../booking/fromOption";
 import { detectSeatIntent, type SeatIntent, type SeatRow } from "../seatfinder";
+import { stripSeatCardPointer } from "../chatText";
 import { VoiceSheet, type VoiceSuggestion } from "../components/VoiceSheet";
 import { AlternativesCard } from "../components/AlternativesCard";
 import { TrainPicker } from "../components/TrainPicker";
@@ -1600,7 +1601,10 @@ export function Concierge() {
               /* 24 Sep 2026 (user: "2A seat bta esne phir direct trains bta di" — seat ka jawab
                * card ke andar chhup gaya tha). Seat line (💺 …) ab card ke UPAR hamesha dikhti hai;
                * baaki lamba text pehle jaisa collapsed note me. */
-              const text = String(msg.text ?? "");
+              /* Round-25: "…Seat Finder card mein hain" jaisa jhootha pointer screen par na aaye
+               * (wo card Round-21c me chat se hat chuka hai). Server ab saari trains isi jawab me
+               * likhta hai; ye sirf safety net hai. */
+              const text = stripSeatCardPointer(String(msg.text ?? ""));
               const seatLines = text.split("\n").filter((l) => l.trim().startsWith("💺"));
               const rest = seatLines.length ? text.split("\n").filter((l) => !l.trim().startsWith("💺")).join("\n").trim() : text;
               const hasJourney = Boolean(msg.blocks?.some((b) => b.type === "journey"));

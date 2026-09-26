@@ -28,7 +28,7 @@ import {
   beforeMinute as parseBeforeMinute,
   departAfterMinute as parseDepartAfter,
 } from "../understand/seatIntent.js";
-import { pickSeatRows, seatSummaryLine, type SeatBoardClass, type SeatBoardTrain, type SeatFilterRow } from "./seatFilter.js";
+import { SEAT_LINE_MAX, pickSeatRows, seatSummaryLine, type SeatBoardClass, type SeatBoardTrain, type SeatFilterRow } from "./seatFilter.js";
 
 export interface FindSeatsArgs {
   from: string;
@@ -237,11 +237,16 @@ export async function runFindSeatsTool(args: FindSeatsArgs): Promise<FindSeatsRe
     `${r.number} ${r.name} · ${r.classCode} · ${r.status === "AVAILABLE" ? `AVAILABLE ${r.seats ?? "?"} seats` : r.status === "RAC" ? `RAC ${r.rac ?? "?"}` : r.status === "WAITLIST" ? `WL ${r.waitlist ?? "?"}` : "N/A"}${r.fare != null ? ` · ₹${r.fare}` : ""}${r.departure ? ` · ${r.departure}` : ""}`;
 
   const lines: string[] = [head];
-  if (pick.seat.length) lines.push(`SEAT (${pick.seat.length} rows): ${pick.seat.slice(0, 8).map(fmt).join(" | ")}`);
-  if (wlPick.wl.length) lines.push(`WAITLIST/N-A (${wlPick.wl.length} rows, confirm% NAHI batana): ${wlPick.wl.slice(0, 8).map(fmt).join(" | ")}`);
+  /* Round-25 (user: "baki trains seat finder card mein kyu le jaata"): pehle yahan sirf 8 rows jaati
+   * thi aur summary line "+N aur" likhti thi — model usse aage badha kar "baaki trains card me hain"
+   * likh deta tha, jabki chat me koi Seat Finder card nahi dikhta. Ab saari rows isi call me jaati
+   * hain (SEAT_LINE_MAX tak) taaki jawab me saari trains aayein — koi card pointer nahi. */
+  if (pick.seat.length) lines.push(`SEAT (${pick.seat.length} rows): ${pick.seat.slice(0, SEAT_LINE_MAX).map(fmt).join(" | ")}`);
+  if (wlPick.wl.length) lines.push(`WAITLIST/N-A (${wlPick.wl.length} rows, confirm% NAHI batana): ${wlPick.wl.slice(0, SEAT_LINE_MAX).map(fmt).join(" | ")}`);
   if (pick.missingClass) lines.push(`${pick.missingClass} trains me ye class hi nahi hai — unhe "seat nahi" mat maano.`);
   if (pick.unknownTime) lines.push(`${pick.unknownTime} rows ka time nahi mila (time filter laga tha).`);
   lines.push(`Source: ${board.provider ?? "live board"} · ${pool.length} trains dekhe (${enriched.size} ka alag board check kiya).`);
+  lines.push("Jawab me SAARI trains ki lines likho (jo SEAT rows me hain) — 'baaki trains kisi card me hain' jaisi baat kabhi mat likho, chat me aisa koi card nahi dikhta.");
 
   return {
     ok: true,

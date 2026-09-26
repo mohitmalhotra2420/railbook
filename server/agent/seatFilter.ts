@@ -150,6 +150,9 @@ export function pickSeatRows(
   return { seat, wl, missingClass, unknownTime };
 }
 
+/* Round-25: ek jawab me kitni rows dikhayein — "koi cap nahi" ke saath, par jawab padhne layak rahe. */
+export const SEAT_LINE_MAX = 12;
+
 const inr = (n: number | null) => (n == null ? "—" : `₹${n.toLocaleString("en-IN")}`);
 const trainCount = (rows: SeatFilterRow[]) => new Set(rows.map((r) => r.number)).size;
 const fmtRow = (r: SeatFilterRow) => {
@@ -183,18 +186,63 @@ export function seatSummaryLine(
 
   if (pick.seat.length) {
     const trains = trainCount(pick.seat);
-    const top = pick.seat.slice(0, 4).map(fmtRow).join(" · ");
-    const more = pick.seat.length > 4 ? ` · +${pick.seat.length - 4} aur (Seat Finder card me)` : "";
-    return `💺 ${cls} me seat wali ${trains} train${trains === 1 ? "" : "s"}${when}${sortNote} — ${top}${more}. (${head})`;
+    /* Round-25 (26 Sep, user screenshot: "Yeh baki trains seat finder card mein kyu le jaata?") —
+     * pehle ye line sirf top 4 rows likhti thi aur baaki ko "(Seat Finder card me)" bhej deti thi;
+     * us card ko Round-21c me chat se hata diya gaya tha, isliye pointer jhootha tha (aur AI wahi
+     * line copy karke "…Seat Finder card mein hain" likh deta tha). Ab SAARI seat rows isi line me
+     * aati hain (koi card pointer nahi) — bahut zyada hon to hi "+N aur bhi hain" (bina kisi card ke). */
+    const shown = pick.seat.slice(0, SEAT_LINE_MAX).map(fmtRow).join(" · ");
+    const more = pick.seat.length > SEAT_LINE_MAX ? ` · +${pick.seat.length - SEAT_LINE_MAX} aur bhi hain` : "";
+    return `💺 ${cls} me seat wali ${trains} train${trains === 1 ? "" : "s"}${when}${sortNote} — ${shown}${more}. (${head})`;
   }
   if (pick.wl.length) {
     const trains = trainCount(pick.wl);
-    const top = pick.wl.slice(0, 3).map(fmtRow).join(" · ");
+    const top = pick.wl.slice(0, SEAT_LINE_MAX).map(fmtRow).join(" · ");
+    const wlMore = pick.wl.length > SEAT_LINE_MAX ? ` · +${pick.wl.length - SEAT_LINE_MAX} aur bhi hain` : "";
     /* WL number hi dikhate hain — confirm% nahi (wo data hamare paas nahi hai). */
-    return `💺 ${cls} me abhi koi AVAILABLE/RAC seat nahi${when} — WL wali ${trains} train${trains === 1 ? "" : "s"} ${trains === 1 ? "hai" : "hain"}: ${top}. Confirm% hum nahi dete (data nahi); booking se pehle IRCTC par check karo. (${head})`;
+    return `💺 ${cls} me abhi koi AVAILABLE/RAC seat nahi${when} — WL wali ${trains} train${trains === 1 ? "" : "s"} ${trains === 1 ? "hai" : "hain"}: ${top}${wlMore}. Confirm% hum nahi dete (data nahi); booking se pehle IRCTC par check karo. (${head})`;
   }
   const extra = pick.unknownTime ? ` ${pick.unknownTime} trains ka time pata nahi chal paya.` : "";
   return `💺 ${cls} me aaj koi seat wali train nahi mili${when}.${extra} (${head})`;
+}
+
+/** Ek row ki chat line (ReplyText parser isi shakal ko rows me todta hai) — sirf asli row data. */
+function replyLine(r: SeatFilterRow): string {
+  const status =
+    r.status === "AVAILABLE"
+      ? `AVAILABLE ${r.seats ?? "?"} seats`
+      : r.status === "RAC"
+        ? `RAC ${r.rac ?? "?"}`
+        : r.status === "WAITLIST"
+          ? `WL ${r.waitlist ?? "?"}`
+          : "N/A";
+  return (
+    `* ${r.number} ${r.name} — ${r.classCode} — ${status}` +
+    `${r.fare != null ? ` — ${inr(r.fare)}` : ""}` +
+    `${r.departure ? ` — ${r.departure} departure` : ""}`
+  );
+}
+
+/**
+ * Round-25 (26 Sep, user screenshot: "Yeh baki trains seat finder card mein kyu le jaata? last line
+ * dekho"): AI ke jawab me jo seat-wali trains chhoot gayi hon, unki lines YAHAN se banti hain — jo
+ * rows live board se aayi hain wahi (kuch invent nahi). Chat me koi Seat Finder card nahi dikhta,
+ * isliye "baki trains card me hain" jaisi baat kabhi sach nahi thi. In lines ko jawab ke saath jodne
+ * par user ko SAARI trains usi message me dikhti hain.
+ */
+export function missingSeatLines(replyText: string, rows: SeatFilterRow[]): string[] {
+  const text = String(replyText ?? "");
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const r of rows) {
+    const key = `${r.number}:${r.classCode}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    /* Number jawab me kahin bhi ho to us train ki line dobara nahi likhte. */
+    if (new RegExp(`\\b${r.number}\\b`).test(text)) continue;
+    out.push(replyLine(r));
+  }
+  return out;
 }
 
 export interface SeatFilterResult {
@@ -246,7 +294,8 @@ export async function seatFilterFor(opts: {
     ? pickSeatRows(board.trains as SeatBoardTrain[], { ...slots, onlyAvailable: false }, times)
     : pick;
   const line = seatSummaryLine({ ...pick, wl: wlPick.wl }, slots, { from, to });
-  const max = opts.maxRows ?? 8;
+  /* Round-25: payload/line me saari seat-wali trains (12 tak) — default 8 se badhaya. */
+  const max = opts.maxRows ?? SEAT_LINE_MAX;
   return {
     line,
     rows: pick.seat.slice(0, max),
