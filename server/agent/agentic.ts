@@ -2629,7 +2629,11 @@ export async function nextStepFromModelOnly(args: {
         "Tumhara EK kaam: user ke liye sabse kaam ka AGLA KADAM chun kar ek line me likhna — jaise ChatGPT/Gemini karte hain " +
         "(socho ki ab user kya poochhna/chaahna chahega: us train ka booking, doosri class, doosri date, seat availability, timings, " +
         "live status, ya koi saaf sawaal). Format bilkul: [NEXT] <chhota label> => <wahi baat jo user bhej sakta hai>. " +
-        "SIRF 1 line, kuch aur nahi (koi greeting, koi jawab, koi explanation). Sirf in tool results ka data use karo — " +
+        "SIRF 1 line, kuch aur nahi (koi greeting, koi jawab, koi explanation). Label aur utterance dono app ki bhasha " +
+        "me (Hinglish), seedha bhejne layak — jaise '[NEXT] Book 22478 · CC (AVL 2 ₹1830) => 22478 mein CC book krdo' ya " +
+        "'[NEXT] 12014 ka live status => 12014 ka live status batao'. AGAR tumne user se koi sawaal poochha hai (jaise kaunsi class, " +
+        "kis date, kitne passengers), to us sawaal ka sabse sambhavit jawab bhi chip bana do (jaise '[NEXT] 3A => 3A' ya " +
+        "'[NEXT] Kal => Kal') taaki user ek tap me aage badh sake. Sirf in tool results ka data use karo — " +
         "koi naya train number/naam/fare/count mat likho. Agar sach me koi agla kaam ka step nahi banta to likho: [NEXT] NONE",
     },
     {
