@@ -138,6 +138,22 @@ const ALIASES: Record<string, string> = {
   बिआस: "BEAS",
   katra: "SVDK",
   कटरा: "SVDK",
+  /* Round-29 (26 Sep, user: "vaishno devi" se station parse nahi hua jab tak poora
+   * "Shri Mata Vaishno Devi Katra" na likha jaye): teerth ke chhote/partial naam bhi kaafi hain —
+   * sab SVDK hi hain (koi naya code/naam invent nahi). */
+  "vaishno devi": "SVDK",
+  "vaishno devi katra": "SVDK",
+  vaishnodevi: "SVDK",
+  "vishno devi": "SVDK",
+  "mata vaishno devi": "SVDK",
+  "shri mata vaishno devi": "SVDK",
+  "shri mata vaishno devi katra": "SVDK",
+  "smvd katra": "SVDK",
+  "smvd katra station": "SVDK",
+  "वैष्णो देवी": "SVDK",
+  "वैष्णो देवी कटरा": "SVDK",
+  वैष्णोदेवी: "SVDK",
+  "माता वैष्णो देवी": "SVDK",
   ahmedabad: "ADI",
   अहमदाबाद: "ADI",
   bhopal: "BPL",

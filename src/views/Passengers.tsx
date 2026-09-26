@@ -221,8 +221,21 @@ export function Passengers() {
             </div>
             <div className="pax-trip-meta">
               <span>📅 {train.date}</span>
-              <span>🕑 {train.departure} → {train.arrival}{train.arrivalDayOffset > 0 ? ` (+${train.arrivalDayOffset}d)` : ""}</span>
-              {klass && <span>💰 {inr(klass.fare)} <span className="muted">per passenger</span></span>}
+              {/* Round-29: timings khaali ho to "🕑 → " jaisa adhoora nahi — saaf line. */}
+              {train.departure || train.arrival ? (
+                <span>🕑 {train.departure} → {train.arrival}{train.arrivalDayOffset > 0 ? ` (+${train.arrivalDayOffset}d)` : ""}</span>
+              ) : (
+                <span className="muted">🕑 Timings provider ke data me nahi the</span>
+              )}
+              {/* Round-29: fare sirf tab likho jab asli ho — "₹0" jhootha lagta hai. Jab provider ka
+                * fare abhi nahi aaya (chat se seedha form khula), saaf batao ki fare Review journey par. */}
+              {klass && (
+                klass.fare > 0 ? (
+                  <span>💰 {inr(klass.fare)} <span className="muted">per passenger</span></span>
+                ) : (
+                  <span className="muted">💰 Fare abhi confirm nahi — Review journey par provider se aayega</span>
+                )
+              )}
             </div>
             {klass?.source && (
               <div className="pax-trip-src muted">

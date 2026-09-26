@@ -171,9 +171,14 @@ describe("Round-27 · ek train ki SAARI classes (ek hi class nahi)", () => {
       "* 12013 AMRITSAR SHTABDI — CC AVL 444 ₹675 · 3A AVL 71 ₹520 · EC AVL 23 ₹1,015 — 06:10 departure\n" +
       "* 12926 PASCHIM EXPRESS — SL WL 60 ₹285 · 3A N/A";
     const { container } = render(<ReplyText text={reply} />);
-    const rows = [...container.querySelectorAll(".rp-row")].map((el) => el.textContent ?? "");
-    expect(rows.length).toBeGreaterThanOrEqual(5);
-    const all = rows.join(" | ");
+    /* Round-29: train-wise card (12013 + 12926 = 2 cards), andar class rows — data waisa hi. */
+    const cards = [...container.querySelectorAll(".rp-row")].map((el) => el.textContent ?? "");
+    expect(cards.length).toBe(2);
+    expect(cards[0]).toContain("12013");
+    expect(cards[1]).toContain("12926");
+    const classRows = [...container.querySelectorAll(".rp-crow")].map((el) => el.textContent ?? "");
+    expect(classRows.length).toBeGreaterThanOrEqual(5);
+    const all = cards.join(" | ") + " | " + classRows.join(" | ");
     expect(all).toContain("12013");
     expect(all).toContain("CC");
     expect(all).toContain("444");

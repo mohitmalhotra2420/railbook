@@ -306,7 +306,12 @@ export function bookingReducer(
       };
     }
     case "SELECT_TRAIN_AND_CLASS": {
-      if (!isBookable(action.klass.status)) {
+      /* Round-29 (user: "22432 mein 3A book krdo" par form khulna chahiye, "check hui?" loop nahi):
+       * status hi pata na ho (UNKNOWN — data ke saath aaya hi nahi tha) to bhi form khulta hai; asli
+       * availability + fare "Review journey" par provider se aate hain (goReview) aur wahan bookable na
+       * ho to wahi rok deta hai. Sirf jab train/class chal hi nahi rahi (N/A/REGRET/CANCELLED) tab
+       * selection rukti hai — warna user ko jhoothi umeed kabhi nahi. */
+      if (!isBookable(action.klass.status) && action.klass.status !== "UNKNOWN") {
         return { ...state, error: UNAVAILABLE_NOTICE, notice: UNAVAILABLE_NOTICE };
       }
       return {

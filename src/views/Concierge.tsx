@@ -12,12 +12,14 @@ import { BERTH_BY_CLASS, CLASS_LABELS, isBookable, type ClassAvailability, type 
 import type { AgentTrainTable } from "../ai/agent";
 import { JourneyOptions } from "../components/JourneyOptions";
 import { bookingFromChipPayload, bookingFromSeatRow, stationOf } from "../booking/fromOption";
+/* Round-29: booking intent par seedha passenger form (pure resolution logic — test ke liye alag). */
+import { buildAutoBookSeat, isBookingIntent, pickRowForBooking } from "../booking/autobook";
 import { detectSeatIntent, type SeatIntent, type SeatRow } from "../seatfinder";
 import { seatListGroups, stripSeatCardPointer } from "../chatText";
 import { VoiceSheet, type VoiceSuggestion } from "../components/VoiceSheet";
 import { AlternativesCard } from "../components/AlternativesCard";
 import { TrainPicker } from "../components/TrainPicker";
-import { ReplyText } from "../components/ReplyText";
+import { ReplyText, type ReplyRow } from "../components/ReplyText";
 import { TrainClassBlock } from "../components/TrainClassBlock";
 
 import type { ChatMessage } from "../conversation/types";
@@ -992,6 +994,36 @@ export function Concierge() {
              * lastAsked set karein — warna agla "2" server par pax nahi banta. */
             setLastAsked(agentRes.resumeAsk);
           }
+          /* Round-29 (26 Sep, user: "22432 mein 3A book krdo" — AI khud passenger form pe shift kare,
+           * details pehle se bhari hon; "Check hui?" dobara na poochhna pade — seat-check flow atka na
+           * rahe). Booking intent + train (+ class) tay ho to jawab ka intezaar nahi: turant passenger
+           * form. Jo data verified hai wahi bhejte hain (row ka status/fare/timing, warna list ka
+           * naam/timing) — kuch invent nahi; status pata na ho to honest note ke saath form. */
+          if (isBookingIntent(trimmed, c?.intent)) {
+            const tno = (/\b(\d{4,5})\b/.exec(trimmed)?.[1] ?? c?.selectedTrainNumber ?? lastFactTrainRef.current ?? "").trim();
+            const clsWanted = (/\b(1A|2A|3A|3E|2S|SL|CC|EC|EA|FC|GN)\b/i.exec(trimmed)?.[1] ?? "").toUpperCase();
+            const routeFrom = state.from ?? c?.origin ?? null;
+            const routeTo = state.to ?? c?.destination ?? null;
+            /* Date: is turn me server ne jo batayi (ya user ne pehle di) wahi — form ka default
+             * (aaj) use nahi karte, warna galat date ka form khul jaata. Date hi na ho to advance
+             * nahi hota (wahan "kis date ko?" poochhna theek hai). */
+            const routeDate = (c?.dateProvided && c?.date ? c.date : "") || (state.dateProvided ? state.date : "") || (state.date && c?.dateProvided ? c.date : "");
+            /* Wahi train+class pehle se form me khuli hai to dobara kuch nahi karte. */
+            const already = state.selectedTrain?.number === tno && (!clsWanted || state.selectedClass?.code === clsWanted);
+            if (tno && !already && routeFrom && routeTo && routeDate) {
+              const sf = agentRes.seatFilter;
+              const live = [...(sf?.rows ?? []), ...(sf?.wlRows ?? [])];
+              const pickRow = pickRowForBooking(live, tno, clsWanted || null);
+              const seat = buildAutoBookSeat({
+                trainNumber: tno,
+                classWanted: clsWanted || null,
+                row: pickRow,
+                trainRow: agentRes.trains?.rows?.find((t) => String(t.number) === tno) ?? null,
+                source: sf?.source ?? null,
+              });
+              openBookingFromSeatRow(seat, { from: routeFrom.code, to: routeTo.code, toName: routeTo.name ?? null, date: routeDate });
+            }
+          }
           // Booking continuity: AI gathered all slots + booking intent → open the bookable TrainBoard.
           const wantBooking =
             c?.intent === "BOOK_TRAIN" ||
@@ -1395,7 +1427,9 @@ export function Concierge() {
     toName?: string | null;
   }) {
     const status = String(q.row?.status ?? "UNKNOWN").toUpperCase();
-    if (status !== "AVAILABLE" && status !== "RAC" && status !== "WAITLIST") {
+    /* Round-29: UNKNOWN (status hi nahi mila) par bhi passenger form — fresh AI query ke loop me
+     * ya user ko "check hui?" poochne me time barbaad nahi; live check "Review journey" par. */
+    if (status !== "AVAILABLE" && status !== "RAC" && status !== "WAITLIST" && status !== "UNKNOWN") {
       void handleText(
         `${q.trainNumber} ki fresh seat availability${q.classCode ? ` ${q.classCode}` : ""} ${q.date ?? state.date} ko ${q.from} se ${q.to}`,
       );
@@ -1415,8 +1449,14 @@ export function Concierge() {
   }
 
   /** Seat Finder ke chip tap par bhi wahi — row me jo hai wahi. */
-  function openBookingFromSeatRow(r: SeatRow, ctx: { from: string; to: string; toName?: string | null; date: string }) {
-    if (r.status !== "AVAILABLE" && r.status !== "RAC" && r.status !== "WAITLIST") {
+  function openBookingFromSeatRow(r: SeatRow, ctx: { from: string; to: string; toName?: string | null; date: string }, note?: string | null) {
+    /* Round-29 (user screenshot: "Check hui?" ke baad wahi "check kar raha hoon" ghuma-ghuma ke —
+     * User: "seat-check flow atka na rahe"). Status pata na ho (UNKNOWN) to ab fresh AI query ka
+     * chakkar nahi — seedha passenger form khulta hai; asli availability + fare "Review journey"
+     * par provider se aati hai (goReview). Sirf jab train/class chal hi nahi rahi (N/A/REGRET/
+     * CANCELLED) tab fresh check maanga jata hai. */
+    const openable = r.status === "AVAILABLE" || r.status === "RAC" || r.status === "WAITLIST" || r.status === "UNKNOWN";
+    if (!openable) {
       void handleText(
         `${r.number} ki fresh seat availability ${r.classCode !== "—" ? `${r.classCode} ` : ""}${ctx.date} ko ${ctx.from} se ${ctx.to}`,
       );
@@ -1429,14 +1469,45 @@ export function Concierge() {
     });
     selectTrainAndClassGo(train, klass);
     speakGuide(`${klass.code} select ho gayi. Ab passenger details bhariye.`);
+    const unknown = klass.status === "UNKNOWN";
     setMessages((m) => [
       ...m,
       {
         id: newId(),
         role: "assistant",
-        text: `✅ ${klass.code} select — passenger form khul gaya: ${train.number} ${train.name ? `${train.name} · ` : ""}${train.date} · ${train.from.code} → ${train.to.code}.`,
+        text: `✅ ${klass.code} select — passenger form khul gaya: ${train.number} ${train.name ? `${train.name} · ` : ""}${train.date} · ${train.from.code} → ${train.to.code}.${
+          unknown ? " Seat status yeh data me nahi tha — asli availability aur fare \"Review journey\" par provider se check honge." : ""
+        }${note ? ` ${note}` : ""}`,
       },
     ]);
+  }
+
+  /** Round-29: chat ke train-card me class par tap → usi train+class ka passenger form (jo dikha wahi). */
+  function openBookingFromReplyRow(r: ReplyRow, group?: { number: string; name: string }) {
+    const from = state.from;
+    const to = state.to;
+    const date = state.date;
+    if (!from || !to || !date) {
+      void handleText(`${r.train} ${r.cls} ki seat availability — ${from?.code ?? ""} se ${to?.code ?? ""}`.trim());
+      return;
+    }
+    const count = typeof r.count === "number" ? r.count : null;
+    const seat = buildAutoBookSeat({
+      trainNumber: r.train,
+      classWanted: r.cls || null,
+      row: {
+        number: r.train,
+        name: group?.name || r.name,
+        classCode: r.cls,
+        status: r.status,
+        /* Chat me jo count dikha wahi — status ke hisaab se seats/RAC/WL me jaata hai. */
+        seats: count,
+        fare: r.fare ? Number(String(r.fare).replace(/[^\d]/g, "")) || null : null,
+        departure: r.dep,
+      },
+      source: "chat",
+    });
+    openBookingFromSeatRow(seat, { from: from.code, to: to.code, toName: to.name, date });
   }
 
   async function onChooseClass(klass: ClassAvailability) {
@@ -1647,7 +1718,7 @@ export function Concierge() {
                     ) : (
                       /* Round-20: lamba jawab (screenshot 3) attractive rows me — ReplyText sirf
                        * render karta hai, text waisa hi rehta hai. */
-                      <ReplyText text={rest} />
+                      <ReplyText text={rest} onBook={(r, g) => openBookingFromReplyRow(r, g)} />
                     ))}
                 </>
               );

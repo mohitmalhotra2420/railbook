@@ -218,13 +218,20 @@ describe("Round-20 · chat ka lamba answer", () => {
     const text =
       "LDH → ASR, kal 26 Sep, Dopahar 12:00–17:00 window: * 11057 CSMT ASR EXPRESS – 3E AVAILABLE 44 seats ₹520, dep 12:55 * 11057 CSMT ASR EXPRESS – 2A AVAILABLE 18 seats ₹725, dep 12:55 * 14649 SARYU YAMUNA EX – 3A AVAILABLE 1 seat ₹520, dep 14:16 * 14649 SARYU YAMUNA EX – 2A AVAILABLE 1 seat ₹725, dep 14:16 * 14649 SARYU YAMUNA EX – 1A AVAILABLE 3 seats ₹1190, dep 14:16 22 trains check ki, is window me seat wali 2 trains dikh rahi hain.";
     const { container } = render(<ReplyText text={text} />);
-    const rows = [...container.querySelectorAll(".rp-row")].map((r) => r.textContent);
-    expect(rows).toHaveLength(5);
-    expect(rows[0]).toContain("11057");
-    expect(rows[0]).toContain("AVL 44");
-    expect(rows[0]).toContain("₹520");
-    expect(rows[0]).toContain("12:55");
-    expect(rows[4]).toContain("1A");
+    /* Round-29: same train ki classes ab ek card me — 11057 (2 class) + 14649 (3 class) = 2 cards,
+     * aur andar 5 class rows (data waisa hi, kuch chhupta nahi). */
+    const cards = [...container.querySelectorAll(".rp-row")].map((r) => r.textContent);
+    expect(cards).toHaveLength(2);
+    expect(cards[0]).toContain("11057");
+    expect(cards[0]).toContain("AVL 44");
+    expect(cards[0]).toContain("₹520");
+    expect(cards[0]).toContain("12:55");
+    expect(cards[1]).toContain("14649");
+    expect(cards[1]).toContain("1A");
+    const classRows = [...container.querySelectorAll(".rp-crow")].map((r) => r.textContent);
+    expect(classRows).toHaveLength(5);
+    expect(classRows[0]).toContain("3E");
+    expect(classRows[4]).toContain("1A");
     /* window wali line upar chip me, aur aakhri sentence neeche tail me (kuch nahi chhupta) */
     expect(container.querySelector(".rp-headchip")?.textContent).toContain("LDH → ASR");
     expect(container.querySelector(".rp-tail")?.textContent).toContain("22 trains check ki");

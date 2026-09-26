@@ -15,7 +15,7 @@
  */
 import type { JSX } from "react";
 
-type Row = {
+export type Row = {
   train: string;
   name: string;
   cls: string;
@@ -25,6 +25,47 @@ type Row = {
   dep: string | null;
   scale: "seats" | "seat" | null;
 };
+
+/** Round-29: ek train ke saare class-rows ek card me. Row ka apna status/count/fare waise hi. */
+export type TrainRowGroup = { number: string; name: string; rows: Row[] };
+/** Concierge ke liye alias — chat card ka class row. */
+export type ReplyRow = Row;
+
+/**
+ * Round-29 (26 Sep, user screenshot: "22432" do baar, "19804" do baar — same train ki classes alag
+ * alag cards me). Pure derived view-model: rows ko trainNumber par group karta hai.
+ *   • order wahi — pehli baar jis train ka zikr aaya, uska card wahin (sort/filter nahi).
+ *   • har class apna status/count/fare/dep RAKHTI hai — koi merge/average/sum nahi.
+ *   • bilkul same record (train+class+status+count+fare+dep) dobara aaye to ek hi baar (blind duplicate
+ *     nahi); par alag status/fare wala record chhupta nahi (overwrite bhi nahi).
+ *   • input rows mutate nahi hoti (nayi array of groups).
+ */
+export function groupReplyRowsByTrain(rows: Row[]): TrainRowGroup[] {
+  const groups: TrainRowGroup[] = [];
+  const at = new Map<string, number>();
+  for (const r of rows) {
+    const key = r.train;
+    let i = at.get(key);
+    if (i === undefined) {
+      i = groups.length;
+      at.set(key, i);
+      groups.push({ number: r.train, name: r.name, rows: [] });
+    }
+    const g = groups[i];
+    if (!g.name && r.name) g.name = r.name;
+    const dup = g.rows.some(
+      (x) =>
+        x.cls === r.cls &&
+        x.status === r.status &&
+        x.count === r.count &&
+        (x.fare ?? "") === (r.fare ?? "") &&
+        (x.dep ?? "") === (r.dep ?? ""),
+    );
+    if (dup) continue;
+    g.rows.push(r);
+  }
+  return groups;
+}
 
 type Parsed = { head: string[]; rows: Row[]; rest: string[] };
 
@@ -45,6 +86,12 @@ function rowOf(seg: string): { row: Row; tail: string } | null {
   if (!m?.groups) return null;
   const g = m.groups as Record<string, string | undefined>;
   const consumed = m[0].length;
+  const source = seg.trim();
+  /* Round-29 (user screenshot: "…3A AVL —" ke baad text "ability check karne ke liye journey date
+   * chahiye" — beech ke shabd kaat ke adhoora pada tha). Regex line ka naam itna khincha ki wo aadhe
+   * shabd par ruk gaya; aisa match row nahi maana jaata — poora text waisa hi rehta hai (kuch chhupta
+   * nahi, kuch adhoora nahi). */
+  if (/[\p{L}\p{N}]/u.test(source[consumed] ?? "") && /[\p{L}\p{N}]/u.test(source[consumed - 1] ?? "")) return null;
   const tail = seg.trim().slice(consumed).replace(/^[\s,;.|–—\-]+/, "").trim();
   const statusRaw = String(g.status ?? "").toUpperCase().replace(/\s+/g, "_");
   /* Round-27: chat/server ke compact jawab me "AVL"/"AVAIL" likha hota hai (jaise "CC AVL 444 ₹675")
@@ -204,9 +251,28 @@ function statusText(r: Row): string {
   return r.count ? String(r.count) : r.status;
 }
 
-export function ReplyText({ text }: { text: string }): JSX.Element {
+/** Card ka tone = us train ki sabse achhi class (green > blue > amber > red) — rang pehle jaisa. */
+function groupTone(rows: Row[]): ReturnType<typeof statusTone> {
+  const tones: string[] = rows.map((r) => statusTone(r.status));
+  for (const t of ["ok", "rac", "wl", "bad"] as const) if (tones.includes(t)) return t;
+  return "bad";
+}
+
+/** Tappable = booking ka rasta khulta hai (available/RAC/WL ya status pata nahi). N/A par jhootha button nahi. */
+const isTappable = (status: string) => status === "AVAILABLE" || status === "RAC" || status === "WAITLIST" || status === "UNKNOWN";
+
+export function ReplyText({
+  text,
+  onBook,
+}: {
+  text: string;
+  /** Round-29: class par tap → usi train+class ka passenger form (Concierge deta hai). */
+  onBook?: (row: Row, group: TrainRowGroup) => void;
+}): JSX.Element {
   const parsed = parseReply(text);
   if (parsed.rows.length === 0) return <p className="msg-text">{text}</p>;
+  /* Round-29: display-level grouping — server ka text/rows waisa hi rehta hai, sirf card ek per train. */
+  const groups = groupReplyRowsByTrain(parsed.rows);
   return (
     <div className="rp">
       {headChips(parsed.head).length > 0 && (
@@ -236,20 +302,50 @@ export function ReplyText({ text }: { text: string }): JSX.Element {
         );
       })()}
       <div className="rp-rows">
-        {parsed.rows.map((r, i) => (
-          <div key={i} className={`rp-row ${statusTone(r.status)}`}>
-            <div className="rp-l1">
-              <span className="rp-no">{r.train}</span>
-              {r.name && <span className="rp-name">{r.name}</span>}
+        {groups.map((g) => {
+          const tone = groupTone(g.rows);
+          return (
+            <div key={`${g.number}|${g.name}`} className={`rp-row ${tone}`}>
+              <div className="rp-l1">
+                <span className="rp-no">{g.number}</span>
+                {g.name && <span className="rp-name">{g.name}</span>}
+                <span className="rp-gcount">
+                  {g.rows.length} class{g.rows.length === 1 ? "" : "es"}
+                </span>
+              </div>
+              <div className="rp-crows">
+                {g.rows.map((r, i) => {
+                  const t = statusTone(r.status);
+                  const body = (
+                    <>
+                      <span className="rp-cls">{r.cls}</span>
+                      <span className={`rp-st ${t}`}>{statusText(r)}</span>
+                      {r.fare && <span className="rp-fare">{r.fare}</span>}
+                      {r.dep && <span className="rp-dep">🕑 {r.dep}</span>}
+                    </>
+                  );
+                  return onBook && isTappable(r.status) ? (
+                    <button
+                      key={i}
+                      type="button"
+                      className={`rp-crow tappable ${t}`}
+                      aria-label={`${g.number} ${g.name} ${r.cls} ${statusText(r)} — passenger form kholo`}
+                      title={`${g.number} ${r.cls} — passenger form kholo`}
+                      onClick={() => onBook(r, g)}
+                    >
+                      {body}
+                      <span className="rp-go">Book</span>
+                    </button>
+                  ) : (
+                    <div key={i} className={`rp-crow ${t}`}>
+                      {body}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
-            <div className="rp-l2">
-              <span className="rp-cls">{r.cls}</span>
-              <span className={`rp-st ${statusTone(r.status)}`}>{statusText(r)}</span>
-              {r.fare && <span className="rp-fare">{r.fare}</span>}
-              {r.dep && <span className="rp-dep">🕑 {r.dep}</span>}
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
       {parsed.rest.length > 0 && <p className="rp-tail">{parsed.rest.join(" ")}</p>}
     </div>
