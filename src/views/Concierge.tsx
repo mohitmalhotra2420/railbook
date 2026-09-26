@@ -1891,7 +1891,11 @@ function SeatListBlock({
               key={g.number}
               number={g.number}
               name={g.name}
-              timeText={g.rows.find((r) => r.departure)?.departure ? `🕑 ${g.rows.find((r) => r.departure)?.departure}` : null}
+              /* Board rows me schedule time nahi hota — jhootha time nahi likhte, "live board" hi. */
+              timeText={(() => {
+                const dep = g.rows.find((r) => r.departure)?.departure;
+                return dep ? `🕑 ${dep}` : "🕑 live board";
+              })()}
               countText={`${g.rows.length} class${g.rows.length === 1 ? "" : "es"} (${g.seatCount} me seat)`}
               rows={g.rows.map((r) => ({
                 code: r.classCode,

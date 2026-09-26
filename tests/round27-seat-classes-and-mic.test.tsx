@@ -16,7 +16,7 @@ import { render, fireEvent } from "@testing-library/react";
 import fs from "node:fs";
 import path from "node:path";
 
-import { groupRowsByTrain, missingSeatLines, seatSummaryLine, trainClassesText, type SeatFilterRow } from "../server/agent/seatFilter";
+import { capRowsByTrain, groupRowsByTrain, missingSeatLines, seatSummaryLine, trainClassesText, type SeatFilterRow } from "../server/agent/seatFilter";
 import { seatListGroups, stripDuplicatedSeatRows } from "../src/chatText";
 import { ReplyText } from "../src/components/ReplyText";
 import { TrainClassBlock } from "../src/components/TrainClassBlock";
@@ -71,6 +71,22 @@ describe("Round-27 · ek train ki SAARI classes (ek hi class nahi)", () => {
     expect(line).toContain("2 trains");
     expect(line).toContain("12013 CC AVL 444 ₹675 · EC AVL 23 ₹1,015");
     expect(line).toContain("19611 SL AVL 174 ₹150 · 3A AVL 71 ₹520");
+  });
+
+  it("cap TRAINS par lagta hai — 12 trains ke saare classes block me aate hain (12 rows nahi)", () => {
+    const rows: SeatFilterRow[] = [];
+    for (let t = 0; t < 15; t += 1) {
+      const num = `12${String(t).padStart(3, "0")}`;
+      for (const [cls, seats] of [["CC", 400], ["3A", 71], ["SL", 22]] as [string, number][]) {
+        rows.push(mk(num, `TRAIN ${t}`, cls, "AVAILABLE", { seats }));
+      }
+    }
+    const capped = capRowsByTrain(rows, 12);
+    /* 12 trains x 3 classes = 36 rows (pehle 12 rows par kat jaata tha) */
+    expect(capped).toHaveLength(36);
+    expect(new Set(capped.map((r) => r.number)).size).toBe(12);
+    const first = capped.filter((r) => r.number === "12000");
+    expect(first.map((r) => r.classCode)).toEqual(["CC", "3A", "SL"]);
   });
 
   it("missingSeatLines: jo train jawab me nahi aayi, uski SAARI classes ek line me", () => {

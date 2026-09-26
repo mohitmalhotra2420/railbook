@@ -304,6 +304,22 @@ export function missingSeatLines(replyText: string, rows: SeatFilterRow[]): stri
   return out;
 }
 
+/** Round-27: cap **trains** par lagta hai, rows (train×class) par nahi — warna same train ki
+ *  baaki classes kat jaati thi ("ek hi class dikha raha" wali complaint). */
+export function capRowsByTrain(rows: SeatFilterRow[], maxTrains: number): SeatFilterRow[] {
+  const order: string[] = [];
+  const byTrain = new Map<string, SeatFilterRow[]>();
+  for (const r of rows) {
+    if (!byTrain.has(r.number)) order.push(r.number);
+    const list = byTrain.get(r.number) ?? [];
+    list.push(r);
+    byTrain.set(r.number, list);
+  }
+  const out: SeatFilterRow[] = [];
+  for (const n of order.slice(0, maxTrains)) out.push(...(byTrain.get(n) ?? []));
+  return out;
+}
+
 export interface SeatFilterResult {
   line: string;
   rows: SeatFilterRow[];
@@ -353,12 +369,13 @@ export async function seatFilterFor(opts: {
     ? pickSeatRows(board.trains as SeatBoardTrain[], { ...slots, onlyAvailable: false }, times)
     : pick;
   const line = seatSummaryLine({ ...pick, wl: wlPick.wl }, slots, { from, to });
-  /* Round-25: payload/line me saari seat-wali trains (12 tak) — default 8 se badhaya. */
+  /* Round-25: payload/line me saari seat-wali trains (12 tak) — default 8 se badhaya.
+   * Round-27: cap ab *trains* par — har train ki SAARI classes isi jawab/block me aani chahiye. */
   const max = opts.maxRows ?? SEAT_LINE_MAX;
   return {
     line,
-    rows: pick.seat.slice(0, max),
-    wlRows: wlPick.wl.slice(0, max),
+    rows: capRowsByTrain(pick.seat, max),
+    wlRows: capRowsByTrain(wlPick.wl, max),
     trainsSeen: board.trains.length,
     source: board.provider ?? null,
   };
