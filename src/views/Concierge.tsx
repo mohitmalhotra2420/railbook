@@ -1106,7 +1106,20 @@ export function Concierge() {
               const routeTo = { code: target.to, name: null as string | null };
               const routeDate = target.date;
               const already = state.selectedTrain?.number === tno && (!clsWanted || state.selectedClass?.code === clsWanted);
-              if (!already) {
+              if (already) {
+                /* Round-37c: user ne wahi booking hukm dobara bheja aur form pehle se khula hai — model ko
+                 * "main booking nahi kar sakta" bolne na do; saaf batao ki form khula hai. */
+                setMessages((m) => [
+                  ...m,
+                  {
+                    id: newId(),
+                    role: "assistant",
+                    text: `✅ ${tno}${clsWanted ? ` · ${clsWanted}` : ""} ka passenger form pehle se khula hai — usme details bhar do. (Bhejne ke liye "Continue to IRCTC" aap khud dabayenge; main passenger details nahi bharta.)`,
+                  },
+                ]);
+                return;
+              }
+              {
                 const sf = agentRes.seatFilter;
                 /* Round-34/37: is turn ki rows pehle; na hon to wahi rows jo user ko pehle DIKHAYI gayi thi
                  * (aur wahi route ho) — warna trains list / picker ka verified naam-timing. */

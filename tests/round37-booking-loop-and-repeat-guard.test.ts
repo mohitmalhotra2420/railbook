@@ -135,6 +135,14 @@ describe("Round-37 · client booking branch", () => {
   });
 });
 
+describe("Round-37 · wahi hukm dobara par saaf jawab (form pehle se khula)", () => {
+  it("'already' case me model ke 'booking nahi kar sakta' ki jagah saaf line", () => {
+    const src = read("src/views/Concierge.tsx");
+    expect(src).toContain("ka passenger form pehle se khula hai — usme details bhar do.");
+    expect(src).toContain("main passenger details nahi bharta.");
+  });
+});
+
 describe("Round-37 · server: picker capture + repeat guard + rule 29", () => {
   const run = read("server/agent/run.ts");
   const agentic = read("server/agent/agentic.ts");
@@ -239,5 +247,38 @@ describe("Round-37b · user ke apne chat se route/date nikaalna (server ctx rese
     const c = read("src/views/Concierge.tsx");
     expect(c).toContain("said: extractRouteDateFromChat(");
     expect(c).toContain("matchStationFuzzy: (r) => matchStationFuzzy(r),");
+  });
+});
+
+describe("Round-37d · web/general sawaal par ChatGPT-jaisa COMPOSED jawab (raw dump nahi)", () => {
+  const agentic = read("server/agent/agentic.ts");
+
+  it("shared chhota-model helper (provider-aware) maujood hai", () => {
+    expect(agentic).toContain("async function smallModelCall(system: string, user: string");
+    expect(agentic).toContain("if (candidates.length > 1) candidates.unshift(candidates.splice(1, 1)[0]); // fast (fallback) model pehle");
+  });
+
+  it("web-answer composition: sirf diye gaye facts se, comparison ho to points, jawab na mile to saaf bolna", () => {
+    expect(agentic).toContain("async function composeWebAnswer(");
+    expect(agentic).toContain("Agar sawaal COMPARISON ka hai (fark/better/kaunsa)");
+    expect(agentic).toContain("kuch bana kar mat likho");
+  });
+
+  it("WEB_SEARCH ka topic-answer ab composed hota hai (raw extract dump nahi)", () => {
+    expect(agentic).toContain("const composed = await composeWebAnswer(userText || q, ans.text, ans.title);");
+    expect(agentic).toContain("${composed ?? ans.text}");
+  });
+
+  it("deterministic web-rescue bhi composed jawab deta hai (Fallback bhi dump nahi)", () => {
+    expect(agentic).toContain("const composed = await composeWebAnswer(userText, `${best.title}\\n${best.snippet}`, best.title);");
+    expect(agentic).toContain("Web se mila${best.title ? ` (${best.title})` : \"\"}: ${composed ?? best.snippet}");
+  });
+
+  it("NEXT-step call bhi isi shared helper par chalta hai (duplicate logic nahi)", () => {
+    expect(agentic).toContain("export async function nextStepFromModelOnly(");
+    const i = agentic.indexOf("export async function nextStepFromModelOnly(");
+    const blk = agentic.slice(i, i + 2000);
+    expect(blk).toContain("await smallModelCall(");
+    expect(blk).toContain("extractNextActions(content).actions");
   });
 });

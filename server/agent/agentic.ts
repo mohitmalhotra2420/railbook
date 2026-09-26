@@ -1254,10 +1254,12 @@ export async function executeApprovedTool(
         for (const t of tries) {
           const ans = await findTopicAnswer(t);
           if (!ans) continue;
+          /* Round-37d: raw extract dump nahi — model se composed 2-4 line jawab (facts se hi). */
+          const composed = await composeWebAnswer(userText || q, ans.text, ans.title);
           const summary =
             ans.kind === "table"
-              ? `Web se mila (Wikipedia — ${ans.title}, top rows):\n${ans.text}\n(Source: ${ans.url})`
-              : `Web se mila (Wikipedia — ${ans.title}): ${ans.text}\n(Source: ${ans.url})`;
+              ? `Web se mila (Wikipedia — ${ans.title}, top rows):\n${composed ?? ans.text}\n(Source: ${ans.url})`
+              : `Web se mila (Wikipedia — ${ans.title}): ${composed ?? ans.text}\n(Source: ${ans.url})`;
           return okResult("web", summary, {
             query: q,
             answer_found: true,
@@ -2417,7 +2419,11 @@ async function webRescueAnswer(userText: string, steps: ToolTraceStep[], stepNo:
       : `${result.summary}\n(Ye railway API ka data nahi, web se laaya gaya jawab hai.)`;
   }
   const best = d.results?.[0];
-  if (best) return `Web se mila: ${best.title} — ${best.snippet}\n(Source: ${best.url}; web search — live railway data nahi.)`;
+  if (best) {
+    /* Round-37d: snippet dump ki jagah model se composed jawab (facts se hi). */
+    const composed = await composeWebAnswer(userText, `${best.title}\n${best.snippet}`, best.title);
+    return `Web se mila${best.title ? ` (${best.title})` : ""}: ${composed ?? best.snippet}\n(Source: ${best.url}; web search — live railway data nahi.)`;
+  }
   return null;
 }
 
@@ -2599,16 +2605,11 @@ function agenticTransport(): AgenticTransport | null {
  * Ye ek chhota, dedicated model call hai — sirf agla kadam poochhne ke liye, apne (chhote) timeout ke
  * saath. Jo model dega wahi client ko jaayega (grounding se validate hoke); na de to KUCH NAHI jaayega —
  * data se banaya hua fallback chip kabhi nahi (user ka saaf rule). */
-export async function nextStepFromModelOnly(args: {
-  userText: string;
-  reply: string;
-  steps: ToolTraceStep[];
-}): Promise<{ label: string; utterance: string; primary?: boolean }[]> {
+/* ── Round-37d: chhota/fast model call (provider-aware) — NEXT-step aur web-answer composition dono
+ * isi se chalte hain. Chhota kaam, chhota timeout, koi tool nahi. */
+async function smallModelCall(system: string, user: string, opts: { maxTokens?: number; timeoutMs?: number } = {}): Promise<string | null> {
   const transport = agenticTransport();
-  if (!transport) return [];
-  /* Round-36c: chain me HF model bhi ho sakta hai (alag base URL + key) — usko NVIDIA endpoint par
-   * bhejna 404 deta tha (probe me chup-chaap kuch na aata). Isliye candidates provider ke hisaab se
-   * banao aur FAST model pehle try karo (chhota kaam, kam latency), phir primary, phir HF endpoint. */
+  if (!transport) return null;
   const candidates: { model: string; url: string; apiKey: string }[] = [];
   for (const m of transport.models) {
     if (transport.hfFallback && m === transport.hfFallback.model) continue;
@@ -2616,33 +2617,7 @@ export async function nextStepFromModelOnly(args: {
   }
   if (transport.hfFallback) candidates.push({ model: transport.hfFallback.model, url: transport.hfFallback.url, apiKey: transport.hfFallback.apiKey });
   if (candidates.length > 1) candidates.unshift(candidates.splice(1, 1)[0]); // fast (fallback) model pehle
-  const data = args.steps
-    .filter((st) => st.ok)
-    .map((st) => `${st.tool}: ${(st.dataPreview ?? st.summary ?? "").slice(0, 500)}`)
-    .join("\n")
-    .slice(0, 2200);
-  if (!data) return [];
-  const messagesFor = (): { role: string; content: string }[] => [
-    {
-      role: "system",
-      content:
-        "Tum RailBook AI ho. Neeche user ka sawaal, tumhara diya hua jawab, aur is turn ke VERIFIED tool results hain. " +
-        "Tumhara EK kaam: user ke liye sabse kaam ka AGLA KADAM chun kar ek line me likhna — jaise ChatGPT/Gemini karte hain " +
-        "(socho ki ab user kya poochhna/chaahna chahega: us train ka booking, doosri class, doosri date, seat availability, timings, " +
-        "live status, ya koi saaf sawaal). Format bilkul: [NEXT] <chhota label> => <wahi baat jo user bhej sakta hai>. " +
-        "SIRF 1 line, kuch aur nahi (koi greeting, koi jawab, koi explanation). Label aur utterance dono app ki bhasha " +
-        "me (Hinglish), seedha bhejne layak — jaise '[NEXT] Book 22478 · CC (AVL 2 ₹1830) => 22478 mein CC book krdo' ya " +
-        "'[NEXT] 12014 ka live status => 12014 ka live status batao'. AGAR tumne user se koi sawaal poochha hai (jaise kaunsi class, " +
-        "kis date, kitne passengers), to us sawaal ka sabse sambhavit jawab bhi chip bana do (jaise '[NEXT] 3A => 3A' ya " +
-        "'[NEXT] Kal => Kal') taaki user ek tap me aage badh sake. Sirf in tool results ka data use karo — " +
-        "koi naya train number/naam/fare/count mat likho. Agar sach me koi agla kaam ka step nahi banta to likho: [NEXT] NONE",
-    },
-    {
-      role: "user",
-      content: `USER SAWAAL: ${args.userText.slice(0, 240)}\n\nJAWAB: ${args.reply.slice(0, 600)}\n\nVERIFIED TOOL RESULTS:\n${data}`,
-    },
-  ];
-  const totalMs = Math.max(3000, Number(process.env.AI_NEXT_STEP_TIMEOUT_MS ?? 12000));
+  const totalMs = Math.max(3000, opts.timeoutMs ?? 12000);
   const perTry = Math.max(3000, Math.floor(totalMs / Math.max(1, Math.min(candidates.length, 2))));
   for (const cand of candidates.slice(0, 2)) {
     const controller = new AbortController();
@@ -2654,8 +2629,11 @@ export async function nextStepFromModelOnly(args: {
         body: JSON.stringify({
           model: cand.model,
           temperature: 0,
-          max_tokens: 700,
-          messages: messagesFor(),
+          max_tokens: opts.maxTokens ?? 500,
+          messages: [
+            { role: "system", content: system },
+            { role: "user", content: user },
+          ],
         }),
         signal: controller.signal,
       });
@@ -2663,14 +2641,57 @@ export async function nextStepFromModelOnly(args: {
       if (!res.ok) continue;
       const parsed = (await res.json()) as NvidiaChatJson;
       const content = String(parsed?.choices?.[0]?.message?.content ?? "").trim();
-      if (!content) continue;
-      return extractNextActions(content).actions;
+      if (content) return content;
     } catch {
       clearTimeout(timer);
       continue;
     }
   }
-  return [];
+  return null;
+}
+
+/* Round-37d (user: "AI ko chatgpt/gemini jaisa banao — ek dum accurate answer de"): Wikipedia se aaya
+ * raw paragraph dump karne ki jagah model se COMPOSED jawab likhwaate hain — sirf diye gaye facts se,
+ * chhota aur seedha. Facts mein jawab na ho to model saaf keh dega (jhooth nahi). */
+async function composeWebAnswer(userText: string, facts: string, title: string | null): Promise<string | null> {
+  const out = await smallModelCall(
+    "Tum RailBook AI ho — Indian Railways ka expert assistant. Neeche user ka sawaal aur web (Wikipedia) se aaye FACTS hain. " +
+      "User ke sawaal ka SEEDHA jawab 2-4 chhoti Hinglish lines me likho — sirf in facts se. Agar sawaal COMPARISON ka hai (fark/better/kaunsa) " +
+      "to points me fark batao. Agar facts me sawaal ka jawab nahi hai to SAAF likho ki is web page me jawab nahi mila (kuch bana kar mat likho). " +
+      "Numbers/naam/date bilkul waise rakho jaise facts me hain. Koi source line ya URL mat likho (wo hum alag se lagayenge). Koi heading/markdown nahi.",
+    `SAWAAL: ${userText.slice(0, 300)}\n${title ? `PAGE: ${title}\n` : ""}FACTS:\n${facts.slice(0, 1800)}`,
+    { maxTokens: 450, timeoutMs: 12000 },
+  );
+  return out ? out.replace(/\s*\n\s*/g, "\n").trim() : null;
+}
+
+export async function nextStepFromModelOnly(args: {
+  userText: string;
+  reply: string;
+  steps: ToolTraceStep[];
+}): Promise<{ label: string; utterance: string; primary?: boolean }[]> {
+  const data = args.steps
+    .filter((st) => st.ok)
+    .map((st) => `${st.tool}: ${(st.dataPreview ?? st.summary ?? "").slice(0, 500)}`)
+    .join("\n")
+    .slice(0, 2200);
+  if (!data) return [];
+  const content = await smallModelCall(
+    "Tum RailBook AI ho. Neeche user ka sawaal, tumhara diya hua jawab, aur is turn ke VERIFIED tool results hain. " +
+      "Tumhara EK kaam: user ke liye sabse kaam ka AGLA KADAM chun kar ek line me likhna — jaise ChatGPT/Gemini karte hain " +
+      "(socho ki ab user kya poochhna/chaahna chahega: us train ka booking, doosri class, doosri date, seat availability, timings, " +
+      "live status, ya koi saaf sawaal). Format bilkul: [NEXT] <chhota label> => <wahi baat jo user bhej sakta hai>. " +
+      "SIRF 1 line, kuch aur nahi (koi greeting, koi jawab, koi explanation). Label aur utterance dono app ki bhasha " +
+      "me (Hinglish), seedha bhejne layak — jaise '[NEXT] Book 22478 · CC (AVL 2 ₹1830) => 22478 mein CC book krdo' ya " +
+      "'[NEXT] 12014 ka live status => 12014 ka live status batao'. AGAR tumne user se koi sawaal poochha hai (jaise kaunsi class, " +
+      "kis date, kitne passengers), to us sawaal ka sabse sambhavit jawab bhi chip bana do (jaise '[NEXT] 3A => 3A' ya " +
+      "'[NEXT] Kal => Kal') taaki user ek tap me aage badh sake. Sirf in tool results ka data use karo — " +
+      "koi naya train number/naam/fare/count mat likho. Agar sach me koi agla kaam ka step nahi banta to likho: [NEXT] NONE",
+    `USER SAWAAL: ${args.userText.slice(0, 240)}\n\nJAWAB: ${args.reply.slice(0, 600)}\n\nVERIFIED TOOL RESULTS:\n${data}`,
+    { maxTokens: 700, timeoutMs: Math.max(3000, Number(process.env.AI_NEXT_STEP_TIMEOUT_MS ?? 12000)) },
+  );
+  if (!content) return [];
+  return extractNextActions(content).actions;
 }
 
 export async function aiPhraseGate(kind: "passengers" | "date" | "station", facts: { fallback: string; mustContain: string[]; context: string }): Promise<{ text: string; model: string | null }> {
