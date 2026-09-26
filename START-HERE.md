@@ -9,7 +9,7 @@ railbook-full/
 ├── railbook/                  ← asli repo (Vite + React + TS client + Express/TS server + tests)
 │   ├── src/                   ← client (views/, components/, booking/, ai/, irctc/, seatfinder.ts…)
 │   ├── server/                ← server (app.ts, agent/, railway/ scrapers…)
-│   ├── tests/                 ← 106 files (vitest) — source-of-truth behaviour
+│   ├── tests/                 ← 107 files (vitest) — source-of-truth behaviour
 │   ├── docs/                  ← RAILBOOK-ADDENDUM (round-by-round history, §9.13 = latest)
 │   ├── provas/                ← real payload samples (live se liye gaye)
 │   ├── tools/                 ← preview/verification tools (Round-21/21b/21c)
@@ -102,11 +102,18 @@ android-app/app/src/main/assets/autofill/
   3. `seatSummaryLine` all-mode branch (ek line me saari trains + "10 me seat (AVL/RAC), 8 me WL/N-A"), `seatFinderTool`/`autoTools`/`toolSpecs` me `only_available` default false, dono prompts me rule. `server/app.ts` me chhoot gayi rows AVL+WL dono se.
   4. Tests: `tests/round26-seat-all-classes.test.tsx` (7) + round-25 test update → **105 files / 1043 PASS** · preview `RailBook-round26-2026-09-26.html` · builder `tools/build-round26-preview.mjs`. APK change nahi.
 
-- **Round-27 (latest, 26 Sep 2026):** "ek hi class dikha raha" + "baki trains live board par hai" + "class pe tap → sidha passenger form" + "mic working nahi hai" →
+- **Round-27 (26 Sep 2026):** "ek hi class dikha raha" + "baki trains live board par hai" + "class pe tap → sidha passenger form" + "mic working nahi hai" →
   1. **Per-train classes (server):** `seatFilter.ts` me `groupRowsByTrain()` / `trainClassesText()` — jawab/line me har train ki **saari** classes (`12013 AMRITSAR SHTABDI — CC AVL 444 ₹675 · 3A AVL 71 ₹520 · EC AVL 23 ₹1,015`), trains ke beech ` | `. `missingSeatLines()` bhi per-train. Cap ab **`capRowsByTrain()`** se **trains** par (pehle rows par tha — isi se same train ki EC/3E/2A block se kat rahi thi).
   2. **Chat ka tappable block (client):** naya `seatlist` block (`src/ai/orchestrate.ts` + `src/api.ts` + `Concierge.tsx` ka `SeatListBlock`) — train-wise `TrainClassBlock` groups, header `Seat wali trains (live board) · N trains · M me seat`, har class chip **tap → passenger form** (`openBookingFromSeatRow`). `chatText.seatListGroups()` + `stripDuplicatedSeatRows()` (text se duplicate row-lines hatati hain, prose bachi rehti hai); `ReplyText` me `AVL/AVAIL` rows + ek line ki saari classes alag-alag rows.
   3. **Native mic:** Android WebView me Web Speech API **nahi hota** — naya `VoiceBridge.kt` (SpeechRecognizer, hi-IN, `window.__railbookVoice.dispatch`) + `MainActivity` me `addJavascriptInterface(…, "RailBookVoice")` + manifest `<queries>`; client `src/voice/nativeSpeech.ts` + `speech.ts`/`useVoiceInput.ts` native-aware (native par `getUserMedia` call nahi).
   4. Tests: `tests/round27-seat-classes-and-mic.test.tsx` (12) + round-25 test format update → **106 files / 1055 PASS** · preview `RailBook-round27-2026-09-26.html` · builders `tools/build-round27-preview.mjs`, probe `tools/probe-live-r27.mjs`. **APK v1.4.8 (vc 31)** — native mic ke liye zaroori.
+
+- **Round-28 (latest, 26 Sep 2026):** black handoff panel + blue header user ko nahi (backend me) · passenger dock fix · 45s → 30s + "details khud bhar jaayengi" →
+  1. **Bridge panel hataya:** `railbook-webview-bridge.js` me `banner()` badal kar `postNotice()/pill()` — page par sirf **one-line pill** (6s me khud hide; STOP wale 12s), poori detail `fill-result` + `ui-notice` se native (status + log + Toast). Kuch chhupta nahi.
+  2. **Android header chhupa:** `activity_main.xml` me `topBar` `visibility="gone"` — version/BHASHA/status/RAILBOOK-IRCTC-CLEAR screen par nahi, **code + listeners zinda**; user updates chhote Toast (`setStatus`) se.
+  3. **Passenger dock fix:** `.overlay-screen` ab `fixed` + `100vh/100dvh` (pehle `.app` ke andar absolute — chat lambi hone par dock screen ke neeche chala jaata tha). Probe: CTA top 1336px → **836px (bina scroll)**. CTA label: details adhoori → "Review journey (pehle details bharo)".
+  4. **30s + assurance:** `PREWARM_COUNTDOWN_MS = 30_000L`; prewarm overlay + passenger dock + Continue-to-IRCTC ke neeche line — "Aapki details IRCTC par khud bhar jaayengi, dobara daalne ki zaroorat nahi (login/OTP/payment aap karenge)". Browser me honest alag wording (`autoFillNotice`).
+  5. Tests: `tests/round28-pax-dock-and-autofill-note.test.tsx` (15) → **107 files / 1070 PASS** · preview `RailBook-round28-2026-09-26.html` · builder `tools/build-round28-preview.mjs`, probes `tools/probe-live-r28.mjs` + `tools/probe-pax-dock.mjs`. **APK v1.4.9** (vc 32).
 
 ### Standing rules (inhe todna nahi)
 
@@ -120,12 +127,12 @@ android-app/app/src/main/assets/autofill/
 
 | cheez | value |
 |---|---|
-| vitest | **106 files / 1055 tests PASS** (~120-175 s) |
+| vitest | **107 files / 1070 tests PASS** (~120-175 s) |
 | server tsc | clean |
 | client tsc | 67 errors (purane, baseline — koi naya nahi) |
-| live commit | `76d53c3` (Round-27) |
-| preview | `RailBook-round27-2026-09-26.html` (Round-26: `RailBook-round26-*.html`, Round-25: `RailBook-round25-*.html` + live phone screenshots) |
-| APK | v1.4.8 `RailBook-v1.4.8-release.apk` (versionCode 31) sha256 `0afcd09a…6832fba` — Round-27 me Android change (native mic) |
+| live commit | `20be5c2` (Round-28) |
+| preview | `RailBook-round28-2026-09-26.html` (Round-26: `RailBook-round26-*.html`, Round-25: `RailBook-round25-*.html` + live phone screenshots) |
+| APK | v1.4.9 `RailBook-v1.4.9-release.apk` (versionCode 32) sha256 `4ea684c3…8e1ce` — Round-28 me Android change (panel hataya, header chhupa, 30s) |
 
 ### Chhote gotchas
 

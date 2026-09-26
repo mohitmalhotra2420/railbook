@@ -513,3 +513,42 @@ User ke teen points (2 screenshots + 1 filter screenshot):
 **Tests:** naya `tests/round27-seat-classes-and-mic.test.tsx` (12 — per-train grouping/text, summary line, `missingSeatLines` per-train, `capRowsByTrain` (12×3=36), `seatListGroups`, chips tap callback, text dedupe, ReplyText multi-class rows, Concierge wiring, native bridge adapter (browser vs app), Kotlin/manifest presence) + `tests/round25-seat-answer-all-trains.test.tsx` format update → kul **106 files / 1055 tests PASS**; server `tsc` clean; client TS 67 (baseline); build `dist/assets/index-CJnycmVY.js` 471.63 kB.
 **Preview:** `RailBook-round27-2026-09-26.html` (pehle vs ab block, server summary lines, live screenshots) · builder `tools/build-round27-preview.mjs` · probe `tools/probe-live-r27.mjs`.
 **APK:** v1.4.8 (`RailBook-v1.4.8-release.apk`, vc 31) — native mic ke liye zaroori.
+
+### 9.20 Round-28 (26 Sep) — black handoff panel + blue header user ko nahi (backend me) · passenger dock hamesha screen par · 45s → 30s + "details khud bhar jaayengi"
+
+**User (3 screenshots + 4 points):**
+
+1. "Ist screenshot mein yeh black wala handoff details user ko nhi dikhni chahiye, backend pe rakho" (IRCTC page ka bada black diagnostic box).
+2. "Second screenshot mein yeh jo upar blue colour mein header hai wo user ko na dikhe, backend pe rakho" (Android top bar).
+3. "passenger form mein na kaafi neeche scroll down krna padhta hai to user ko pata chlta hai review journey button bhi hai uski ek baar check kro page ka ui sahi karo".
+4. "redirect to irctc time 45 sec se 30 sec krdo and sath mein user ko inform kro ki apki details automatically fill ho jayengi irctc pe, dubara dalne ki zarort nhi hai".
+
+**1) Black handoff panel hataya (Android bridge)**
+
+- `app/src/main/assets/autofill/railbook-webview-bridge.js`: purana `banner()` bada fixed panel (`RailBook app · assisted fill`, `Detected (…)`, `Filled (…)`, read-only note) render karta tha. Ab uski jagah `postNotice()` + `pill()`: page par **ek line wali pill** (rounded, `pointer-events:none`, **6s me khud hide**; STOP/reject wale serious message 12s ya `sticky`), aur wahi text **native** ko `ui-notice` event + `fill-result` ke saare diagnostics (`filledCount/failed/notFound/siteChanges/refusedClicks/paxFilled`) ke saath jaata hai (status bar + log + Toast). Kuch chhupta nahi — sirf screen par nahi dikhta.
+- `MainActivity.kt`: naya `setStatus(msg, toast)` + `"ui-notice" ->` branch; fill-result par `paxFilled` hone par Toast: "✅ Aapki details IRCTC par bhar di gayi hain — yahan dobara kuch daalne ki zaroorat nahi. Sirf login/OTP/payment aap karenge."
+- Refused-click / unexpected-change STOP par page par ab sirf: "⚠️ Autofill ruk gaya — RailBook me dobara Continue dabaiye" (detail `console.warn` + native me).
+
+**2) Blue header screen se gayab (logic zinda)**
+
+- `activity_main.xml`: `topBar` par `android:visibility="gone"` — version · BHASHA · status line · safety hint · RAILBOOK / IRCTC / CLEAR HANDOFF sab ab screen par nahi; **buttons, listeners, HandoffStore clear, Bhasha cycle, status text sab wahi code** (backend). `WebView` aur `prewarmOverlay` ab `parent` ke top se bandhe (poori screen).
+- User-facing updates sirf chhote Toast (`setStatus`) se: handoff saved, IRCTC block (CDN), login page ready, auto-fill ho gayi.
+
+**3) Passenger page ka dock hamesha screen par**
+
+- Wajah: `.overlay-screen` `.app` ke **andar** `absolute` tha, aur `.app` ki `min-height: 100dvh` par chat lambi hone par wo (device test frame me) **1400px+** ho jaata hai → overlay bhi utna lamba, isliye uska bottom dock (VoiceBar + CTA) screen ke neeche chala jaata tha (user ko bahut scroll karke pata chalta tha ki "Review journey" button hai).
+- Fix: `src/styles.css` me `.overlay-screen` ab `position: fixed; top/left/right: 0; height: 100vh; height: 100dvh; max-width: 480px; margin: 0 auto` (purane WebView ke liye explicit offsets, `inset` par bharosa nahi). `.sticky-cta` me `flex-shrink: 0` + top border.
+- CTA label bhi honest: details adhoori → **"Review journey (pehle details bharo)"** (disabled), poora bharte hi **"Review journey"**.
+- Probe (`tools/probe-pax-dock.mjs` + `tools/probe-live-r28.mjs`): CTA `top 1336px` (screen 900, bina scroll nahi dikhta) → ab **`top 836px`, `btnVisibleWithoutScroll: true`**; naiveh live browser me bhi confirm.
+
+**4) 45s → 30s + auto-fill assurance (teen jagah)**
+
+- `PREWARM_COUNTDOWN_MS = 30_000L` (aur "45s" wale messages → "30s"), `PREWARM_EXTRA_WAIT_MS = 0L` jaisa tha.
+- Prewarm overlay me `prewarmNote` line: "Aapki details IRCTC par khud bhar jaayengi — jo yahan bhara hai wo dobara daalne ki zaroorat nahi. Sirf login/OTP/payment aap karenge."
+- `src/components/IrctcHandoff.tsx` me `isRailBookAppContext()` + `autoFillNotice(inApp)` — **app me**: "IRCTC khulte hi aapki journey + passenger details khud bhar jaayengi — wahan dobara daalne ki zaroorat nahi. Sirf login/OTP/payment aap karenge (security)."; **browser me jhooth nahi**: "RailBook app (Android) me ye details IRCTC par khud bhar jaati hain — browser me summary clipboard se paste kar sakte ho." Review page par Continue button ke neeche, aur passenger page ke dock me wahi assurance.
+
+**Live proof (deploy `20be5c2`):** live browser (Pixel-size, 430×900) — seat chip tap → passenger form: `btnLabel "Review journey (pehle details bharo)"`, `btnTop 836`, `btnVisibleWithoutScroll true`, note visible + text theek; form bharne par `label "Review journey"`, `disabled false`, phir Review page par `#irctc-continue` bina scroll dikhta hai aur `#irctc-autofill-note` line maujood.
+
+**APK v1.4.9** (versionCode 32, `1.4.9-clean-ui-30s`, 4,819,427 B, sha256 `4ea684c3…8e1ce`): bridge files verified — purana panel string APK ke andar bhi nahi, pill + assurance line maujood.
+**Tests:** naya `tests/round28-pax-dock-and-autofill-note.test.tsx` (15 — dock/CTA/assurance, overlay CSS, Android header gone par listeners zinda, 30s constant, bridge me panel gone + `ui-notice` + diagnostics) + round-24 CSS assert update → kul **107 files / 1070 tests PASS**; client TS 67 (baseline); build `index-3AgEmAG-.js` 472.71 kB.
+**Preview:** `RailBook-round28-2026-09-26.html` (`tools/build-round28-preview.mjs`).
