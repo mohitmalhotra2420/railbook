@@ -2077,6 +2077,15 @@ function systemPrompt(
     if (/\bcancel/i.test(t)) {
       lines.push(`TOOL HINT: cancelled trains ka sawaal — GET_CANCELLED_TRAINS chalao. Agar wo ✗/khaali aaye to "koi train cancel nahi hui" MAT kaho (fail = list nahi mili); saaf bolo list abhi nahi mil rahi aur agar kisi train ka cancellation alert ho to wo do.`);
     }
+    /* Round-43j: "aadhi yatra / partial / beech se" — partial-route seat sawaal ka sahi tool
+     * (FIND_PARTIAL_ROUTE_SEATS). Slot (date/train/class) missing ho to tool ke saath hi poochho. */
+    if (/\b(aadhi|aadha|aadhe|partial|half\s*(?:journey|trip|yatra)|beech\s*se|बीच से|आधी)\b/i.test(t) && /\b(seat|seats|berth|milegi|milega|milegi\?|ticket|book)\b/i.test(t)) {
+      lines.push(`TOOL HINT: "aadhi yatra / partial route" ka seat sawaal hai — FIND_PARTIAL_ROUTE_SEATS call karo (origin/destination/date jo user ne diye ho; jo missing ho wo usi reply me poochho — seedha "date chahiye/train chahiye" list mat banao jab tak tool try na kar lo).`);
+    }
+    /* Round-43j: station ambiguous ho (Delhi/Mumbai jaise) to options EK hi baar — search repeat mat karo. */
+    if (/\b(delhi|mumbai|kolkata|chennai|bengaluru|bangalore|hyderabad|pune|agra|mathura)\b/i.test(t) && !/\b(ndls|nzm|dli|anvt|cstm|csmt|bct|bvi|hwh|shm|mas|sbc|ypr|hyb|sc|pune\b|pune jn|agc|af\b|mtj)\b/i.test(t)) {
+      lines.push(`TOOL HINT: station city ambiguous ho sakti hai — SEARCH_STATIONS EK BAAR chalao aur "N. CODE – Station Name" format me options do; usi turn me baar-baar search repeat mat karo (ek list kaafi hai), aur baaki sawaal (date/seat/tool) us reply me poora karo.`);
+    }
     if (isComparisonQuery(t)) {
       lines.push(`TOOL HINT: comparison sawaal hai — DONO cheezon ka data laao (KB/WEB_SEARCH) aur bullet-wise compare karo; ek taraf ka jawab adhoora hai.`);
     }

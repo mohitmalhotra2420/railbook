@@ -912,3 +912,9 @@ User (R38 ke baad, wahi demand dobara): *"abh yeh AI ko samjhna chahiye tha … 
 **Live verify (@`d1a383f`/`3049289`/`6c89159`):** single-train 2.8s · multi-turn "aaj ki"/"CC" 1.2s · 19326 honest correction 1.2s · internal-leak scrubber 0 leaks · **Book-tap 2/2 (Playwright, mobile viewport)**.
 
 **Tests:** naya `tests/round43-single-train-and-leaks.test.ts` (21) + `tests/intelligence.test.ts` R43 expectations (T5 naya: cancelled date par agla din) + `tests/agentic-adversarial.test.ts` (pax relaxation) + `tests/round16p` regression (parson parse) → **122 files / 1336 ALL PASS**.
+
+**R43d/i/j — tool-routing hints (battery ke baad):** live/track sawaal (train number + late/kahan hai/status, koi date nahi) → **TRACK_TRAIN bina date** (server aaj/chalti hui run laata hai; model ka "kis date ka chahiye?" sawaal band — battery `late-simple` ✅, live 33s TRACK_TRAIN✓); "aadhi yatra/partial" → FIND_PARTIAL_ROUTE_SEATS hint; multi-station city (Delhi/Kolkata…) → SEARCH_STATIONS **ek hi baar** + baaki slots usi reply me.
+
+**Final battery (@`26d9543`, 25 sawaal):** **17/25** (R42 pre-fix 13/24 · R43 mid 16/25). ✅ name-picker · code · arrival-at · stops · **late-simple** · where-messy · seat ×3 · avail-specific · avail-one-train · fare · rank · book ×2 · kb ×2. ❌ 8 me se **5 provider-down/judge-limitation** (board ✗✗✗ · pnr ✗ · coach ✗ — provider; name-info/KB 0.2s — probe tool-less KB answer ko ❌ ginta hai jabki jawab sahi hai) aur **3 sahi clarification** (vacant/connections — multi-station city ka sawaal, user ke rule ke mutabiq guess nahi; partial — train/date/class chahiye). Page scope note: 27 Sep 2026 ko 12054 cancelled hai — isliye booking/seat flows me agla din (28 Sep) ka real data aata hai.
+
+**Zip:** `RailBook/RailBook-FULL-2026-09-27.zip` (55,221,076 B) · preview: `RailBook/previews/RailBook-round43-2026-09-27.html` (5,187 B).
