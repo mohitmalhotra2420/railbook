@@ -1670,8 +1670,14 @@ export async function executeApprovedTool(
             const fresh = new Set(options.slice(0, 2).map((o) => o.date));
             const running = options.filter((o) => o.runState === "running" && fresh.has(o.date));
             const wantsNow = /\b(abhi|live|kahan|kaha|status|running|chal rahi|kitna late|late hai)\b/i.test(String(ctx.userText ?? "")) && !/\b(kal|yesterday|parso|pichhl|pehle|wali run|\d{1,2}\s*(sep|sept|oct|nov|dec|jan|feb|mar|apr|may|jun|jul|aug))/i.test(String(ctx.userText ?? ""));
+            /* Round-43d: "abhi/late/status" sawaal par aaj ka run options me hai to wahi lo — chahe
+             * RUNNING na ho (cancelled/not-started bhi aaj ka SAHI jawab hai). Warna model ghair-zaroori
+             * "kis din ka chahiye?" poochh leta tha (battery: late-simple ❌). */
+            const istTodayIso = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
             if (running.length === 1 && wantsNow) {
               liveDateOverride = running[0].date;
+            } else if (wantsNow && options.some((o) => o.date === istTodayIso)) {
+              liveDateOverride = istTodayIso;
             } else if (options.length > 1) {
               const lines = options.map((o, i) => `${i + 1}. ${o.label ?? o.date} — ${o.date}${o.runState && o.runState !== "unknown" ? ` (${o.runState.replace("_", " ")})` : ""}`).join("\n");
               return failResult(null, `${a.train_number} ki ${options.length} runs ka live data hai — kis din wali chahiye? User se poochho (options EXACTLY ye do, numbered):\n${lines}\nUser chune to TRACK_TRAIN dobara us date ke saath call karo. Khud koi run mat chuno.`, { needs_choice: true, kind: "run_date", options });

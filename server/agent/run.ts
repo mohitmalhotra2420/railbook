@@ -1481,9 +1481,12 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
      * class de raha hai ("Date aaj ki ludhiana se hw ki") → usi train ki availability dobara dikhao
      * (train dobara poochhna/khoya nahi jaata — ChatGPT jaisa continue). */
     const ctxResume = { ...emptyAgentContext(), ...(req.context ?? {}) };
-    const resumeDateAsk = /\b(aaj|kal|parso|tomorrow|today|date|tareekh|\d{1,2}\s*(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec))\b/i.test(t) && !/\b(trains?\s*batao|kaunsi|sabhi|sab\s*trains|alawa|options?|list|book|cancel|refund)\b/i.test(t);
+    const resumeDateAsk = /\b(aaj|kal|parso|parson|tomorrow|today|date|tareekh|\d{1,2}\s*(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec))\b/i.test(t) && !/\b(trains?\s*batao|kaunsi|sabhi|sab\s*trains|alawa|options?|list|book|cancel|refund)\b/i.test(t);
     const resumeBareClass = /^\s*(1A|2A|3A|3E|2S|SL|CC|EC|FC|1E)\s*$/i.test(t) && Boolean(ctxResume.date);
-    const resumeTrain = !/\d{4,5}/.test(t) && ctxResume.selectedTrainNumber && (resumeDateAsk || resumeBareClass) ? ctxResume.selectedTrainNumber : null;
+    /* Sirf FOLLOW-UP par resume: user naya route-ask kar raha ho ("jammu se ndls jaana hai aaj seats
+     * dikhao") to purani train par nahi atakna (Round-18m-28). */
+    const routeAskVerb = /\b(jaana hai|jana hai|jaana|jana|dikhao|dikha|batao|bata|bataiye|options?|trains?)\b/i.test(t);
+    const resumeTrain = !/\d{4,5}/.test(t) && !routeAskVerb && ctxResume.selectedTrainNumber && (resumeDateAsk || resumeBareClass) ? ctxResume.selectedTrainNumber : null;
     if ((asksSingleTrainAvailability(t) || resumeTrain) && !isBookingMutation(req)) {
       const tnum = (/\b(\d{4,5})\b/.exec(t) ?? [])[1] ?? resumeTrain;
       if (tnum) {
@@ -1495,9 +1498,104 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
         const avCtx = { ...emptyAgentContext(), ...(req.context ?? {}) };
         const clsAsk = (t.match(/\b(1A|2A|3A|3E|2S|SL|CC|EC|FC|1E)\b/i) ?? [])[1]?.toUpperCase() ?? null;
         /* User ne apna segment bola ho ("ludhiana se hw") to wahi boarding/destination maano —
-         * provider se us segment ka data maango (poora route nahi). */
-        const askFrom = (detAv as unknown as { from?: { code?: string } | null }).from?.code ?? null;
-        const askTo = (detAv as unknown as { to?: { code?: string } | null }).to?.code ?? null;
+         * provider se us segment ka data maango (poora route nahi). NLU kabhi station na pakde
+         * (jaise "19326 hw ke liye seat check krna") to khud dhoondho — par sirf TAB jab token sach
+         * me koi station ho (exact code/naam), warna "seat"/"check" jaisa shabd station ban jaata. */
+        const stopWords = new Set([
+          "seat", "seats", "check", "krna", "karna", "karo", "kar", "ke", "ki", "ka", "liye", "liy",
+          "wala", "wali", "me", "mein", "hai", "hain", "kya", "batao", "bata", "bataiye", "dekh", "dekhna",
+          "dikhao", "train", "gaadi", "number", "no", "tak", "kal", "aaj", "parso", "parson", "subah",
+          "shaam", "raat", "class", "classes", "book", "booking", "kaise", "kitni", "kitna", "abhi",
+          "kahan", "chahiye", "milegi", "milega", "khali", "khaali", "please", "haan", "ha", "na", "nahi",
+          "1a", "2a", "3a", "3e", "2s", "sl", "cc", "ec", "fc", "1e",
+        ]);
+        const schedAsk = await routedSchedule(tnum).catch(() => null);
+        const askStops = schedAsk && schedAsk.schedule && "stops" in schedAsk.schedule ? schedAsk.schedule.stops ?? [] : [];
+        const inAskRoute = (code: string) => askStops.some((st) => String(st.code ?? "").toUpperCase() === code.toUpperCase());
+        let askFrom = (detAv as unknown as { from?: { code?: string } | null }).from?.code ?? null;
+        let askTo = (detAv as unknown as { to?: { code?: string } | null }).to?.code ?? null;
+        if (!askFrom && !askTo) {
+          const cands = t.toLowerCase().split(/[^a-z]+/).filter(Boolean)
+            .filter((w) => w !== String(tnum).toLowerCase() && w.length >= 2 && w.length <= 12 && !stopWords.has(w))
+            .slice(0, 3);
+          for (const cand of cands) {
+            try {
+              /* Pehle route-stops se seedha match (code ya naam ka pehla token). */
+              const direct = askStops.find(
+                (st) => String(st.code ?? "").toUpperCase() === cand.toUpperCase() || String(st.name ?? "").toLowerCase().split(/[^a-z]+/)[0] === cand,
+              );
+              if (direct) {
+                const code = String(direct.code ?? "").toUpperCase();
+                /* Station route me mila — kaunsa side? Pehla stop = boarding, aakhri stop = destination;
+                 * warna phrase se ("ke liye/tak/jaana" = destination). Warna "19326 indore ke liye"
+                 * boarding ban jaata aur sawaal ulta ho jaata. */
+                const idx = askStops.findIndex((st) => String(st.code ?? "").toUpperCase() === code);
+                const looksDest = /\b(ke liye|k liye|tak|jaana|jana|destination|pahunch)\b/i.test(t);
+                if (idx === 0 && !/\b(ke liye|tak|jaana)\b/i.test(t)) askFrom = code;
+                else if (idx === askStops.length - 1 || looksDest) askTo = code;
+                else if (!askFrom) askFrom = code;
+                else askTo = code;
+                break;
+              }
+              /* Route me nahi — dekho token asli station hai ya koi aam shabd (guess nahi). */
+              const found = await routedStationSearch(cand).catch(() => null);
+              const exact = (found?.stations ?? []).find((st) => st.code.toUpperCase() === cand.toUpperCase());
+              if (exact) {
+                askTo = exact.code;
+                break;
+              }
+            } catch {
+              /* candidate skip */
+            }
+          }
+        }
+        /* Agar user ka station is train ke route me hi nahi (19326 Haridwar nahi jaati) → saaf bol do,
+         * poora route-board/N-A rows mat dikhao (ChatGPT jaisa sahi jawab). */
+        if ((askFrom && !inAskRoute(askFrom)) || (askTo && !inAskRoute(askTo))) {
+          const badCode = askTo && !inAskRoute(askTo) ? askTo : askFrom!;
+          const badSide = askTo && !inAskRoute(askTo) ? ("to" as const) : ("from" as const);
+          const first = askStops[0];
+          const last = askStops[askStops.length - 1];
+          const nameHit = (await routedStationSearch(badCode).catch(() => null))?.stations?.find((x) => x.code.toUpperCase() === badCode.toUpperCase()) ?? null;
+          const asked = `${badCode}${nameHit?.name && nameHit.name.toUpperCase() !== badCode ? ` (${nameHit.name})` : ""}`;
+          const tname2 = avCtx.selectedTrainName ?? (schedAsk?.schedule && "trainName" in schedAsk.schedule ? String((schedAsk.schedule as { trainName?: string }).trainName ?? "") : "");
+          const label2 = `${tnum}${tname2 ? ` (${tname2})` : ""}`;
+          const where2 = `${first?.code ?? "?"} → ${last?.code ?? "?"}`;
+          const ctxBad = { ...emptyAgentContext(), ...(req.context ?? {}) };
+          ctxBad.selectedTrainNumber = tnum;
+          ctxBad.selectedTrainName = tname2 || ctxBad.selectedTrainName;
+          ctxBad.lastTool = "getTimetable";
+          ctxBad.lastToolOk = true;
+          return {
+            nlu: detAv,
+            source: "nlu" as const,
+            context: ctxBad,
+            tool: null,
+            toolOk: null,
+            reply:
+              `${label2} ke timetable me ${asked} nahi milta — is train ka route ${where2} hai, aur ${asked} us route me nahi hai.\n\n` +
+              `Ye train kis station tak chahiye? Sahi station bata do, main usi ka seat status check kar dunga. ` +
+              `${badSide === "to" ? `${asked} ke liye` : "Is station se"} jaane wali trains bhi bata sakta hoon.\n\n` +
+              `(Jawab ${label2} ke asli timetable/stops se verify kiya — andaza nahi.)`,
+            interrupt: false,
+            resumeAsk: null,
+            resumeText: null,
+            trains: null,
+            confirmBook: false,
+            missingFields: [],
+            modelUsed: null,
+            latencyMs: 0,
+            failureReason: "single_train_station_not_in_route",
+            engine: "deterministic" as const,
+            agenticFailureReason: null,
+            grounded: true,
+            toolTrace: [],
+            nextActions: [
+              { label: `${tnum} ka route`, utterance: `${tnum} ka route batao`, primary: false },
+              { label: `${badCode} ke liye trains`, utterance: `${first?.code ?? "ASR"} se ${badCode} jaane wali trains batao kal`, primary: false },
+            ],
+          } as never;
+        }
         const baseMs = (req.now && Date.parse(req.now) ? Date.parse(req.now) : Date.now()) + 5.5 * 3600 * 1000;
         const ymd = (ms: number) => new Date(ms).toISOString().slice(0, 10);
         const given = avCtx.dateProvided && avCtx.date ? avCtx.date : detAv.date ?? null;
@@ -1509,6 +1607,11 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
         /* Agar kisi bhi date/class me AVAILABLE/RAC nahi (sab WL/N-A/cancelled) → deterministic jawab
          * mat do: normal flow chale taaki auto-alternatives (real data) aur agla kadam mil sake. */
         let goodAny = false;
+        /* Round-43e: agar kisi bhi date par koi class available nahi (sab N/A — 19326 jaisa "koi seat
+         * nahi") to bhi user ko saaf date-wise jawab mile; 53s wala model/board path na chale. WL/RAC
+         * wali case (kam availability) ab bhi alternatives flow par jaati hai (Round-18 §6/§7). */
+        let sawNka = false;
+        let sawWl = false;
         let name: string | null = avCtx.selectedTrainName ?? null;
         let from = avCtx.origin?.code ?? null;
         let to = avCtx.destination?.code ?? null;
@@ -1527,6 +1630,8 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
             to = askTo ?? to ?? data.resolvedRoute?.destination ?? null;
             const rows = (data.classes ?? []).filter((c) => c.code);
             if (rows.some((c) => /^(AVAILABLE|RAC)$/i.test(String(c.status ?? "")))) goodAny = true;
+            if (rows.some((c) => /NOT_AVAILABLE|N\/A/i.test(String(c.status ?? "")))) sawNka = true;
+            if (rows.some((c) => /WAIT|RAC/i.test(String(c.status ?? "")))) sawWl = true;
             const cancelled = rows.length > 0 && rows.every((c) => /cancel/i.test(String(c.note ?? "")) || (String(c.status).toUpperCase() === "NOT_AVAILABLE" && /cancel/i.test(String(c.note ?? ""))));
             const when = `${d.slice(8, 10)} ${["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][Number(d.slice(5, 7)) - 1]}${label(d) ? ` (${label(d)})` : ""}`;
             if (cancelled) {
@@ -1546,8 +1651,12 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
         for (const d of dates) await queryDate(d);
         if (!goodAny && dates.length === 1) await queryDate(ymd(Date.parse(`${dates[0]}T00:00:00Z`) + 86400000));
         const head = `${tnum}${name ? ` ${name}` : ""}${from && to ? ` (${from} → ${to})` : ""} — seat availability:`;
-        if (okAny && goodAny) {
-          const reply = `${head}\n${blocks.join("\n")}\n\nAur kisi date/class ka bolo, ya seedha "Book ${tnum}${clsAsk ? ` ${clsAsk}` : ""}" kah do — main passenger form khol dunga.`;
+        if (okAny && (goodAny || (sawNka && !sawWl))) {
+          const reply = `${head}\n${blocks.join("\n")}\n\n${
+            goodAny
+              ? `Aur kisi date/class ka bolo, ya seedha "Book ${tnum}${clsAsk ? ` ${clsAsk}` : ""}" kah do — main passenger form khol dunga.`
+              : `Is train me in dates par koi class available nahi (N/A = koi seat nahi / bookable nahi). Chaho to is route ki doosri trains ke seats bata dun?`
+          }`;
           return {
             nlu: detAv,
             source: "nlu" as const,
@@ -1582,11 +1691,64 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
             grounded: true,
             toolTrace: stepsOut,
             nextActions: [
-              { label: `Book ${tnum}${clsAsk ? ` · ${clsAsk}` : ""}`, utterance: `${tnum} mein ${clsAsk ?? ""} book krdo ${dates[0]}`.replace(/\s+/g, " "), primary: true },
+              ...(goodAny
+                ? [{ label: `Book ${tnum}${clsAsk ? ` · ${clsAsk}` : ""}`, utterance: `${tnum} mein ${clsAsk ?? ""} book krdo ${dates[0]}`.replace(/\s+/g, " "), primary: true }]
+                : [{ label: "Route ki doosri trains", utterance: `${tnum} ke alawa ${(from ?? "ASR")} se ${(to ?? "HW")} jaane wali trains ke seats batao`, primary: true }]),
               ...(given ? [] : [{ label: "Kal ki seat", utterance: `${tnum} ki seat availability kal ki`, primary: false }]),
             ],
           } as never;
         }
+      }
+    }
+  }
+
+  /* ── Round-43d (27 Sep 2026, battery: "12054 late hai kya" ❌ model date poochh kar ruk gaya) ──
+   * Khaas train ka live sawaal ("kahan hai" / "late hai kya" / running status) aur user ne koi date nahi
+   * boli → seedha wahi live probe (date ke bina — router khud aaj ka origin-idle run skip kar ke chalta
+   * hua run deta hai, Round-16p logic). Pehle ye model ke paas jaata tha jo date poochh kar ruk jaata tha. */
+  if (!aiFirst && !isBookingMutation(req)) {
+    const t = String(req.text ?? "");
+    const tnum = (/\b(\d{4,5})\b/.exec(t) ?? [])[1] ?? null;
+    const liveQ = /\b(kahan hai|kahaan hai|kaha hai|abhi kahan|abhi kaha|kahan tak|kahan pahunchi|live status|running status|live hai|late hai|late h\b|late chal|delayed|delay hai|kitni der|der se chal)\b/i.test(t);
+    const anyDate = /\b(aaj|kal|parso|parson|tomorrow|today|yesterday|\d{1,2}\s*(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*|20\d\d-\d\d-\d\d|\d{1,2}\/\d{1,2})\b/i.test(t);
+    if (tnum && liveQ && !anyDate) {
+      try {
+        /* Date KE BINA — router khud aaj ka origin-idle run skip kar ke chalta hua run deta hai
+         * (Round-16p logic), aur cancel-alert bhi wahi se aata hai. Koi andaza nahi. */
+        const liveResult = await executeTool("getLiveStatus", { trainNumber: tnum });
+        if (liveResult.ok && liveResult.summary) {
+          {
+            const ctxLive = { ...emptyAgentContext(), ...(req.context ?? {}) };
+            ctxLive.selectedTrainNumber = tnum;
+
+            ctxLive.intent = "LIVE_TRAIN_STATUS";
+            ctxLive.lastTool = "getLiveStatus";
+            ctxLive.lastToolOk = true;
+
+            return {
+              nlu: null,
+              source: "nlu" as const,
+              context: ctxLive,
+              tool: "getLiveStatus" as ToolName,
+              toolOk: true,
+              reply: `${liveResult.summary}\n(Live railway data — verified.)`,
+              interrupt: false,
+              resumeAsk: null,
+              resumeText: null,
+              trains: null,
+              confirmBook: false,
+              missingFields: [],
+              modelUsed: null,
+              latencyMs: 0,
+              failureReason: null,
+              engine: "deterministic" as const,
+              agenticFailureReason: null,
+              grounded: true,
+            } as never;
+          }
+        }
+      } catch {
+        /* live probe optional — normal flow chalta rahe */
       }
     }
   }
@@ -1936,7 +2098,12 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
      * → seedha getLiveStatus tool, instant deterministic. Messy/ambiguous
      * ("18310 cdg kahan hai", typo wali) query ab bhi agentic jaati hai. */
     const LIVE_PHRASE_RE = /\b(kahan hai|kahaan hai|kaha hai|abhi kahan|abhi kaha|kahan tak|kahan pahunchi|live status|running status|live hai)\b/i;
-    if (!aiFirst && trainNo && LIVE_PHRASE_RE.test(req.text)) {
+    /* Round-43d: "12054 late hai kya" jaisa sawaal bhi aaj ke run ka live sawaal hai — pehle ye model
+     * par chhodne se model date poochh kar ruk jaata tha (battery: late-simple ❌). Ye pattern sirf
+     * AAJ ke run ka late/delay poochhta hai (punctuality history "time par chalti hai ya late" isse
+     * alag rehta hai — usme "late hai" nahi hota). */
+    const LIVE_TODAY_RE = /\b(late hai|late h|late chal|delayed|delay hai|kitni der|der se chal)\b/i;
+    if (!aiFirst && trainNo && (LIVE_PHRASE_RE.test(req.text) || LIVE_TODAY_RE.test(req.text))) {
       const liveStop = new Set([
         "kahan", "kahaan", "kaha", "hai", "hain", "abhi", "kya", "live", "status", "running",
         "right", "now", "ab", "tell", "me", "batao", "bata", "bataiye", "btado", "dijiye",

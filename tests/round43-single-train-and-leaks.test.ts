@@ -11,6 +11,11 @@ import { describe, it, expect } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import { asksSingleTrainAvailability, scrubInternalNotes } from "../server/agent/answerMode";
+import { runAgent } from "../server/agent/run";
+import { setRailcoreFetch } from "../server/railway/railcore";
+import { setScrapeFetch } from "../server/railway/webscrape";
+import { setProvider } from "../server/providers/index";
+import { afterEach, beforeEach, vi } from "vitest";
 
 const read = (p: string) => fs.readFileSync(path.join(__dirname, "..", p), "utf8");
 
@@ -76,5 +81,187 @@ describe("Round-43 · seat card ka Book → passenger form", () => {
     expect(c).toContain("const pickedB = lastPickedTrainRef.current;");
     expect(c).toContain("state.date || remembered?.date || pickedB?.date || ctxB?.date");
     expect(c).toContain("if (!from || !to || !date) {");
+  });
+});
+
+/* ── Round-43d: aaj ka live status seedha (battery me "12054 late hai kya" par model date poochh kar
+ * ruk gaya tha — ChatGPT jaisa sawaal nahi poochhna chahiye). */
+function liveMockRunning(): void {
+  setRailcoreFetch(async (input) => {
+    const url = new URL(String(input));
+    if (!url.pathname.includes("/live")) {
+      return new Response(JSON.stringify({ success: false }), { status: 404, headers: { "Content-Type": "application/json" } });
+    }
+    const body = {
+      success: true,
+      data: {
+        train_number: "12054",
+        train_name: "JAN SHATABDI EXPRESS",
+        journey_date: url.searchParams.get("date") ?? "2026-09-27",
+        total_distance_km: 315,
+        status: "RUNNING",
+        status_text: "Running 12 minutes late",
+        current_station_code: "JEP",
+        current_station_name: "Jeonathpur",
+        next_station_code: "HW",
+        next_station_name: "Haridwar Jn",
+        previous_station_code: "LDH",
+        delay_minutes: 12,
+        progress_percent: 55,
+        distance_covered_km: 180,
+        last_reported_at: "2026-09-27T14:35:00+05:30",
+      },
+    };
+    return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
+  });
+}
+
+describe("Round-43d · aaj ka live status seedha (bina date ke)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ now: new Date("2026-09-27T09:10:00.000Z"), toFake: ["Date"] }); // 27 Sep 2026, 14:40 IST
+    process.env.RAILWAY_PROVIDER = "railcore";
+    process.env.RAILCORE_API_KEY = "rk_live_test";
+    process.env.RAILKIT_API_KEY = "";
+    process.env.NVIDIA_API_KEY = "";
+    setProvider(null);
+    setScrapeFetch(async () => new Response(JSON.stringify({ success: false }), { status: 500, headers: { "Content-Type": "application/json" } }));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    setRailcoreFetch(null);
+    setScrapeFetch(null);
+    process.env.RAILWAY_PROVIDER = "mock";
+    process.env.RAILCORE_API_KEY = "";
+    setProvider(null);
+  });
+
+  it("'12054 late hai kya' → deterministic live status, koi date sawaal nahi", async () => {
+    liveMockRunning();
+    const r = await runAgent({ text: "12054 late hai kya", known: {} });
+    const reply = String(r.reply ?? "");
+    expect(r.engine, reply).toBe("deterministic");
+    expect(reply, reply).toMatch(/Jeonathpur|12/);
+    expect(reply, reply).not.toMatch(/kaunse din|kaunsi date|kis din|kaunsi run/i);
+  });
+
+  it("'12054 abhi kaha pahunchi' → wahi deterministic live jawab", async () => {
+    liveMockRunning();
+    const r = await runAgent({ text: "12054 abhi kaha pahunchi", known: {} });
+    const reply = String(r.reply ?? "");
+    expect(r.engine, reply).toBe("deterministic");
+    expect(reply, reply).not.toMatch(/kaunse din|kaunsi date|kis din/i);
+  });
+
+  it("date di ho ('parson wali') to ye fast-path chalta hi nahi (past-run flow hi rahe)", () => {
+    const r = read("server/agent/run.ts");
+    expect(r).toContain("const anyDate = /\\b(aaj|kal|parso|parson|");
+    expect(r).toContain("const liveQ = /\\b(kahan hai|");
+  });
+});
+
+/* ── Round-43e (user screenshot 27 Sep): "19326 hw ke liye seat check krna" — 19326 Haridwar jaati hi
+ * nahi, phir bhi poora route-board (saari classes N/A) dikha diya tha. ChatGPT ne sahi kaha "route me
+ * Haridwar nahi hai". Ab: station train ke timetable me nahi → saaf correction + sahi destination sawaal;
+ * aur agar train me koi class hi available nahi (N/A) → date-wise honest jawab (53s model board nahi). */
+function inRouteMock(): void {
+  setRailcoreFetch(async (input) => {
+    const url = new URL(String(input));
+    const p = url.pathname;
+    const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+    const sched = p.match(/\/trains\/(\d+)\/schedule$/);
+    if (sched) {
+      const num = sched[1];
+      const stops = num === "19326"
+        ? [
+            { station_code: "ASR", station_name: "AMRITSAR JN", arrival_time: null, departure_time: "01:50", day: 1 },
+            { station_code: "SRE", station_name: "SAHARANPUR JN", arrival_time: "09:20", departure_time: "09:25", day: 1 },
+            { station_code: "MB", station_name: "MORADABAD", arrival_time: "12:00", departure_time: "12:10", day: 1 },
+            { station_code: "INDB", station_name: "INDORE JN", arrival_time: "00:55", departure_time: null, day: 2 },
+          ]
+        : [
+            { station_code: "ASR", station_name: "AMRITSAR JN", arrival_time: null, departure_time: "06:50", day: 1 },
+            { station_code: "UMB", station_name: "AMBALA CANTT JN", arrival_time: "10:55", departure_time: "11:04", day: 1 },
+            { station_code: "HW", station_name: "HARIDWAR JN", arrival_time: "13:50", departure_time: null, day: 1 },
+          ];
+      return json(200, { success: true, data: { train_number: num, train_name: num === "19326" ? "ASR INDB EXP" : "HW JANSHATABDI", running_days: ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"], classes: ["1A", "2A", "3A", "SL"], stops } });
+    }
+    if (p.endsWith("/availability/seats")) {
+      const date = url.searchParams.get("date");
+      return json(200, {
+        success: true,
+        data: {
+          train_number: url.searchParams.get("train_number"),
+          journey_date: date,
+          quota: "GN",
+          /* 19326 jaisa "koi seat nahi" — sab classes N/A (fares ke saath, jaise provider deta hai). */
+          classes: [
+            { class_code: "1A", status: "NOT_AVAILABLE", availability_text: "NOT AVAILABLE", total_fare: 3920 },
+            { class_code: "2A", status: "NOT_AVAILABLE", availability_text: "NOT AVAILABLE", total_fare: 2340 },
+            { class_code: "SL", status: "NOT_AVAILABLE", availability_text: "NOT AVAILABLE", total_fare: 650 },
+          ],
+        },
+      });
+    }
+    if (p.endsWith("/stations/search")) {
+      const q = (url.searchParams.get("query") ?? url.searchParams.get("q") ?? "").toLowerCase();
+      const results = q === "hw" ? [{ station_code: "HW", station_name: "HARIDWAR JN", city: "Haridwar", confidence: 1 }] : [];
+      return json(200, { success: true, data: { results } });
+    }
+    return json(404, { success: false, error: { message: "unknown endpoint" } });
+  });
+}
+
+describe("Round-43e · station route me nahi → honest correction (board nahi) + all-N/A par clean jawab", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ now: new Date("2026-09-27T09:10:00.000Z"), toFake: ["Date"] });
+    process.env.RAILWAY_PROVIDER = "railcore";
+    process.env.RAILCORE_API_KEY = "rk_live_test";
+    process.env.RAILKIT_API_KEY = "";
+    process.env.NVIDIA_API_KEY = "";
+    setProvider(null);
+    setScrapeFetch(async () => new Response(JSON.stringify({ success: false }), { status: 500, headers: { "Content-Type": "application/json" } }));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    setRailcoreFetch(null);
+    setScrapeFetch(null);
+    process.env.RAILWAY_PROVIDER = "mock";
+    process.env.RAILCORE_API_KEY = "";
+    setProvider(null);
+  });
+
+  it("'19326 hw ke liye seat check krna' → 'Haridwar route me nahi' (koi N/A board nahi)", async () => {
+    inRouteMock();
+    const r = await runAgent({ text: "19326 hw ke liye seat check krna", known: {} });
+    const reply = String(r.reply ?? "");
+    expect(r.failureReason, reply).toBe("single_train_station_not_in_route");
+    expect(r.engine, reply).toBe("deterministic");
+    expect(reply, reply).toMatch(/19326/);
+    expect(reply, reply).toMatch(/HW/);
+    expect(reply, reply).toMatch(/ASR → INDB/);
+    expect(reply, reply).toMatch(/nahi/i);
+    /* Jhoothi seat rows kabhi nahi. */
+    expect(reply, reply).not.toMatch(/N\/A|AVAILABLE|WL ?\d/i);
+    expect((r as unknown as { trains?: unknown }).trains ?? null).toBeNull();
+  });
+
+  it("train me koi class available nahi → date-wise honest jawab (model/board path nahi)", async () => {
+    inRouteMock();
+    const r = await runAgent({ text: "19326 indore ke liye seat check krna", known: {} });
+    const reply = String(r.reply ?? "");
+    expect(r.failureReason, reply).toBe("single_train_availability_deterministic");
+    expect(reply, reply).toMatch(/19326 \(ASR → INDB\)/);
+    expect(reply, reply).toMatch(/27 Sep \(aaj\):/);
+    expect(reply, reply).toMatch(/koi class available nahi/i);
+    expect(reply, reply).toMatch(/N\/A/);
+  });
+
+  it("provider ka route data ho tab hi 'nahi milta' claim (warna normal flow)", () => {
+    const r = read("server/agent/run.ts");
+    expect(r).toContain("single_train_station_not_in_route");
+    expect(r).toContain("stopWords");
+    expect(r).toContain("askStops");
   });
 });
