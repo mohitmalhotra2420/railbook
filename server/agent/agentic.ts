@@ -2080,6 +2080,18 @@ function systemPrompt(
     if (isComparisonQuery(t)) {
       lines.push(`TOOL HINT: comparison sawaal hai — DONO cheezon ka data laao (KB/WEB_SEARCH) aur bullet-wise compare karo; ek taraf ka jawab adhoora hai.`);
     }
+    /* Round-43d: khaas train ka live sawaal (kahan hai / late hai / running status) + koi date nahi →
+     * TRACK_TRAIN aaj ke run ke saath chalao; "kis date ka chahiye?" ka ghair-zaroori sawaal NAHI (aaj ka
+     * run hi asli jawab hai — cancelled/shimla ho to wahi sach). Date boli ho to wahi date. */
+    if (/\b\d{4,5}\b/.test(t) && /\b(kahan hai|kahaan hai|kaha hai|abhi kahan|abhi kaha|kahan tak|kahan pahunchi|live status|running status|live hai|late hai|late h\b|late chal|delayed|delay hai|kitni der|der se chal)\b/i.test(t)) {
+      const hasDate = /\b(aaj|kal|parso|parson|tomorrow|today|yesterday|\d{1,2}\s*(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*|20\d\d-\d\d-\d\d|\d{1,2}\/\d{1,2})\b/i.test(t);
+      const tn = (/\b(\d{4,5})\b/.exec(t) ?? [])[1];
+      lines.push(
+        hasDate
+          ? `TOOL HINT: train ka live/track sawaal hai — TRACK_TRAIN (train_number=${tn}, date=user ki boli hui date) chalao; date dobara mat poochho.`
+          : `TOOL HINT: train ka live/track sawaal hai aur user ne koi date nahi boli — TRACK_TRAIN (train_number=${tn}) AAS-IS chalao (date ke bina); server aaj/pichhle chalti hui run ka data laayega. "Kis date ka chahiye?" ka sawaal NAHI poochhna — aaj ka run hi jawab hai (cancelled ho to wahi sach bolo).`,
+      );
+    }
     if (/\b(ke\s*(?:a)?la[wo]a|ke\s*ilawa|ilawa|alaava|other than|besides|alternatives?|aur\s*(?:koi|options?|trains?\s*batao)|doosri\s*(?:gaadi|train))\b/i.test(t)) {
       const tn = (/\b(\d{4,5})\b/.exec(t) ?? [])[1];
       lines.push(`TOOL HINT: ye "us train ke alawa aur options" ka sawaal hai — pehla tool call FIND_ALTERNATIVE_TRAINS${tn ? ` (train_number=${tn})` : ""} ho (purani list dobara nahi, usi route ke aage-peeche wali trains). Station ka naam/code dobara MAT poochho — jo user ne diya hai wahi final hai.`);
