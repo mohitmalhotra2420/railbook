@@ -88,3 +88,29 @@ describe("Round-41 · comparison ka poora jawab (dono taraf)", () => {
     expect(liveDataQuestion("mera pnr 4561237890 check karo")).toBe(true);
   });
 });
+
+describe("Round-41b · deterministic tool-routing hints + fail-semantics", () => {
+  it("punctuality sawaal par GET_TRAIN_HISTORY hint (timetable/seat nahi)", () => {
+    const a = read("server/agent/agentic.ts");
+    expect(a).toContain("TOOL HINT: ye train ki punctuality/history ka sawaal hai");
+    expect(a).toContain("GET_TRAIN_HISTORY (train_number=");
+  });
+
+  it("station-code aur comparison hints maujood", () => {
+    const a = read("server/agent/agentic.ts");
+    expect(a).toContain("SEARCH_STATIONS chalao (station ka naam query me)");
+    expect(a).toContain("comparison sawaal hai — DONO cheezon ka data laao");
+  });
+
+  it("tool ✗ ka matlab 'khaali list' nahi — koi claim nahi", () => {
+    const a = read("server/agent/agentic.ts");
+    expect(a).toContain("(c) kisi tool ka ✗ (fail) ye matlab NAHI ki list khaali hai");
+    expect(a).toContain('"koi train cancel nahi hui" MAT kaho');
+  });
+
+  it("rule 31(f): resolve ho chuka date/route dobara nahi poochhna", () => {
+    const a = read("server/agent/agentic.ts");
+    expect(a).toContain("(f) Agar system ne date/route resolve kar di");
+    expect(a).toContain("uska sawaal DOBARA mat poochho");
+  });
+});
