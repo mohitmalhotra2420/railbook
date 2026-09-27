@@ -198,13 +198,16 @@ export async function checkStationsOnRoute(
       }
     }
   }
-  if (origin && destination) return { origin, destination, first, last, stops };
+  /* Dono side NLU/se aaye ho to token-scan ki zaroorat nahi — par VERIFICATION (doosra source + bad
+   * claim) yahan bhi honi chahiye, warna "route me nahi" wala station chup-chaap aage chala jaata hai
+   * (live bug: 12951 mumbai rajdhani haridwar → dest=HW bina check, phir tool fail). */
+  const haveBoth = Boolean(origin && destination);
 
   const looksDest = /\b(ke liye|k liye|tak|jaana|jana|destination|pahunch)\b/i.test(String(userText ?? ""));
   const fromCue = /\bse\b/i.test(String(userText ?? ""));
 
   /* Station args me nahi aaya — user ke apne shabdon se (sirf wahi tokens jo SACH ME station hain). */
-  for (const cand of candidateStationTokens(userText ?? "", trainNumber)) {
+  for (const cand of haveBoth ? [] : candidateStationTokens(userText ?? "", trainNumber)) {
     if (cand === String(trainNumber)) continue;
     const byCode = stops.find((st) => norm(st.code) === norm(cand));
     const byName = stops.find((st) => nameToken(st.name ?? "") === cand);
@@ -234,12 +237,20 @@ export async function checkStationsOnRoute(
     if (!origin) origin = code;
     else if (!destination) destination = code;
   }
-  /* Negative claim ka final faisla: do source. Ek source me mila → claim nahi. */
+  const rescued: string[] = [];
+  /* Negative claim ka final faisla: DO source. Ek source me mila → claim nahi (aur us station ko
+   * segment endpoint bhi nahi banne dete — warna provider se ulta data maangte). */
   for (const c of badCands) {
-    if (await survivesInSecondSource(c.code)) continue;
+    if (await survivesInSecondSource(c.code)) {
+      rescued.push(norm(c.code));
+      continue;
+    }
     return { bad: await bad(c.code, c.side), first, last, stops };
   }
-  return { origin, destination, first, last, stops };
+  const inRouteNow = (code: string | undefined) => (code ? stops.some((st) => norm(st.code) === norm(code)) : false);
+  const finalOrigin = inRouteNow(origin) && !rescued.includes(norm(origin)) ? origin : undefined;
+  const finalDestination = inRouteNow(destination) && !rescued.includes(norm(destination)) ? destination : undefined;
+  return { origin: finalOrigin, destination: finalDestination, first, last, stops };
 }
 
 /** Tool/handler ka honest route-mismatch message. `forModel` par user-facing wording bhi di jaati hai. */
