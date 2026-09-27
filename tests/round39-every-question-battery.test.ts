@@ -91,7 +91,7 @@ describe("Round-39 · general railway knowledge KB me (battery me khaali/galat a
   it("RULES_TOPIC_RE me in sawaalon ke words hain (KB pehle chalta hai)", () => {
     const a = read("server/agent/agentic.ts");
     const re = /const RULES_TOPIC_RE = \/(.*)\/i;/s.exec(a)?.[1] ?? "";
-    for (const w of ["doori", "distance", "kutta", "pet", "smoking", "charging", "ac kharab", "bachch"]) {
+    for (const w of ["doori", "distance", "kutta", "pet", "smoking", "charging", "ac kharab", "bachch", "sabse bada", "sabse lambi", "konkan"]) {
       expect(re, `${w} RULES_TOPIC_RE me hona chahiye`).toContain(w);
     }
   });
