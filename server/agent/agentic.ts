@@ -2950,6 +2950,24 @@ export async function runAgenticTurn(input: {
   /* Round-18m-29: deferred planner decision (validated from the final answer). */
   let pendingDecision: { plan: JourneyPlan; cands: JourneyCandidate[] } | null = null;
 
+  /* Round-40e: KNOWLEDGE sawaal + curated KB entry → seedha verified KB jawab (model/web/24 tool-calls se
+   * pehle, 0.3s). Live sawaal (seat/fare/status/PNR/booking/journey) isse bilkul nahi chhoote — unme
+   * tools hi chalte hain. Isi wajah se live par jawab path-to-path nahi badalta (deterministic). */
+  {
+    const kbEarly = kbAuthoritativeRebound(input.text);
+    if (kbEarly) {
+      return {
+        ok: true,
+        reply: kbEarly,
+        grounded: true,
+        steps: [],
+        modelUsed: null,
+        latencyMs: Date.now() - startedAll,
+        failureReason: "kb_authoritative_early",
+      };
+    }
+  }
+
   // Vercel function wall (~30s default) — poora turn is budget ke andar raho.
   // Wall paar hua to jo tool-data mila uska summary return karo (null nahi).
   /* Stage-5L-net: 90s wall + 66s planner left no room for a final AI round; mobile saw "network error". 70s still covers RANK + short reply. */

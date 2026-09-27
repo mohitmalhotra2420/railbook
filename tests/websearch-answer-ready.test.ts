@@ -169,7 +169,9 @@ describe("ROUND-15: WEB_SEARCH answer-ready (Muse web-search fix)", () => {
         choices: [{ message: { content: "Web se mila (Wikipedia — Vande Bharat Express): Vande Bharat ki maximum operational speed 160 km/h hai; trial runs mein 183 km/h tak gayi thi. (Source: https://en.wikipedia.org/wiki/Vande_Bharat_Express)" } }],
       });
     });
-    const turn = await runAgenticTurn({ text: "vande bharat ki top speed kitni hai", now: "2026-09-07T10:00:00+05:30" });
+    /* Round-40e: KB-first early return se bachne ke liye non-KB phrasing (KB me "vande bharat ki top speed" entry hai) —
+     is test ka maksad WEB_SEARCH loop/repeat-reject hai, KB nahi. */
+    const turn = await runAgenticTurn({ text: "vande bharat kitni tez chalti hai", now: "2026-09-07T10:00:00+05:30" });
     expect(turn.ok).toBe(true);
     expect(turn.grounded).toBe(true);
     expect(turn.steps.map((s) => `${s.tool}${s.ok ? "✓" : "✗"}`)).toEqual(["WEB_SEARCH✓", "WEB_SEARCH✗"]);
@@ -195,7 +197,7 @@ describe("ROUND-15: WEB_SEARCH answer-ready (Muse web-search fix)", () => {
     const reply = String(turn.reply);
     /* Round-38: KB se aata hai (stable fact) — dhaancha wahi: seedha jawab + honest label. */
     expect(reply).toMatch(/160 km\/h/);
-    expect(reply).toMatch(/General railway rules|web-scrape ka jawab/);
+    expect(reply).toMatch(/General railway rules|General railway knowledge|web-scrape ka jawab/);
     expect(reply).not.toMatch(/^• /m);
   });
 });
