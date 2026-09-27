@@ -1527,7 +1527,10 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
             tool: null,
             toolOk: null,
             reply:
-              `${label2} ${asked} nahi jaati — uska route ${bad.first} → ${bad.last} hai, aur ${asked} us route me nahi hai.\n\n` +
+              `${label2} ${asked} par stop nahi karti — uska route ${bad.first} → ${bad.last} hai, aur ${asked} us route me nahi hai.\n\n` +
+              (bad.nearby
+                ? `Par isi shehar ka ${bad.nearby.code}${bad.nearby.name ? ` (${bad.nearby.name})` : ""} us route me hai${bad.nearby.departure ? ` (departure ${bad.nearby.departure})` : ""} — wahan se travel kar sakte ho; uska seat status bhi bata dunga.\n\n`
+                : "") +
               `Ye train kis station tak chahiye? Sahi station bata do, main usi ka seat status check kar dunga. ` +
               `${bad.side === "destination" ? `${asked} ke liye` : "Is station se"} jaane wali trains bhi bata sakta hoon.\n\n` +
               `(Jawab ${label2} ke asli timetable/stops se verify kiya — andaza nahi.)`,
@@ -1545,6 +1548,7 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
             grounded: true,
             toolTrace: [],
             nextActions: [
+              ...(bad.nearby ? [{ label: `${bad.nearby.code} ka seat`, utterance: `${tnum} ki seat availability ${bad.nearby.code} se`, primary: true }] : []),
               { label: `${tnum} ka route`, utterance: `${tnum} ka route batao`, primary: false },
               { label: `${bad.code} ke liye trains`, utterance: `${bad.first} se ${bad.code} jaane wali trains batao kal`, primary: false },
             ],

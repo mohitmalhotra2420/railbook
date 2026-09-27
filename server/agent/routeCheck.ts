@@ -10,6 +10,7 @@
  * likhne ki zaroorat nahi — ek jagah verification, har path par lagu. Route data na mile to koi claim nahi.
  */
 import { routedSchedule, routedStationSearch } from "../railway/router.js";
+import { scrapeTrainScheduleWeb } from "../railway/webscrape.js";
 
 export const ROUTE_ASK_STOPWORDS = new Set([
   "seat", "seats", "check", "krna", "karna", "karo", "kar", "ke", "ki", "ka", "liye", "liy",
@@ -54,7 +55,15 @@ const normName = (s: string | undefined | null) =>
 
 type Stop = { code?: string; name?: string; city?: string };
 
-export type RouteStationBad = { code: string; side: "origin" | "destination"; first: string; last: string };
+export type RouteStationBad = {
+  code: string;
+  side: "origin" | "destination";
+  first: string;
+  last: string;
+  /** Isi SHEHAR ka koi doosra station jo route me hai (jaise Ludhiana: LDH stop nahi, par DDL hai).
+   *  Isse jawab zyada sahi hota hai — "nahi jaati" ke bajaye exact station bata dete hain. */
+  nearby?: { code: string; name?: string; arrival?: string | null; departure?: string | null };
+};
 export type RouteStationCheck = {
   origin?: string;
   destination?: string;
@@ -81,7 +90,24 @@ export async function checkStationsOnRoute(
   const first = norm(stops[0].code);
   const last = norm(stops[stops.length - 1].code);
   const inRoute = (code: string) => stops.some((st) => norm(st.code) === norm(code));
-  const bad = (code: string, side: "origin" | "destination"): RouteStationBad => ({ code: norm(code), side, first, last });
+  const citySiblingOf = async (code: string): Promise<RouteStationBad["nearby"] | undefined> => {
+    const hit = await searchHit(code);
+    const city = normName(hit?.city ?? "");
+    if (!city) return undefined;
+    /* CODE se search karne par sirf wahi station milta hai — isliye shehar ke naam se search karo. */
+    const res = await routedStationSearch(String(hit?.city ?? "").trim() || code).catch(() => null);
+    const sameCity = (res?.stations ?? []).filter((st) => normName(st.city ?? "") === city);
+    for (const cand of sameCity) {
+      if (norm(cand.code) === norm(code)) continue;
+      const inRoute = stops.find((st) => norm(st.code) === norm(cand.code));
+      if (inRoute) return { code: norm(inRoute.code), name: inRoute.name, arrival: (inRoute as { arrival?: string | null }).arrival, departure: (inRoute as { departure?: string | null }).departure };
+    }
+    return undefined;
+  };
+  const bad = async (code: string, side: "origin" | "destination"): Promise<RouteStationBad> => {
+    const sib = await citySiblingOf(code).catch(() => undefined);
+    return { code: norm(code), side, first, last, ...(sib ? { nearby: sib } : {}) };
+  };
 
   /* Kisi bhi code ko route ke station se match karo — pehle code, phir naam, phir shehar (ek hi ho to). */
   const mapToRoute = async (code: string): Promise<"in" | "mapped" | "out" | "unknown"> => {
@@ -104,6 +130,32 @@ export async function checkStationsOnRoute(
   };
   /* Station search ka bharosa: exact CODE match, ya kam-se-kam 3 akshar ka token (aur 5+ akshar par
    * search ka top result). Chhote token ("ko", "se") par top result lena jhoothi mismatch deta tha. */
+  /* ── DOOSRA SOURCE (Round-43k) ─────────────────────────────────────────────────────────────────────
+   * "Ye station is train me nahi hai" ek NEGATIVE claim hai — ek provider ke stop-list me gap ho sakta hai
+   * (live case: 12054 ke route me asli me LDH Ludhiana hai, par primary API ne Dhandal Kalan ke saath LDH
+   * chhod diya; aise hi 19326). Isliye negative claim se PEHLE ek doosra (web) schedule source check hota
+   * hai: agar wahan station mil gaya to claim nahi karte (aur us station ka data lene se rok nahi lagti).
+   * Do source chup rahein tab hi "nahi jaati" bolte hain. Positive claims ke liye ye extra call nahi. */
+  const inStopsByName = (list: Stop[], code: string, name: string | undefined): boolean => {
+    if (list.some((st) => norm(st.code) === norm(code))) return true;
+    const hn = normName(name ?? "");
+    if (!hn) return false;
+    return list.some((st) => {
+      const sn = normName(st.name ?? "");
+      return sn && (sn === hn || (sn.length >= 5 && hn.length >= 5 && (sn.startsWith(hn) || hn.startsWith(sn))));
+    });
+  };
+  const secondaryStops = async (): Promise<Stop[]> => {
+    const sc = await scrapeTrainScheduleWeb(trainNumber).catch(() => null);
+    return (sc?.stops ?? []).map((st) => ({ code: st.code, name: st.name })) as Stop[];
+  };
+  const survivesInSecondSource = async (code: string): Promise<boolean> => {
+    const sec = await secondaryStops();
+    if (!sec.length) return false;
+    const hit = await searchHit(code);
+    return inStopsByName(sec, code, hit?.name);
+  };
+
   const searchHit = async (tok: string): Promise<{ code: string; name?: string; city?: string } | null> => {
     const t = norm(tok);
     const res = await routedStationSearch(tok).catch(() => null);
@@ -130,13 +182,14 @@ export async function checkStationsOnRoute(
   let origin = norm(asked.origin ?? "") || undefined;
   let destination = norm(asked.destination ?? "") || undefined;
 
+  const badCands: { code: string; side: "origin" | "destination" }[] = [];
   for (const [side, code] of [
     ["origin", origin],
     ["destination", destination],
   ] as const) {
     if (!code) continue;
     const verdict = await mapToRoute(code);
-    if (verdict === "out") return { bad: bad(code, side), first, last, stops };
+    if (verdict === "out") badCands.push({ code, side });
     if (verdict === "mapped") {
       const mapped = await routeCodeOf(code);
       if (mapped) {
@@ -173,22 +226,35 @@ export async function checkStationsOnRoute(
     if (verdict === "out") {
       /* Message me asli station code dikhao (HW), raw token nahi (HARIDWAR). */
       const realCode = resolved ?? (await searchHitCode(cand)) ?? norm(cand);
-      return { bad: bad(realCode, looksDest && !fromCue ? "destination" : origin ? "destination" : "origin"), first, last, stops };
+      badCands.push({ code: realCode, side: looksDest && !fromCue ? "destination" : origin ? "destination" : "origin" });
+      continue;
     }
     const code = resolved ?? norm(cand);
     if (code === origin || code === destination) continue;
     if (!origin) origin = code;
     else if (!destination) destination = code;
   }
+  /* Negative claim ka final faisla: do source. Ek source me mila → claim nahi. */
+  for (const c of badCands) {
+    if (await survivesInSecondSource(c.code)) continue;
+    return { bad: await bad(c.code, c.side), first, last, stops };
+  }
   return { origin, destination, first, last, stops };
 }
 
 /** Tool/handler ka honest route-mismatch message. `forModel` par user-facing wording bhi di jaati hai. */
 export function routeMismatchMessage(trainNumber: string, bad: RouteStationBad, forModel = false): string {
-  const head = `${trainNumber} ${bad.code} NAHI JAATI — us train ka timetable route ${bad.first} → ${bad.last} hai, ${bad.code} us route me nahi.`;
+  const sibPlain = bad.nearby
+    ? ` Isi shehar ka ${bad.nearby.code}${bad.nearby.name ? ` (${bad.nearby.name})` : ""} us route me hai${bad.nearby.departure ? ` — departure ${bad.nearby.departure}` : ""}.`
+    : "";
+  const sibModel = bad.nearby
+    ? ` User ko yahi exact baat batao (us station se travel ho sakti hai) aur uska data chahiye to poochho.`
+    : "";
+  const head = `${trainNumber} ${bad.code} par stop NAHI karti — us train ka timetable route ${bad.first} → ${bad.last} hai, ${bad.code} us route me nahi.${sibPlain}`;
+  const headModel = `${head}${sibModel}`;
   if (!forModel) return head;
   return (
-    `${head} Is station ka seat/fare/board data dena MANA hai (koi N/A rows nahi). ` +
+    `${headModel} Is station ka seat/fare/board data dena MANA hai (koi N/A rows nahi). ` +
     `User ko exactly aise bolo (Hinglish, 2-3 line): "${trainNumber} ke timetable me ${bad.code} nahi milta — is train ka route ${bad.first} → ${bad.last} hai, ${bad.code} us route me nahi hai. Ye train kis station tak chahiye, ya ${bad.code} ke liye kaunsi train dekhni hai?"`
   );
 }

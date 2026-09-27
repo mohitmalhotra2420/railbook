@@ -11,7 +11,7 @@ import { describe, it, expect } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import { asksSingleTrainAvailability, scrubInternalNotes } from "../server/agent/answerMode";
-import { candidateStationTokens, checkStationsOnRoute, normalizeRouteSegment } from "../server/agent/routeCheck";
+import { candidateStationTokens, checkStationsOnRoute, normalizeRouteSegment, routeMismatchMessage } from "../server/agent/routeCheck";
 import { runAgent } from "../server/agent/run";
 import { setRailcoreFetch } from "../server/railway/railcore";
 import { setScrapeFetch } from "../server/railway/webscrape";
@@ -182,6 +182,7 @@ function inRouteMock(): void {
           ]
         : [
             { station_code: "ASR", station_name: "AMRITSAR JN", arrival_time: null, departure_time: "06:50", day: 1 },
+            { station_code: "DDL", station_name: "DHANDARI KALAN", arrival_time: "09:15", departure_time: "09:20", day: 1 },
             { station_code: "UMB", station_name: "AMBALA CANTT JN", arrival_time: "10:55", departure_time: "11:04", day: 1 },
             { station_code: "HW", station_name: "HARIDWAR JN", arrival_time: "13:50", departure_time: null, day: 1 },
           ];
@@ -206,7 +207,16 @@ function inRouteMock(): void {
     }
     if (p.endsWith("/stations/search")) {
       const q = (url.searchParams.get("query") ?? url.searchParams.get("q") ?? "").toLowerCase();
-      const results = q === "hw" ? [{ station_code: "HW", station_name: "HARIDWAR JN", city: "Haridwar", confidence: 1 }] : [];
+      const LUDHIANA = [
+        { station_code: "LDH", station_name: "LUDHIANA JN", city: "Ludhiana", confidence: 1 },
+        { station_code: "DDL", station_name: "DHANDARI KALAN", city: "Ludhiana", confidence: 0.8 },
+      ];
+      const results =
+        q === "hw" || q === "haridwar"
+          ? [{ station_code: "HW", station_name: "HARIDWAR JN", city: "Haridwar", confidence: 1 }]
+          : q === "ldh" || q === "ludhiana" || q === "ludhiana jn"
+            ? LUDHIANA
+            : [];
       return json(200, { success: true, data: { results } });
     }
     return json(404, { success: false, error: { message: "unknown endpoint" } });
@@ -279,6 +289,22 @@ describe("Round-43e · station route me nahi → honest correction (board nahi) 
  * pehla/aakhri stop redundant arg nahi banta (12054 'HW→HW' provider-bug), (c) asli station route me
  * nahi to honest fail — general, kisi ek train/station par hardcoded nahi. */
 describe("Round-43k · shared route verification (tool ke andar, kisi bhi train × station par)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ now: new Date("2026-09-27T09:10:00.000Z"), toFake: ["Date"] });
+    process.env.RAILWAY_PROVIDER = "railcore";
+    process.env.RAILCORE_API_KEY = "rk_live_test";
+    /* Deterministic: web-scrape (doosra source) band — mock route/timetable hi source hai. */
+    setScrapeFetch(async () => new Response(JSON.stringify({ success: false }), { status: 500, headers: { "Content-Type": "application/json" } }));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    setRailcoreFetch(null);
+    setScrapeFetch(null);
+    process.env.RAILWAY_PROVIDER = "mock";
+    process.env.RAILCORE_API_KEY = "";
+    setProvider(null);
+  });
+
   it("model ke marker tokens user ko na dikhein ([END] / (done)) — par [NEXT] chips bache rahein", () => {
     expect(scrubInternalNotes("12054 (Hw Janshatabdi) ASR → HW. [END]")).toBe("12054 (Hw Janshatabdi) ASR → HW.");
     expect(scrubInternalNotes("Jawab: 28 Sep CC WL16 · 2S AVL 235 (done)")).toBe("Jawab: 28 Sep CC WL16 · 2S AVL 235");
@@ -293,6 +319,18 @@ describe("Round-43k · shared route verification (tool ke andar, kisi bhi train 
     /* Train ke naam wale shabd bhi station nahi (12951 mumbai RAJDHANI haridwar). */
     expect(candidateStationTokens("12951 mumbai rajdhani haridwar ke liye seat check krna", "12951")).toEqual(["mumbai", "haridwar"]);
   });
+
+  it("station ka SHEHAR route me hai to wahi station bataye (Ludhiana → DDL)", async () => {
+    inRouteMock();
+    const c = await checkStationsOnRoute("12054", {}, "12054 ludhiana se haridwar tak chalti hai?");
+    expect(c.bad?.code).toBe("LDH");
+    expect(c.bad?.nearby?.code).toBe("DDL");
+    const msg = routeMismatchMessage("12054", c.bad!);
+    expect(msg).toMatch(/LDH par stop NAHI karti/);
+    expect(msg).toMatch(/DDL/);
+    expect(msg, "user-facing message me model-instruction nahi honi chahiye").not.toMatch(/user ko/i);
+    expect(routeMismatchMessage("12054", c.bad!, true)).toMatch(/User ko yahi exact baat batao/);
+  }, 25000);
 
   it("redundant segment arg drop: aakhri stop = poori route, aur 'X→X' par koi claim nahi", () => {
     const stops = [{ code: "ASR" }, { code: "UMB" }, { code: "HW" }];

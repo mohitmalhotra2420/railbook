@@ -2055,7 +2055,10 @@ async function routeFactLine(userText: string): Promise<string | null> {
   const chk = await checkStationsOnRoute(tn, {}, t).catch(() => null);
   if (!chk) return null;
   if (chk.bad) {
-    return `VERIFIED ROUTE FACT (timetable se, FINAL — guess nahi): ${tn} ke route (${chk.bad.first} → ${chk.bad.last}) me ${chk.bad.code} NAHI hai. Is sawaal ka jawab sach ke saath do (train wahaan nahi jaati/rukhti) — us station ke liye seat/board rows ya koi fare MAT do; sahi station poochho.`;
+    const sib = chk.bad.nearby
+      ? ` ISKE BADLE isi shehar ka ${chk.bad.nearby.code}${chk.bad.nearby.name ? ` (${chk.bad.nearby.name})` : ""} us route me hai${chk.bad.nearby.departure ? ` — departure ${chk.bad.nearby.departure}` : ""}; user ko yahi exact baat batao (us station se travel ho sakti hai, aur uska data chahiye to poochho).`
+      : "";
+    return `VERIFIED ROUTE FACT (timetable se, FINAL — guess nahi): ${tn} ke route (${chk.bad.first} → ${chk.bad.last}) me ${chk.bad.code} NAHI hai — train wahaan nahi rukti; is station ka seat/board rows ya koi fare MAT do, aur sahi station poochho.${sib}`;
   }
   if (!chk.stops.length) return null;
   const hits: string[] = [];
