@@ -1744,6 +1744,8 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
               engine: "deterministic" as const,
               agenticFailureReason: null,
               grounded: true,
+              /* Audit/trace ke liye tool bhi dikhe (chat me "⚙️" line) — data wahi verified live. */
+              toolTrace: [{ step: 1, tool: "getLiveStatus", args: { trainNumber: tnum }, ok: true, source: "provider", summary: String(liveResult.summary ?? ""), latencyMs: 0 } as ToolTraceStep],
             } as never;
           }
         }
