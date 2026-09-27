@@ -854,3 +854,23 @@ User (R38 ke baad, wahi demand dobara): *"abh yeh AI ko samjhna chahiye tha … 
 ```
 **Tests:** naya `tests/round39-every-question-battery.test.ts` (11) + round38 (23) + intelligence/round15 anchors → **118 files / 1286 ALL PASS** · server tsc clean · client 69 (baseline) · build (R39b) · **APK change nahi**.
 **Files:** `server/agent/subject.ts` · `server/agent/railkb.ts` · `server/agent/agentic.ts` · `server/agent/run.ts` · `src/ai/facts.ts` · tests · `tools/probe-r39-battery.mjs`. **Workspace reset note:** reset par `/home/user/recover.sh` (fetch+reset+npm ci+APK bridge restore) chalao.
+
+## §9.32 — Round-40 (27 Sep 2026): "khud ka dimaag" — ChatGPT-jaisa mode split + KB authoritative
+
+**User (4th time, raat bhar):** "jaise ChatGPT/Gemini/Manus khud ka brain use karte hain — unko pehle batana nahi padta; wo khud samajhte hain ki kya missing hai, user se kya poochhna hai, kaunsa tool lagana hai. Mera LLM bhi waise hi khud samjhe aur ek dum perfect answer/outcome de."
+
+**LIVE root cause:** final answer par `groundingCheck` HAR 3+ digit number aur HAR uppercase token ko tool-evidence se match karta tha — model ka sahi general-knowledge jawab ("1853", "23 platforms") bhi reject ho kar "verified data nahi mila" ban jaata tha.
+
+**Fixes (live `24696d3`):**
+1. **LIVE/KNOWLEDGE mode split** (`server/agent/answerMode.ts`): LIVE = khaas train ka seat/fare/status/PNR/platform/booking + journey search + kisi din ki running → strict grounding. KNOWLEDGE = baaki sab → model apne knowledge se; sirf live-claims (₹/AVL/RAC/WL/PNR/platform N/seat count) evidence se verify (`liveClaimCheck`).
+2. **KB authoritative** (`kbAuthoritativeRebound`): knowledge sawaal + KB entry → verified KB jawab model ki memory/web se PEHLE (4 paths). Vivek ka purana galat "4273 km" ab kabhi user tak nahi.
+3. **Typo/ASR** (`normalizeRailText` ~22 patterns): statsu→status, gaadi→train, ldh→ludhiana…
+4. **Prompt rules 30/31**: DO MODES + KHUD KA DIMAAG (samjho → missing pehchano → tools chuno → jawab+agla kadam).
+5. **Evidence fix**: `dataPreview` ab grounding evidence me — asli verified numbers grounded.
+6. **Seat/fare leak band** knowledge mode me bhi (fake "42 seats" ungrounded).
+7. **KB additions:** pehli train 1853 · 18 zonal railways (+19 note) · ~7,300+ stations · sabse tez (Vande Bharat 160) · sabse purana station (Bori Bunder/Royapuram) · **Ludhiana Junction = 7 platforms** (Wikipedia/redbus/totaltraininfo verified).
+8. **RULES_TOPIC_RE:** `sabse puran[a-z]*` (pehle "sabse purana" match nahi hota tha).
+
+**Tests:** 119 files / 1299 ALL PASS.
+
+**Round-40e (final, live `da41cb1`):** KB-first early return — knowledge sawaal + curated KB entry → **0.0–0.1s** verified jawab (model/24 tool-calls se pehle). Live sawaal (seat/fare/status/PNR/booking/journey) untouched — wahan tools hi chalte hain. Live verify: Vivek 0.1s (4,154/4,286) · sabse purana station 0.0s (Bori Bunder 1853) · Vande Bharat speed 0.0s (160) · LDH platforms 0.0s (7) · seat availability real (2S AVL 384 ₹205 · CC WL14). Suite 119 files/1299 ALL PASS.
