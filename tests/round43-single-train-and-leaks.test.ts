@@ -265,3 +265,24 @@ describe("Round-43e · station route me nahi → honest correction (board nahi) 
     expect(r).toContain("askStops");
   });
 });
+
+/* ── Round-43f/g (user screenshot 27 Sep): "Book 12054" chip par app BLANK ho gaya (white screen) —
+ * client ne bina class ke passenger form khola aur Passengers me BERTH_BY_CLASS[undefined].map crash
+ * kar gaya. Aur cancelled date (27 Sep) par booking dead-end thi — ab agla din (28 Sep) ka verified
+ * data offer hota hai. */
+describe("Round-43f/g · Book tap crash-proof + dead date par agla din", () => {
+  it("client form sirf VERIFIED class par kholta hai (crash-proof)", () => {
+    const c = read("src/views/Concierge.tsx");
+    expect(c).toContain("const verifiedClass = String(openRowB?.classCode ?? clsWanted ?? \"\")");
+    expect(c).toContain("if (verifiedClass) {");
+    expect(c).toContain("if (!uniqClasses.length) return;");
+    const p = read("src/views/Passengers.tsx");
+    expect(p).toContain("BERTH_BY_CLASS[state.selectedClass.code] ?? []");
+  });
+
+  it("booking: boli hui date par kuch bookable nahi → agla din ka real data + chips usi date ke", () => {
+    const r = read("server/agent/run.ts");
+    expect(r).toContain("bDateUsed");
+    expect(r).toContain("par koi class bookable nahi");
+  });
+});

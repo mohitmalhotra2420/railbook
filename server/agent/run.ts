@@ -1835,11 +1835,29 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
       const okList: string[] = [];
       let availStep: ToolTraceStep | null = null;
       let fareStep: ToolTraceStep | null = null;
+      /* Round-43g: agar boli hui date par koi class bookable hi nahi (cancelled/N-A — jaise 27 Sep
+       * 12054) to user ko dead-end booking nahi — agla din bhi check karo aur wahi offer karo (jo data
+       * me sach me hai). Sab kuch provider ke data se, guess nahi. */
+      let bDateUsed = bDate;
       try {
         const avArgs = { ...argsBase, ...(cls ? { class_code: cls } : {}) };
         const av = (await executeApprovedTool("CHECK_AVAILABILITY", avArgs as never, { userText: req.text })) as unknown as { ok: boolean; summary: string };
         availStep = { step: 1, tool: "CHECK_AVAILABILITY", args: avArgs, ok: av.ok, source: "provider", summary: String(av.summary ?? ""), latencyMs: 0 } as ToolTraceStep;
         if (av.ok) okList.push("CHECK_AVAILABILITY");
+        const dead = !/\b(AVAILABLE|RAC|WL|WAIT|WAITLIST)\b/i.test(String(av.summary ?? ""));
+        if (dead && bDate) {
+          const nextDate = (() => {
+            const [y, m, d] = bDate.split("-").map(Number);
+            const dt = new Date(Date.UTC(y, m - 1, d + 1));
+            return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}-${String(dt.getUTCDate()).padStart(2, "0")}`;
+          })();
+          const av2 = (await executeApprovedTool("CHECK_AVAILABILITY", { ...argsBase, date: nextDate, ...(cls ? { class_code: cls } : {}) } as never, { userText: req.text })) as unknown as { ok: boolean; summary: string };
+          const better = av2.ok && /\b(AVAILABLE|RAC|WL|WAIT|WAITLIST)\b/i.test(String(av2.summary ?? ""));
+          if (better) {
+            bDateUsed = nextDate;
+            availStep = { step: 1, tool: "CHECK_AVAILABILITY", args: { ...argsBase, date: nextDate, ...(cls ? { class_code: cls } : {}) }, ok: true, source: "provider", summary: `${bDate} par koi class bookable nahi → ${nextDate}: ${String(av2.summary ?? "")}`, latencyMs: 0 } as ToolTraceStep;
+          }
+        }
       } catch {
         /* tool fail — neeche honest handling */
       }
@@ -1856,18 +1874,18 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
       const availTxt = availStep?.ok ? availStep.summary.replace(/\s+/g, " ").trim() : null;
       const fareTxt = fareStep?.ok ? fareStep.summary.replace(/\s+/g, " ").trim() : null;
       const routeTxt = bFrom && bTo ? `${bFrom} → ${bTo}` : "";
-      const head = `${tnum}${tName ? ` ${tName}` : ""}${routeTxt ? ` (${routeTxt})` : ""} · ${bDate}${cls ? ` · ${cls}` : ""}`;
+      const head = `${tnum}${tName ? ` ${tName}` : ""}${routeTxt ? ` (${routeTxt})` : ""} · ${bDateUsed}${cls ? ` · ${cls}` : ""}${bDateUsed !== bDate && bDate ? ` (${bDate} par koi class bookable nahi thi)` : ""}`;
       let reply: string;
       const nextActions: { label: string; utterance: string; primary?: boolean }[] = [];
       if (!cls && availTxt) {
         reply = `${head} — kaunsi class me book karun?\n${availTxt}`;
         const classRows = [...String(availStep?.summary ?? "").matchAll(/\b(1A|2A|3A|3E|2S|SL|CC|EC|FC)\b/gi)].map((m) => m[1].toUpperCase());
         for (const c of [...new Set(classRows)].slice(0, 3)) {
-          nextActions.push({ label: `Book ${tnum} · ${c}`, utterance: `${tnum} mein ${c} book krdo ${bDate}`, primary: nextActions.length === 0 });
+          nextActions.push({ label: `Book ${tnum} · ${c}`, utterance: `${tnum} mein ${c} book krdo ${bDateUsed}`, primary: nextActions.length === 0 });
         }
       } else if (availTxt || fareTxt) {
         reply = `${head} ki booking — provider ka live data:\n${availTxt ? `• ${availTxt}` : ""}${fareTxt ? `${availTxt ? "\n" : ""}• ${fareTxt}` : ""}\nPassenger details ka form khol raha hoon — naam/age bhar kar aage badho. (Booking/payment sirf aapke confirm par.)`;
-        nextActions.push({ label: `Book ${tnum}${cls ? ` · ${cls}` : ""}`, utterance: `${tnum} mein ${cls ?? "2S"} book krdo ${bDate}`.replace(/\s+/g, " "), primary: true });
+        nextActions.push({ label: `Book ${tnum}${cls ? ` · ${cls}` : ""}`, utterance: `${tnum} mein ${cls ?? "2S"} book krdo ${bDateUsed}`.replace(/\s+/g, " "), primary: true });
       } else {
         reply = `${head} ki booking ke liye seat/fare data abhi provider se nahi mil pa raha — bina verified data main aage nahi badhaunga. Thodi der baad phir bolo, ya app ke "Sabhi trains · Book →" se class chun lo.`;
       }

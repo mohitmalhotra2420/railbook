@@ -1161,20 +1161,36 @@ export function Concierge() {
                 const pickedClass = clsWanted ? withSeat.find((r) => classKey(r) === clsWanted) ?? null : null;
                 /* Class boli ho to seedha usi ka form (user ki marzi). Class na boli ho aur 2+ class khuli
                  * ho to pehle poochho (Round-35). Warna jo mila wahi. */
+                /* Round-43f (user screenshot crash 27 Sep): "Book <train>" chip par class na hone aur
+                 * koi verified class row na milne par pehle form khul jaata tha — Passengers me
+                 * BERTH_BY_CLASS[undefined] → app BLANK ho jaata tha (poora white screen). Ab form sirf
+                 * tab khulta hai jab class VERIFIED ho (user ne boli, ya real row se mili); warna server
+                 * ka class-sawaal/chips waisa hi dikhta hai. */
+                const openRowB =
+                  clsWanted ? pickedClass ?? pickRowForBooking(live, tno, clsWanted) :
+                  uniqClasses[0] ?? thisTrain.find((r) => isOpenableStatus(String(r.status ?? ""))) ?? null;
+                const verifiedClass = String(openRowB?.classCode ?? clsWanted ?? "").trim().toUpperCase();
                 if (clsWanted || uniqClasses.length < 2) {
-                  const pickRow = clsWanted
-                    ? pickedClass ?? pickRowForBooking(live, tno, clsWanted)
-                    : pickRowForBooking(live, tno, null);
-                  const seat = buildAutoBookSeat({
-                    trainNumber: tno,
-                    classWanted: clsWanted || pickRow?.classCode || null,
-                    row: pickRow,
-                    trainRow: agentRes.trains?.rows?.find((t) => String(t.number) === tno) ?? null,
-                    source: sf?.source ?? null,
-                  });
-                  openBookingFromSeatRow(seat, { from: routeFrom.code, to: routeTo.code, toName: routeTo.name ?? null, date: routeDate });
-                  return;
+                  /* Round-43f: class VERIFIED na ho to form kabhi nahi (Passengers me crash ho jaata tha). */
+                  if (verifiedClass) {
+                    const pickRow = clsWanted
+                      ? pickedClass ?? pickRowForBooking(live, tno, clsWanted)
+                      : pickRowForBooking(live, tno, null);
+                    const seat = buildAutoBookSeat({
+                      trainNumber: tno,
+                      classWanted: verifiedClass,
+                      row: pickRow,
+                      trainRow: agentRes.trains?.rows?.find((t) => String(t.number) === tno) ?? null,
+                      source: sf?.source ?? null,
+                    });
+                    openBookingFromSeatRow(seat, { from: routeFrom.code, to: routeTo.code, toName: routeTo.name ?? null, date: routeDate });
+                    return;
+                  }
                 }
+                /* Round-43f: koi verified class row nahi (jaise single-train deterministic reply jisme
+                 * sirf date-wise text hai) → ye client message MAT banao ("0 classes khuli hain — ." bhadda
+                 * tha); server ka apna class-sawaal + chips hi dikhne do. */
+                if (!uniqClasses.length) return;
                 const nm = uniqClasses[0]?.name ?? agentRes.trains?.rows?.find((t) => String(t.number) === tno)?.name ?? lastPickedTrainRef.current?.number === tno ? uniqClasses[0]?.name ?? null : null;
                 setMessages((m) => [
                   ...m,
@@ -2561,7 +2577,7 @@ function BlockView({
                 <div className={`control ${err.berthPreference ? "bad" : ""} ${mark(berthOk, on === "berth")}`}>
                   <select value={p.berthPreference} onChange={(e) => updatePassenger(p.id, { berthPreference: e.target.value })}>
                     <option value="">Select</option>
-                    {(state.selectedClass ? BERTH_BY_CLASS[state.selectedClass.code] : ["No Preference"]).concat("No Preference").filter((v, i, a) => a.indexOf(v) === i).map((b) => (
+                    {(state.selectedClass ? BERTH_BY_CLASS[state.selectedClass.code] ?? [] : ["No Preference"]).concat("No Preference").filter((v, i, a) => a.indexOf(v) === i).map((b) => (
                       <option key={b}>{b}</option>
                     ))}
                   </select>
