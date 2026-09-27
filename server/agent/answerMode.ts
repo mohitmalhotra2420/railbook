@@ -150,6 +150,9 @@ export function scrubInternalNotes(reply: string): string {
   const instructionRe =
     /\b(jawab me\b[^.]*\blikho|mat likho|likho\s*\(jo|seat rows me hain|card me hain|confirm% ?nahi batana|mat maano|dobara mat poochho|tool hint|tool hint:|internal|system check)\b/i;
   const noisyParen = /\([^()]*\b(?:live board|board check kiya|alag board)\b[^()]*\)/gi;
+  /* Round-43k: model ke apne control/marker tokens user ko kabhi na dikhein ("[END]", "(END)", "[/NEXT]"…).
+   * [NEXT] chips ke liye CLIENT ka marker hai (alag line me) — isliye yahan sirf END/DONE jaise markers. */
+  const markerJunk = /\[\/?(?:end|done|eot|finish|stop)\]|\(\s*(?:end|done)\s*\)|<\/?\s*(?:end|done)\s*>|\[\/?(?:end|done)\]/gi;
   const trainsDekhe = /\b\d+\s*trains? dekhe\s*(?:\([^()]*\))?\.?/gi;
   const out = String(reply)
     .split("\n")
@@ -157,6 +160,7 @@ export function scrubInternalNotes(reply: string): string {
     .map((line) =>
       line
         .replace(noisyParen, "")
+        .replace(markerJunk, "")
         .replace(trainsDekhe, "")
         .replace(/·\s*\)/g, ")")
         .replace(/\s+([).,])/g, "$1")

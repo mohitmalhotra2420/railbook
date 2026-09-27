@@ -2039,6 +2039,44 @@ export function stationQueryWithUserQualifier(query: string, userText: string): 
   }
 }
 
+/* ── Round-43k: GROUNDED ROUTE FACT (general) ─────────────────────────────────────────────────────────
+ * User ne khaas train + station(s) bola ho (jaise "12054 ludhiana se haridwar tak chalti hai?") to model
+ * ko route ka SACHCH diya jaata hai — timetable se, guess nahi. Isse koi bhi train × station ka sawaal
+ * ("wahaan se chalti hai?", "X par rukti hai?", "Y tak jaati hai?") verified jawab paata hai, aur
+ * "origin X nahi hai" jaisa galat tark nahi hota (stop hone ka matlab hai wahan se travel ho sakti hai).
+ * Route me NA ho to wo bhi fact hai — us station ka seat/board data nahi dena.
+ */
+async function routeFactLine(userText: string): Promise<string | null> {
+  const t = String(userText ?? "");
+  const tn = (/\b(\d{4,5})\b/.exec(t) ?? [])[1];
+  if (!tn) return null;
+  const toks = candidateStationTokens(t, tn);
+  if (!toks.length) return null;
+  const chk = await checkStationsOnRoute(tn, {}, t).catch(() => null);
+  if (!chk) return null;
+  if (chk.bad) {
+    return `VERIFIED ROUTE FACT (timetable se, FINAL — guess nahi): ${tn} ke route (${chk.bad.first} → ${chk.bad.last}) me ${chk.bad.code} NAHI hai. Is sawaal ka jawab sach ke saath do (train wahaan nahi jaati/rukhti) — us station ke liye seat/board rows ya koi fare MAT do; sahi station poochho.`;
+  }
+  if (!chk.stops.length) return null;
+  const hits: string[] = [];
+  for (const tok of toks) {
+    const st = chk.stops.find((x) => String(x.name ?? "").toLowerCase().split(/[^a-z]+/)[0] === tok) ?? chk.stops.find((x) => String(x.code ?? "").toLowerCase() === tok);
+    if (!st) continue;
+    const idx = chk.stops.findIndex((x) => x === st);
+    const arr = (st as { arrival?: string | null }).arrival ?? "-";
+    const dep = (st as { departure?: string | null }).departure ?? "-";
+    const role = idx === 0 ? "origin (pehla stop)" : idx === chk.stops.length - 1 ? "aakhri stop (destination)" : `stop #${idx + 1} of ${chk.stops.length}`;
+    hits.push(`${String(st.code).toUpperCase()} (${String(st.name ?? "")}) = ${role}, arr ${arr} / dep ${dep}`);
+  }
+  if (!hits.length) return null;
+  return (
+    `VERIFIED ROUTE FACT (timetable se, FINAL — guess nahi): ${tn} ke route (${chk.first} → ${chk.last}) ke stops — ` +
+    `${hits.join(" · ")}. In stops par train RUKTI hai, isliye in station se us tak travel ho sakti hai (origin na hone ka ` +
+    `matlab "wahan se nahi chalti" NAHI hota — aisa galat tark mat karo). Jawab me yahi timings likho, apni yaad se koi ` +
+    `timing/stop mat jodo.`
+  );
+}
+
 function systemPrompt(
   now: string | undefined,
   known: {
@@ -2989,6 +3027,7 @@ export async function runAgenticTurn(input: {
     .filter((h) => h && (h.role === "user" || h.role === "assistant") && typeof h.content === "string" && h.content.trim())
     .slice(-8)
     .map((h) => ({ role: h.role, content: redact(h.content.slice(0, 700)) }));
+  const routeFact = await routeFactLine(String(input.text ?? "")).catch(() => null);
   const messages: ChatMsg[] = [
     {
       role: "system",
@@ -3011,6 +3050,7 @@ export async function runAgenticTurn(input: {
         input.text,
       ),
     },
+    ...(routeFact ? [{ role: "system" as const, content: routeFact }] : []),
     ...historyTurns,
     {
       role: "user",

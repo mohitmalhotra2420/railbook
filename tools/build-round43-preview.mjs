@@ -63,6 +63,7 @@ const html = `<!doctype html>
 <span class="pill">internal notes kabhi nahi</span>
 <span class="pill">Book-tap crash-proof</span>
 <span class="pill">route me na ho → saaf correction</span>
+<span class="pill">tool-level general verification (routeCheck.ts)</span>
 
 <table>
 <tr><th>Aapka sawaal</th><th>Pehle</th><th>Ab</th></tr>
@@ -76,6 +77,15 @@ ${rows.map(([q, before, after]) => `<tr><td><code>${q}</code></td><td class="bad
 • <code>19326 hw ke liye seat check krna</code> → 1.2s — "HW us route me nahi hai, route ASR → INDB"<br>
 • <b>Playwright (mobile viewport) live:</b> seat answer → <code>Book 12054</code> → class chip → <b>passenger form khula</b>, aur route board → class chip → <b>form khula</b> = 2/2<br>
 • <code>probe-r43-booktap.mjs</code> ye dono raste har deploy par check karta hai.
+</div>
+
+<div class="box" style="border-color:#2b5f8a">
+<b>Round-43k — "ese kitne rules fix kroge?" (aapka sawaal):</b> ab verification <b>har naye sawaal ka patch nahi</b> — ek hi shared module <code>server/agent/routeCheck.ts</code> ke andar general hai, aur wahi code <b>tool ke andar</b> chalta hai (CHECK_AVAILABILITY / GET_FARE) + deterministic handler me. Matlab: <b>kisi bhi train × station</b> par — station train ke route me na ho to tool khud fail hota hai, koi jhootha N/A board nahi, aur model ise bypass nahi kar sakta.<br>
+• <code>19326 haridwar…</code> → "HW nahi jaati — route ASR → INDB" <b>3.5s</b> (pehle 45.7s poora ASR→INDB board)<br>
+• <code>12951 mumbai rajdhani haridwar…</code> → "HW nahi jaati — route MMCT → NDLS" <b>0.9s live</b> (train-specific rule nahi, general proof)<br>
+• <code>12054 haridwar…</code> → asli seat data (27 Sep cancelled · 28 Sep CC WL16 ₹650 · 2S AVL 235 ₹205)<br>
+• Isi round me 2 chhupe bug bhi pakde: station search "ko/se" jaise shabd ko station maan leta tha (false "nahi jaati"), aur aakhri stop ko destination bhejne par provider "HW→HW" samajh kar data nahi deta tha — dono general tarike se band.<br>
+• Full suite <b>122 files / 1339 tests pass</b>.
 </div>
 
 <div class="box">

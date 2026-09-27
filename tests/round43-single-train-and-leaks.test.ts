@@ -279,6 +279,12 @@ describe("Round-43e · station route me nahi → honest correction (board nahi) 
  * pehla/aakhri stop redundant arg nahi banta (12054 'HW→HW' provider-bug), (c) asli station route me
  * nahi to honest fail — general, kisi ek train/station par hardcoded nahi. */
 describe("Round-43k · shared route verification (tool ke andar, kisi bhi train × station par)", () => {
+  it("model ke marker tokens user ko na dikhein ([END] / (done)) — par [NEXT] chips bache rahein", () => {
+    expect(scrubInternalNotes("12054 (Hw Janshatabdi) ASR → HW. [END]")).toBe("12054 (Hw Janshatabdi) ASR → HW.");
+    expect(scrubInternalNotes("Jawab: 28 Sep CC WL16 · 2S AVL 235 (done)")).toBe("Jawab: 28 Sep CC WL16 · 2S AVL 235");
+    expect(scrubInternalNotes("Seat status neeche hai.\n[NEXT] Book 12054 · CC => 12054 mein CC book krdo")).toContain("[NEXT]");
+  });
+
   it("station tokens: postposition / class / booking shabd nikaal do", () => {
     const toks = candidateStationTokens("12138 mein SL 2026-10-02 ko LDH se CSMT 1 passenger ke liye seat hai?", "12138");
     expect(toks).toContain("ldh");
@@ -309,7 +315,7 @@ describe("Round-43k · shared route verification (tool ke andar, kisi bhi train 
     const ok = await checkStationsOnRoute("19326", {}, "19326 indore ke liye seat check krna");
     expect(ok.bad).toBeUndefined();
     expect(ok.destination).toBe("INDB");
-  });
+  }, 25000 /* mock schedule + station-search calls — suite load par 5s kaafi nahi tha */);
 });
 
 /* ── Round-43f/g (user screenshot 27 Sep): "Book 12054" chip par app BLANK ho gaya (white screen) —
