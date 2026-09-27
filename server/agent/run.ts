@@ -28,6 +28,7 @@ import { executeTool, livePositionLabel, type ToolName } from "./tools.js";
 import { parseStatusDate } from "../understand/legacy-dates.js";
 import {
   agenticConfigured,
+  asksSingleTrainAvailability,
   ensureBookingOffer,
   executeApprovedTool,
   runAgenticTurn,
@@ -246,8 +247,9 @@ async function atlasFallback(
           ? /* Round-18l: "is weekend" → real Sat/Sun options, user chune (date kabhi assume nahi). */
             `${ctx.origin.code} → ${ctx.destination.code} — weekend mein kaunsa din? ${nlu.dateAmbiguous.map((d) => `${d.label} (${d.date})`).join(" ya ")}?`
           : `${ctx.origin.code} → ${ctx.destination.code} — kis date ko jaana hai? (aaj/kal/parso ya tareekh)`
-        : !(ctx.paxProvided && ctx.passengers) && !(nlu.passengerCount && nlu.passengerCount >= 1)
-          /* Round-18m-30t: deterministic planner bhi passengers ke bina kabhi nahi (same rule as tools). */
+        : !(ctx.paxProvided && ctx.passengers) && !(nlu.passengerCount && nlu.passengerCount >= 1) && !ctx.selectedTrainNumber
+          /* Round-18m-30t: route-level planner passengers ke bina kabhi nahi (same rule as tools).
+           * Round-43: par khaas train selected ho to availability pax ke bina bhi jawab hai (ChatGPT jaisa). */
           ? `${ctx.origin.code} → ${ctx.destination.code}, ${ctx.date} — kitne passengers hain? (1–6) Seats usi hisaab se check karunga.`
           : null;
   if (missingAsk) {
@@ -1032,6 +1034,9 @@ async function answerFromWebScrape(questionText: string): Promise<string | null>
 const PAX_GATE_SKIP_INTENTS = new Set(["LIVE_TRAIN_STATUS", "CHECK_PNR", "VIEW_BOOKINGS", "CANCEL_BOOKING", "VIEW_WALLET", "ADD_MONEY", "HELP", "COACH_POSITION", "TRAIN_SCHEDULE", "LIST_CITIES", "RAIL_POLICY", "ABOUT_ASSISTANT", "CANCELLED_TRAINS", "GENERAL_RAILWAY_KNOWLEDGE", "TRAIN_HISTORY", "OUT_OF_DOMAIN", "CONFIRM_YES", "CONFIRM_NO"]);
 function passengerGateAsk(ctx: AgentContext, det: { intent?: string | null; trainNumber?: string | null }, text: string, opts: { trainNo?: string | null; stationPick?: unknown } = {}): string | null {
   if (opts.trainNo || det.trainNumber) return null;
+  /* Round-43: khaas train selected hai (single-train availability) → pax ki shart nahi — us train ka
+   * availability data pax ke bina bhi jawab hai (jaise ChatGPT). Route-level board par gate waise hi. */
+  if (ctx.selectedTrainNumber) return null;
   if (!ctx.origin || !ctx.destination || !ctx.date || !ctx.dateProvided) return null;
   if (ctx.paxProvided && ctx.passengers) return null;
   if (PAX_GATE_SKIP_INTENTS.has(String(det.intent ?? "NONE"))) return null;
@@ -1463,6 +1468,126 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
         agenticFailureReason: null,
         grounded: true,
       };
+    }
+  }
+
+  /* ── Round-43 (27 Sep 2026, user screenshot: "12054 ki seat availability btana" par poora 16-train
+   * board khul gaya, uska jawab nahi mila — jabki ChatGPT usi sawaal par 27/28/29 Sep ki saaf
+   * date-wise availability deta hai). Ab KHAAS TRAIN ke seat sawaal par usi train ka
+   * CHECK_AVAILABILITY chalta hai (FIND_SEATS ka route-board NAHI) — date na ho to aaj + kal dono. */
+  {
+    const t = String(req.text ?? "");
+    /* Round-43b (multi-turn): train pehle turn me aa chuki hai (ctx me selected) aur ab user date/route/
+     * class de raha hai ("Date aaj ki ludhiana se hw ki") → usi train ki availability dobara dikhao
+     * (train dobara poochhna/khoya nahi jaata — ChatGPT jaisa continue). */
+    const ctxResume = { ...emptyAgentContext(), ...(req.context ?? {}) };
+    const resumeDateAsk = /\b(aaj|kal|parso|tomorrow|today|date|tareekh|\d{1,2}\s*(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec))\b/i.test(t) && !/\b(trains?\s*batao|kaunsi|sabhi|sab\s*trains|alawa|options?|list|book|cancel|refund)\b/i.test(t);
+    const resumeBareClass = /^\s*(1A|2A|3A|3E|2S|SL|CC|EC|FC|1E)\s*$/i.test(t) && Boolean(ctxResume.date);
+    const resumeTrain = !/\d{4,5}/.test(t) && ctxResume.selectedTrainNumber && (resumeDateAsk || resumeBareClass) ? ctxResume.selectedTrainNumber : null;
+    if ((asksSingleTrainAvailability(t) || resumeTrain) && !isBookingMutation(req)) {
+      const tnum = (/\b(\d{4,5})\b/.exec(t) ?? [])[1] ?? resumeTrain;
+      if (tnum) {
+        const detAv = await deterministicUnderstand(req.text, {
+          now: req.now ? new Date(req.now) : undefined,
+          lastAsked: req.lastAsked ?? null,
+          known: { from: seeded.origin, to: seeded.destination, date: seeded.date, passengerCount: seeded.passengers },
+        });
+        const avCtx = { ...emptyAgentContext(), ...(req.context ?? {}) };
+        const clsAsk = (t.match(/\b(1A|2A|3A|3E|2S|SL|CC|EC|FC|1E)\b/i) ?? [])[1]?.toUpperCase() ?? null;
+        /* User ne apna segment bola ho ("ludhiana se hw") to wahi boarding/destination maano —
+         * provider se us segment ka data maango (poora route nahi). */
+        const askFrom = (detAv as unknown as { from?: { code?: string } | null }).from?.code ?? null;
+        const askTo = (detAv as unknown as { to?: { code?: string } | null }).to?.code ?? null;
+        const baseMs = (req.now && Date.parse(req.now) ? Date.parse(req.now) : Date.now()) + 5.5 * 3600 * 1000;
+        const ymd = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+        const given = avCtx.dateProvided && avCtx.date ? avCtx.date : detAv.date ?? null;
+        const dates = given ? [given] : [ymd(baseMs), ymd(baseMs + 86400000)];
+        const label = (d: string) => (d === ymd(baseMs) ? "aaj" : d === ymd(baseMs + 86400000) ? "kal" : "");
+        const stepsOut: ToolTraceStep[] = [];
+        const blocks: string[] = [];
+        let okAny = false;
+        /* Agar kisi bhi date/class me AVAILABLE/RAC nahi (sab WL/N-A/cancelled) → deterministic jawab
+         * mat do: normal flow chale taaki auto-alternatives (real data) aur agla kadam mil sake. */
+        let goodAny = false;
+        let name: string | null = avCtx.selectedTrainName ?? null;
+        let from = avCtx.origin?.code ?? null;
+        let to = avCtx.destination?.code ?? null;
+        /* Round-43c: user ne ek hi date boli ho ("aaj ki") aur us din train cancelled/WL-only ho to
+         * ChatGPT jaisa agla din bhi dikhao (27 Sep cancelled → 28 Sep CC WL16 · 2S AVL 294) — warna
+         * aaj ka single-date jawab deterministic hi nahi ban paata aur route-board par chala jaata hai. */
+        const queryDate = async (d: string): Promise<void> => {
+          try {
+            const avArgs = { train_number: tnum, date: d, ...(askFrom ? { origin: askFrom } : {}), ...(askTo ? { destination: askTo } : {}) };
+            const r = (await executeApprovedTool("CHECK_AVAILABILITY", avArgs as never, { userText: req.text })) as unknown as { ok: boolean; summary: string; data: unknown; source: string | null };
+            stepsOut.push({ step: stepsOut.length + 1, tool: "CHECK_AVAILABILITY", args: avArgs, ok: r.ok, source: r.source ?? "provider", summary: String(r.summary ?? ""), latencyMs: 0, dataPreview: r.data ? JSON.stringify(r.data).slice(0, 380) : undefined } as ToolTraceStep);
+            if (!r.ok) return;
+            okAny = true;
+            const data = (r.data ?? {}) as { classes?: { code?: string; status?: string; seats?: number | null; rac?: number | null; waitlist?: number | null; fare?: number | null; note?: string | null }[]; resolvedRoute?: { origin?: string; destination?: string } };
+            from = askFrom ?? from ?? data.resolvedRoute?.origin ?? null;
+            to = askTo ?? to ?? data.resolvedRoute?.destination ?? null;
+            const rows = (data.classes ?? []).filter((c) => c.code);
+            if (rows.some((c) => /^(AVAILABLE|RAC)$/i.test(String(c.status ?? "")))) goodAny = true;
+            const cancelled = rows.length > 0 && rows.every((c) => /cancel/i.test(String(c.note ?? "")) || (String(c.status).toUpperCase() === "NOT_AVAILABLE" && /cancel/i.test(String(c.note ?? ""))));
+            const when = `${d.slice(8, 10)} ${["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][Number(d.slice(5, 7)) - 1]}${label(d) ? ` (${label(d)})` : ""}`;
+            if (cancelled) {
+              blocks.push(`• ${when}: train cancelled`);
+              return;
+            }
+            const parts = rows.map((c) => {
+              const st = String(c.status ?? "").toUpperCase();
+              const val = st === "AVAILABLE" ? `AVAILABLE ${c.seats ?? "?"}` : st === "RAC" ? `RAC ${c.rac ?? "?"}` : st.includes("WAIT") ? `WL ${c.waitlist ?? "?"}` : st === "NOT_AVAILABLE" ? "N/A" : c.status;
+              /* Fare sirf jab verified ho (0/null par "₹0" bhadda lagta hai aur jhootha bhi). */
+              return `${c.code} ${val}${c.fare != null && c.fare > 0 ? ` ₹${c.fare}` : ""}`;
+            });
+            const wanted = clsAsk ? parts.filter((p) => p.startsWith(clsAsk)) : parts;
+            blocks.push(`• ${when}: ${(wanted.length ? wanted : parts).join(" · ")}`);
+          } catch { /* is date ka data nahi mila — baaki dates chalte rahenge */ }
+        };
+        for (const d of dates) await queryDate(d);
+        if (!goodAny && dates.length === 1) await queryDate(ymd(Date.parse(`${dates[0]}T00:00:00Z`) + 86400000));
+        const head = `${tnum}${name ? ` ${name}` : ""}${from && to ? ` (${from} → ${to})` : ""} — seat availability:`;
+        if (okAny && goodAny) {
+          const reply = `${head}\n${blocks.join("\n")}\n\nAur kisi date/class ka bolo, ya seedha "Book ${tnum}${clsAsk ? ` ${clsAsk}` : ""}" kah do — main passenger form khol dunga.`;
+          return {
+            nlu: detAv,
+            source: "nlu" as const,
+            context: {
+              ...avCtx,
+              origin: from ? { code: from, name: from, city: from } : avCtx.origin,
+              destination: to ? { code: to, name: to, city: to } : avCtx.destination,
+              selectedTrainNumber: tnum,
+              selectedTrainName: name ?? avCtx.selectedTrainName,
+              /* Round-43b: pehli date ctx me lock — agla turn ("CC", "kal ki seat") isi context par resume kare. */
+              date: dates[0] ?? avCtx.date,
+              dateProvided: dates[0] ? true : avCtx.dateProvided,
+              classCode: clsAsk ?? avCtx.classCode,
+              lastTool: "getAvailability",
+              lastToolOk: true,
+              bookingStage: "results",
+            },
+            tool: "getAvailability" as ToolName,
+            toolOk: true,
+            reply,
+            interrupt: false,
+            resumeAsk: null,
+            resumeText: null,
+            trains: null,
+            confirmBook: false,
+            missingFields: [],
+            modelUsed: null,
+            latencyMs: 0,
+            failureReason: "single_train_availability_deterministic",
+            engine: "deterministic" as const,
+            agenticFailureReason: null,
+            grounded: true,
+            toolTrace: stepsOut,
+            nextActions: [
+              { label: `Book ${tnum}${clsAsk ? ` · ${clsAsk}` : ""}`, utterance: `${tnum} mein ${clsAsk ?? ""} book krdo ${dates[0]}`.replace(/\s+/g, " "), primary: true },
+              ...(given ? [] : [{ label: "Kal ki seat", utterance: `${tnum} ki seat availability kal ki`, primary: false }]),
+            ],
+          } as never;
+        }
+      }
     }
   }
 

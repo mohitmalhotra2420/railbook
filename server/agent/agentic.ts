@@ -56,7 +56,8 @@ import { cleanQueryEn, findTopicAnswer, HINGLISH_TOPIC_WORDS, significantWords }
 import { ATTRIBUTE_Q_RE, COUNT_LIST_RE, trainFamilyPage, wikiLargestTable } from "./wikitable.js";
 import { railKbAnswer } from "./railkb.js";
 import { answerCoversSubject, answerMatchesRailMode, subjectHitCount } from "./subject.js";
-import { asksStationCode, isComparisonQuery, liveClaimCheck, liveDataQuestion, normalizeRailText } from "./answerMode.js";
+import { asksSingleTrainAvailability, asksStationCode, isComparisonQuery, liveClaimCheck, liveDataQuestion, normalizeRailText, scrubInternalNotes } from "./answerMode.js";
+export { asksSingleTrainAvailability } from "./answerMode.js";
 /* Round-18i: rules/procedure topics → KB before Wikipedia (see WEB_SEARCH). */
 const RULES_TOPIC_RE = /\b(tatkal|premium tatkal|rac|waiting list|waitlist|wl|gnwl|pqwl|rlwl|chart|pnr|refund|cancel(?:lation)?|luggage|saman|samaan|blanket|bedroll|pantry|catering|id proof|photo id|concession|senior citizen|quota|break journey|child (?:ticket|fare)|bachcha|tte|ticket checker|arp|advance reservation|kitne din pehle|khana|khaana|food|meal|chai|berth|berths|platform|platforms|coach me kitne|top speed|maximum speed|max speed|kitni tez|divyangjan|divyang|wheelchair|handicapped|accessible|kutta|pet|dog|smoking|sigret|cigarette|charging|charger|ac fail|ac kharab|bachch|child fare|2a 3a|3a 2a|doori|distance|kitne km|kitna door|sabse bada|bada station|largest|biggest|sabse lambi|sabse lamba|longest|konkan|kitne zone|zones|pehli train|first train|sabse puran[a-z]*|kitne railway station|kitne station|sabse tez train|fastest train)\b/i;
 import { stationBoard, trainHistory } from "../railway/railkit.js";
@@ -2582,6 +2583,13 @@ async function answerFromWebScrapeTool(questionText: string): Promise<{ summary:
 }
 
 function deterministicSummary(steps: ToolTraceStep[]): string {
+  /* Round-43: user ko sirf saaf jawab — internal instruction/noise scrub. */
+  return scrubInternalNotes(deterministicSummaryRaw(steps));
+}
+
+function deterministicSummaryRaw(steps: ToolTraceStep[]): string {
+  /* Round-43: tool summaries me model ke liye instructions hote hain ("Jawab me SAARI lines likho…") —
+   * deterministic summary user ko dikhta hai, isliye wahan se internal notes hata kar bhejo. */
   const okSteps = steps.filter((s) => s.ok);
   /* Round-18m-33 (screenshot: "User se poochho (options EXACTLY ye do…)" user ko dikh gaya): needs_choice step ka
    * summary MODEL-instruction hai — user ko sirf saaf sawaal + options. */
@@ -3362,7 +3370,10 @@ export async function runAgenticTurn(input: {
         } else if (
           /* Round-33 (user: "Kal,1" par list hi nahi aayi — AI ne passengers dobara poochh liye): SEARCH_TRAINS
            * ek LIST tool hai — usme passengers ki zaroorat hi nahi (seat/plan tools me hai). */
-          (toolName === "JOURNEY_ANALYZE" || toolName === "RANK_JOURNEY_OPTIONS" || toolName === "FIND_CONNECTIONS" || toolName === "CHECK_AVAILABILITY" || toolName === "FIND_VACANT_SEATS" || toolName === "FIND_PARTIAL_ROUTE_SEATS" || toolName === "FIND_ALTERNATIVE_TRAINS") &&
+          /* Round-43: CHECK_AVAILABILITY (khaas train ki availability) ab bina passengers ke bhi chalti hai —
+           * availability ek DATA jawab hai (jaise ChatGPT), sufficiency ka faisla booking par hota hai.
+           * Route-level seat tools (FIND_*) par pax ki shart waise hi chalti hai. */
+          (toolName === "JOURNEY_ANALYZE" || toolName === "RANK_JOURNEY_OPTIONS" || toolName === "FIND_CONNECTIONS" || toolName === "FIND_VACANT_SEATS" || toolName === "FIND_PARTIAL_ROUTE_SEATS" || toolName === "FIND_ALTERNATIVE_TRAINS") &&
           !(input.known?.passengers && input.known.passengers >= 1) &&
           !(typeof args.passengers === "number" && args.passengers >= 1 && userStatedPax(input.text, args.passengers, { bareDigitIsPax: lastAskedPax })) &&
           !(input.known?.dateProvided === false && dateHint?.kind !== "date") /* date pehle poochhegi (upar/neeche wala guard) */
@@ -3692,7 +3703,7 @@ export async function runAgenticTurn(input: {
     }
     /* Round-32: model ke [NEXT] (agla kadam) pehle alag — warna wo line user ko dikh jaati. */
     const extracted = extractNextActions(redact(content));
-    const clean = scrubProactiveOffers(extracted.text);
+    const clean = scrubInternalNotes(scrubProactiveOffers(extracted.text));
 
     // Repair pass (one-shot): model ne tools chala kar data le liya, phir bhi
     // "info maango" wala jawab de diya? Ek corrective call do — data upar hai.

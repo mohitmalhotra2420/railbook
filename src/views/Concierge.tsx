@@ -1678,9 +1678,15 @@ export function Concierge() {
 
   /** Round-29: chat ke train-card me class par tap → usi train+class ka passenger form (jo dikha wahi). */
   function openBookingFromReplyRow(r: ReplyRow, group?: { number: string; name: string }) {
-    const from = state.from;
-    const to = state.to;
-    const date = state.date;
+    /* Round-43 (user screenshot 27 Sep: seat card ke "Book" par form nahi khula — client state khaali thi
+     * aur handler chupke chat message bhej deta tha): route/date HAR verified source se lo — state →
+     * agent context (server) → yaad rakhi seat rows → picker tap. Sab fail ho to hi honest sawaal. */
+    const ctxB = agentCtxRef.current;
+    const remembered = lastSeatRowsRef.current;
+    const pickedB = lastPickedTrainRef.current;
+    const from = state.from ?? (ctxB?.origin ? { code: ctxB.origin.code, name: ctxB.origin.name ?? ctxB.origin.code, city: ctxB.origin.city ?? ctxB.origin.code } : null) ?? (remembered?.from ? { code: remembered.from, name: remembered.from, city: remembered.from } : null) ?? (pickedB?.from ? { code: pickedB.from, name: pickedB.from, city: pickedB.from } : null);
+    const to = state.to ?? (ctxB?.destination ? { code: ctxB.destination.code, name: ctxB.destination.name ?? ctxB.destination.code, city: ctxB.destination.city ?? ctxB.destination.code } : null) ?? (remembered?.to ? { code: remembered.to, name: remembered.to, city: remembered.to } : null) ?? (pickedB?.to ? { code: pickedB.to, name: pickedB.to, city: pickedB.to } : null);
+    const date = state.date || remembered?.date || pickedB?.date || ctxB?.date || "";
     if (!from || !to || !date) {
       void handleText(`${r.train} ${r.cls} ki seat availability — ${from?.code ?? ""} se ${to?.code ?? ""}`.trim());
       return;

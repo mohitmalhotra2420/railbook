@@ -24,6 +24,7 @@ const QS = [
   ["partial", "aadhi yatra kar rahe hain ASR se NDLS, seat milegi kya", ["FIND_PARTIAL_ROUTE_SEATS", "FIND_SEATS"]],
   // ── availability/fare specific
   ["avail-specific", "12054 me 28 September ko 3A me seat hai kya", ["CHECK_AVAILABILITY"]],
+  ["avail-one-train", "12054 ki seat availability btana", ["CHECK_AVAILABILITY"]],
   ["fare-class", "12054 ka CC fare kal ka batao", ["GET_FARE"]],
   // ── plan / alternatives / connections
   ["alt-trains", "12054 ke alawa ASR se HW aur trains batao kal", ["FIND_ALTERNATIVE_TRAINS", "SEARCH_TRAINS"]],

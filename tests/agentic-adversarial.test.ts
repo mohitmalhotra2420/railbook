@@ -758,14 +758,14 @@ describe("TEST 12: multi-turn state (origin/date/class preserved)", () => {
       known: { origin: "ASR", destination: "NDLS", date: "2026-09-05", trainNumber: "12014" },
     });
     expect(turn.ok).toBe(true);
-    /* Round-40: mock model "47 seats AVAILABLE" bolta hai jabki CHECK_AVAILABILITY
-     * PASSENGERS MISSING ki wajah se chala hi nahi (pax known me nahi tha) — pehle ye 2-digit
-     * number bach jaata tha (sirf 3+ digit check hoti thi). Ab "kuch bhi fake nahi": invented
-     * availability user tak nahi jaati; verified fare (1210) hi dikhta hai aur availability ke
-     * liye model apne shabdon me passengers poochhta hai (live flow me verified). */
-    expect(turn.grounded).toBe(false);
-    expect(String(turn.reply)).not.toMatch(/47 seats|AVAILABLE/i);
+    /* Round-43 (27 Sep 2026): CHECK_AVAILABILITY par passengers ki shart hat gayi (user: "khaas train ke
+     * seat sawaal ka seedha, ChatGPT jaisa jawab") — ab tool CHALTA hai aur mock ka real data
+     * (available_count 47, total_fare 1210) milta hai, isliye model ka "47 seats AVAILABLE" grounded
+     * hai (pehle tool block hone par ye invented hota tha). "Kuch bhi fake nahi" waise hi lagu:
+     * reply ke numbers tool data se verify hote hain; yahan mock ka 47/1210 asli provider data hai. */
+    expect(turn.grounded).toBe(true);
     expect(String(turn.reply)).toMatch(/1210/);
+    expect(String(turn.reply)).toMatch(/47 (seats )?AVAILABLE/i);
     sawArgs = turn.steps[0].args;
     expect(sawArgs).toMatchObject({ train_number: "12014", origin: "ASR", destination: "NDLS", date: "2026-09-05", class_code: "CC" });
     expect(turn.steps.map((s) => s.tool)).toEqual(["GET_FARE", "CHECK_AVAILABILITY"]);

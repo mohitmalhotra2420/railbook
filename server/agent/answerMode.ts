@@ -139,3 +139,48 @@ export function asksStationCode(text: string): boolean {
   if (/\b(hota|hoti|hote|kya hota|matlab|meaning)\b/.test(t)) return false;
   return true;
 }
+
+
+/** Round-43 (user screenshot 27 Sep: reply me tool ke INTERNAL instructions user ko dikh gaye —
+ * "Jawab me SAARI trains ki lines likho… mat likho… SEAT rows me hain" aur "(0 ka alag board check
+ * kiya)" jaisa process-noise): model kabhi tool summary ka instruction part echo kar deta hai.
+ * Ye scrubber user-visible reply se aise internal notes/noise hata deta hai (data chhoota nahi). */
+export function scrubInternalNotes(reply: string): string {
+  if (!reply) return reply;
+  const instructionRe =
+    /\b(jawab me\b[^.]*\blikho|mat likho|likho\s*\(jo|seat rows me hain|card me hain|confirm% ?nahi batana|mat maano|dobara mat poochho|tool hint|tool hint:|internal|system check)\b/i;
+  const noisyParen = /\([^()]*\b(?:live board|board check kiya|alag board)\b[^()]*\)/gi;
+  const trainsDekhe = /\b\d+\s*trains? dekhe\s*(?:\([^()]*\))?\.?/gi;
+  const out = String(reply)
+    .split("\n")
+    .filter((line) => !instructionRe.test(line))
+    .map((line) =>
+      line
+        .replace(noisyParen, "")
+        .replace(trainsDekhe, "")
+        .replace(/·\s*\)/g, ")")
+        .replace(/\s+([).,])/g, "$1")
+        .replace(/\(\s*\)/g, "")
+        .replace(/\s{2,}/g, " ")
+        .trimEnd(),
+    )
+    /* Saaf karne ke baad khaali/sirf-punctuation lines bach jaayein to hata do. */
+    .filter((line) => /[A-Za-z0-9\u0900-\u097F₹]/.test(line))
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  /* Puri reply hi internal-noise thi (kuch bacha nahi) → original hi de do (blank se behtar). */
+  return out.length >= 12 ? out : String(reply).trim();
+}
+
+/** Round-43: khaas train ki seat availability ka sawaal ("12054 ki seat availability batao") —
+ * inme usi train ka CHECK_AVAILABILITY chalta hai; route ka poora board (FIND_SEATS) NAHI. */
+export function asksSingleTrainAvailability(text: string): boolean {
+  const t = normalizeRailText(text);
+  const num = /\b\d{4,5}\b/.test(t);
+  if (!num) return false;
+  if (!/\b(seat|seats|availability|avl|berth|berths|rac|wl|waitlist|waiting list|khali|khaali|vacant|available)\b/.test(t)) return false;
+  /* Route-level sawaal (poore board ka kaam) — single-train nahi. */
+  if (/\b(sabse|kaunsi|kounsi|sabhi|sab\s+trains|alawa|ilaava|options?|doosri|aur\s+trains?|alternatives?)\b/.test(t)) return false;
+  return true;
+}
