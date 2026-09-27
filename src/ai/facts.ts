@@ -16,19 +16,19 @@ export function isCapabilityAsk(text: string): boolean {
 
 export function capabilityReply(text: string): string {
   const t = text.toLowerCase();
-  if (/\b(khana|food|pantry|catering|meal)\b|खाना|पैंट्री/.test(t)) {
-    return "Pantry / khana ka menu railway provider se nahi aata — main gadh ke nahi bataunga. Route, time, seats, fare check kar sakta hoon.";
+  if (/\b(khana|food|pantry|catering|meal|chai|tea)\b|खाना|पैंट्री/.test(t)) {
+    return "Pantry/catering: Rajdhani · Duronto · Vande Bharat · Tejas jaise trains me onboard IRCTC catering hoti hai (booking ke waqt meal option — breakfast/lunch/dinner/tea); Sleeper/General me IRCTC eCatering (ecatering.irctc.co.in / 1323) se en-route station par order kar sakte ho, seat par serve hota hai. Kisi specific train (number) ka catering confirm chahiye to number batao — verified source se dekh kar bataunga, guess nahi karunga.";
   }
   if (/\b(blanket|bedroll)\b|कंबल/.test(t)) {
-    return "Blanket / bedroll confirm provider payload mein nahi hota. Main invent nahi karunga. Seats/fare/live pooch sakte ho.";
+    return "Bedding: AC classes (1A/2A/3A) me blanket + sheet + pillow included hoti hai; Sleeper (SL) aur 2S me bedding nahi milti. Kisi specific train ke liye confirm chahiye to train number batao.";
   }
   if (/\b(wifi|wi-fi|charging|charger|charge point)\b|चार्जिंग/.test(t)) {
-    return "Wifi / charging point IRCTC amenity list yahan nahi milti. Main gadh ke nahi bataunga. Train timetable ya seats check karun?";
+    return "Charging point: reserved coaches (SL/3A/2A/1A/CC/EC) me aam taur par berth/seat ke paas hota hai — purane rakes aur General (GS) dabbe me nahi hota. Wifi: kuch premium trains ke naye rakes me hota hai, har train me nahi — exact status provider data me confirm nahi hota, isliye main guess nahi karunga.";
   }
   if (/\b(platform|pf number)\b/.test(t)) {
-    return "Platform number live status se aata hai, guess nahi. Train number bolo to live nikaalta hoon.";
+    return "Platform number live status/chart se confirm hota hai — guess nahi karta. Train number (aur date) bolo, main live status se jo data milta hai wahi bataunga.";
   }
-  return "Yeh cheez provider se available nahi. Main gadh ke nahi bataunga — trains, seats, fare, live, PNR pooch sakte ho.";
+  return "Yeh cheez mere live provider data me confirm nahi hoti — main guess nahi karunga. Jo main sach me bata sakta hoon: trains · timings · seats/fare · live status · PNR · rules (tatkal/RAC/luggage). Poochhiye, seedha jawab dunga.";
 }
 
 export function isTrainFactAsk(text: string): boolean {

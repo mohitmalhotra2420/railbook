@@ -55,9 +55,9 @@ import { generalWebSearch, scrapeWebPage, trustedSiteOf, webSearch } from "./web
 import { cleanQueryEn, findTopicAnswer, HINGLISH_TOPIC_WORDS, significantWords } from "./topicpage.js";
 import { ATTRIBUTE_Q_RE, COUNT_LIST_RE, trainFamilyPage, wikiLargestTable } from "./wikitable.js";
 import { railKbAnswer } from "./railkb.js";
-import { answerCoversSubject, subjectHitCount } from "./subject.js";
+import { answerCoversSubject, answerMatchesRailMode, subjectHitCount } from "./subject.js";
 /* Round-18i: rules/procedure topics → KB before Wikipedia (see WEB_SEARCH). */
-const RULES_TOPIC_RE = /\b(tatkal|premium tatkal|rac|waiting list|waitlist|wl|gnwl|pqwl|rlwl|chart|pnr|refund|cancel(?:lation)?|luggage|saman|samaan|blanket|bedroll|pantry|catering|id proof|photo id|concession|senior citizen|quota|break journey|child (?:ticket|fare)|bachcha|tte|ticket checker|arp|advance reservation|kitne din pehle|khana|khaana|food|meal|chai|berth|berths|platform|platforms|coach me kitne|top speed|maximum speed|max speed|kitni tez|divyangjan|divyang|wheelchair|handicapped|accessible)\b/i;
+const RULES_TOPIC_RE = /\b(tatkal|premium tatkal|rac|waiting list|waitlist|wl|gnwl|pqwl|rlwl|chart|pnr|refund|cancel(?:lation)?|luggage|saman|samaan|blanket|bedroll|pantry|catering|id proof|photo id|concession|senior citizen|quota|break journey|child (?:ticket|fare)|bachcha|tte|ticket checker|arp|advance reservation|kitne din pehle|khana|khaana|food|meal|chai|berth|berths|platform|platforms|coach me kitne|top speed|maximum speed|max speed|kitni tez|divyangjan|divyang|wheelchair|handicapped|accessible|kutta|pet|dog|smoking|sigret|cigarette|charging|charger|ac fail|ac kharab|bachch|child fare|2a 3a|3a 2a|doori|distance|kitne km|kitna door)\b/i;
 import { stationBoard, trainHistory } from "../railway/railkit.js";
 
 export type AgenticToolName =
@@ -1268,6 +1268,11 @@ export async function executeApprovedTool(
             rejectedSubject = `${ans.title} · ${subjectHitCount(userText || q, ans.title, ans.text)} match`;
             continue;
           }
+          /* Round-39: rail sawaal par road/air wala page bhi reject (Expressway ≠ rail doori). */
+          if (!answerMatchesRailMode(userText || q, ans.title, ans.text)) {
+            rejectedSubject = `${ans.title} · mode mismatch (road/air — rail sawaal)`;
+            continue;
+          }
           let extra: { title: string; text: string; url: string } | null = null;
           if (cmpParts) {
             /* Jo subject page ke title me NAHI hai, usi ka page laao (warna "Vande Bharat Sleeper" page
@@ -2456,7 +2461,7 @@ async function webRescueAnswer(userText: string, steps: ToolTraceStep[], stepNo:
       : `${result.summary}\n(Ye railway API ka data nahi, web se laaya gaya jawab hai.)`;
   }
   /* Round-38: snippet ka subject match na ho to doosre result dekho — galat station/train ka jawab nahi. */
-  const best = (d.results ?? []).find((r) => answerCoversSubject(userText, r.title, r.snippet));
+  const best = (d.results ?? []).find((r) => answerCoversSubject(userText, r.title, r.snippet) && answerMatchesRailMode(userText, r.title, r.snippet));
   if (best) return `Web se mila: ${best.title} — ${best.snippet}\n(Source: ${best.url}; web search — live railway data nahi.)`;
   return null;
 }

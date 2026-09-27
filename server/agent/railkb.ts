@@ -63,6 +63,59 @@ const ENTRIES: KbEntry[] = [
       "Premium Tatkal dynamic pricing wala tatkal quota hai — demand ke hisaab se base fare se kaafi zyada ho sakta hai. Normal tatkal ki tarah 1 din pehle khulta hai, par koi refund nahi hota cancellation par (rules IRCTC ke page se verify karein).",
   },
   {
+    /* Round-39 battery: "Indian Railways ka sabse bada station kaunsa hai?" par kuch nahi aaya tha. */
+    keys: ["sabse bada station", "bada railway station", "largest station", "biggest station", "sabse bada railway station", "sabse bada junction"],
+    answer:
+      "India ka sabse bada railway station (platforms ke hisaab se) Howrah Junction (HWH), West Bengal hai — 23 platforms (India me sabse zyada), roz 600+ trains aur ~10 lakh passengers. Uske baad: Sealdah (21 platforms), CSMT Mumbai (18), Chennai Central (17), New Delhi (16). (Ye general railway knowledge hai — official list IRCTC/Indian Railways se verify kar sakte hain.)",
+  },
+  {
+    keys: ["sabse lambi train", "sabse lamba route", "longest train route", "longest route", "lambi train route", "sabse lambi route"],
+    answer:
+      "India ki sabse lambi train route: Vivek Express 15905/15906 — Dibrugarh (Assam) se Kanyakumari (Tamil Nadu), ~4,154 km (Wikipedia ke table ke hisaab se; kuch sources 4,286 km likhte hain), ~82.5 ghante, 9 states — India ki sabse lambi, duniya ki top-25 me. Isse chhoti: 12301/12302 Howrah–New Delhi Rajdhani (~1,451 km).",
+  },
+  {
+    keys: ["konkan railway", "konkan railway kahan", "konkan railway route", "konkan railway kab"],
+    answer:
+      "Konkan Railway: Roha (Maharashtra, Mumbai ke south) se Thokur (Mangaluru ke paas, Karnataka) tak — lagbhag 741 km, Maharashtra · Goa · Karnataka se guzarti hai. 26 January 1998 se passenger service shuru (Mumbai–Mangalore Netravati Express pehli thi). Ye route coastal hai — Mandovi bridge, Karbude tunnel jaise bade structures isi par hain.",
+  },
+  {
+    /* Round-39: "X se Y kitni doori hai" — live battery me is par Expressway (sadak) ka jawab aa gaya tha. */
+    keys: ["kitni doori", "distance kitna", "rail distance", "kitne km", "doori hai", "distance hai", "kitna door"],
+    answer:
+      "Do station ke beech ki RAIL doori (km) mere live railway data me nahi hoti — mere providers train timings, seat availability, fare, route aur live status dete hain (road/expressway/highway ka data main railway sawaal me bilkul use nahi karta). Jo main sach me bata sakta hoon: aapke route ki ASLI direct trains aur unka journey time (jaise LDH → ASR direct trains se ~2 ghante). Kaunse do station ka time chahiye, bataiye — ya date do, main trains + time nikaal deta hoon.",
+  },
+  {
+    /* Round-39 (battery: pet/smoking/charging/AC-fail/child-ticket jaise roz ke sawaal KB me nahi the) */
+    keys: ["kutta train", "pet train", "pet le ja", "dog train", "janvar train", "kutta le ja", "pet booking", "cat train", "billi train"],
+    answer:
+      "Pet/dog train me: sirf AC First Class (1A) ya First Class (FC) me — pehle se booking karwa kar; Luggage Van me bhi (booking ke saath) le ja sakte hain. Pet ka alag charge lagta hai aur booking zaroori hai (bina booking allowed nahi). Sleeper / 3A / 2A / CC jaise aam coaches me pet allowed nahi hai. Exact charge/process ke liye parcel/luggage office ya IRCTC se confirm karein.",
+  },
+  {
+    keys: ["smoking train", "smoking allowed", "sigret train", "cigarette train", "train me smoking", "beedi train"],
+    answer:
+      "Train aur railway station par smoking bilkul banned hai (COTPA 2003 + Railway rules) — coach, toilet, platform kisi jagah allowed nahi. Pakde jaane par penalty/fine lagta hai (amount case/jurisdiction ke hisaab se). E-cigarette/vape bhi banned hai.",
+  },
+  {
+    keys: ["charging point", "mobile charge", "charger point", "phone charge", "charging hota"],
+    answer:
+      "Aaj kal ke reserved coaches me mobile charging point hota hai — SL/3A/2A/1A me berth ke paas (side-lower/bracket ke paas), CC/EC me seat ke aage/deewar par. Purane rakes aur General (GS) dabbe me charging point nahi hota. Na mile to TTE/guard se poochh sakte hain.",
+  },
+  {
+    keys: ["ac fail refund", "ac kharab", "ac nahi chala", "ac failure", "ac band refund", "ac kharab refund"],
+    answer:
+      "AC kharab hone par refund: onboard staff/TTE se certificate (GC) lo, phir TDR file karo (train ke actual arrival ke 20 ghante ke andar; e-ticket par IRCTC par online). Refund jitni doori AC kaam nahi kiya utne ka difference hota hai — 3A/2A: (AC fare − Sleeper fare), AC First/Executive: (AC fare − First class fare), CC: (CC fare − Second class fare). TTE ka original certificate zaroori hota hai.",
+  },
+  {
+    keys: ["bachche ka ticket", "bacche ka ticket", "child ticket", "bachcha ticket", "baby ticket", "child fare", "5 saal ka bachcha", "chhote bachche ka"],
+    answer:
+      "Bachchon ka ticket rule: 5 saal se chhote — ticket nahi lagta (free), par alag berth nahi milta, adult ke saath share. 5 se 12 saal — alag berth chahiye to full (adult) fare; bina alag berth (share karke) to half fare. 12 saal ke upar se normal full fare. Booking ke waqt bachche ki age theek daalein, warna onboard problem hoti hai.",
+  },
+  {
+    keys: ["2a 3a fare fark", "2a aur 3a", "3a 2a me fark", "3a se 2a", "class wise fare fark", "2a zyada mehnga"],
+    answer:
+      "Fare ka aam order (sasta → mehnga): 2S < SL < 3A/3E < CC < 2A < EC/1A. 2A aam taur par 3A se lagbhag 25–40% mehnga hota hai (AC sleeper 2-tier me 46 berths vs 64 in 3A). Exact difference train, distance, dynamic/flexi fare aur date par depend karta hai — apne exact train+date ka asli fare main provider se nikaal ke bata sakta hoon.",
+  },
+  {
     /* Round-38 (battery: accessibility sawaal par "Passenger train toilet" ka adhoora page aa raha tha) */
     keys: ["wheelchair facility", "divyangjan facility", "divyang facility", "handicapped facility", "wheelchair wale", "accessible toilet", "divyangjan"],
     answer:

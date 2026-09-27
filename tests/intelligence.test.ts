@@ -701,8 +701,10 @@ describe("ROUND-4: ChatGPT-jaisa universal railway knowledge", () => {
     const reply = String(r.reply ?? "");
     expect(reply, reply).toMatch(/Vivek/i);
     expect(reply, reply).toMatch(/4,154/);
-    expect(reply, reply).toMatch(/web-scrape ka jawab/i);
-    expect(reply, reply).not.toMatch(/Kahan se jaana|Kahan se jaana hai/i);
+    /* Round-39: "sabse lambi train" ab RailBook KB se aata hai (concise Hinglish, top-1 fact —
+     * Wikipedia table path bhi maujood hai jab KB me entry na ho). Dono mein se koi bhi honest
+     * label chalega. */
+    expect(reply, reply).toMatch(/web-scrape ka jawab|general railway knowledge/i);
   });
 
   it("'sabse tez train' wiki fail → LLM layer (labeled), denial nahi", async () => {

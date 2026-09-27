@@ -1417,6 +1417,54 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
     }
   }
 
+  /* ── Round-39: CAPABILITY/META sawaal — "tum kya kar sakte ho", "kya nahi kar sakte",
+   * "tum kaun ho" (live battery me "kya nahi kar sakte" par model ne booking flow shuru kar
+   * diya: "Kahan se jaana hai?" 😑). Ye jawab fixed aur honest hai — koi tool nahi. */
+  {
+    const t = String(req.text ?? "").toLowerCase();
+    const capabilityQ =
+      /\b(tum|aap|tu|you)\b[^?!.]{0,40}\b(kya|kaun|kaunsi|kaunsa|kaise|what|who)\b[^?!.]{0,40}\b(kar sakte|kar sakta|kar sakt[ae]|kar sakti|nahi kar|nhi kar|na kar|kaun ho|koi ho|limits?|limit)\b/i.test(t) ||
+      /\b(kya nahi kar|kya nhi kar|what can'?t you|what can you not|tumhari limits?|tumhari kya limit|aap kya nahi)\b/i.test(t) ||
+      /\b(tum|aap|tu|you)\b[^?!.]{0,30}\b(kaun|koun|who)\b[^?!.]{0,20}\b(ho|hain|are you)\b/i.test(t) ||
+      /\b(what can you do|tum kya kya kar|aap kya kya kar|tum kya kar sakti ho)\b/i.test(t);
+    if (capabilityQ && !/\b(\d{4,5})\b/.test(t)) {
+      const detCap = await deterministicUnderstand(req.text, {
+        now: req.now ? new Date(req.now) : undefined,
+        lastAsked: req.lastAsked ?? null,
+        known: { from: seeded.origin, to: seeded.destination, date: seeded.date, passengerCount: seeded.passengers },
+      });
+      return {
+        nlu: detCap,
+        source: "nlu",
+        context: { ...emptyAgentContext() },
+        tool: null,
+        toolOk: null,
+        reply:
+          "Main RailBook AI hoon — Indian Railways ka assistant. Main ye sab kar sakta hoon:\n" +
+          "• Train search (from → to + date) — direct/connecting, timings, kis class me seat hai, fare\n" +
+          "• Kisi bhi train ka: naam · route · timetable/stops · live status (abhi kahan hai) · kitni late\n" +
+          "• Seat availability & fare (ConfirmTkt · RailYatri · eRail se real data), WL/RAC ka sach\n" +
+          "• Booking aage badhana: class/seat chun kar passenger form kholna (IRCTC handoff)\n" +
+          "• PNR status · station code/naam/city · general railway rules (tatkal · RAC/WL · luggage · khana · refund)\n" +
+          "• General railway knowledge (itihaas, speed, sabse lambi route, sabse bada station jaise sawaal)\n\n" +
+          "Do cheezein main NAHI karta (aapke rule ke hisaab se): (1) IRCTC par 'Continue to IRCTC' main aapki taraf se click nahi karta, (2) aapke passenger details / OTP / payment main khud nahi bharta — wo aap karte ho. " +
+          "Aur jo data verified nahi hota, main guess nahi karta — saaf bolta hoon aur jo sach me pata hai wahi deta hoon.",
+        interrupt: false,
+        resumeAsk: null,
+        resumeText: null,
+        trains: null,
+        confirmBook: false,
+        missingFields: [],
+        modelUsed: null,
+        latencyMs: 0,
+        failureReason: "capability_meta_answer",
+        engine: "deterministic",
+        agenticFailureReason: null,
+        grounded: true,
+      };
+    }
+  }
+
   /* ── ROUND-8a: "nayi baat / reset" — topic-switch command. Client is
    * response par apne booking slots bhi clear karta hai (justReset flag). */
   if (isResetCommand(req.text)) {

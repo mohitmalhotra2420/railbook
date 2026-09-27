@@ -56,7 +56,7 @@ describe("Round-38 · jawab ka subject match (galat station/train ka jawab user 
 
   it("web-rescue me bhi subject match (pehla galat snippet nahi)", () => {
     const a = read("server/agent/agentic.ts");
-    expect(a).toContain("const best = (d.results ?? []).find((r) => answerCoversSubject(userText, r.title, r.snippet));");
+    expect(a).toContain("const best = (d.results ?? []).find((r) => answerCoversSubject(userText, r.title, r.snippet) && answerMatchesRailMode(userText, r.title, r.snippet));");
   });
 });
 
@@ -98,5 +98,82 @@ describe("Round-38 · KB me stable railway facts (battery me galat/aadhe jawab a
     for (const w of ["khana", "khaana", "food", "meal", "chai", "berth", "platform", "top speed", "maximum speed"]) {
       expect(re, `${w} RULES_TOPIC_RE me hona chahiye`).toContain(w);
     }
+  });
+});
+
+/* ── Round-39 (27 Sep): 24-naye-sawaal battery ke natije — mode guard + roz ke rules ───────────── */
+import { answerMatchesRailMode, asksNonRailMode } from "../server/agent/subject";
+
+describe("Round-39 · rail sawaal par road/air ka jawab reject (Expressway ≠ rail doori)", () => {
+  it("live bug: 'Ludhiana se Amritsar kitni doori' par Expressway page reject", () => {
+    const q = "Ludhiana se Amritsar kitni doori hai?";
+    expect(answerMatchesRailMode(q, "Delhi–Amritsar–Katra Expressway", "under-construction 670 km (420 mi) 4-lane expressway connecting Bahadurgarh border with Katra")).toBe(false);
+    expect(answerMatchesRailMode(q, "Ludhiana Junction railway station", "Ludhiana Jn se Amritsar Jn tak rail route halts")).toBe(true);
+  });
+
+  it("user khud road/flight poochhe to guard nahi lagta", () => {
+    expect(asksNonRailMode("Delhi Amritsar expressway kitne km hai?")).toBe(true);
+    expect(answerMatchesRailMode("Delhi Amritsar expressway kitne km hai?", "Delhi–Amritsar–Katra Expressway", "670 km expressway")).toBe(true);
+    expect(asksNonRailMode("Ludhiana se Amritsar kitni doori hai?")).toBe(false);
+  });
+
+  it("rail ka normal jawab kabhi reject nahi hota", () => {
+    expect(answerMatchesRailMode("Vande Bharat ki speed?", "Vande Bharat Express", "semi-high speed rail service by Indian Railways")).toBe(true);
+    expect(answerMatchesRailMode("12054 ke bare me batao", "Hw Janshatabdi Express", "Amritsar se Haridwar tak")).toBe(true);
+  });
+
+  it("topic loop + web-rescue dono me mode guard wire hai", () => {
+    const a = read("server/agent/agentic.ts");
+    expect(a).toContain("if (!answerMatchesRailMode(userText || q, ans.title, ans.text)) {");
+    expect(a).toContain("answerMatchesRailMode(userText, r.title, r.snippet)");
+  });
+});
+
+describe("Round-39 · roz ke rules KB me (pet, smoking, charging, AC fail, bachcha, 2A-3A fare, distance)", () => {
+  it("pet/dog: sirf 1A/FC + luggage van, booking zaroori", () => {
+    const a = railKbAnswer("Kutta train me le ja sakte hain?") ?? "";
+    expect(a).toMatch(/AC First Class|1A/);
+    expect(a).toMatch(/booking/i);
+    expect(a).toMatch(/allowed nahi/);
+  });
+
+  it("smoking banned (COTPA) + e-cigarette bhi", () => {
+    const a = railKbAnswer("Train me smoking allowed hai?") ?? "";
+    expect(a).toContain("COTPA");
+    expect(a).toMatch(/banned/);
+    expect(a).toMatch(/e-cigarette|vape/i);
+  });
+
+  it("charging point reserved coaches me, general me nahi", () => {
+    const a = railKbAnswer("Mobile charging point har coach me hota hai?") ?? "";
+    expect(a).toMatch(/charging point/i);
+    expect(a).toMatch(/General/);
+  });
+
+  it("AC fail refund: TDR 20 ghante + TTE certificate + difference formula", () => {
+    const a = railKbAnswer("AC kharab ho gaya to paisa wapas milta hai?") ?? "";
+    expect(a).toContain("TDR");
+    expect(a).toMatch(/20 ghante/);
+    expect(a).toMatch(/Sleeper fare/);
+  });
+
+  it("bachche ka ticket: <5 free, 5-12 half (share) / full (alag berth)", () => {
+    const a = railKbAnswer("Bachche ka ticket kab lagta hai?") ?? "";
+    expect(a).toMatch(/5 saal se chhote|5 saal se chhota/);
+    expect(a).toMatch(/half fare/);
+    expect(a).toMatch(/12/);
+  });
+
+  it("2A vs 3A fare order + 'exact fare provider se' line", () => {
+    const a = railKbAnswer("3A aur 2A me fare ka fark kitna hota hai?") ?? "";
+    expect(a).toMatch(/2S < SL < 3A/);
+    expect(a).toMatch(/25–40%|25-40%/);
+  });
+
+  it("rail distance: honest line + road data kabhi nahi + journey time offer", () => {
+    const a = railKbAnswer("Ludhiana se Amritsar kitni doori hai?") ?? "";
+    expect(a).toMatch(/RAIL doori/);
+    expect(a).toMatch(/road\/expressway\/highway ka data main railway sawaal me bilkul use nahi karta/);
+    expect(a).toMatch(/journey time/);
   });
 });

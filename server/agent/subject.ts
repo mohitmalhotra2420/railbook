@@ -20,6 +20,12 @@ const GENERIC = new Set([
   "tak","aur","ya","ka","wala","wali","waley","kaise","karein","kare","karna","hoga","hogi","vehicle",
   "passenger","passengers","person","log","koi","kuch","bahut","thoda","sasta","sasti","fast","fastest",
   "best","better","abhi","aaj","kal","parso","tomorrow","today","india","indian","express","superfast",
+  /* Hindi adjectives/superlatives — subject nahi hote (warna "sabse lambi train" par "lambi" subject ban kar
+   * sahi Wikipedia page reject ho jaata tha). */
+  "sabse","sabse8","lambi","lamba","lambe","bad","bada","badi","bade","badaa","chhota","chhoti","chhote",
+  "mehnga","mehngi","mehnge","saste","tez","tezz","dheema","dheemi","jaldi","der","pehle","baad","kam",
+  "zyada","achha","achhi","ache","badhiya","sundar","naya","nayi","naye","purana","purani","purane","asli",
+  "sach","sachcha","galat","theek","thik","mast","bhar","bharat","hindi","english","hinglish",
   "mail","local","pass","number","no","naam","name","detail","details","info","jaankari","information",
   "facility","facilities","option","options","price","prices","rate","rates","kilometre","km","hour",
   "ghante","minutes","minute","din","day","dinon","phone","mobile","online","irctc","railbook","app",
@@ -71,4 +77,42 @@ export function subjectHitCount(question: string, title: string, body: string): 
   if (!strong.length) return Number.POSITIVE_INFINITY;
   const hay = `${title} ${body}`.toLowerCase();
   return strong.filter((w) => hay.includes(w)).length;
+}
+
+
+/* ── Round-39 (27 Sep): mode guard ────────────────────────────────────────────────────────────────
+ * Live battery: "Ludhiana se Amritsar kitni doori hai?" par Wikipedia ka **Delhi–Amritsar–Katra
+ * Expressway** (sadak!) ka jawab aa gaya — subject match (dono naam the) par MODE hi galat tha.
+ * RailBook railway assistant hai: jab tak user khud sadak/bus/flight na poochhe, jawab rail ka hona
+ * chahiye. Ye guard road/highway/air/metro wale pages ko reject karta hai. */
+
+const ROAD_ASK_RE = /\b(expressway|highway|motorway|sadak|road|by ?road|bus|car|taxi|cab|flight|air|airport|metro|NH\s?\d+|flyover)\b/i;
+const RAIL_DOMAIN_RE = /\b(train|trains|rail|railway|station|jn|junction|coach|berth|irctc|pnr|platform|express|superfast|sl|3a|2a|1a|cc|2s|ec)\b/i;
+const ROAD_ANSWER_RE = /\b(expressway|highway|motorway|controlled-access|national highway|NH ?\d+|roadways|bus stand|airport|airline|flight|metro rail)\b/i;
+const RAIL_ANSWER_RE = /\b(railway|rail|train|station|junction|coach|berth|platform|route|halt|express)\b/i;
+
+/** User ne khud road/air/metro poochha? (tab road wala jawab bilkul valid hai) */
+export function asksNonRailMode(question: string): boolean {
+  return ROAD_ASK_RE.test(String(question ?? ""));
+}
+
+/**
+ * Rail-domain sawaal par road/air jawab aaya to false (reject).
+ * Non-rail sawaal par ye guard nahi lagta. Rail-related jawab par bhi nahi.
+ */
+export function answerMatchesRailMode(question: string, title: string, body: string): boolean {
+  const q = String(question ?? "");
+  const hay = `${title} ${body}`;
+  if (asksNonRailMode(q)) return true; // user ne khud road/air poochha
+  const railAnswer = RAIL_ANSWER_RE.test(hay);
+  const roadAnswer = ROAD_ANSWER_RE.test(hay);
+  if (roadAnswer && !railAnswer) return false;
+  /* Dono ho (jaise "rail + expressway" wala paragraph) — tab hi reject jab question me rail-domain
+   * ka koi shabd na ho (warna rail ka sawaal rail hi ke baare me tha). */
+  if (roadAnswer && railAnswer && !RAIL_DOMAIN_RE.test(q)) {
+    const roadHit = (hay.match(ROAD_ANSWER_RE) ?? []).length;
+    const railHit = (hay.match(RAIL_ANSWER_RE) ?? []).length;
+    if (roadHit > railHit) return false;
+  }
+  return true;
 }
