@@ -102,18 +102,29 @@ describe("ROUND-15: WEB_SEARCH answer-ready (Muse web-search fix)", () => {
     expect(a?.text).not.toMatch(/1960/); // generic history para haara
   });
 
-  it("WEB_SEARCH tool: answer-ready 'Web se mila (Wikipedia — …)' summary + 'dobara search mat karo' note", async () => {
+  /* Round-38 (27 Sep): "top speed/kitni tez" jaise GENERAL-FACT sawaal ab RailBook KB se aate hain
+   * (stable fact, turant + Hinglish — pehle Wikipedia ka galat page aa jaata tha, jaise "Rajdhani ki
+   * top speed" par ek specific Rajdhani service ka page). Web topic-page path tab bhi maujood hai jab
+   * KB me entry na ho (neeche wale tests usko cover karte hain). */
+  it("WEB_SEARCH tool: top-speed jaise stable fact KB se aate hain (Hinglish + source label)", async () => {
     wikiMock();
     const r = await executeApprovedTool("WEB_SEARCH", { query: "Vande Bharat Express top speed" }, { userText: "vande bharat ki top speed kitni hai" });
     expect(r.ok).toBe(true);
-    expect(r.source).toBe("web");
-    expect(r.summary).toMatch(/^Web se mila \(Wikipedia — Vande Bharat Express\)/);
+    expect(r.source).toBe("kb");
     expect(r.summary).toMatch(/160 km\/h/);
-    expect(r.summary).toMatch(/\(Source: https:\/\/en\.wikipedia\.org\/wiki\/Vande_Bharat_Express\)/);
+    expect(r.summary).toMatch(/183 km\/h/);
     const data = r.data as { answer_found: boolean; note: string; answer: string };
     expect(data.answer_found).toBe(true);
     expect(data.note).toMatch(/dobara WEB_SEARCH MAT/i);
     expect(data.answer).toMatch(/160 km\/h/);
+  });
+
+  it("WEB_SEARCH tool: KB me na ho to Wikipedia topic-page summary aata hai (Vande Bharat Sleeper page bhi subject-match ke saath)", async () => {
+    wikiMock();
+    const r = await executeApprovedTool("WEB_SEARCH", { query: "Vande Bharat histories" }, { userText: "vande bharat histories batao" });
+    expect(r.ok).toBe(true);
+    expect(["web", "kb"]).toContain(r.source); // KB me na ho to web
+    expect(String(r.summary)).toMatch(/Vande Bharat/i);
   });
 
   it("WEB_SEARCH tool: topic-page fail → snippet fallback ab 'Best:' snippet summary mein deta hai", async () => {
@@ -182,9 +193,9 @@ describe("ROUND-15: WEB_SEARCH answer-ready (Muse web-search fix)", () => {
     });
     const turn = await runAgenticTurn({ text: "vande bharat ki top speed kitni hai", now: "2026-09-07T10:00:00+05:30" });
     const reply = String(turn.reply);
-    expect(reply).toMatch(/^Web se mila \(Wikipedia — Vande Bharat Express\)/);
+    /* Round-38: KB se aata hai (stable fact) — dhaancha wahi: seedha jawab + honest label. */
     expect(reply).toMatch(/160 km\/h/);
-    expect(reply).toMatch(/web-scrape ka jawab/);
+    expect(reply).toMatch(/General railway rules|web-scrape ka jawab/);
     expect(reply).not.toMatch(/^• /m);
   });
 });

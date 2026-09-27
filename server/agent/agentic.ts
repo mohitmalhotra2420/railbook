@@ -55,8 +55,9 @@ import { generalWebSearch, scrapeWebPage, trustedSiteOf, webSearch } from "./web
 import { cleanQueryEn, findTopicAnswer, HINGLISH_TOPIC_WORDS, significantWords } from "./topicpage.js";
 import { ATTRIBUTE_Q_RE, COUNT_LIST_RE, trainFamilyPage, wikiLargestTable } from "./wikitable.js";
 import { railKbAnswer } from "./railkb.js";
+import { answerCoversSubject, subjectHitCount } from "./subject.js";
 /* Round-18i: rules/procedure topics → KB before Wikipedia (see WEB_SEARCH). */
-const RULES_TOPIC_RE = /\b(tatkal|premium tatkal|rac|waiting list|waitlist|wl|gnwl|pqwl|rlwl|chart|pnr|refund|cancel(?:lation)?|luggage|saman|samaan|blanket|bedroll|pantry|catering|id proof|photo id|concession|senior citizen|quota|break journey|child (?:ticket|fare)|bachcha|tte|ticket checker|arp|advance reservation|kitne din pehle)\b/i;
+const RULES_TOPIC_RE = /\b(tatkal|premium tatkal|rac|waiting list|waitlist|wl|gnwl|pqwl|rlwl|chart|pnr|refund|cancel(?:lation)?|luggage|saman|samaan|blanket|bedroll|pantry|catering|id proof|photo id|concession|senior citizen|quota|break journey|child (?:ticket|fare)|bachcha|tte|ticket checker|arp|advance reservation|kitne din pehle|khana|khaana|food|meal|chai|berth|berths|platform|platforms|coach me kitne|top speed|maximum speed|max speed|kitni tez)\b/i;
 import { stationBoard, trainHistory } from "../railway/railkit.js";
 
 export type AgenticToolName =
@@ -1255,9 +1256,18 @@ export async function executeApprovedTool(
          * Rajdhani me kya fark hai") par ek hi page ka data adhoora rehta tha — doosri cheez ka topic
          * page bhi laao taaki model dono taraf se sahi tulna kar sake. */
         const cmpParts = comparisonSubjects(userText || q);
+        /* Round-38 (user: "har sawaal ka ek dumm sahi jawab jaise chatgpt"): live battery me pakda —
+         * "Ludhiana junction ke kitne platform hain?" par Wikipedia ka page "Raipur Haryana Junction
+         * railway station" ka aa gaya aur wahi user ko chala gaya. Ab jawab ka SUBJECT match hota hai;
+         * galat page skip kar ke agla try, sab reject ho jaayein to saaf "sahi page nahi mila". */
+        let rejectedSubject: string | null = null;
         for (const t of tries) {
           const ans = await findTopicAnswer(t);
           if (!ans) continue;
+          if (!answerCoversSubject(userText || q, ans.title, ans.text)) {
+            rejectedSubject = `${ans.title} · ${subjectHitCount(userText || q, ans.title, ans.text)} match`;
+            continue;
+          }
           let extra: { title: string; text: string; url: string } | null = null;
           if (cmpParts) {
             /* Jo subject page ke title me NAHI hai, usi ka page laao (warna "Vande Bharat Sleeper" page
@@ -1304,6 +1314,15 @@ export async function executeApprovedTool(
         }
         /* Round-18m-30z: Wikipedia/KB se jawab nahi → TRUSTED railway sites (IRCTC/indianrail.gov.in/
          * indiarailinfo/erail/railyatri/confirmtkt/ixigo/trainman…) par search + best page ka focused para. */
+        if (rejectedSubject) {
+          /* Round-38: har page galat subject ka tha (jaise Ludhiana ke sawaal par Raipur ka page) —
+           * jawab invent karne se behtar hai saaf batana; KB/scrape ka mauka upar mil chuka hai. */
+          return failResult("none", `Is sawaal ka sahi page nahi mila (mila tha: ${rejectedSubject} — alag subject). User ko saaf bolo ki is cheez ka verified data mujhe nahi mila, aur jo main SAHI se bata sakta hoon wo BATAO (jaise station ka naam/code/city, wahan ki trains, fare/seat/live status — railway tools se). Kuch bhi anumaan se mat likho.`, {
+            query: q,
+            answer_found: false,
+            rejected: rejectedSubject,
+          });
+        }
         const scraped = await answerFromWebScrapeTool(userText || q).catch(() => null);
         if (scraped) {
           return okResult("web", scraped.summary, { query: q, answer_found: true, answer: scraped.answer, source_url: scraped.url, title: scraped.title, kind: "web_page", note: "YAHI JAWAB HAI — dobara WEB_SEARCH MAT karo. Is 'answer' ko 2-4 line Hinglish mein do, source site ka naam + URL ke saath; 'web se mila' likho." });
@@ -2436,7 +2455,8 @@ async function webRescueAnswer(userText: string, steps: ToolTraceStep[], stepNo:
       ? `${result.summary}\n(General railway rules — live data nahi; official/IRCTC se verify karein.)`
       : `${result.summary}\n(Ye railway API ka data nahi, web se laaya gaya jawab hai.)`;
   }
-  const best = d.results?.[0];
+  /* Round-38: snippet ka subject match na ho to doosre result dekho — galat station/train ka jawab nahi. */
+  const best = (d.results ?? []).find((r) => answerCoversSubject(userText, r.title, r.snippet));
   if (best) return `Web se mila: ${best.title} — ${best.snippet}\n(Source: ${best.url}; web search — live railway data nahi.)`;
   return null;
 }

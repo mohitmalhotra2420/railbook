@@ -63,6 +63,32 @@ const ENTRIES: KbEntry[] = [
       "Premium Tatkal dynamic pricing wala tatkal quota hai — demand ke hisaab se base fare se kaafi zyada ho sakta hai. Normal tatkal ki tarah 1 din pehle khulta hai, par koi refund nahi hota cancellation par (rules IRCTC ke page se verify karein).",
   },
   {
+    /* Round-38 (battery: "Sleeper coach me kitne berth hote hain?" par Wikipedia Vande Bharat ka page aa gaya) */
+    keys: ["sleeper coach berth", "coach me kitne berth", "kitne berth hote", "berth count", "sl coach berth", "3a me kitne berth", "2a me kitne berth", "1a me kitne berth", "chair car seat"],
+    answer:
+      "Aam IR coach layout (per coach): Sleeper (SL) 72 berths · 3A 64 berths · 2A 46 berths · 1A 22 berths (kabhi 24) · Chair Car (CC) 78 seats (kuch 102) · 2S 108 seats · EC 56 seats. SL/3A me side-lower 2 berths share karte hain (RAC). Train/rake ke hisaab se thoda farq ho sakta hai — exact berth count seat-selection/coach layout par depend karta hai.",
+  },
+  {
+    keys: ["rajdhani top speed", "rajdhani ki speed", "rajdhani maximum speed", "rajdhani kitni tez"],
+    answer:
+      "Rajdhani Express LHB coaches ki maximum permissible speed (MPS) 130 km/h hoti hai (network par priority sabse zyada, kam stops). Comparison: Vande Bharat 160 km/h tak (operational), Gatimaan Express 160 km/h (Tughlakabad–Agra section), Tejas Rajdhani bhi 130 km/h. Average speed route ke hisaab se 55–90 km/h ke beech rehti hai.",
+  },
+  {
+    keys: ["vande bharat top speed", "vande bharat ki speed", "vande bharat maximum speed"],
+    answer:
+      "Vande Bharat Express ki maximum operational speed 160 km/h hai (Delhi–Agra/Tughlakabad–Agra section par achieved — Indian Railways ki sabse tez operational speed, Gatimaan Express ke saath share). Trial runs me 183 km/h tak gayi thi. Route ke hisaab se average 70–100 km/h.",
+  },
+  {
+    keys: ["train me khana", "khana milta", "khaana milta", "chai kitne", "khana kitne ka", "onboard food", "train me food"],
+    answer:
+      "Train me onboard khana IRCTC catering se aata hai: Garib Rath/Rajdhani/Duronto/Vande Bharat jaise trains me meal booking ke waqt option me included/optional hota hai (route+time ke hisaab se breakfast/lunch/dinner/tea); sleeper/general me aap IRCTC eCatering (ecatering.irctc.co.in ya 1323) se en-route station par order kar sakte ho aur seat par serve hota hai. Exact rate/menu train aur vendor par depend karta hai — verified menu IRCTC ke catering page par hota hai.",
+  },
+  {
+    keys: ["platform kitne", "kitne platform", "platform ki jaankari", "platform number"],
+    answer:
+      "Station ke platform ki exact count mere live railway data me nahi hoti (provider seat/fare/train data dete hain, platform count nahi). Main aapko station ka naam/code/city, wahan se chalne wali trains, seat/fare/live status de sakta hoon; platform ki jaankari ke liye Indian Railways ka station page (indiarailinfo) dekh sakte hain.",
+  },
+  {
     keys: ["rac kya", "rac meaning", "rac kaise", "rac seat", "rac kab confirm", "reservation against cancellation"],
     answer:
       "RAC (Reservation Against Cancellation) ka matlab: aapko confirmed berth nahi, shared side-lower berth milti hai (2 passengers ek side lower share karte hain). Jab koi passenger cancel karta hai ya chart preparation ke time vacancy banti hai to RAC confirm ho jaati hai. RAC wale passenger travel kar hi sakte hain.",
