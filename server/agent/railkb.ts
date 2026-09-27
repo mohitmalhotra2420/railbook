@@ -63,6 +63,12 @@ const ENTRIES: KbEntry[] = [
       "Premium Tatkal dynamic pricing wala tatkal quota hai — demand ke hisaab se base fare se kaafi zyada ho sakta hai. Normal tatkal ki tarah 1 din pehle khulta hai, par koi refund nahi hota cancellation par (rules IRCTC ke page se verify karein).",
   },
   {
+    /* Round-38 (battery: accessibility sawaal par "Passenger train toilet" ka adhoora page aa raha tha) */
+    keys: ["wheelchair facility", "divyangjan facility", "divyang facility", "handicapped facility", "wheelchair wale", "accessible toilet", "divyangjan"],
+    answer:
+      "Divyangjan (wheelchair) passengers ke liye Indian Railways ki facility: online booking me 'Divyangjan' option chuno (concession + lower berth priority) · station par wheelchair/ trolley free milti hai (station master/ enq desk se) · train me SLR/guard coach ke paas reserved divyangjan berths (2 per coach, door ke paas) · bade stations par lift/ramp/accessible toilet · escort ke saath travel par bhi concession. Booking ke waqt passenger type 'Divyangjan' select karna zaroori hai, warna priority berth nahi milti.",
+  },
+  {
     /* Round-38 (battery: "Sleeper coach me kitne berth hote hain?" par Wikipedia Vande Bharat ka page aa gaya) */
     keys: ["sleeper coach berth", "coach me kitne berth", "kitne berth hote", "berth count", "sl coach berth", "3a me kitne berth", "2a me kitne berth", "1a me kitne berth", "chair car seat"],
     answer:

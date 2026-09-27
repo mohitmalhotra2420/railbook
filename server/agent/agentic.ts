@@ -57,7 +57,7 @@ import { ATTRIBUTE_Q_RE, COUNT_LIST_RE, trainFamilyPage, wikiLargestTable } from
 import { railKbAnswer } from "./railkb.js";
 import { answerCoversSubject, subjectHitCount } from "./subject.js";
 /* Round-18i: rules/procedure topics → KB before Wikipedia (see WEB_SEARCH). */
-const RULES_TOPIC_RE = /\b(tatkal|premium tatkal|rac|waiting list|waitlist|wl|gnwl|pqwl|rlwl|chart|pnr|refund|cancel(?:lation)?|luggage|saman|samaan|blanket|bedroll|pantry|catering|id proof|photo id|concession|senior citizen|quota|break journey|child (?:ticket|fare)|bachcha|tte|ticket checker|arp|advance reservation|kitne din pehle|khana|khaana|food|meal|chai|berth|berths|platform|platforms|coach me kitne|top speed|maximum speed|max speed|kitni tez)\b/i;
+const RULES_TOPIC_RE = /\b(tatkal|premium tatkal|rac|waiting list|waitlist|wl|gnwl|pqwl|rlwl|chart|pnr|refund|cancel(?:lation)?|luggage|saman|samaan|blanket|bedroll|pantry|catering|id proof|photo id|concession|senior citizen|quota|break journey|child (?:ticket|fare)|bachcha|tte|ticket checker|arp|advance reservation|kitne din pehle|khana|khaana|food|meal|chai|berth|berths|platform|platforms|coach me kitne|top speed|maximum speed|max speed|kitni tez|divyangjan|divyang|wheelchair|handicapped|accessible)\b/i;
 import { stationBoard, trainHistory } from "../railway/railkit.js";
 
 export type AgenticToolName =

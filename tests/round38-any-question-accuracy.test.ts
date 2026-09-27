@@ -85,6 +85,13 @@ describe("Round-38 · KB me stable railway facts (battery me galat/aadhe jawab a
     expect(p).toContain("indiarailinfo");
   });
 
+  it("divyangjan/wheelchair facility ka KB jawab (adhoora toilet-page nahi)", () => {
+    const d = railKbAnswer("Wheelchair wale passenger ke liye train me kya facility hai?") ?? "";
+    expect(d).toContain("Divyangjan");
+    expect(d).toContain("wheelchair");
+    expect(d).toMatch(/concession|berth/);
+  });
+
   it("in topics par WB_SEARCH se pehle KB chalta hai (RULES_TOPIC_RE me words)", () => {
     const a = read("server/agent/agentic.ts");
     const re = /const RULES_TOPIC_RE = \/(.*)\/i;/s.exec(a)?.[1] ?? "";
