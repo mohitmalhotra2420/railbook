@@ -154,12 +154,16 @@ export function scrubInternalNotes(reply: string): string {
    * [NEXT] chips ke liye CLIENT ka marker hai (alag line me) — isliye yahan sirf END/DONE jaise markers. */
   /* Round-43k: tool ke RAW keys/JSON fragment kabhi user tak na jayein ("Station checks: BCT onRoute: false",
    * `"resolvedRoute"`, `{"code": ...}`) — user ko sirf saaf Hinglish jawab milta hai. */
+  /* Round-44: model ke liye likhi imperative instructions user ko kabhi na dikhein
+   * ("uska tool AB call karo", "sirf confirm karke mat ruko", "1 line mein poochho kya chahiye"). */
+  const modelInstruction =
+    /\b(uska tool|tool AB call|call karo|mat ruko|confirm karke mat|1 line mein poochho|poochho kya chahiye|user ne jo poochha)\b|\buser ko\b[^.]{0,60}\b(batao|bolo|bata|bataiye|poochho|dikhao|samjhao)\b/i;
   const rawToolEcho = /\b(onRoute|stationChecks|resolvedRoute|toolTrace|dataPreview|failureReason|provider_failed|autoRoute|autoDate|webNote|executedArgs)\b|^\s*[{[]\s*"|"\s*:\s*("|\d|true|false|null)/i;
   const markerJunk = /\[\/?(?:end|done|eot|finish|stop)\]|\(\s*(?:end|done)\s*\)|<\/?\s*(?:end|done)\s*>|\[\/?(?:end|done)\]/gi;
   const trainsDekhe = /\b\d+\s*trains? dekhe\s*(?:\([^()]*\))?\.?/gi;
   const out = String(reply)
     .split("\n")
-    .filter((line) => !instructionRe.test(line) && !rawToolEcho.test(line))
+    .filter((line) => !instructionRe.test(line) && !rawToolEcho.test(line) && !modelInstruction.test(line))
     .map((line) =>
       line
         .replace(noisyParen, "")
