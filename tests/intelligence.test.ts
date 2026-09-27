@@ -717,7 +717,8 @@ describe("ROUND-4: ChatGPT-jaisa universal railway knowledge", () => {
     const r = await runAgent({ text: "sabse tez train kaunsi hai india mein", now: "2026-09-06T20:00:00+05:30" });
     const reply = String(r.reply ?? "");
     expect(reply, reply).toMatch(/Vande Bharat/i);
-    expect(reply, reply).toMatch(/AI ka general jawab/i);
+    /* Round-40: "sabse tez train" ab KB me hai (Vande Bharat 160 km/h) — KB label bhi honest hai. */
+    expect(reply, reply).toMatch(/AI ka general jawab|general railway knowledge/i);
     expect(reply, reply).not.toMatch(/confirm nahi kar paya/i);
     expect(reply, reply).not.toMatch(/Kahan se jaana/i);
   });

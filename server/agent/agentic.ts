@@ -56,8 +56,9 @@ import { cleanQueryEn, findTopicAnswer, HINGLISH_TOPIC_WORDS, significantWords }
 import { ATTRIBUTE_Q_RE, COUNT_LIST_RE, trainFamilyPage, wikiLargestTable } from "./wikitable.js";
 import { railKbAnswer } from "./railkb.js";
 import { answerCoversSubject, answerMatchesRailMode, subjectHitCount } from "./subject.js";
+import { liveClaimCheck, liveDataQuestion, normalizeRailText } from "./answerMode.js";
 /* Round-18i: rules/procedure topics → KB before Wikipedia (see WEB_SEARCH). */
-const RULES_TOPIC_RE = /\b(tatkal|premium tatkal|rac|waiting list|waitlist|wl|gnwl|pqwl|rlwl|chart|pnr|refund|cancel(?:lation)?|luggage|saman|samaan|blanket|bedroll|pantry|catering|id proof|photo id|concession|senior citizen|quota|break journey|child (?:ticket|fare)|bachcha|tte|ticket checker|arp|advance reservation|kitne din pehle|khana|khaana|food|meal|chai|berth|berths|platform|platforms|coach me kitne|top speed|maximum speed|max speed|kitni tez|divyangjan|divyang|wheelchair|handicapped|accessible|kutta|pet|dog|smoking|sigret|cigarette|charging|charger|ac fail|ac kharab|bachch|child fare|2a 3a|3a 2a|doori|distance|kitne km|kitna door|sabse bada|bada station|largest|biggest|sabse lambi|sabse lamba|longest|konkan)\b/i;
+const RULES_TOPIC_RE = /\b(tatkal|premium tatkal|rac|waiting list|waitlist|wl|gnwl|pqwl|rlwl|chart|pnr|refund|cancel(?:lation)?|luggage|saman|samaan|blanket|bedroll|pantry|catering|id proof|photo id|concession|senior citizen|quota|break journey|child (?:ticket|fare)|bachcha|tte|ticket checker|arp|advance reservation|kitne din pehle|khana|khaana|food|meal|chai|berth|berths|platform|platforms|coach me kitne|top speed|maximum speed|max speed|kitni tez|divyangjan|divyang|wheelchair|handicapped|accessible|kutta|pet|dog|smoking|sigret|cigarette|charging|charger|ac fail|ac kharab|bachch|child fare|2a 3a|3a 2a|doori|distance|kitne km|kitna door|sabse bada|bada station|largest|biggest|sabse lambi|sabse lamba|longest|konkan|kitne zone|zones|pehli train|first train|sabse puran|kitne railway station|kitne station|sabse tez train|fastest train)\b/i;
 import { stationBoard, trainHistory } from "../railway/railkit.js";
 
 export type AgenticToolName =
@@ -2119,6 +2120,8 @@ function systemPrompt(
       "24. UNIVERSAL WEB FALLBACK (user request 2026-09-06: 'ChatGPT jaisa — koi bhi railway sawaal, API se jawab na mile to khud web se dhoondh lo'): koi bhi railway ka sawaal (catering/pantry/rules/facilities/history/facts/general knowledge) jiska jawab railway data tools (timetable/live/fare/seats) se NAHI aata — WEB_SEARCH se dhoondo aur 'web se mila' + source label ke saath do. Railway-irrelevant web results (cars/automobiles jaise) skip karo, railway-relevant hi do. Na mile to honest 'nahi mil paya' bolo — guess kabhi nahi. Live status/fare/seats/availability/PNR ke liye web search kabhi use mat karna — wahan sirf railway tools.",
       "27. SAARE TOOLS KHULE HAIN (user rule 2026-09-26: 'AI ko jitne bhi tools available hai wo sabh provide kro, no restriction on using any tool'): jo bhi tool jawab ke liye chahiye, jitni baar chahiye, use karo — SEARCH_TRAINS, JOURNEY_ANALYZE, RANK_JOURNEY_OPTIONS, FIND_SEATS, CHECK_AVAILABILITY, GET_FARE, GET_TIMETABLE, TRACK_TRAIN, GET_TRAIN_INFO, FIND_ALTERNATIVE_TRAINS, FIND_CONNECTIONS, WEB_SEARCH… koi rok nahi, koi count-limit nahi. SIRF DO CHEEZEIN TUM KABHI NAHI KAROGE: (i) 'Continue to IRCTC' par click (RailBook app ka handoff button user khud dabayega), (ii) passenger details/passenger form khud se bharna ya booking confirm karna — wo user ka kaam hai. Baaki sab tumhare haath me hai.",
     "28. SAWAAL KA MATLAB PEHLE (user 2026-09-26: 'kya AI meri baat samajh nahi paaya?'): 'plan banao / journey plan / kya best rahega' = RANK_JOURNEY_OPTIONS ya JOURNEY_ANALYZE (timings + fare + best option) — seat board ki list NAHI. 'alternative trains / doosri trains / koi aur option / iske alawa' = FIND_ALTERNATIVE_TRAINS (us train ke aage/peeche wali trains, timing+fare ke saath) — wahi purani list dobara NAHI. 'trains batao / kaunsi trains chalti hain' = SEARCH_TRAINS. 'seat/berth/AVL/kitni seat khali' = FIND_SEATS ya CHECK_AVAILABILITY. Har TRAIN LIST jawab me timing (departure → arrival + duration) aur fare (jo tool ne diya ho) ZAROOR likho — 'sirf train ke naam' wali list adhoori hai (user ki shikayat: 'trains list krdi without fare and timings'). CLASS AMBIGUOUS HO TO PEHLE POOCHHO (user 2026-09-26: '19028 mein book krdo' par AI ne class nahi poochhi, seedha ek class ka form khol diya, jabki us train me kai classes khuli thi — 'AI khud kyu nhi soch rha, har cheez thodi btani padegi'): agar user booking maange ('book krdo', '<train> mein book') aur usne class NA boli ho aur us train me EK SE ZYADA class khuli ho, to pehle SAAF poochho 'kaunsi class me book karun?' aur [NEXT] me wahi classes chips ke roop me do (jaise '[NEXT] 19028 · 3A (AVL 26 ₹565) => 19028 mein 3A book krdo') — uski class ke bina aage mat badho; ek hi class khuli ho to seedha wahi class bata do (poochhne ki zaroorat nahi).",
+    "31. KHUD KA DIMAAG (user 2026-09-27: 'jaise chatgpt/gemini/manus khud ka brain use karte hain… unko pehle batana nahi padta, wo khud se samajhte hain ki kya missing hai, user se kya poochhna chahiye, kaunsa tool lagana hai — waise hi mera AI bhi khud se samjhe'): har turn tum YE 4 kadam khud karo, koi tumhe batayega nahi — (1) SAMJHO: user ki baat apne shabdon me (typo/adhoora bhi ho to matlab nikaalo, jaise 'statsu'=status, 'gaadi'=train, 'ldh'=Ludhiana, 'asr'=Amritsar; haan/na/thanks jaise jawaab pichhle sawaal ka jawab maano). (2) CHECK KARO — kya missing hai?: jawab/kaam ke liye koi cheez zaroori hai jo user ne nahi boli (route? date? passengers? class kaunsi? train kaunsa? seat ya live?) to wo khud pehchano aur BAS wahi ek zaroori sawaal poochho (jab tak ek se zyada sach me na atke hon), saath me [NEXT] chips se options do (dates: aaj/kal/parso; classes; trains). Jo user bata chuka hai (route/date/class/pax) wo FINAL maano — dobara MAT poochho. Jo sawaal tu poochhega wahi user ke liye agla kadam hai — usme wo choices do jo sach me aage badhaayein. (3) TOOLS KHUD CHUNO: jawab ke liye jo tool chahiye wo tumhare paas hai — lagao, jitne chahiye. Live/seat/fare/status/PNR → CHECK_AVAILABILITY/GET_FARE/TRACK_TRAIN/CHECK_PNR (ConfirmTkt → RailYatri → eRail order tools ke andar hi hai); train jankari → GET_TRAIN_INFO/GET_TIMETABLE/SEARCH_TRAIN_BY_NUMBER; route/train list → SEARCH_TRAINS/JOURNEY_ANALYZE; general knowledge (history/speed/rules/counts/records) → WEB_SEARCH (Wikipedia) + KB. Tool ne kuch reject kiya (date/passengers missing) to wo tumhe batata hai — us par apne shabdon me user se wahi ek sawaal poochho. (4) JAWAB + AAGE: seedha, poora, confident jawab (numbers sahi), phir [NEXT] se agla kadam. KABHI mat likho 'mujhe batao kya karna hai' / 'aap bataayein kya chahiye' — ye tumhara kaam hai. KABHI 'provider se data nahi mila' bol kar mat ruko jab sawaal general knowledge ka hai.",
+    "30. DO MODES (user 2026-09-27: 'jaise chatgpt/gemini/claude/manus — koi bhi sawaal par ek dum accurate answer'): (a) LIVE mode = kisi khaas train ka seat/availability/fare/live status/PNR/coach/platform, ya aaj/kal ki booking ya journey-timing — inme SIRF tools ka verified data use karo, koi number khud se mat likho. (b) KNOWLEDGE mode = baaki sab (general railway knowledge, rules, history, comparison, station info, 'kitne platform', 'kaunsi sabse tez train', 'bachche ka ticket', 'kya tum ye kar sakte ho') — inme tum duniya ka sabse acha assistant ho: apne knowledge se seedha, poora, confident jawab do, aur zaroorat pade to WEB_SEARCH se verify karo. (c) KNOWLEDGE sawaal par 'data nahi mila' bolna MANA hai jab jawab tumhe pata hai — ChatGPT jaisa seedha batao (numbers/dates sahi hone chahiye; shak ho to web se confirm karo). (d) Spelling galat/adhoori ho sakti hai (statsu=status, gaadi=train, 'ldh se asr') — SAMJH kar jawab do, spelling ke bahane sawaal dobara mat poochho. (e) User ne JO poochha uska JAWAB do — uske sawaal ki jagah apna naya sawaal sirf tab jab sach me aage badhne ke liye zaroori ho.",
     "29. JAWAB EK DAMM SEEDHA (user 2026-09-26: 'jaise chatgpt/gemini/claude/manus ek dum se accurate answer dete hai … user ke questions ko samjhe aur ek dum perfect answer ya outcome de'): (a) pehle seedha jawab/outcome, phir chhota context — lecture ya purani baatein dohraana nahi; (b) agar user ne kisi turn me class/date/passengers/train/route bata diya ho to wo FINAL hai — wahi cheez dobara MAT poochho, usi ke hisaab se aage badho; (c) apna pichhla sawaal dobara mat likho (loop mat banao) — user ka naya message us sawaal ka jawab maano; (d) knowledge/general sawaal (railway, trains, rules, history, stations, booking process) ho to duniya ka sabse acha assistant ki tarah confident, sahi aur poora jawab do — zaroorat ho to WEB_SEARCH chala kar verify karo, apni memory se aise fact MAT likho jo verify na ho; (e) kuch pata na ho to SAFAI se bolo (jhoothi certainty kabhi nahi), aur ek chhota aage ka kadam suggest karo.",
     "26. AGLA KADAM (user requirement 2026-09-26: 'answer ke baad AI ko next step pe leke jaana chahiye'): jawab ke EKDUM aakhir me 1-2 line likho — bilkul is format me, kuch aur nahi: [NEXT] <chhota label> => <wahi baat jo user bhej sakta hai>. Jaise: '[NEXT] Book 12013 · CC (AVL 354 ₹675) => 12013 mein CC book krdo'. Rules: (a) sirf ISI turn ke tool data se banao — koi naya train number/naam/fare/count nahi; (b) label me wahi number jo data me hai; (c) max 2 lines, sabse zaroori pehle; (d) user requirement 26 Sep (round 34 + 36): jab bhi is turn me koi KAAM KA data aaya ho (train/seat/fare/timing/status/plan/route), [NEXT] ZAROOR likho — agla kadam TUM socho aur suggest karo (jaise us train ka booking, doosri class, doosri date, seat availability, timings, live status, ya zaroorat ho to sawaal). Ab koi data-derived fallback nahi hai: [NEXT] nahi diya to user ko agla kadam dikhega hi nahi — isliye sirf tab chhodo jab sach me koi agla kaam ka step na banta ho; (e) reply ke andar [NEXT] ke alawa agla kadam dobara mat likho (UI khud dikhata hai); (f) user requirement 26 Sep (round 36): 'Agla kadam' card SIRF tumhare [NEXT] se banta hai — data se banaya hua koi fallback chip nahi hota, isliye tumne [NEXT] NAHI diya to user ko agla kadam dikhega hi nahi. Isliye apna dimaag lagao jaise ChatGPT/Gemini lagate hain: socho ki user ke liye agla sabse kaam ka kadam kya hai — booking, doosri class/date, seat availability, timings, live status, ya koi saaf sawaal ('kaunsi class me book karun?') — aur wahi [NEXT] me do.",
   ]
@@ -2374,6 +2377,10 @@ function groundingCheck(content: string, steps: ToolTraceStep[], evidenceParts: 
     JSON.stringify(steps.map((s) => s.summary)) +
     " " +
     JSON.stringify(steps.map((s) => s.args)) +
+    " " +
+    /* Round-40: tool ke data ka preview bhi evidence hai — warna provider ka verified number
+     * (jaise CHECK_AVAILABILITY ka "47 seats") summary me verbatim na hone par "ungrounded" lagta tha. */
+    JSON.stringify(steps.map((s) => s.dataPreview ?? "")) +
     " " +
     evidenceParts.join(" ");
   const numbers = content.match(/\d+(?:\.\d+)?/g) ?? [];
@@ -3722,9 +3729,27 @@ export async function runAgenticTurn(input: {
       });
       continue;
     }
-    const check = groundingCheck(clean, steps, evidenceAll);
+    /* Round-40: KNOWLEDGE-mode sawaal par model ka apna jawab accept hota hai (ChatGPT jaisa) —
+     * pehle har 3+ digit number ko tool-evidence se match karne ki zabardasti thi, isliye sahi general
+     * knowledge jawab ("1969", "23 platforms") bhi reject ho kar user ko "data nahi mila" milta tha.
+     * LIVE-mode (seat/fare/status/PNR/booking) par strict grounding waise hi chalta hai. */
+    const knowledgeMode = !liveDataQuestion(input.text);
+    /* Knowledge mode me bhi LIVE-claims (₹ fare, AVL/RAC/WL count, PNR, platform number) evidence se
+     * verify hote hain — "kuch bhi fake nahi" (sirf general knowledge numbers allowed). */
+    const evidenceText =
+      JSON.stringify(steps.map((s) => s.summary)) +
+      " " +
+      JSON.stringify(steps.map((s) => s.args)) +
+      " " +
+      JSON.stringify(steps.map((s) => s.dataPreview ?? "")) +
+      " " +
+      evidenceAll.join(" ");
+    const check = knowledgeMode ? liveClaimCheck(clean, evidenceText) : groundingCheck(clean, steps, evidenceAll);
+    /* Knowledge mode me [NEXT] chips reply ke apne text se bhi validate hote hain (model apne
+     * knowledge ke hisaab se hi sahi suggestion de sakta hai); live mode me sirf tool-evidence. */
+    const nextEvidence = knowledgeMode ? [...evidenceAll, clean] : evidenceAll;
     /* Round-32: model ka "agla kadam" bhi evidence se verify — jo number/naam is turn me nahi aaya, drop. */
-    const nextActions = extracted.actions.filter((a) => groundingCheck(`${a.label} ${a.utterance}`, steps, evidenceAll).grounded);
+    const nextActions = extracted.actions.filter((a) => groundingCheck(`${a.label} ${a.utterance}`, steps, nextEvidence).grounded);
     /* Round-34: model ne agla kadam nahi diya par is turn me verified data hai → model se hi maango. */
     if (
       !nextActions.length &&
@@ -3841,9 +3866,29 @@ export async function runAgenticTurn(input: {
     let nextFailure: string | null = null;
     if (!nextActionsFinal.length && okSteps.length > 0 && check.grounded) {
       const dedicated = await nextStepFromModelOnly({ userText: input.text, reply: clean, steps });
-      const val = dedicated.filter((a) => groundingCheck(`${a.label} ${a.utterance}`, steps, evidenceAll).grounded);
+      const val = dedicated.filter((a) => groundingCheck(`${a.label} ${a.utterance}`, steps, nextEvidence).grounded);
       nextActionsFinal = val;
       nextFailure = val.length ? "next_step_from_dedicated_call" : "next_step_dedicated_empty_no_fallback";
+    }
+    /* Round-40 (user: "jaise chatgpt… ek dum accurate answer"): KNOWLEDGE mode me curated KB entry ko
+     * authoritative maano — model ki memory se pehle. Agar is turn me koi tool data nahi aaya aur KB me
+     * is sawaal ka verified jawab hai (Vivek route, pet rule, pehli train, zones…), to wahi user ko do —
+     * model ki memory ke galat number (jaise "4273 km") user tak na jaayein. Tool data aaya ho to model
+     * ka (us data wala) jawab hi chalta hai. */
+    if (knowledgeMode && !steps.some((st) => st.ok)) {
+      const kbAns = railKbAnswer(input.text);
+      if (kbAns) {
+        const kbText = kbAns.replace(/\(Ye general railway knowledge hai[^)]*\)\s*$/, "").trim();
+        return {
+          ok: true,
+          reply: `${kbText}\n\n(General railway knowledge — official/IRCTC se cross-check kar sakte hain.)`,
+          grounded: true,
+          steps,
+          modelUsed, modelFallbacks, latencyMs: Date.now() - startedAll,
+          failureReason: "kb_authoritative",
+          nextActions: nextActionsFinal.length ? nextActionsFinal : null,
+        };
+      }
     }
     return {
       ok: true,
