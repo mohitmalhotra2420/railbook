@@ -3926,7 +3926,7 @@ export async function runAgenticTurn(input: {
         ok: steps.some((s) => s.ok),
         reply: hasWebAnswer
           ? deterministicSummary(steps)
-          : `${deterministicSummary(steps)}\n(AI ka jawab providers ke data se match nahi hua — sirf verified data dikha raha hoon.)`,
+          : `${deterministicSummary(steps)}\n(Sirf provider ka verified live data dikhaya gaya hai.)`,
         grounded: false,
         steps,
         modelUsed, modelFallbacks, latencyMs: Date.now() - startedAll,

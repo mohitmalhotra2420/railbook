@@ -874,3 +874,22 @@ User (R38 ke baad, wahi demand dobara): *"abh yeh AI ko samjhna chahiye tha … 
 **Tests:** 119 files / 1299 ALL PASS.
 
 **Round-40e (final, live `da41cb1`):** KB-first early return — knowledge sawaal + curated KB entry → **0.0–0.1s** verified jawab (model/24 tool-calls se pehle). Live sawaal (seat/fare/status/PNR/booking/journey) untouched — wahan tools hi chalte hain. Live verify: Vivek 0.1s (4,154/4,286) · sabse purana station 0.0s (Bori Bunder 1853) · Vande Bharat speed 0.0s (160) · LDH platforms 0.0s (7) · seat availability real (2S AVL 384 ₹205 · CC WL14). Suite 119 files/1299 ALL PASS.
+
+## §9.33 — Round-41 (27 Sep 2026): "sahi tool, sahi waqt" (tool-routing audit)
+
+**User (dohraaya):** "jaise ChatGPT/Gemini/Manus sahi tools use karte hain sahi as per user query — mera AI bhi ek dum perfectly sahi tools use kare, user query samajhke."
+
+**Audit:** 12 sawaal live par `toolTrace` ke saath — 4 galat/jhootha mile:
+1. **Comparison** ("Tejas aur Vande Bharat me fark") → ek hi cheez ka KB answer (adhoora) → ab `isComparisonQuery` guard + 4 naye comparison KB entries (Tejas vs Vande Bharat · SL vs 3A · 2S vs SL · CC vs EC), KB-first dono-taraf check ke bina aage nahi badhta.
+2. **Station code** ("Amritsar station code kya hai") → generic KB definition chal rahi thi → `asksStationCode` guard → ab SEARCH_STATIONS tool → **ASR**.
+3. **Punctuality** ("12054 time par chalti hai ya late") → model date poochh raha tha → deterministic **routing hint** + rule 32 → GET_TRAIN_HISTORY.
+4. **Tool fail semantics** ("cancelled list" fail hone par bhi "koi train cancel nahi hui") → ab rule 32(c): fail = "list nahi mili", koi claim nahi.
++ **Plan** case: resolved date ("kal") dobara poochhna band (rule 31(f)).
++ "gadh ke nahi bataunga" phrasing poori tarah hatayi (server + src) → "bina verified data andaza nahi lagaunga".
++ Fare reply ka noisy suffix → "Sirf provider ka verified live data dikhaya gaya hai."
+
+**Prompt:** naya **rule 32 — SAHI TOOL CHUNO** (intent→tool table: TRACK_TRAIN/GET_TIMETABLE/GET_TRAIN_HISTORY/CHECK_AVAILABILITY/GET_FARE/SEARCH_TRAINS/JOURNEY_ANALYZE/RANK/FIND_ALTERNATIVE_TRAINS/FIND_CONNECTIONS/CHECK_PNR/GET_CANCELLED_TRAINS/SEARCH_STATIONS/GET_STATION_BOARD/GET_COACH_POSITION/WEB_SEARCH/KB).
+
+**Live verify @`825c70c`:** comparison 0.1s dono-taraf · station-code ASR 5.0s (SEARCH_STATIONS) · punctuality GET_TRAIN_HISTORY✓ (sach: cancelled run) · cancelled → honest "list abhi nahi mili" · plan kal ka → RANK_JOURNEY_OPTIONS (date dobara nahi poochha) · coach → sach + guidance.
+
+**Tests:** 120 files / **1314 ALL PASS**.
