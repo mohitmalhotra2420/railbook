@@ -152,11 +152,14 @@ export function scrubInternalNotes(reply: string): string {
   const noisyParen = /\([^()]*\b(?:live board|board check kiya|alag board)\b[^()]*\)/gi;
   /* Round-43k: model ke apne control/marker tokens user ko kabhi na dikhein ("[END]", "(END)", "[/NEXT]"…).
    * [NEXT] chips ke liye CLIENT ka marker hai (alag line me) — isliye yahan sirf END/DONE jaise markers. */
+  /* Round-43k: tool ke RAW keys/JSON fragment kabhi user tak na jayein ("Station checks: BCT onRoute: false",
+   * `"resolvedRoute"`, `{"code": ...}`) — user ko sirf saaf Hinglish jawab milta hai. */
+  const rawToolEcho = /\b(onRoute|stationChecks|resolvedRoute|toolTrace|dataPreview|failureReason|provider_failed|autoRoute|autoDate|webNote|executedArgs)\b|^\s*[{[]\s*"|"\s*:\s*("|\d|true|false|null)/i;
   const markerJunk = /\[\/?(?:end|done|eot|finish|stop)\]|\(\s*(?:end|done)\s*\)|<\/?\s*(?:end|done)\s*>|\[\/?(?:end|done)\]/gi;
   const trainsDekhe = /\b\d+\s*trains? dekhe\s*(?:\([^()]*\))?\.?/gi;
   const out = String(reply)
     .split("\n")
-    .filter((line) => !instructionRe.test(line))
+    .filter((line) => !instructionRe.test(line) && !rawToolEcho.test(line))
     .map((line) =>
       line
         .replace(noisyParen, "")

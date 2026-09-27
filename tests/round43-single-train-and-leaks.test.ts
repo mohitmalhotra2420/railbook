@@ -309,6 +309,12 @@ describe("Round-43k · shared route verification (tool ke andar, kisi bhi train 
     expect(scrubInternalNotes("12054 (Hw Janshatabdi) ASR → HW. [END]")).toBe("12054 (Hw Janshatabdi) ASR → HW.");
     expect(scrubInternalNotes("Jawab: 28 Sep CC WL16 · 2S AVL 235 (done)")).toBe("Jawab: 28 Sep CC WL16 · 2S AVL 235");
     expect(scrubInternalNotes("Seat status neeche hai.\n[NEXT] Book 12054 · CC => 12054 mein CC book krdo")).toContain("[NEXT]");
+    /* Raw tool JSON/user-facing reply me kabhi nahi (live leak: "Station checks: BCT onRoute: false"). */
+    const raw = "12951 Ndls Tejas Raj ka route MMCT → NDLS hai.\nStation checks: BCT onRoute: false | HW onRoute: false\nIsliye 12951 se Mumbai → Haridwar nahi ja sakte.";
+    const clean = scrubInternalNotes(raw);
+    expect(clean).not.toMatch(/onRoute|Station checks/);
+    expect(clean).toMatch(/MMCT → NDLS/);
+    expect(clean).toMatch(/nahi ja sakte/);
   });
 
   it("station tokens: postposition / class / booking shabd nikaal do", () => {
