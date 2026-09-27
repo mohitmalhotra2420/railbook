@@ -2185,6 +2185,18 @@ export function ensureBookingOffer(reply: string | null, userText: string | null
   return `${reply.trimEnd()}\n\nBook karna hai? Aap Confirm screen (ya card ke “Sabhi trains · Book →”) se khud confirm karenge — booking/payment main nahi karta. Bolo to aage badhaun.`;
 }
 
+/** Round-40b (user: "ek dum accurate answer"): KNOWLEDGE sawaal + curated KB entry → verified KB jawab
+ * hi do (model ki memory ya adhoore web-scrape se pehle; budget khatam hone par bhi). Live sawaal
+ * (seat/fare/status/PNR/booking/journey) isse bilkul nahi chhoote — wahan tools hi chalte hain. */
+function kbAuthoritativeRebound(userText: string): string | null {
+  if (liveDataQuestion(userText)) return null;
+  const kb = railKbAnswer(userText);
+  if (!kb) return null;
+  const kbText = kb.replace(/\(Ye general railway knowledge hai[^)]*\)\s*$/, "").trim();
+  if (!kbText) return null;
+  return `${kbText}\n\n(General railway knowledge — official/IRCTC se cross-check kar sakte hain.)`;
+}
+
 /** Trace/test ke liye: model ke raw args ko zod se guzar kar EXECUTED args nikaalo. */
 export function sanitizedArgs(name: string, raw: Record<string, unknown>): Record<string, unknown> {
   if (!APPROVED.includes(name as AgenticToolName)) return {};
@@ -2946,6 +2958,10 @@ export async function runAgenticTurn(input: {
 
   for (let step = 1; step <= MAX_STEPS; step++) {
     if (timeLeft() < 2500) {
+      const kbBudget = kbAuthoritativeRebound(input.text);
+      if (kbBudget) {
+        return { ok: true, reply: kbBudget, grounded: true, steps, modelUsed, modelFallbacks, latencyMs: Date.now() - startedAll, failureReason: "kb_authoritative" };
+      }
       if (steps.length && timeLeft() > -20000 && webRescueEligible(input.text, steps, { allowOkSteps: knowledgeQuestion(input.text) })) {
         const rescued = await webRescueAnswer(input.text, steps, steps.length + 1);
         if (rescued) {
@@ -3833,6 +3849,10 @@ export async function runAgenticTurn(input: {
       }
       /* Round-16o: koi tool succeed nahi hua aur general sawaal hai → web se
        * asli jawab (model ki memory nahi) — "provider se nahi mil" ke bajaye. */
+      const kbUngrounded = kbAuthoritativeRebound(input.text);
+      if (kbUngrounded) {
+        return { ok: true, reply: kbUngrounded, grounded: true, steps, modelUsed, modelFallbacks, latencyMs: Date.now() - startedAll, failureReason: "kb_authoritative" };
+      }
       if (webRescueEligible(input.text, steps)) {
         const rescued = await webRescueAnswer(input.text, steps, steps.length + 1);
         if (rescued) {
@@ -3877,12 +3897,11 @@ export async function runAgenticTurn(input: {
      * ka (us data wala) jawab hi chalta hai. */
     /* Round-40b: KB curated hai — knowledge-mode sawaal par web-scrape ke adhoore jawab se bhi PEHLE. */
     if (knowledgeMode) {
-      const kbAns = railKbAnswer(input.text);
-      if (kbAns) {
-        const kbText = kbAns.replace(/\(Ye general railway knowledge hai[^)]*\)\s*$/, "").trim();
+      const kbStory = kbAuthoritativeRebound(input.text);
+      if (kbStory) {
         return {
           ok: true,
-          reply: `${kbText}\n\n(General railway knowledge — official/IRCTC se cross-check kar sakte hain.)`,
+          reply: kbStory,
           grounded: true,
           steps,
           modelUsed, modelFallbacks, latencyMs: Date.now() - startedAll,
@@ -3902,7 +3921,11 @@ export async function runAgenticTurn(input: {
     };
   }
 
-  // Step budget kharch — honest deterministic summary.
+  // Step budget kharch — honest deterministic summary (KB-entry wale knowledge sawaal pehle).
+  const kbTail = kbAuthoritativeRebound(input.text);
+  if (kbTail) {
+    return { ok: true, reply: kbTail, grounded: true, steps, modelUsed, modelFallbacks, latencyMs: Date.now() - startedAll, failureReason: "kb_authoritative" };
+  }
   if (webRescueEligible(input.text, steps, { allowOkSteps: knowledgeQuestion(input.text) })) {
     const rescued = await webRescueAnswer(input.text, steps, steps.length + 1);
     if (rescued) {
