@@ -2073,6 +2073,10 @@ function systemPrompt(
     if (isComparisonQuery(t)) {
       lines.push(`TOOL HINT: comparison sawaal hai — DONO cheezon ka data laao (KB/WEB_SEARCH) aur bullet-wise compare karo; ek taraf ka jawab adhoora hai.`);
     }
+    if (/\b(ke\s*(?:a)?la[wo]a|ke\s*ilawa|ilawa|alaava|other than|besides|alternatives?|aur\s*(?:koi|options?|trains?\s*batao)|doosri\s*(?:gaadi|train))\b/i.test(t)) {
+      const tn = (/\b(\d{4,5})\b/.exec(t) ?? [])[1];
+      lines.push(`TOOL HINT: ye "us train ke alawa aur options" ka sawaal hai — pehla tool call FIND_ALTERNATIVE_TRAINS${tn ? ` (train_number=${tn})` : ""} ho (purani list dobara nahi, usi route ke aage-peeche wali trains). Station ka naam/code dobara MAT poochho — jo user ne diya hai wahi final hai.`);
+    }
     return lines.length ? lines.join("\n") : null;
   })();
   const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"] as const;
@@ -3371,7 +3375,7 @@ export async function runAgenticTurn(input: {
             ok: false,
             source: null,
             summary:
-              "PASSENGERS MISSING — kitne log travel kar rahe hain ye pata nahi. Seat availability / journey plan party-size par depend karta hai (2 logon ke liye AVL 1 kaafi nahi), isliye ye tool bina passengers ke nahi chalega. 1 ASSUME MAT KARO. Reply mein sirf poochho: kitne passengers (1–6)? (route/date jo pata hai wo confirm karte hue). User number de to isi tool ko `passengers` arg ke saath dobara call karo.",
+              "PASSENGERS MISSING — kitne log travel kar rahe hain ye pata nahi. Seat availability / journey plan party-size par depend karta hai (2 logon ke liye AVL 1 kaafi nahi), isliye ye tool bina passengers ke nahi chalega. 1 ASSUME MAT KARO. Reply mein SIRF poochho: kitne passengers (1–6)? — route/date/class jo pata hai (ya server resolve kar chuka hai) wo DOBARA MAT POOCHHO; sirf passengers ka jawab aate hi wahi tool dobara chalao. User number de to isi tool ko `passengers` arg ke saath dobara call karo.",
             data: null,
             rejected: "passengers_required",
           };

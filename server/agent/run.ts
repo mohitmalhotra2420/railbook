@@ -29,6 +29,7 @@ import { parseStatusDate } from "../understand/legacy-dates.js";
 import {
   agenticConfigured,
   ensureBookingOffer,
+  executeApprovedTool,
   runAgenticTurn,
   webRescueEligible,
   type AgentTrainRow,
@@ -1462,6 +1463,134 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
         agenticFailureReason: null,
         grounded: true,
       };
+    }
+  }
+
+  /* ── Round-42 (27 Sep 2026, user: "jaise ChatGPT… sahi tools use karo user query samajhke"): BOOKING
+   * HUKM ("<train> mein 2S book krdo kal ke liye") par model kai baar sirf train-info tool chala kar
+   * khali summary de deta tha aur passenger form khulta hi nahi tha. Ab booking order par SERVER hi sahi
+   * tools chalata hai (CHECK_AVAILABILITY + GET_FARE — real data), route train ke timetable se lock karta
+   * hai, aur date/class naming se target bana kar deta hai — client ka form resolver isi se form kholta
+   * hai. Koi bhi number khud se nahi — sab provider ka. (R34: "bare Book <train-no> = hukm → seedha form".) */
+  {
+    const t = String(req.text ?? "");
+    const bookOrder = /\b(book\s*kr?do|book\s*kar\s*do|book\s*kardo|book\s*kar|booking\s*kar|ticket\s*book|book\s+(?:a\s+)?ticket|book\s*it)\b/i.test(t);
+    const tnum = (/\b(\d{4,5})\b/.exec(t) ?? [])[1] ?? null;
+    if (bookOrder && tnum && !/\b(cancel|refund|pnr|status)\b/i.test(t)) {
+      const detBook = await deterministicUnderstand(req.text, {
+        now: req.now ? new Date(req.now) : undefined,
+        lastAsked: req.lastAsked ?? null,
+        known: { from: seeded.origin, to: seeded.destination, date: seeded.date, passengerCount: seeded.passengers },
+      });
+      const bootCtx = { ...emptyAgentContext(), ...(req.context ?? {}) };
+      const cls = (t.match(/\b(1A|2A|3A|3E|2S|SL|CC|EC|FC|1E)\b/i) ?? [])[1]?.toUpperCase() ?? bootCtx.classCode ?? detBook.classCodes?.[0] ?? null;
+      const bDate = bootCtx.date ?? detBook.date ?? null;
+      let bFrom = bootCtx.origin?.code ?? null;
+      let bTo = bootCtx.destination?.code ?? null;
+      let tName: string | null = bootCtx.selectedTrainName ?? null;
+      if (!bFrom || !bTo || !tName) {
+        try {
+          const sched = await routedSchedule(tnum);
+          const stops = sched?.schedule && "stops" in sched.schedule ? sched.schedule.stops ?? [] : [];
+          if (stops.length) {
+            bFrom = bFrom ?? stops[0].code ?? null;
+            bTo = bTo ?? stops[stops.length - 1].code ?? null;
+            tName = tName ?? (sched.schedule && "trainName" in sched.schedule ? (sched.schedule.trainName as string) ?? null : null);
+          }
+        } catch {
+          /* timetable nahi mili — route ke bina hi aage (neeche honest handling) */
+        }
+      }
+      const outCtx: AgentContext = {
+        ...bootCtx,
+        origin: bFrom ? { code: bFrom, name: tName ?? bFrom, city: bFrom } : bootCtx.origin,
+        destination: bTo ? { code: bTo, name: bTo, city: bTo } : bootCtx.destination,
+        date: bDate,
+        dateProvided: Boolean(bDate),
+        classCode: cls ?? bootCtx.classCode,
+        intent: "BOOK_TRAIN",
+        selectedTrainNumber: tnum,
+        selectedTrainName: tName ?? bootCtx.selectedTrainName,
+        lastTool: "getAvailability",
+        lastToolOk: null,
+        bookingStage: "results",
+      };
+      const baseResp = {
+        nlu: detBook,
+        source: "nlu" as const,
+        context: outCtx,
+        tool: null as string | null,
+        toolOk: null as boolean | null,
+        interrupt: false,
+        resumeAsk: null,
+        resumeText: null,
+        trains: null,
+        confirmBook: false,
+        missingFields: [] as string[],
+        modelUsed: null as string | null,
+        latencyMs: 0,
+        failureReason: "booking_order_deterministic" as string | null,
+        engine: "deterministic" as const,
+        agenticFailureReason: null as string | null,
+        grounded: true,
+      };
+      if (!bDate) {
+        return {
+          ...baseResp,
+          reply: `${tnum}${tName ? ` ${tName}` : ""}${bFrom && bTo ? ` (${bFrom} → ${bTo})` : ""} ki booking ke liye date bata do — aaj, kal, parso ya tareekh. (Class${cls ? ` ${cls}` : ""} aur baaki sab yaad rakhunga; passenger details ka form agle step me.)`,
+          nextActions: [
+            { label: "Aaj ke liye", utterance: `${tnum} mein ${cls ?? "2S"} book krdo aaj ke liye`, primary: true },
+            { label: "Kal ke liye", utterance: `${tnum} mein ${cls ?? "2S"} book krdo kal ke liye` },
+          ],
+        } as never;
+      }
+      const argsBase = { train_number: tnum, date: bDate, origin: bFrom ?? undefined, destination: bTo ?? undefined } as Record<string, unknown>;
+      const okList: string[] = [];
+      let availStep: ToolTraceStep | null = null;
+      let fareStep: ToolTraceStep | null = null;
+      try {
+        const avArgs = { ...argsBase, ...(cls ? { class_code: cls } : {}) };
+        const av = (await executeApprovedTool("CHECK_AVAILABILITY", avArgs as never, { userText: req.text })) as unknown as { ok: boolean; summary: string };
+        availStep = { step: 1, tool: "CHECK_AVAILABILITY", args: avArgs, ok: av.ok, source: "provider", summary: String(av.summary ?? ""), latencyMs: 0 } as ToolTraceStep;
+        if (av.ok) okList.push("CHECK_AVAILABILITY");
+      } catch {
+        /* tool fail — neeche honest handling */
+      }
+      if (cls) {
+        try {
+          const fArgs = { ...argsBase, class_code: cls };
+          const fr = (await executeApprovedTool("GET_FARE", fArgs as never, { userText: req.text })) as unknown as { ok: boolean; summary: string };
+          fareStep = { step: 2, tool: "GET_FARE", args: fArgs, ok: fr.ok, source: "provider", summary: String(fr.summary ?? ""), latencyMs: 0 } as ToolTraceStep;
+          if (fr.ok) okList.push("GET_FARE");
+        } catch {
+          /* fare fail — availability se kaam chalega */
+        }
+      }
+      const availTxt = availStep?.ok ? availStep.summary.replace(/\s+/g, " ").trim() : null;
+      const fareTxt = fareStep?.ok ? fareStep.summary.replace(/\s+/g, " ").trim() : null;
+      const routeTxt = bFrom && bTo ? `${bFrom} → ${bTo}` : "";
+      const head = `${tnum}${tName ? ` ${tName}` : ""}${routeTxt ? ` (${routeTxt})` : ""} · ${bDate}${cls ? ` · ${cls}` : ""}`;
+      let reply: string;
+      const nextActions: { label: string; utterance: string; primary?: boolean }[] = [];
+      if (!cls && availTxt) {
+        reply = `${head} — kaunsi class me book karun?\n${availTxt}`;
+        const classRows = [...String(availStep?.summary ?? "").matchAll(/\b(1A|2A|3A|3E|2S|SL|CC|EC|FC)\b/gi)].map((m) => m[1].toUpperCase());
+        for (const c of [...new Set(classRows)].slice(0, 3)) {
+          nextActions.push({ label: `Book ${tnum} · ${c}`, utterance: `${tnum} mein ${c} book krdo ${bDate}`, primary: nextActions.length === 0 });
+        }
+      } else if (availTxt || fareTxt) {
+        reply = `${head} ki booking — provider ka live data:\n${availTxt ? `• ${availTxt}` : ""}${fareTxt ? `${availTxt ? "\n" : ""}• ${fareTxt}` : ""}\nPassenger details ka form khol raha hoon — naam/age bhar kar aage badho. (Booking/payment sirf aapke confirm par.)`;
+        nextActions.push({ label: `Book ${tnum}${cls ? ` · ${cls}` : ""}`, utterance: `${tnum} mein ${cls ?? "2S"} book krdo ${bDate}`.replace(/\s+/g, " "), primary: true });
+      } else {
+        reply = `${head} ki booking ke liye seat/fare data abhi provider se nahi mil pa raha — bina verified data main aage nahi badhaunga. Thodi der baad phir bolo, ya app ke "Sabhi trains · Book →" se class chun lo.`;
+      }
+      return {
+        ...baseResp,
+        reply,
+        toolOk: okList.length > 0,
+        toolTrace: [availStep, fareStep].filter(Boolean) as ToolTraceStep[],
+        nextActions,
+      } as never;
     }
   }
 
