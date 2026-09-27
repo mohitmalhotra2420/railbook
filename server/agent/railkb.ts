@@ -63,6 +63,11 @@ const ENTRIES: KbEntry[] = [
       "Premium Tatkal dynamic pricing wala tatkal quota hai — demand ke hisaab se base fare se kaafi zyada ho sakta hai. Normal tatkal ki tarah 1 din pehle khulta hai, par koi refund nahi hota cancellation par (rules IRCTC ke page se verify karein).",
   },
   {
+    keys: ["ludhiana platform", "ludhiana junction platform", "ldh platform", "ludhiana station platform", "ludhiana me kitne platform", "ludhiana kitne platform"],
+    answer:
+      "Ludhiana Junction (LDH) me 7 platforms hain (Wikipedia aur station guides ke hisaab se; 18 tracks, Northern Railway / Firozpur division). Sabse kam platform wale bade stations me nahi — balki Punjab ka sabse vyast junction hai, 200+ trains roz rukti hain. Aapke shehar ka station hai — kuch aur jaanna ho (kaunsi train, seat, live status) to poochh lo.",
+  },
+  {
     keys: ["sabse purana station", "purana railway station", "oldest station", "pehla station india", "first railway station"],
     answer:
       "India ka pehla railway station Bori Bunder (Mumbai) tha — 16 April 1853 ki pehli train wahin se chali (aaj wahi jagah CSMT/Chhatrapati Shivaji Maharaj Terminus hai). Aaj bhi chalu sabse purane station buildings me Royapuram (Chennai, 1856) aur Howrah (1854) aate hain. 'Sabse purana' ka jawab is baat par depend karta hai ki pehla (1853) ya sabse purana surviving building (1856) poochha ja raha ho.",
@@ -171,7 +176,7 @@ const ENTRIES: KbEntry[] = [
   {
     keys: ["platform kitne", "kitne platform", "platform ki jaankari", "platform number"],
     answer:
-      "Station ke platform ki exact count mere live railway data me nahi hoti (provider seat/fare/train data dete hain, platform count nahi). Main aapko station ka naam/code/city, wahan se chalne wali trains, seat/fare/live status de sakta hoon; platform ki jaankari ke liye Indian Railways ka station page (indiarailinfo) dekh sakte hain.",
+      "Station ke platform ki count mere live seat/fare tools me nahi aati — par main aapko bata sakta hoon: station ka naam/code/city, wahan se chalne wali trains, seat/fare/live status; aur platform/parking jaise station-facts ke liye Hindi/English me poochho ya Indian Railways ke station page (indiarailinfo) dekh lein. Ludhiana Junction ka apna count mere paas hai — 7 platforms.",
   },
   {
     keys: ["rac kya", "rac meaning", "rac kaise", "rac seat", "rac kab confirm", "reservation against cancellation"],

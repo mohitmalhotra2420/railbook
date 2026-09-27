@@ -3875,7 +3875,8 @@ export async function runAgenticTurn(input: {
      * is sawaal ka verified jawab hai (Vivek route, pet rule, pehli train, zones…), to wahi user ko do —
      * model ki memory ke galat number (jaise "4273 km") user tak na jaayein. Tool data aaya ho to model
      * ka (us data wala) jawab hi chalta hai. */
-    if (knowledgeMode && !steps.some((st) => st.ok)) {
+    /* Round-40b: KB curated hai — knowledge-mode sawaal par web-scrape ke adhoore jawab se bhi PEHLE. */
+    if (knowledgeMode) {
       const kbAns = railKbAnswer(input.text);
       if (kbAns) {
         const kbText = kbAns.replace(/\(Ye general railway knowledge hai[^)]*\)\s*$/, "").trim();

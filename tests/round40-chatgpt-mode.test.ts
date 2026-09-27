@@ -54,7 +54,7 @@ describe("Round-40 · LIVE vs KNOWLEDGE mode (jadi fix)", () => {
 
   it("KB authoritative: knowledge mode + koi tool data nahi → curated KB jawab", () => {
     const a = read("server/agent/agentic.ts");
-    expect(a).toContain("if (knowledgeMode && !steps.some((st) => st.ok))");
+    expect(a).toContain("if (knowledgeMode) {");
     expect(a).toContain('failureReason: "kb_authoritative"');
   });
 
