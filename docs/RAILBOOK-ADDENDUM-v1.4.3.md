@@ -918,3 +918,24 @@ User (R38 ke baad, wahi demand dobara): *"abh yeh AI ko samjhna chahiye tha … 
 **Final battery (@`26d9543`, 25 sawaal):** **17/25** (R42 pre-fix 13/24 · R43 mid 16/25). ✅ name-picker · code · arrival-at · stops · **late-simple** · where-messy · seat ×3 · avail-specific · avail-one-train · fare · rank · book ×2 · kb ×2. ❌ 8 me se **5 provider-down/judge-limitation** (board ✗✗✗ · pnr ✗ · coach ✗ — provider; name-info/KB 0.2s — probe tool-less KB answer ko ❌ ginta hai jabki jawab sahi hai) aur **3 sahi clarification** (vacant/connections — multi-station city ka sawaal, user ke rule ke mutabiq guess nahi; partial — train/date/class chahiye). Page scope note: 27 Sep 2026 ko 12054 cancelled hai — isliye booking/seat flows me agla din (28 Sep) ka real data aata hai.
 
 **Zip:** `RailBook/RailBook-FULL-2026-09-27.zip` (55,221,076 B) · preview: `RailBook/previews/RailBook-round43-2026-09-27.html` (5,187 B).
+
+
+## §9.35 — Round-43k (27 Sep 2026): general tool-level route verification (user: "ese kitne rules fix kroge?")
+
+**User (27 Sep):** "19326 to haridwar jaati hi nahi… ChatGPT ne sahi answer diya. Tum rules fix kar rahe ho — kya AI ko khud se nahi sochna chahiye? Ese kitne rules fix kroge?" → acceptance: per-question rule patching band; verification khud tool ke ANDAR general ho (kisi bhi train × station par), model/tool usse bypass na kar sake.
+
+**Naya shared module `server/agent/routeCheck.ts` (ek hi source of truth):**
+- `candidateStationTokens(text, trainNumber)` — sirf wahi tokens jinme station hone ka dum ho (postposition "ko/se/par/mein", class codes, booking shabd, aur train-naam ke aam shabd "rajdhani/shatabdi/express…" hata kar).
+- `checkStationsOnRoute(train, {origin?, destination?}, userText?)` → pehle dinaye gaye station, warna user ke tokens; match CODE se, code na ho to NAAM/SHEHAR se (MMCT "Mumbai Central" vs purana BCT — ek hi station, jhoothi "nahi jaati" nahi); route me na ho to `bad { code, side, first, last }`; timetable na mile to koi claim nahi (user ka segment waise hi aage).
+- `normalizeRouteSegment(stops, seg)` — pehla/aakhri stop dohraana provider ko galat lagta hai (live: 12054 `destination=HW` → provider ne "HW→HW" maan kar koi data nahi diya); redundant side drop, aur same-station dono taraf par koi segment claim nahi.
+- `routeMismatchMessage(train, bad, forModel)` — tool ka honest fail text (+ model ke liye exact Hinglish wording).
+
+**Wiring:** `agentic.ts` CHECK_AVAILABILITY + GET_FARE (route check + normalized segment) · `run.ts` deterministic single-train handler (wahi checker, duplicate stop-word list hata di). Station train ke route me nahi → tool `ok:false` + `route_mismatch` data; model ise bypass nahi kar sakta.
+
+**False-positive guards (isi round me pakde gaye):**
+- "12138 … **ko** LDH se CSMT" me "ko" station search se ERN ban gaya tha → postposition stopwords + search confidence gate (exact code, ya token ≥3 akshar; fuzzy top-result sirf ≥5 akshar par).
+- NLU se destination already set ho to wahi station dobara origin na bane (HW→HW trap).
+
+**Live-path proof (deterministic handler, /tmp/dbg-gen2.mts):** `19326 haridwar…` → "HW nahi jaati — route ASR → INDB" **3.5s** (pehle 45.7s timetable-info) · `12951 mumbai rajdhani haridwar…` → "HW nahi jaati — route MMCT → NDLS" **3.5s** (pehle 59.3s) · `12054 haridwar…` → real seat data (27 Sep cancelled · 28 Sep CC WL16 ₹650 · 2S AVL 235 ₹205) **10.1s** · `19326 indore…` → real N/A board **16.8s**. Tool-level (executeApprovedTool): 19326+{ASR→HW} fail · **12951+{NDLS→HW} fail (general proof, koi train-specific rule nahi)** · 12054+{ASR→HW} ok real data · 19326+{ASR→SRE} provider-honest.
+
+**Tests:** `tests/round43-single-train-and-leaks.test.ts` me naya describe (tokens/stopWords, redundant-segment drop, mock route par 19326 HW fail + Indore ok) — full suite **122 files / 1339 tests pass** (`/tmp/r43k-suite2.log`).

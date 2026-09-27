@@ -25,6 +25,7 @@ import {
   type AgentToolName,
 } from "./context.js";
 import { executeTool, livePositionLabel, type ToolName } from "./tools.js";
+import { checkStationsOnRoute, normalizeRouteSegment } from "./routeCheck.js";
 import { parseStatusDate } from "../understand/legacy-dates.js";
 import {
   agenticConfigured,
@@ -1497,70 +1498,23 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
         });
         const avCtx = { ...emptyAgentContext(), ...(req.context ?? {}) };
         const clsAsk = (t.match(/\b(1A|2A|3A|3E|2S|SL|CC|EC|FC|1E)\b/i) ?? [])[1]?.toUpperCase() ?? null;
-        /* User ne apna segment bola ho ("ludhiana se hw") to wahi boarding/destination maano —
-         * provider se us segment ka data maango (poora route nahi). NLU kabhi station na pakde
-         * (jaise "19326 hw ke liye seat check krna") to khud dhoondho — par sirf TAB jab token sach
-         * me koi station ho (exact code/naam), warna "seat"/"check" jaisa shabd station ban jaata. */
-        const stopWords = new Set([
-          "seat", "seats", "check", "krna", "karna", "karo", "kar", "ke", "ki", "ka", "liye", "liy",
-          "wala", "wali", "me", "mein", "hai", "hain", "kya", "batao", "bata", "bataiye", "dekh", "dekhna",
-          "dikhao", "train", "gaadi", "number", "no", "tak", "kal", "aaj", "parso", "parson", "subah",
-          "shaam", "raat", "class", "classes", "book", "booking", "kaise", "kitni", "kitna", "abhi",
-          "kahan", "chahiye", "milegi", "milega", "khali", "khaali", "please", "haan", "ha", "na", "nahi",
-          "1a", "2a", "3a", "3e", "2s", "sl", "cc", "ec", "fc", "1e",
-        ]);
-        const schedAsk = await routedSchedule(tnum).catch(() => null);
-        const askStops = schedAsk && schedAsk.schedule && "stops" in schedAsk.schedule ? schedAsk.schedule.stops ?? [] : [];
-        const inAskRoute = (code: string) => askStops.some((st) => String(st.code ?? "").toUpperCase() === code.toUpperCase());
-        let askFrom = (detAv as unknown as { from?: { code?: string } | null }).from?.code ?? null;
-        let askTo = (detAv as unknown as { to?: { code?: string } | null }).to?.code ?? null;
-        if (!askFrom && !askTo) {
-          const cands = t.toLowerCase().split(/[^a-z]+/).filter(Boolean)
-            .filter((w) => w !== String(tnum).toLowerCase() && w.length >= 2 && w.length <= 12 && !stopWords.has(w))
-            .slice(0, 3);
-          for (const cand of cands) {
-            try {
-              /* Pehle route-stops se seedha match (code ya naam ka pehla token). */
-              const direct = askStops.find(
-                (st) => String(st.code ?? "").toUpperCase() === cand.toUpperCase() || String(st.name ?? "").toLowerCase().split(/[^a-z]+/)[0] === cand,
-              );
-              if (direct) {
-                const code = String(direct.code ?? "").toUpperCase();
-                /* Station route me mila — kaunsa side? Pehla stop = boarding, aakhri stop = destination;
-                 * warna phrase se ("ke liye/tak/jaana" = destination). Warna "19326 indore ke liye"
-                 * boarding ban jaata aur sawaal ulta ho jaata. */
-                const idx = askStops.findIndex((st) => String(st.code ?? "").toUpperCase() === code);
-                const looksDest = /\b(ke liye|k liye|tak|jaana|jana|destination|pahunch)\b/i.test(t);
-                if (idx === 0 && !/\b(ke liye|tak|jaana)\b/i.test(t)) askFrom = code;
-                else if (idx === askStops.length - 1 || looksDest) askTo = code;
-                else if (!askFrom) askFrom = code;
-                else askTo = code;
-                break;
-              }
-              /* Route me nahi — dekho token asli station hai ya koi aam shabd (guess nahi). */
-              const found = await routedStationSearch(cand).catch(() => null);
-              const exact = (found?.stations ?? []).find((st) => st.code.toUpperCase() === cand.toUpperCase());
-              if (exact) {
-                askTo = exact.code;
-                break;
-              }
-            } catch {
-              /* candidate skip */
-            }
-          }
-        }
-        /* Agar user ka station is train ke route me hi nahi (19326 Haridwar nahi jaati) → saaf bol do,
-         * poora route-board/N-A rows mat dikhao (ChatGPT jaisa sahi jawab). */
-        if ((askFrom && !inAskRoute(askFrom)) || (askTo && !inAskRoute(askTo))) {
-          const badCode = askTo && !inAskRoute(askTo) ? askTo : askFrom!;
-          const badSide = askTo && !inAskRoute(askTo) ? ("to" as const) : ("from" as const);
-          const first = askStops[0];
-          const last = askStops[askStops.length - 1];
-          const nameHit = (await routedStationSearch(badCode).catch(() => null))?.stations?.find((x) => x.code.toUpperCase() === badCode.toUpperCase()) ?? null;
-          const asked = `${badCode}${nameHit?.name && nameHit.name.toUpperCase() !== badCode ? ` (${nameHit.name})` : ""}`;
-          const tname2 = avCtx.selectedTrainName ?? (schedAsk?.schedule && "trainName" in schedAsk.schedule ? String((schedAsk.schedule as { trainName?: string }).trainName ?? "") : "");
+        /* ── Round-43k: station check EK shared jagah se (routeCheck.ts) — wahi jo tool ke andar chalti hai
+         * (CHECK_AVAILABILITY/GET_FARE). Isliye ye deterministic handler aur model path kabhi alag baat
+         * nahi bolte: station train ke timetable route me nahi → saaf correction + sahi station ka sawaal,
+         * koi N/A board nahi (user screenshot: "19326 hw ke liye seat check krna"). Station NLU se na
+         * mile to bhi user ke asli tokens se (naam/code) khud dhoondha jaata hai. */
+        const detFrom = (detAv as unknown as { from?: { code?: string } | null }).from?.code ?? null;
+        const detTo = (detAv as unknown as { to?: { code?: string } | null }).to?.code ?? null;
+        const routeChk = await checkStationsOnRoute(tnum, { origin: detFrom, destination: detTo }, t);
+        const askFrom = routeChk.origin ?? null;
+        const askTo = routeChk.destination ?? null;
+        if (routeChk.bad) {
+          const bad = routeChk.bad;
+          const nameHit = (await routedStationSearch(bad.code).catch(() => null))?.stations?.find((x) => x.code.toUpperCase() === bad.code.toUpperCase()) ?? null;
+          const asked = `${bad.code}${nameHit?.name && nameHit.name.toUpperCase() !== bad.code ? ` (${nameHit.name})` : ""}`;
+          const schedBad = await routedSchedule(tnum).catch(() => null);
+          const tname2 = avCtx.selectedTrainName ?? (schedBad?.schedule && "trainName" in schedBad.schedule ? String((schedBad.schedule as { trainName?: string }).trainName ?? "") : "");
           const label2 = `${tnum}${tname2 ? ` (${tname2})` : ""}`;
-          const where2 = `${first?.code ?? "?"} → ${last?.code ?? "?"}`;
           const ctxBad = { ...emptyAgentContext(), ...(req.context ?? {}) };
           ctxBad.selectedTrainNumber = tnum;
           ctxBad.selectedTrainName = tname2 || ctxBad.selectedTrainName;
@@ -1573,9 +1527,9 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
             tool: null,
             toolOk: null,
             reply:
-              `${label2} ke timetable me ${asked} nahi milta — is train ka route ${where2} hai, aur ${asked} us route me nahi hai.\n\n` +
+              `${label2} ${asked} nahi jaati — uska route ${bad.first} → ${bad.last} hai, aur ${asked} us route me nahi hai.\n\n` +
               `Ye train kis station tak chahiye? Sahi station bata do, main usi ka seat status check kar dunga. ` +
-              `${badSide === "to" ? `${asked} ke liye` : "Is station se"} jaane wali trains bhi bata sakta hoon.\n\n` +
+              `${bad.side === "destination" ? `${asked} ke liye` : "Is station se"} jaane wali trains bhi bata sakta hoon.\n\n` +
               `(Jawab ${label2} ke asli timetable/stops se verify kiya — andaza nahi.)`,
             interrupt: false,
             resumeAsk: null,
@@ -1592,7 +1546,7 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
             toolTrace: [],
             nextActions: [
               { label: `${tnum} ka route`, utterance: `${tnum} ka route batao`, primary: false },
-              { label: `${badCode} ke liye trains`, utterance: `${first?.code ?? "ASR"} se ${badCode} jaane wali trains batao kal`, primary: false },
+              { label: `${bad.code} ke liye trains`, utterance: `${bad.first} se ${bad.code} jaane wali trains batao kal`, primary: false },
             ],
           } as never;
         }
@@ -1618,16 +1572,22 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
         /* Round-43c: user ne ek hi date boli ho ("aaj ki") aur us din train cancelled/WL-only ho to
          * ChatGPT jaisa agla din bhi dikhao (27 Sep cancelled → 28 Sep CC WL16 · 2S AVL 294) — warna
          * aaj ka single-date jawab deterministic hi nahi ban paata aur route-board par chala jaata hai. */
+        /* Round-43k: jo station train ka pehla/aakhri stop hi hai wo arg dena bekaar hai (provider use ulta
+         * samajh leta hai — 12054 par "HW→HW" ban gaya tha). Tool khud bhi normalize karta hai, par call
+         * sasti rahe isliye yahin skip. */
+        const segReq = normalizeRouteSegment(routeChk.stops, { origin: askFrom, destination: askTo });
+        const segFrom = segReq.origin ?? null;
+        const segTo = segReq.destination ?? null;
         const queryDate = async (d: string): Promise<void> => {
           try {
-            const avArgs = { train_number: tnum, date: d, ...(askFrom ? { origin: askFrom } : {}), ...(askTo ? { destination: askTo } : {}) };
+            const avArgs = { train_number: tnum, date: d, ...(segFrom ? { origin: segFrom } : {}), ...(segTo ? { destination: segTo } : {}) };
             const r = (await executeApprovedTool("CHECK_AVAILABILITY", avArgs as never, { userText: req.text })) as unknown as { ok: boolean; summary: string; data: unknown; source: string | null };
             stepsOut.push({ step: stepsOut.length + 1, tool: "CHECK_AVAILABILITY", args: avArgs, ok: r.ok, source: r.source ?? "provider", summary: String(r.summary ?? ""), latencyMs: 0, dataPreview: r.data ? JSON.stringify(r.data).slice(0, 380) : undefined } as ToolTraceStep);
             if (!r.ok) return;
             okAny = true;
             const data = (r.data ?? {}) as { classes?: { code?: string; status?: string; seats?: number | null; rac?: number | null; waitlist?: number | null; fare?: number | null; note?: string | null }[]; resolvedRoute?: { origin?: string; destination?: string } };
-            from = askFrom ?? from ?? data.resolvedRoute?.origin ?? null;
-            to = askTo ?? to ?? data.resolvedRoute?.destination ?? null;
+            from = segFrom ?? askFrom ?? from ?? data.resolvedRoute?.origin ?? null;
+            to = segTo ?? askTo ?? to ?? data.resolvedRoute?.destination ?? null;
             const rows = (data.classes ?? []).filter((c) => c.code);
             if (rows.some((c) => /^(AVAILABLE|RAC)$/i.test(String(c.status ?? "")))) goodAny = true;
             if (rows.some((c) => /NOT_AVAILABLE|N\/A/i.test(String(c.status ?? "")))) sawNka = true;

@@ -11,6 +11,7 @@ import { describe, it, expect } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import { asksSingleTrainAvailability, scrubInternalNotes } from "../server/agent/answerMode";
+import { candidateStationTokens, checkStationsOnRoute, normalizeRouteSegment } from "../server/agent/routeCheck";
 import { runAgent } from "../server/agent/run";
 import { setRailcoreFetch } from "../server/railway/railcore";
 import { setScrapeFetch } from "../server/railway/webscrape";
@@ -261,8 +262,53 @@ describe("Round-43e · station route me nahi → honest correction (board nahi) 
   it("provider ka route data ho tab hi 'nahi milta' claim (warna normal flow)", () => {
     const r = read("server/agent/run.ts");
     expect(r).toContain("single_train_station_not_in_route");
-    expect(r).toContain("stopWords");
-    expect(r).toContain("askStops");
+    /* Round-43k (user: 'ese kitne rules fix kroge?'): verification EK jagah — run.ts apna stop-word list
+     * ya route check DUPLICATE nahi rakhta, shared checker use karta hai (wahi jo tool ke andar chalta hai). */
+    expect(r).toContain("checkStationsOnRoute");
+    expect(r).toContain("normalizeRouteSegment");
+    const routeCheck = read("server/agent/routeCheck.ts");
+    expect(r).not.toContain("const stopWords = new Set(");
+    expect(routeCheck).toContain("ROUTE_ASK_STOPWORDS");
+    expect(read("server/agent/agentic.ts")).toContain("checkStationsOnRoute");
+  });
+});
+
+/* ── Round-43k: general verification — kisi bhi train × station par, aur false-positive ka koi mauka nahi.
+ * User: "ese kitne rules fix kroge? AI ko khud verify karna chahiye." Isliye ye tests tool ke ANDAR ki
+ * shared verification ke hain: (a) postposition/class/booking shabd station nahi bante, (b) route ka
+ * pehla/aakhri stop redundant arg nahi banta (12054 'HW→HW' provider-bug), (c) asli station route me
+ * nahi to honest fail — general, kisi ek train/station par hardcoded nahi. */
+describe("Round-43k · shared route verification (tool ke andar, kisi bhi train × station par)", () => {
+  it("station tokens: postposition / class / booking shabd nikaal do", () => {
+    const toks = candidateStationTokens("12138 mein SL 2026-10-02 ko LDH se CSMT 1 passenger ke liye seat hai?", "12138");
+    expect(toks).toContain("ldh");
+    expect(toks).toContain("csmt");
+    for (const bad of ["ko", "se", "mein", "sl", "passenger", "seat", "ke", "liye", "hai", "12138"]) expect(toks, `${bad} station token nahi hona chahiye`).not.toContain(bad);
+    /* Train ke naam wale shabd bhi station nahi (12951 mumbai RAJDHANI haridwar). */
+    expect(candidateStationTokens("12951 mumbai rajdhani haridwar ke liye seat check krna", "12951")).toEqual(["mumbai", "haridwar"]);
+  });
+
+  it("redundant segment arg drop: aakhri stop = poori route, aur 'X→X' par koi claim nahi", () => {
+    const stops = [{ code: "ASR" }, { code: "UMB" }, { code: "HW" }];
+    expect(normalizeRouteSegment(stops, { destination: "HW" })).toEqual({});            /* == last stop */
+    expect(normalizeRouteSegment(stops, { origin: "ASR" })).toEqual({});                /* == first stop */
+    expect(normalizeRouteSegment(stops, { origin: "HW", destination: "HW" })).toEqual({});
+    expect(normalizeRouteSegment(stops, { origin: "UMB", destination: "HW" })).toEqual({ origin: "UMB" });
+    expect(normalizeRouteSegment(stops, { origin: "ASR", destination: "UMB" })).toEqual({ destination: "UMB" });
+  });
+
+  it("19326 par Haridwar nahi (mock route) — fail + exact route bataye; 'HW' code aur naam dono", async () => {
+    inRouteMock();
+    const byCode = await checkStationsOnRoute("19326", { destination: "HW" }, "19326 hw ke liye seat check krna");
+    expect(byCode.bad?.code).toBe("HW");
+    expect(byCode.bad?.first).toBe("ASR");
+    expect(byCode.bad?.last).toBe("INDB");
+    const byName = await checkStationsOnRoute("19326", {}, "19326 haridwar ke liye seat check krna");
+    expect(byName.bad?.code).toBe("HW");
+    /* Route wala station (Indore = aakhri stop) par koi mismatch nahi — sirf redundant arg drop. */
+    const ok = await checkStationsOnRoute("19326", {}, "19326 indore ke liye seat check krna");
+    expect(ok.bad).toBeUndefined();
+    expect(ok.destination).toBe("INDB");
   });
 });
 

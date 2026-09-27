@@ -184,3 +184,8 @@ export function asksSingleTrainAvailability(text: string): boolean {
   if (/\b(sabse|kaunsi|kounsi|sabhi|sab\s+trains|alawa|ilaava|options?|doosri|aur\s+trains?|alternatives?)\b/.test(t)) return false;
   return true;
 }
+
+/* Round-43k: station-token helper ab ek shared module me hai (agentic tool + deterministic handler dono
+ * wahi use karte hain) — yahan se re-export, taaki purane imports na tootein. */
+export { ROUTE_ASK_STOPWORDS, candidateStationTokens, checkStationsOnRoute, routeMismatchMessage } from "./routeCheck.js";
+export type { RouteStationBad, RouteStationCheck } from "./routeCheck.js";

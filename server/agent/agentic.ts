@@ -36,6 +36,7 @@ import {
 } from "../railway/router.js";
 import { scrapeTrainFactsWeb, webSourceLabel } from "../railway/webscrape.js";
 import { parseDatePhrase, parseStatusDate } from "../understand/legacy-dates.js";
+import { candidateStationTokens, checkStationsOnRoute, normalizeRouteSegment, routeMismatchMessage } from "./routeCheck.js";
 import { STATION_QUALIFIER_CANON } from "../understand/legacy-nlu.js";
 import { RailKitProvider } from "../railway/railkit.js";
 import type { ClassCode } from "../providers/types.js";
@@ -1727,20 +1728,33 @@ export async function executeApprovedTool(
         return res.ok ? okResult(res.source, res.summary, res.data) : failResult(res.source, res.summary, res.data);
       }
       case "CHECK_AVAILABILITY": {
-        const ctx = await resolveTrainRouteDate(a as unknown as { train_number: string; date?: string; origin?: string; destination?: string });
-        if (!ctx.origin || !ctx.destination) {
+        /* Round-43k: station train ke route me hai ya nahi — shared checker (routeCheck.ts) verify karta
+         * hai, isliye model/tool ise bypass nahi kar sakta (jhootha N/A board kabhi nahi). */
+        const routeChk = await checkStationsOnRoute(
+          a.train_number as string,
+          { origin: (a.origin as string | undefined) ?? null, destination: (a.destination as string | undefined) ?? null },
+          ctx.userText ?? null,
+        );
+        if (routeChk.bad) return failResult(null, routeMismatchMessage(a.train_number as string, routeChk.bad, true), { route_mismatch: true, ...routeChk.bad });
+        const segCHECK_AVAILABILITY = normalizeRouteSegment(routeChk.stops, { origin: routeChk.origin, destination: routeChk.destination });
+        const rctx = await resolveTrainRouteDate({
+          ...(a as unknown as { train_number: string; date?: string }),
+          origin: segCHECK_AVAILABILITY.origin,
+          destination: segCHECK_AVAILABILITY.destination,
+        });
+        if (!rctx.origin || !rctx.destination) {
           return failResult(null, `Availability ke liye route chahiye (origin/destination) aur timetable se route resolve nahi hua — user se poochho.`);
         }
         const code = (a.class_code as string | undefined)?.toUpperCase() as ClassCode | undefined;
         if (!code) {
           const board = await routedClassBoard(
             a.train_number as string,
-            ctx.date,
-            ctx.origin,
-            ctx.destination,
+            rctx.date,
+            rctx.origin,
+            rctx.destination,
             (a.quota as string | undefined) ?? "GN",
           );
-          if (!board.classes.length) return failResult(board.provider, `Availability unavailable (${ctx.origin}→${ctx.destination}, ${ctx.date}).`);
+          if (!board.classes.length) return failResult(board.provider, `Availability unavailable (${rctx.origin}→${rctx.destination}, ${rctx.date}).`);
           const boardWeb = board.classes.find((c) => c.source === "web_railyatri" && c.status !== "UNKNOWN");
           const boardExtra = board.classes.find((c) => (c.source === "railradar" || c.source === "indianrailapi") && c.status !== "UNKNOWN");
           /* Round-18m-23 (user: "Fare reference 2A ₹3000…" — seat UNKNOWN tha aur fare poore route ka):
@@ -1750,54 +1764,66 @@ export async function executeApprovedTool(
             const segFares = board.classes.filter((c) => c.fare > 0 && (c.source === "web_erail" || c.fareSource === "web_erail")).map((c) => `${c.code} ₹${c.fare}`);
             return failResult(
               providerOf(),
-              `Availability unavailable (${a.train_number} ${ctx.origin}→${ctx.destination}, ${ctx.date}) — kisi bhi class ka seat status provider se nahi aaya; invent nahi karunga.${segFares.length ? ` (Sirf ${ctx.origin}→${ctx.destination} segment ka ticket fare web se mila: ${segFares.join(", ")} — erail.in; ye seat status NAHI hai.)` : " Fare bhi verified nahi mila — koi fare mat batao."}`,
-              { train_number: a.train_number, date: ctx.date, resolvedRoute: { origin: ctx.origin, destination: ctx.destination, autoDate: ctx.autoDate }, classes: board.classes.map((c) => ({ ...c, fare: segFares.length ? c.fare : 0 })) },
+              `Availability unavailable (${a.train_number} ${rctx.origin}→${rctx.destination}, ${rctx.date}) — kisi bhi class ka seat status provider se nahi aaya; invent nahi karunga.${segFares.length ? ` (Sirf ${rctx.origin}→${rctx.destination} segment ka ticket fare web se mila: ${segFares.join(", ")} — erail.in; ye seat status NAHI hai.)` : " Fare bhi verified nahi mila — koi fare mat batao."}`,
+              { train_number: a.train_number, date: rctx.date, resolvedRoute: { origin: rctx.origin, destination: rctx.destination, autoDate: rctx.autoDate }, classes: board.classes.map((c) => ({ ...c, fare: segFares.length ? c.fare : 0 })) },
             );
           }
           return okResult(
             board.provider,
-            `${a.train_number} ${ctx.origin}→${ctx.destination} (${ctx.date}${ctx.autoDate ? ", aaj ke liye" : ""}): ${board.classes.map((c) => `${c.code} ${c.status}${c.seats != null ? ` ${c.seats}` : ""}${c.waitlist != null ? ` WL${c.waitlist}` : ""}${c.rac != null ? ` RAC${c.rac}` : ""}`).join(", ")}.${boardWeb ? ` (Source: railyatri.in — IRCTC data, railway API down tha${boardWeb.webNote && /as of/i.test(boardWeb.webNote) ? `, ${boardWeb.webNote.match(/as of[^)]*/i)?.[0]}` : ""}.)` : boardExtra ? webSourceLabel(String(boardExtra.source)) : ""}`,
-            { train_number: a.train_number, date: ctx.date, resolvedRoute: { origin: ctx.origin, destination: ctx.destination, autoDate: ctx.autoDate }, classes: board.classes },
+            `${a.train_number} ${rctx.origin}→${rctx.destination} (${rctx.date}${rctx.autoDate ? ", aaj ke liye" : ""}): ${board.classes.map((c) => `${c.code} ${c.status}${c.seats != null ? ` ${c.seats}` : ""}${c.waitlist != null ? ` WL${c.waitlist}` : ""}${c.rac != null ? ` RAC${c.rac}` : ""}`).join(", ")}.${boardWeb ? ` (Source: railyatri.in — IRCTC data, railway API down tha${boardWeb.webNote && /as of/i.test(boardWeb.webNote) ? `, ${boardWeb.webNote.match(/as of[^)]*/i)?.[0]}` : ""}.)` : boardExtra ? webSourceLabel(String(boardExtra.source)) : ""}`,
+            { train_number: a.train_number, date: rctx.date, resolvedRoute: { origin: rctx.origin, destination: rctx.destination, autoDate: rctx.autoDate }, classes: board.classes },
           );
         }
         const row = await getProvider().getAvailability(
           a.train_number as string,
-          ctx.date,
-          ctx.origin,
-          ctx.destination,
+          rctx.date,
+          rctx.origin,
+          rctx.destination,
           code,
           (a.quota as string | undefined) ?? "GN",
         );
-        if (row.status === "UNKNOWN") return failResult(providerOf(), `Availability unavailable (${ctx.origin}→${ctx.destination}, ${ctx.date}) — invent nahi karunga.`, row);
+        if (row.status === "UNKNOWN") return failResult(providerOf(), `Availability unavailable (${rctx.origin}→${rctx.destination}, ${rctx.date}) — invent nahi karunga.`, row);
         return okResult(
           row.source === "web_railyatri" ? "web_railyatri" : row.source === "railradar" || row.source === "indianrailapi" ? row.source : providerOf(),
-          `${a.train_number} ${code} ${ctx.origin}→${ctx.destination} (${ctx.date}${ctx.autoDate ? ", aaj ke liye" : ""}): ${row.status}${row.seats != null ? `, ${row.seats} seats` : ""}${row.waitlist != null ? `, WL ${row.waitlist}` : ""}${row.rac != null ? `, RAC ${row.rac}` : ""}${row.fare > 0 ? `, ₹${row.fare}` : ""}.${row.source === "web_railyatri" ? ` (Source: railyatri.in — IRCTC data, railway API down tha${row.webNote && /as of/i.test(row.webNote) ? `, ${row.webNote.match(/as of[^)]*/i)?.[0]}` : ""}; booking se pehle IRCTC par confirm karein.)` : row.source === "railradar" || row.source === "indianrailapi" ? webSourceLabel(row.source) : ""}`,
-          { ...row, resolvedRoute: { origin: ctx.origin, destination: ctx.destination, date: ctx.date, autoDate: ctx.autoDate } },
+          `${a.train_number} ${code} ${rctx.origin}→${rctx.destination} (${rctx.date}${rctx.autoDate ? ", aaj ke liye" : ""}): ${row.status}${row.seats != null ? `, ${row.seats} seats` : ""}${row.waitlist != null ? `, WL ${row.waitlist}` : ""}${row.rac != null ? `, RAC ${row.rac}` : ""}${row.fare > 0 ? `, ₹${row.fare}` : ""}.${row.source === "web_railyatri" ? ` (Source: railyatri.in — IRCTC data, railway API down tha${row.webNote && /as of/i.test(row.webNote) ? `, ${row.webNote.match(/as of[^)]*/i)?.[0]}` : ""}; booking se pehle IRCTC par confirm karein.)` : row.source === "railradar" || row.source === "indianrailapi" ? webSourceLabel(row.source) : ""}`,
+          { ...row, resolvedRoute: { origin: rctx.origin, destination: rctx.destination, date: rctx.date, autoDate: rctx.autoDate } },
         );
       }
       case "GET_FARE": {
-        const ctx = await resolveTrainRouteDate(a as unknown as { train_number: string; date?: string; origin?: string; destination?: string });
-        if (!ctx.origin || !ctx.destination) {
+        /* Round-43k: fare bhi usi train ke route wale station ka — warna jhootha "reference fare". */
+        const fareChk = await checkStationsOnRoute(
+          a.train_number as string,
+          { origin: (a.origin as string | undefined) ?? null, destination: (a.destination as string | undefined) ?? null },
+          ctx.userText ?? null,
+        );
+        if (fareChk.bad) return failResult(null, routeMismatchMessage(a.train_number as string, fareChk.bad, true), { route_mismatch: true, ...fareChk.bad });
+        const segFare = normalizeRouteSegment(fareChk.stops, { origin: fareChk.origin, destination: fareChk.destination });
+        const rctx = await resolveTrainRouteDate({
+          ...(a as unknown as { train_number: string; date?: string }),
+          origin: segFare.origin,
+          destination: segFare.destination,
+        });
+        if (!rctx.origin || !rctx.destination) {
           return failResult(null, `Fare ke liye route chahiye (origin/destination) aur timetable se route resolve nahi hua — user se poochho. Train ${a.train_number} ki timetable bhi unavailable thi.`);
         }
         const fare = await getProvider().getFare(
           a.train_number as string,
-          ctx.date,
-          ctx.origin,
-          ctx.destination,
+          rctx.date,
+          rctx.origin,
+          rctx.destination,
           (a.class_code as string).toUpperCase() as ClassCode,
           (a.passengers as number | undefined) ?? 1,
         );
         if (!fare.railwayAvailable && fare.baseFare <= 0)
           return failResult(
             providerOf(),
-            `Fare unavailable (${ctx.origin}→${ctx.destination}, ${ctx.date})${fare.unavailableReason ? ` — ${fare.unavailableReason}` : ""} — andaza nahi lagaunga.`,
+            `Fare unavailable (${rctx.origin}→${rctx.destination}, ${rctx.date})${fare.unavailableReason ? ` — ${fare.unavailableReason}` : ""} — andaza nahi lagaunga.`,
             fare,
           );
         return okResult(
           providerOf(),
-          `${a.train_number} ${(a.class_code as string).toUpperCase()} ${ctx.origin}→${ctx.destination} (${ctx.date}${ctx.autoRoute ? ", poora route" : ""}${ctx.autoDate ? ", aaj ke liye" : ""}): ticket ₹${fare.baseFare}, service ₹${fare.serviceFee}, total ₹${fare.total}${(a.passengers as number | undefined) ? ` (${a.passengers} pax)` : ""}.${fare.source === "web_railyatri" ? " (Source: railyatri.in — IRCTC fare, railway API down tha; exact booking fare thoda alag ho sakta hai.)" : fare.source === "web_erail" ? ` (Source: erail.in — ${ctx.origin}→${ctx.destination} segment ka fare, railway API down tha; exact booking fare thoda alag ho sakta hai.)` : fare.source === "railradar" || fare.source === "indianrailapi" ? webSourceLabel(fare.source) : ""}`,
-          { ...fare, resolvedRoute: { origin: ctx.origin, destination: ctx.destination, date: ctx.date, autoRoute: ctx.autoRoute, autoDate: ctx.autoDate } },
+          `${a.train_number} ${(a.class_code as string).toUpperCase()} ${rctx.origin}→${rctx.destination} (${rctx.date}${rctx.autoRoute ? ", poora route" : ""}${rctx.autoDate ? ", aaj ke liye" : ""}): ticket ₹${fare.baseFare}, service ₹${fare.serviceFee}, total ₹${fare.total}${(a.passengers as number | undefined) ? ` (${a.passengers} pax)` : ""}.${fare.source === "web_railyatri" ? " (Source: railyatri.in — IRCTC fare, railway API down tha; exact booking fare thoda alag ho sakta hai.)" : fare.source === "web_erail" ? ` (Source: erail.in — ${rctx.origin}→${rctx.destination} segment ka fare, railway API down tha; exact booking fare thoda alag ho sakta hai.)` : fare.source === "railradar" || fare.source === "indianrailapi" ? webSourceLabel(fare.source) : ""}`,
+          { ...fare, resolvedRoute: { origin: rctx.origin, destination: rctx.destination, date: rctx.date, autoRoute: rctx.autoRoute, autoDate: rctx.autoDate } },
         );
       }
       case "CHECK_PNR": {
