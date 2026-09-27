@@ -783,3 +783,34 @@ User (27 Sep screenshot): *"mainay 3 baar bola 12054 mein 2s book krdo … AI wa
 **Live proof (`b738b8c`, user ka exact scenario):** T1 "12054 ki seat availability batao ASR se HW kal ke liye" → real seat jawab · **T2 "12054 mein 2S book krdo" → passenger form khul gaya (12054 · 2S · ASR → HW · 📅 2026-09-28)** · T3 wahi dobara → "form pehle se khula hai" (koi loop nahi) · comparison sawaal → "Vande Bharat Sleeper + Rajdhani Express" composed jawab dono sources ke saath · KB sawaal (luggage/WL rules/tatkal) → seedha sahi jawab.
 **Tests:** naya `tests/round37-booking-loop-and-repeat-guard.test.ts` (37) + round29/30/34/35 anchors update → **117 files / 1251 ALL PASS** · server tsc clean · client 69 (baseline) · build `index-B8_cbDTF.js` 487.5 kB.
 **Files:** `src/booking/autobook.ts` · `src/views/Concierge.tsx` · `server/agent/agentic.ts` · `server/agent/railkb.ts` · `server/agent/run.ts` · tests · probes `tools/probe-live-r37-live.mjs`, `tools/probe-r37-debug.mjs`. **APK change nahi** (web fix — app live URL load karta hai).
+
+### 9.30 Round-38 (27 Sep) — "kisi bhi sawaal ka ek dumm sahi jawab, jaise ChatGPT/Gemini/Claude/Manus"
+
+User (R37 ke turant baad, dobara): *"abh yeh AI ko samjhna chahiye tha and sahi answer karna chahiye tha kyu nhi kiya … jaise chatgpt yan gemini yan claude yan manus — koi bhi trains, India railway, Booking, live status, stations etc (examples) poochun to ek dum se accurate answer dete hai but mera AI kyu nhi krta — esko bhi waisa banao, user ke questions samjho aur ek dum perfect answer/outcome do."*
+
+**Pehle naapa (battery):** naya `tools/probe-r38-battery.mjs` — 18 sawaal, 8 category (train identity, station, fare, live status, schedule, rules, catering, berth, list, capability, station code, general speed, accessibility, off-domain, light, booking). Result @`b738b8c`: **18/18 jawab, 18/18 Hinglish** — par **accuracy** me ye galat/adhoora:
+- "Ludhiana junction ke kitne platform hain?" → Wikipedia ka page **"Raipur Haryana Junction railway station"** ka (galat station!) — aur wahi user ko chala gaya.
+- "Sleeper coach me kitne berth hote hain?" → Vande Bharat Sleeper ka page (count nahi).
+- "Rajdhani ki top speed kitni hoti hai?" → ek specific Rajdhani service ka average-speed page (mojibake).
+- "Vande Bharat me khaana milta hai?" / "chai" → raw English Wikipedia / "verified data nahi mila".
+- "Wheelchair facility?" → "Passenger train toilet" ka adhoora page.
+
+**Kya lagaya (R38 + R38b):**
+1. **Subject guard** (`server/agent/subject.ts`, naya): jawab ka page user ke sawaal ke **strong shabdon** se match hota hai (station/train ke naam, numbers) — generic railway/bolne ke shabd (platform, berth, khana, mujhe, batao…) subject nahi bante. Galat page **skip** ho jaata hai (agli koshish chalti hai); **saari** koshish fail → saaf jawab *"is sawaal ka sahi page nahi mila — verified data nahi hai"* + jo **sach me** bata sakte hain wo suggest (station code/naam, wahaan ki trains, fare/seat/live status) — **kuch bhi andaze se nahi**.
+2. **Web-rescue me bhi** subject-match (`results.find(...)`) — pehla galat snippet nahi jaata.
+3. **KB me stable railway facts** (`railkb.ts`): coach berth count (SL 72 · 3A 64 · 2A 46 · 1A 22 · CC 78 · 2S 108 · EC 56) · Rajdhani 130 km/h MPS (+ comparison line) · Vande Bharat 160 operational / 183 trial · onboard khana (IRCTC catering, eCatering/1323) · platform count ka **honest** jawab · **divyangjan/wheelchair facility** (concession, reserved berths, ramp/lift, escort).
+4. **RULES_TOPIC_RE** me khana/khaana/food/meal/chai/berth/platform/top speed/maximum speed/kitni tez/divyangjan/wheelchair — ye topics **pehle KB** (stable fact, Hinglish, turant), web sirf jab KB me na ho.
+
+**Live natija (battery dobara, `1136870`):**
+| sawaal | pehle | ab |
+|---|---|---|
+| Ludhiana platform count | Raipur Haryana Jn ka page (galat) | "mere live data me platform count nahi hoti" + jo bata sakta hoon (honest) |
+| Sleeper coach berth | Vande Bharat Sleeper page | **SL 72 berth** (+ 3A/2A/1A/CC/2S/EC counts) |
+| Rajdhani top speed | galat service ka page (mojibake) | **130 km/h MPS** + comparison |
+| Vande Bharat khana | raw English Wikipedia | IRCTC catering ka Hinglish jawab |
+| Train me chai | "verified data nahi mila" | IRCTC catering ka jawab |
+| Wheelchair facility | "Passenger train toilet" (adhoora) | Divyangjan facility ka poora jawab |
+
+**Battery summary:** 18/18 direct jawab · 18/18 Hinglish · **avg latency 33.1s → 23.5s**. R37 ka user-scenario dobara verify: "12054 mein 2S book krdo" → form khula, dobara hukm → "form pehle se khula hai" (loop nahi).
+**Tests:** naya `tests/round38-any-question-accuracy.test.ts` (12) + round15 web-answer test update (top-speed ab KB se) → **117 files / 1264 ALL PASS** · server tsc clean · client 69 (baseline) · build `index-COu_oIzK.js` 487.5 kB.
+**Files:** `server/agent/subject.ts` (naya) · `server/agent/agentic.ts` · `server/agent/railkb.ts` · `tests/round38-any-question-accuracy.test.ts` · `tools/probe-r38-battery.mjs` · `tools/build-round38-preview.mjs`. **APK change nahi** (web fix). Android bridge v1.4.9 APK se restore kiya gaya (31,495 B, `postNotice`×2) — workspace reset ke baad.
