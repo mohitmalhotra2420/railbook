@@ -67,7 +67,7 @@ android-app/app/src/main/assets/autofill/
 
 ## 4. Current state (26 Sep 2026)
 
-- **Live:** commit `1136870` (Round-38, 27 Sep 2026), `/api/version` = `1136870`.
+- **Live:** commit `f10d824` (Round-39, 27 Sep 2026), `/api/version` = `f10d824`.
 - **Round-20:** direct-trains card = Seat Finder jaisa shared `TrainClassBlock`; kisi bhi class chip par tap → seedha IRCTC-jaisa passenger form (train no/date/from→to auto, catering real, insurance/payment nahi); chat ka lamba jawab `ReplyText` rows me.
 - **Round-21:** IRCTC autofill me food + "Book only if confirm berths are allotted" + "Consider for auto up-gradation" + mobile/email. Naya **V2 payload** (`railbookAutofillPayloadV2`); purani key + `postMessage` me exact **V1 shape** (purane app/extension safe).
 - **Round-21b (latest):** catering ka **per-source sach** — `sources{erail,confirmtkt}`, `conflict`, `premiumCatering` (Rajdhani/Shatabda/Duronto/Vande Bharat/Tejas), `foodChoiceExpected`, `evidence[]`. Passenger form me **Food choice sirf saaf data par**; conflict par honest line, guess kabhi nahi. App panel batata hai jab IRCTC page par food option hi na ho.
@@ -108,7 +108,14 @@ android-app/app/src/main/assets/autofill/
   3. **Native mic:** Android WebView me Web Speech API **nahi hota** — naya `VoiceBridge.kt` (SpeechRecognizer, hi-IN, `window.__railbookVoice.dispatch`) + `MainActivity` me `addJavascriptInterface(…, "RailBookVoice")` + manifest `<queries>`; client `src/voice/nativeSpeech.ts` + `speech.ts`/`useVoiceInput.ts` native-aware (native par `getUserMedia` call nahi).
   4. Tests: `tests/round27-seat-classes-and-mic.test.tsx` (12) + round-25 test format update → **106 files / 1055 PASS** · preview `RailBook-round27-2026-09-26.html` · builders `tools/build-round27-preview.mjs`, probe `tools/probe-live-r27.mjs`. **APK v1.4.8 (vc 31)** — native mic ke liye zaroori.
 
-- **Round-38 (latest, 27 Sep 2026):** user (R37 ke turant baad) — *"jaise chatgpt/gemini/claude/manus … koi bhi trains/India railway/Booking/live status/stations etc poochun to wo ek dum se accurate answer dete hai but mera AI kyu nhi — esko bhi waisa banao, user ke questions samjho aur ek dum perfect answer/outcome do."* →
+- **Round-39 (latest, 27 Sep 2026):** user (wahi demand R38 ke baad) — *"jaise chatgpt/gemini/claude/manus — koi bhi trains/Indian railway/booking/live status/stations sawaal (examples) par ek dum accurate answer/outcome do."* →
+  1. **24-sawaal battery** (`tools/probe-r39-battery.mjs`) se weak jawab pakde: distance par **Expressway (sadak)**, pet/smoking/charging/AC-fail/2A-3A-fare par "data nahi", "sabse bada station" par Ernakulam ka page, "Konkan Railway" par Mangalore Central, aur **"Tum kya nahi kar sakte?" par AI ne booking flow shuru kar diya ("Kahan se jaana hai?")**.
+  2. **Mode guard** (subject.ts): rail sawaal par road/air page reject; distance ka honest jawab (+journey time offer).
+  3. **KB**: pet/dog · smoking · charging point · AC-fail refund (TDR 20h) · bachche ka ticket · 2A-3A fare order · sabse bada station (Howrah 23 platforms) · sabse lambi route (Vivek Express 4,154 km) · Konkan Railway (Roha→Thokur 741 km); RULES_TOPIC_RE me words → **KB web se pehle**.
+  4. **Capability/meta sawaal ka fixed honest jawab** (run.ts, 0.3s) — 2 rok ke saath (IRCTC click nahi, passenger details nahi). **Client amenity replies** ab sach (charging/bedding/catering).
+  5. Tests: naya `tests/round39-every-question-battery.test.ts` (11) → **118 files / 1286 ALL PASS** · live `f10d824` · **APK nahi**.
+  6. **Workspace reset** (3rd time) — `/home/user/recover.sh` banaya (GitHub fetch + reset + npm ci + APK se bridge restore); reset par pehle wahi chalao.
+- **Round-38 (27 Sep 2026):** user (R37 ke turant baad) — *"jaise chatgpt/gemini/claude/manus … koi bhi trains/India railway/Booking/live status/stations etc poochun to wo ek dum se accurate answer dete hai but mera AI kyu nhi — esko bhi waisa banao, user ke questions samjho aur ek dum perfect answer/outcome do."* →
   1. **Battery se naapa** (`tools/probe-r38-battery.mjs`, 18 sawaal): 18/18 jawab par **accuracy** me galat pages — "Ludhiana junction ke kitne platform" → **Raipur Haryana Junction** ka page (!), "Sleeper coach berth" → Vande Bharat ka page, "Rajdhani top speed" → galat service, "khana/chai" → raw English/"data nahi", "wheelchair" → adhoora toilet page.
   2. **Subject guard** (`server/agent/subject.ts`, naya): jawab ka page sawaal ke strong shabdon (station/train naam, number) se match hota hai — galat page skip, sab reject → saaf "sahi page nahi mila + jo sach me bata sakta hoon" (kuch bhi andaze se nahi). Web-rescue me bhi pehla subject-match.
   3. **KB facts** (`railkb.ts`): berth count (SL72/3A64/2A46/1A22/CC78/2S108/EC56) · Rajdhani 130 km/h · Vande Bharat 160/183 · onboard khana IRCTC · platform count honest · **divyangjan/wheelchair facility**; RULES_TOPIC_RE me ye words (pehle KB, phir web).
@@ -202,10 +209,10 @@ android-app/app/src/main/assets/autofill/
 
 | cheez | value |
 |---|---|
-| vitest | **117 files / 1264 tests** (ALL PASS — Round-38 ke 12 naye) |
+| vitest | **118 files / 1286 tests** (ALL PASS — Round-39 ke 11 naye) |
 | server tsc | clean |
 | client tsc | 67 errors (purane, baseline — koi naya nahi) |
-| live commit | `1136870` (Round-38) |
+| live commit | `f10d824` (Round-39) |
 | preview | `RailBook-round38-2026-09-27.html` (Round-37/36/35 ke bhi previews/ me hain) |
 | APK | v1.4.9 `RailBook-v1.4.9-release.apk` (versionCode 32) sha256 `4ea684c3…8e1ce` — Round-29 me koi Android change nahi (web fix; app live URL load karta hai) |
 

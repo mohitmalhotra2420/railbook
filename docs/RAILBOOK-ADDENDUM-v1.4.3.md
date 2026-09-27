@@ -814,3 +814,43 @@ User (R37 ke turant baad, dobara): *"abh yeh AI ko samjhna chahiye tha and sahi 
 **Battery summary:** 18/18 direct jawab · 18/18 Hinglish · **avg latency 33.1s → 23.5s**. R37 ka user-scenario dobara verify: "12054 mein 2S book krdo" → form khula, dobara hukm → "form pehle se khula hai" (loop nahi).
 **Tests:** naya `tests/round38-any-question-accuracy.test.ts` (12) + round15 web-answer test update (top-speed ab KB se) → **117 files / 1264 ALL PASS** · server tsc clean · client 69 (baseline) · build `index-COu_oIzK.js` 487.5 kB.
 **Files:** `server/agent/subject.ts` (naya) · `server/agent/agentic.ts` · `server/agent/railkb.ts` · `tests/round38-any-question-accuracy.test.ts` · `tools/probe-r38-battery.mjs` · `tools/build-round38-preview.mjs`. **APK change nahi** (web fix). Android bridge v1.4.9 APK se restore kiya gaya (31,495 B, `postNotice`×2) — workspace reset ke baad.
+
+### 9.31 Round-39 (27 Sep) — "har tarah ke sawaal" (24-sawaal battery): mode guard, roz ke rules, general knowledge, capability
+
+User (R38 ke baad, wahi demand dobara): *"abh yeh AI ko samjhna chahiye tha … mai kya abh har choti choti cheez check karun? AI khud kyu nhi samjh ke sahi se outcome deta? jaise chatgpt/gemini/claude/manus … koi bhi trains, Indian railway, booking, live status, stations etc (examples) — ek dum accurate answer do."*
+
+**Pehle naapa:** naya `tools/probe-r39-battery.mjs` — **24 naye sawaal** (station code/naam/distance/city · train naam/compare/count/route · booking tatkal/fare-fark/senior/child · live late/kahan · rules pet/smoking/charging/AC-fail/bedroll · general biggest/longest/Konkan · capability). Live `1136870` par weak jawab mile:
+| sawaal | pehle (galat/weak) |
+|---|---|
+| "Ludhiana se Amritsar kitni doori hai?" | **Delhi–Amritsar–Katra Expressway** (sadak) ka jawab 😑 |
+| "Kutta train me le ja sakte hain?" | "verified rule nahi mil paya" (51s) |
+| "Train me smoking allowed hai?" | "specific rule nahi de paaye" (37s) |
+| "Mobile charging point har coach me?" | raw "UNVERIFIED" bullet dump (42s) |
+| "AC kharab ho gaya to paisa wapas?" | "koi verified rule nahi" (108s!) |
+| "3A aur 2A me fare ka fark?" | "koi relevant data nahi" (65s) |
+| "Indian Railways ka sabse bada station?" | kuch nahi aaya |
+| "Konkan Railway kahan se kahan tak?" | **Mangalore Central station** ka page |
+| "Tum kya nahi kar sakte?" | AI ne **booking flow** shuru kar diya — **"Kahan se jaana hai?"** |
+
+**Kya lagaya (R39 + R39b):**
+1. **Mode guard** (`server/agent/subject.ts`): rail sawaal par road/air/metro wala page **reject** (user khud road poochhe to allowed). Distance sawaal par honest line: *"rail/road doori km mere providers me nahi aati — jo sach me bata sakta hoon: aapke route ki asli trains + journey time"* (Expressway/highway data railway sawaal me **kabhi** nahi).
+2. **Roz ke rules KB:** pet/dog (sirf 1A/FC + Luggage Van, booking zaroori, baaki coaches me nahi) · smoking (COTPA banned + vape, penalty) · charging point (reserved coaches me berth/seat ke paas, general/purane rakes me nahi) · **AC-fail refund** (TTE certificate + TDR 20 ghante ke andar + difference formula 3A/2A → SL, 1A/EC → FC, CC → 2S) · **bachche ka ticket** (<5 free bina berth; 5–12: alag berth = full, share = half) · 2A vs 3A fare order (`2S < SL < 3A < CC < 2A < EC/1A`, 2A ~25–40% mehnga, exact provider se).
+3. **General knowledge KB:** sabse bada station = **Howrah Jn (23 platforms)** + top-5 list · sabse lambi route = **Vivek Express 15905/15906, Dibrugarh → Kanyakumari ~4,154 km (kuch sources 4,286)** · **Konkan Railway = Roha (MH) → Thokur (Mangaluru) ~741 km, 1998**. RULES_TOPIC_RE me in ke words — **KB web se pehle** (pehle web par Ernakulam/Mangalore ke galat pages aa rahe the).
+4. **Capability/meta sawaal** (`run.ts`, deterministic): "tum kya (nahi) kar sakte ho", "tum kaun ho" → **fixed honest jawab**: kya-kya karta hoon + wahi **2 rok** (IRCTC click nahi, passenger details/OTP/payment nahi) + "verified nahi to guess nahi". Live: **0.3s** me jawab (pehle 2-3s me galat booking sawaal).
+5. **Client amenity replies** (`src/ai/facts.ts`) ab sach bolte hain: charging/bedding/catering/wifi ka asli jawab — pehle "gadh ke nahi bataunga" type replies thi.
+6. **Subject-guard me Hindi adjectives** (lambi/lamba/bada/chhota/sabse…) generic — warna sahi Wikipedia page ("Longest train services…") reject ho jaata tha.
+
+**Live natija (deploy `f10d824` ke baad):**
+```
+"Ludhiana se Amritsar kitni doori hai?"  → honest: rail/road km data nahi + journey-time offer  ✅
+"Kutta train me le ja sakte hain?"       → 1A/FC + Luggage Van, booking zaroori, baaki me nahi ✅
+"Mobile charging point har coach me?"    → reserved me haan, general/purane me nahi            ✅
+"AC kharab ho gaya to paisa wapas?"      → TTE certificate + TDR 20h + difference formula      ✅
+"3A aur 2A me fare ka fark?"             → order + 25–40% + "exact provider se"               ✅
+"Sabse bada station?"                    → Howrah Jn 23 platforms (+ top-5)                    ✅
+"Konkan Railway kahan se kahan tak?"     → Roha → Thokur, 741 km, 1998                         ✅
+"Sabse lambi train route?"               → Vivek Express, ~4,154 km (~82.5h)                   ✅
+"Tum kya nahi kar sakte?"                → capability + 2 rok, 0.3s (booking sawaal nahi)       ✅
+```
+**Tests:** naya `tests/round39-every-question-battery.test.ts` (11) + round38 (23) + intelligence/round15 anchors → **118 files / 1286 ALL PASS** · server tsc clean · client 69 (baseline) · build (R39b) · **APK change nahi**.
+**Files:** `server/agent/subject.ts` · `server/agent/railkb.ts` · `server/agent/agentic.ts` · `server/agent/run.ts` · `src/ai/facts.ts` · tests · `tools/probe-r39-battery.mjs`. **Workspace reset note:** reset par `/home/user/recover.sh` (fetch+reset+npm ci+APK bridge restore) chalao.
