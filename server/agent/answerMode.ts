@@ -30,12 +30,13 @@ export function liveDataQuestion(text: string): boolean {
     /\b(fare|kiraya|kitne ka|kitna paisa|price|rate)\b/.test(t) ||
     /\b(book|booking|ticket|reserve|confirm|irctc|payment|wallet)\b/.test(t);
   if (trainNo && liveish) return true;
-  /* PNR/chart/coach-position — hamesha verified data (kisi bhi train number ke bina bhi). */
-  if (/\b(pnr|chart|coach position|platform number)\b/.test(t)) return true;
+  /* PNR/chart — hamesha verified data (train number ke bina bhi). "coach position/platform number"
+   * sirf tab LIVE jab kisi khaas train/station ki baat ho (how-to sawaal knowledge hi rehta hai). */
+  if (/\b(pnr|chart)\b/.test(t)) return true;
   /* Journey search (route + trains) — provider ka live kaam ("ASR se NDLS trains batao"). */
   if (/\b(trains?|gaadi|gadi)\b/.test(t) && /\bse\b|\bfrom\b/.test(t)) return true;
   /* Khaas train ka route/stops/timetable (train number ke saath) — schedule data provider se. */
-  if (TRAIN_NO_RE.test(t) && /\b(route|stops?|halts?|timetable|schedule|kahan rukti|kahan rukta|kahan se kahan)\b/.test(t)) return true;
+  if (TRAIN_NO_RE.test(t) && /\b(route|stops?|halts?|timetable|schedule|kahan rukti|kahan rukta|kahan se kahan|coach position|platform number)\b/.test(t)) return true;
   /* "Is Saturday ko Vande Bharat chalegi?" — kisi khaas din ki running/availability = verified data. */
   if (
     /\b(chalegi|chalega|chal rahi|mil jayegi|milegi|milengi)\b/.test(t) &&
@@ -118,4 +119,23 @@ export function liveClaimCheck(content: string, evidenceText: string): { grounde
     }
   }
   return { grounded: bad.length === 0, evidence: [...new Set(bad)].join(",") };
+}
+
+
+/** Round-41: comparison sawaal ("X aur Y me kya fark", "X vs Y behtar") — inme DONO taraf ka jawab
+ * chahiye; ek hi cheez ka KB/general answer chal jaana adhoora jawab hai. */
+export function isComparisonQuery(text: string): boolean {
+  const t = normalizeRailText(text);
+  return /\b(fark|difference|antar|compare|comparison|better|behtar|kaunsa acha|kaunsi achi|accha kaunsa|versus|vs)\b/.test(t) &&
+    /\b(aur|and|vs|versus)\b/.test(t);
+}
+
+/** Round-41: "Amritsar station code kya hai" jaise sawaal me SPECIFIC station ka code chahiye —
+ * ye SEARCH_STATIONS tool ka kaam hai, generic KB definition ka nahi. */
+export function asksStationCode(text: string): boolean {
+  const t = normalizeRailText(text);
+  if (!/\b(code|station code|ka code)\b/.test(t)) return false;
+  /* "station code kya hota hai" (definition) isse bahar — wahan KB theek hai. */
+  if (/\b(hota|hoti|hote|kya hota|matlab|meaning)\b/.test(t)) return false;
+  return true;
 }

@@ -732,7 +732,7 @@ function namedTrainCompareTurn(
   const nums = spokenTrainNumbers(text).slice(0, 2);
   const destCluster = destCue(text) ? clusterStationsForText(text) : null;
   return {
-    text: `${nums.join(" aur ")} ka timetable provider se nikal raha hoon — fare/seats gadh ke nahi bataunga.`,
+    text: `${nums.join(" aur ")} ka timetable provider se nikal raha hoon — fare/seats bina verified data nahi bataunga.`,
     prefs,
     apply: {},
     compareTrains: nums,
@@ -1032,7 +1032,7 @@ function switchIntent(
       };
     }
     return {
-      text: `Koi bhi shehar ka naam bol sakte ho — AI naam samajh leti hai.\n\nTicket search live IRCTC nahi hai. Trains RailCore se aati hain (RailKit fallback) — jaise ${bookableCityExamples()}.\nJo station resolve nahi hota, uske liye main train gadh ke nahi bataunga.\n\nDelhi / Mumbai / Ambala jaise cities mein kai stations hote hain — chips se choose karo.\nPoori list chahiye to “poori city list” bolo. Warna kahan se kahan jaana hai?`,
+      text: `Koi bhi shehar ka naam bol sakte ho — AI naam samajh leti hai.\n\nTicket search live IRCTC nahi hai. Trains RailCore se aati hain (RailKit fallback) — jaise ${bookableCityExamples()}.\nJo station resolve nahi hota, uske liye main andaza nahi lagaunga.\n\nDelhi / Mumbai / Ambala jaise cities mein kai stations hote hain — chips se choose karo.\nPoori list chahiye to “poori city list” bolo. Warna kahan se kahan jaana hai?`,
       prefs,
       apply,
       ask: "from",
@@ -1056,7 +1056,7 @@ function switchIntent(
   }
   if (nlu.intent === "REFUND_STATUS") {
     return wrap({
-      text: "Refund official IRCTC rule se main gadh ke nahi bataunga. Jo ticket yahan book hui ho uske liye bookings khol sakta hoon.",
+      text: "Refund official IRCTC rule se hota hai — bina verified rule andaza nahi lagaunga. Jo ticket yahan book hui ho uske liye bookings khol sakta hoon.",
       prefs,
       apply,
       openBookings: true,

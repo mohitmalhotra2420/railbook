@@ -317,7 +317,7 @@ export function createApp() {
       /* AI ne jawab nahi diya (ya generic "provider se nahi mil" line di) → seat line akele bhi kaafi hai. */
       const aiFailed =
         !result.reply ||
-        /jawab nahi aa paya|jawaab nahi aa paya|gadh ke nahi bataunga|provider se nahi mil/i.test(String(result.reply ?? ""));
+        /jawab nahi aa paya|jawaab nahi aa paya|andaza nahi lagaunga|provider se nahi mil/i.test(String(result.reply ?? ""));
       return {
         nlu: result.nlu,
         source: result.source,

@@ -73,6 +73,32 @@ const ENTRIES: KbEntry[] = [
       "India ka pehla railway station Bori Bunder (Mumbai) tha — 16 April 1853 ki pehli train wahin se chali (aaj wahi jagah CSMT/Chhatrapati Shivaji Maharaj Terminus hai). Aaj bhi chalu sabse purane station buildings me Royapuram (Chennai, 1856) aur Howrah (1854) aate hain. 'Sabse purana' ka jawab is baat par depend karta hai ki pehla (1853) ya sabse purana surviving building (1856) poochha ja raha ho.",
   },
   {
+    /* Round-41: comparison sawaal — dono taraf ka jawab ek jagah. */
+    keys: ["tejas aur vande bharat", "tejas vs vande bharat", "tejas vande bharat fark", "vande bharat vs tejas"],
+    answer:
+      "Tejas vs Vande Bharat — dono premium AC chair-car day trains, par design aur operator alag:\n• Rake: Tejas = locomotive-hauled LHB coaches (IRCTC chalata hai, pehla 2017 Mumbai–Goa); Vande Bharat = self-propelled EMU trainset (locomotive nahi, Indian Railways, 2019 se).\n• Speed: Tejas practical max ~130 km/h (design 200); Vande Bharat 160 km/h, acceleration bahut tez (0–100 ~52 sec vs Tejas 2–3 min) — chhoti doori par VB usually jaldi pahunchti hai.\n• Classes: dono me CC + EC; VB ki EC me 180° rotating seats.\n• Routes: Tejas sirf kuch routes; Vande Bharat 50+ routes.\n• Catering/dynamic pricing: Tejas IRCTC-operated (chef-curated meals, dynamic pricing); VB me bhi onboard catering (service ke hisaab se included).\n• Extras: Tejas par IRCTC delay-compensation policy rahi hai; VB me nahi. Short: chhota safar + speed → Vande Bharat; airline-jaisa premium feel → Tejas.",
+  },
+  {
+    keys: ["sl aur 3a", "sl vs 3a", "3a vs sl", "sleeper aur 3a", "sl 3a me fark", "3a ya sl", "sl ya 3a"],
+    answer:
+      "SL vs 3A (sleeper vs AC 3-tier):\n• SL: non-AC 3-tier — 72 berths/coach, fan + khuli khidki, bedding free nahi (alag/paid), reserved me sabse sasta.\n• 3A: AC 3-tier — 64 berths/coach, poora AC, curtains, bedding (blanket/pillow/sheets) included, zyada privacy.\n• Fare: 3A aam taur par SL se ~1.5–2x (route/distance par depend) — exact apni date par GET_FARE se.\n• Choose: budget → SL; raat ka aaram/garam mausam/bachche-buzurg → 3A. (3A me WL zyada hoti hai.)",
+  },
+  {
+    keys: ["2s aur sl", "2s vs sl", "sl vs 2s", "2s ya sl", "sl ya 2s", "sitting ya sleeper"],
+    answer:
+      "2S vs SL:\n• 2S (Second Sitting): non-AC bench seat, din ke chhote safar ke liye sasta (SL se bhi kam); raat bhar baithna mushkil.\n• SL (Sleeper): non-AC berth, raat ke safar ke liye sahi; thoda mehnga par aaram zyada.\n• Din me 3–5 ghante → 2S; raat ya 6+ ghante → SL. Dono me AC nahi.",
+  },
+  {
+    keys: ["cc aur ec", "cc vs ec", "ec vs cc", "chair car vs executive", "ec me kya alag"],
+    answer:
+      "CC vs EC (Vande Bharat/Shatabdi):\n• CC (AC Chair Car): 3+2 layout, standard legroom, ~72–78 seats/coach, fare kam.\n• EC (Executive Chair Car): 2+2 layout, ~56 seats, zyada legroom + footrest, Vande Bharat me 180° rotating seats, fare CC se ~1.6–2x.\n• Value → CC; business-class feel → EC. Dono chair cars hain (berth nahi).",
+  },
+  {
+    keys: ["coach position", "coach kahan lagega", "dabba kahan", "coach number kaise pata", "coach position kaise"],
+    answer:
+      "Coach position live sirf thodi der pehle milta hai — aam taur par departure se ~1–2 ghante pehle jab rake platform par lagti hai. Iske liye: (1) station ka display board / announcement, (2) IRCTC/NTES app ka 'Coach Position', (3) RailBook ke station-board/coach tools (jab provider data de). Live data na mile to main andaza nahi lagaunga — platform board/app hi final hota hai.",
+  },
+  {
     /* Round-40: "sabse purani/pehli train", "kitne zone", "kitne station", "sabse tez train" jaisa GK. */
     keys: ["pehli train", "first train india", "sabse purani train", "train kab chali", "india ki pehli train", "1853 train"],
     answer:

@@ -1751,7 +1751,7 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
               context: ctx,
               tool: "getLiveStatus",
               toolOk: true,
-              reply: `${liveResult.summary}\n(Live railway data — gadh ke nahi.)`,
+              reply: `${liveResult.summary}\n(Live railway data — verified.)`,
               interrupt: false,
               resumeAsk: null,
               resumeText: null,
@@ -1835,7 +1835,7 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
       const unhelpfulNoData =
         Boolean(det.unresolvedTo) &&
         turn.steps.every((st) => !st.ok) &&
-        /provider se nahi mil|gadh ke nahi bataunga|unavailable/i.test(String(turn.reply ?? ""));
+        /provider se nahi mil|unavailable|andaza nahi lagaunga/i.test(String(turn.reply ?? ""));
       if (unhelpfulNoData) agenticFailureReason = "unhelpful_summary_with_pending_choice";
       /* Round-18m-30r (user rule: STATION pehle, date baad): city ambiguous hai, model ne SEARCH_STATIONS/
        * options diye bina date/pax poochh liya ya kuch aur bol diya → model ka reply discard; deterministic
@@ -1859,7 +1859,7 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
       const unhelpfulGeneral =
         !unhelpfulNoData &&
         turn.steps.every((st) => !st.ok) &&
-        /provider se nahi mil|gadh ke nahi bataunga/i.test(String(turn.reply ?? "")) &&
+        /provider se nahi mil|andaza nahi lagaunga/i.test(String(turn.reply ?? "")) &&
         webRescueEligible(String(req.text ?? ""), turn.steps);
       if (unhelpfulGeneral) agenticFailureReason = "unhelpful_summary_general_question";
       if (turn.reply && !pickReasked && !unhelpfulNoData && !unhelpfulGeneral && !skippedStationStep) {
