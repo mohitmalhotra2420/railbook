@@ -36,7 +36,7 @@ import {
 } from "../railway/router.js";
 import { scrapeTrainFactsWeb, webSourceLabel } from "../railway/webscrape.js";
 import { parseDatePhrase, parseStatusDate } from "../understand/legacy-dates.js";
-import { candidateStationTokens, checkStationsOnRoute, normalizeRouteSegment, routeMismatchMessage } from "./routeCheck.js";
+import { candidateStationTokens, checkStationsOnRoute, citySiblingOnRoute, normalizeRouteSegment, routeMismatchMessage } from "./routeCheck.js";
 import { STATION_QUALIFIER_CANON } from "../understand/legacy-nlu.js";
 import { RailKitProvider } from "../railway/railkit.js";
 import type { ClassCode } from "../providers/types.js";
@@ -1632,11 +1632,19 @@ export async function executeApprovedTool(
         if (fromCode && toCode) seg = segmentOfStops(stops, fromCode, toCode);
         else if (!fromCode && toCode && stops.length) seg = segmentOfStops(stops, stops[0].code, toCode);
         else if (fromCode && !toCode && stops.length) seg = segmentOfStops(stops, fromCode, stops[stops.length - 1].code);
+        /* Round-43k: off-route station ke liye same-shehar ka route-station bhi batao (Ludhiana → DDL) —
+         * tab model/fallback dono ka jawab exact hota hai, "nahi jaati" ke bajaye asli station milta hai. */
+        const siblingLines = await Promise.all(
+          stationChecks.filter((c) => !c.onRoute && c.code).map(async (c) => {
+            const sib = await citySiblingOnRoute(String(a.train_number), String(c.code)).catch(() => null);
+            return sib ? ` Isi shehar ka ${sib.code}${sib.name ? ` (${sib.name})` : ""} route par hai${sib.departure ? ` — dep ${sib.departure}` : ""}.` : "";
+          }),
+        );
         const checkLine = stationChecks
-          .map((c) =>
+          .map((c, i) =>
             c.onRoute
               ? ` ${c.code} par RUKTI HAI (stop #${c.index}/${stops.length}${c.arrival ? `, arr ${c.arrival}` : ""}${c.departure ? `, dep ${c.departure}` : ""}).`
-              : ` ${c.code ?? c.ref} is train ke route par NAHI hai — ${c.ref} ke liye ye train use nahi hoti.`,
+              : ` ${c.code ?? c.ref} is train ke route par NAHI hai — ${c.ref} ke liye ye train use nahi hoti.${siblingLines.filter((_, j) => stationChecks.filter((x) => !x.onRoute && x.code)[j] === c).join("")}`,
           )
           .join("");
         const segLine = seg ? `, ${seg.from}→${seg.to} ${seg.departure}→${seg.arrival} (${seg.durationLabel})` : "";

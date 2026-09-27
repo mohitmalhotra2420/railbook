@@ -290,3 +290,26 @@ export function normalizeRouteSegment(
   if (destination && destination === last) destination = undefined;
   return { origin, destination };
 }
+
+/** Kisi station ke liye train ke route ka "same-city" station (Ludhiana → DDL). Koi doosra tool/handler
+ * isse wahi nuance de sakta hai (jaise GET_TIMETABLE ka station line) — verification ek hi jagah rehti hai. */
+export async function citySiblingOnRoute(
+  trainNumber: string,
+  stationCode: string,
+): Promise<{ code: string; name?: string; arrival?: string | null; departure?: string | null } | null> {
+  const sched = await routedSchedule(trainNumber).catch(() => null);
+  const stops: Stop[] = sched?.schedule && "stops" in sched.schedule ? (sched.schedule.stops as Stop[]) ?? [] : [];
+  if (stops.length < 2) return null;
+  if (stops.some((st) => norm(st.code) === norm(stationCode))) return null; /* khud route me hai */
+  const res = await routedStationSearch(String(stationCode)).catch(() => null);
+  const hit = (res?.stations ?? []).find((st) => norm(st.code) === norm(stationCode)) ?? null;
+  const city = normName(hit?.city ?? "");
+  if (!city) return null;
+  const cityRes = await routedStationSearch(String(hit?.city ?? "").trim() || stationCode).catch(() => null);
+  for (const cand of cityRes?.stations ?? []) {
+    if (normName(cand.city ?? "") !== city || norm(cand.code) === norm(stationCode)) continue;
+    const inRoute = stops.find((st) => norm(st.code) === norm(cand.code));
+    if (inRoute) return { code: norm(inRoute.code), name: inRoute.name, arrival: (inRoute as { arrival?: string | null }).arrival, departure: (inRoute as { departure?: string | null }).departure };
+  }
+  return null;
+}
