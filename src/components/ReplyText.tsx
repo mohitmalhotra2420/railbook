@@ -14,6 +14,7 @@
  *   • bullet na ho to pehle jaisa paragraph (kuch chhupta nahi, kuch invent nahi).
  */
 import type { JSX } from "react";
+import { AnswerCard } from "./AnswerCard";
 
 export type Row = {
   train: string;
@@ -270,7 +271,10 @@ export function ReplyText({
   onBook?: (row: Row, group: TrainRowGroup) => void;
 }): JSX.Element {
   const parsed = parseReply(text);
-  if (parsed.rows.length === 0) return <p className="msg-text">{text}</p>;
+  /* Round-47: seat rows nahi mile (matlab ye prose jawab hai — jaise "12013 … timetable ke hisaab se
+   * LDH arrival 20:16") → ab seedha paragraph nahi, sections me (headline + status chips + timetable +
+   * body + source). Text waisa hi rehta hai, sirf padhne-layak baant diya jaata hai. */
+  if (parsed.rows.length === 0) return <AnswerCard text={text} />;
   /* Round-29: display-level grouping — server ka text/rows waisa hi rehta hai, sirf card ek per train. */
   const groups = groupReplyRowsByTrain(parsed.rows);
   return (

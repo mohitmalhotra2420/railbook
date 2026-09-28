@@ -26,6 +26,8 @@ import { VoiceSheet, type VoiceSuggestion } from "../components/VoiceSheet";
 import { AlternativesCard } from "../components/AlternativesCard";
 import { TrainPicker } from "../components/TrainPicker";
 import { ReplyText, type ReplyRow } from "../components/ReplyText";
+import { AnswerCard } from "../components/AnswerCard";
+import { IconPlus, IconGrid, IconBoard, IconTicket, IconChat } from "../components/Icons";
 import { TrainClassBlock } from "../components/TrainClassBlock";
 
 import type { ChatMessage } from "../conversation/types";
@@ -1866,19 +1868,32 @@ export function Concierge() {
             Demo
           </span>
         )}
-        {!showHome && (
-          <button className="icon-btn" title="Nayi chat" aria-label="Nayi chat" onClick={startNewChat}>✚</button>
-        )}
-        <button className="icon-btn" title="RailKit tools" onClick={() => go("tools")}>▦</button>
-        <button className="icon-btn" title="Wallet" onClick={() => go("wallet")}>₹</button>
-        <button className="icon-btn" title="Bookings" onClick={() => go("bookings")}>☰</button>
+        {/* Round-47 (user: "header bhi better banao naye buttons rakho yeh purane htado", aur
+         * "payment ka sign hta do"): purane text-glyph buttons (✚ ▦ ₹ ☰) hata kar saaf SVG icons;
+         * ₹ (wallet) header se hata — wallet booking flow ke apne buttons se khulta rehta hai. */}
+        <button className="icon-btn" title="Nayi chat" aria-label="Nayi chat" onClick={startNewChat}>
+          <IconChat />
+        </button>
+        <button className="icon-btn" title="Board / tools" aria-label="Rail tools" onClick={() => go("tools")}>
+          <IconBoard />
+        </button>
+        <button className="icon-btn" title="Train search" aria-label="Train search" onClick={() => go("home")}>
+          <IconGrid />
+        </button>
+        <button className="icon-btn accent" title="Meri bookings" aria-label="Meri bookings" onClick={() => go("bookings")}>
+          <IconTicket />
+        </button>
       </header>
       {debugOn && lastDbg && (
         <div className="muted" style={{ padding: "6px 16px", fontSize: 12 }}>{lastDbg}</div>
       )}
-      <div className="ai-progress" aria-hidden>
+      {/* Round-47: booking ka safar — ab dots + track (aur active step gold). Labels wahi 4. */}
+      <div className={`ai-progress${showHome ? " idle" : ""}`} aria-hidden={showHome}>
         {["Journey", "Train", "Passengers", "Payment"].map((l, i) => (
-          <span key={l} className={i <= step ? "on" : ""}>{l}</span>
+          <span key={l} className={`ai-step${i <= step ? " on" : ""}${i === step ? " now" : ""}`}>
+            <i className="ai-dot">{i < step ? "✓" : i + 1}</i>
+            <b>{l}</b>
+          </span>
         ))}
       </div>
 
@@ -1929,7 +1944,7 @@ export function Concierge() {
                         <summary>
                           AI note <span className="msg-note-hint">tap karo</span>
                         </summary>
-                        <p className="msg-text">{rest}</p>
+                        <AnswerCard text={rest} />
                       </details>
                     ) : (
                       /* Round-20: lamba jawab (screenshot 3) attractive rows me — ReplyText sirf

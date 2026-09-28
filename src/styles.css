@@ -2367,3 +2367,184 @@ button.rp-crow:active { transform: translateY(1px); }
 .rp-crow.tappable:hover { border-color: var(--green); background: #f6fbf8; }
 .rp-crow .rp-go { margin-left: auto; font-size: 11px; font-weight: 800; color: #fff; background: #22304a; border-radius: 8px; padding: 3px 9px; }
 .rp-crow.tappable .rp-cls { background: #e8eef7; }
+
+/* ══ ROUND-47 (28 Sep 2026) — chat ki padhne-layak UI + naya header ══════════════════════════════════
+ * User (screenshot): "etna lamba chat padhna kitna mushkil ho rha, thoda attractive banao so that
+ * readable ho, clean UI ho — response ko clear cards, larger text, spacing, status chip aur timetable
+ * sections me divide kiya jaaye." + "header bhi better banao naye buttons rakho yeh purane htado,
+ * payment ka sign hta do". Sirf UI — AI/API/backend ko haath nahi lagaya. */
+
+/* ── 1. Header ───────────────────────────────────────────────────────────────────────────────────── */
+.topbar {
+  background: linear-gradient(180deg, #0e2647 0%, var(--navy) 100%);
+  padding: calc(9px + var(--safe-t)) 12px 10px;
+  gap: 8px;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.06) inset, 0 6px 18px rgba(11, 31, 58, 0.18);
+}
+.topbar .brand { font-size: 17px; letter-spacing: 0.01em; }
+.topbar .brand img { width: 30px; height: 30px; border-radius: 9px; box-shadow: 0 0 0 1px rgba(255,255,255,0.14); }
+.topbar .brand .build-tag {
+  background: rgba(255, 255, 255, 0.09);
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  color: rgba(255, 255, 255, 0.72);
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 10.5px;
+  letter-spacing: 0.05em;
+}
+.icon-btn {
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  transition: transform 0.12s ease, background 0.15s ease;
+}
+.icon-btn:hover { background: rgba(255, 255, 255, 0.14); }
+.icon-btn:active { transform: translateY(1px) scale(0.97); background: rgba(255, 255, 255, 0.2); }
+.icon-btn.accent { background: rgba(200, 150, 46, 0.22); border-color: rgba(243, 228, 188, 0.28); color: #f7ead0; }
+.icon-btn.accent:hover { background: rgba(200, 150, 46, 0.34); }
+.icon-btn svg { width: 21px; height: 21px; }
+
+/* Booking ka safar — dots + track (purane plain text tabs ki jagah) */
+.ai-progress {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--navy);
+  padding: 0 12px 11px;
+  font-size: 10.5px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+.ai-progress.idle { opacity: 0.45; }
+.ai-step {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: rgba(255, 255, 255, 0.42);
+  min-width: 0;
+}
+.ai-step .ai-dot {
+  flex: 0 0 auto;
+  width: 17px;
+  height: 17px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 700;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+}
+.ai-step b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-step.on { color: rgba(255, 255, 255, 0.86); }
+.ai-step.on .ai-dot { background: rgba(200, 150, 46, 0.28); border-color: rgba(243, 228, 188, 0.4); color: #f7ead0; }
+.ai-step.now b { color: var(--gold-soft); }
+
+/* ── 2. Chat bubbles — thoda bada text, zyada saans lene ki jagah ──────────────────────────────── */
+.thread { padding: 14px 14px 10px; }
+.msg { margin: 12px 0 18px; }
+.msg.user .msg-text { font-size: 15px; padding: 11px 15px; line-height: 1.5; border-radius: 18px 18px 5px 18px; box-shadow: 0 2px 10px rgba(11, 31, 58, 0.14); }
+.msg.assistant .msg-kicker { font-size: 10.5px; letter-spacing: 0.1em; margin-bottom: 6px; color: var(--faint); }
+.msg-note > summary { font-size: 12px; padding: 6px 12px; }
+
+/* ── 3. AnswerCard — lamba prose jawab sections me (AnswerCard.tsx) ─────────────────────────────── */
+.ac { display: flex; flex-direction: column; gap: 10px; }
+.ac-steps { display: flex; flex-wrap: wrap; gap: 6px; }
+.ac-stepchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #365b8a;
+  background: #f2f7ff;
+  border: 1px solid #dbe7f6;
+  border-radius: 999px;
+  padding: 4px 10px;
+}
+.ac-stepdot { font-size: 11px; }
+.ac-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.ac-chip {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  border-radius: 999px;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--muted);
+}
+.ac-chip.ok { background: var(--green-soft); border-color: #bfe3d1; color: var(--green); }
+.ac-chip.warn { background: var(--amber-soft); border-color: #f0d6a8; color: var(--amber); }
+.ac-chip.info { background: #eef4ff; border-color: #d3e0f7; color: #2c4f86; }
+.ac-chip.muted { background: #f2f2f0; border-color: #e2e0da; color: var(--muted); }
+
+.ac-head {
+  margin: 0;
+  font-size: 16.5px;
+  font-weight: 650;
+  line-height: 1.45;
+  color: var(--ink);
+  letter-spacing: -0.01em;
+}
+/* Timetable section — chhota departure board */
+.ac-board {
+  background: linear-gradient(180deg, #ffffff 0%, #fbfcff 100%);
+  border: 1px solid #e2e8f3;
+  border-radius: 15px;
+  padding: 11px 12px;
+  box-shadow: 0 1px 0 rgba(11, 31, 58, 0.03), 0 6px 18px rgba(11, 31, 58, 0.05);
+}
+.ac-board-top { display: flex; align-items: center; gap: 8px; margin-bottom: 9px; }
+.ac-board-code {
+  font-size: 12.5px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  background: var(--navy);
+  color: #fff;
+  border-radius: 8px;
+  padding: 3px 8px;
+}
+.ac-board-name { font-size: 13.5px; font-weight: 600; color: #22304a; }
+.ac-times { display: flex; gap: 10px; }
+.ac-time {
+  flex: 1;
+  border-radius: 12px;
+  padding: 8px 10px;
+  background: #f6f8fc;
+  border: 1px solid #e7ecf6;
+}
+.ac-time.arr { background: #f2f8f4; border-color: #dcebe1; }
+.ac-time.dep { background: #fdf6ec; border-color: #f1e2c8; }
+.ac-time-l { display: block; font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.ac-time-v {
+  display: block;
+  margin-top: 2px;
+  font-size: 22px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+  color: var(--navy);
+}
+.ac-body { display: flex; flex-direction: column; gap: 8px; }
+.ac-p { margin: 0; font-size: 15.5px; line-height: 1.62; color: #2a2f36; }
+.ac-hl {
+  font-weight: 700;
+  color: var(--navy);
+  background: linear-gradient(180deg, transparent 62%, rgba(200, 150, 46, 0.28) 62%);
+  border-radius: 3px;
+  padding: 0 1px;
+}
+.ac-src {
+  font-size: 11.5px;
+  color: var(--muted);
+  border-top: 1px dashed var(--line);
+  padding-top: 7px;
+  line-height: 1.45;
+}
+.ac-src-k { font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; font-size: 10px; color: var(--faint); margin-right: 4px; }
