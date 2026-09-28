@@ -1108,7 +1108,7 @@ export type ArrivalAtStation = {
  * '"Depart" ke liye exact station chahiye'). Deterministic direct jawab:
  * live position + route-order se Haan/Abhi-nahi, schedule se dep-time. */
 const DEPART_QUESTION_RE =
-  /\bdepart(?:ed|ure)?\b|(?:nikal|nikli|chhoot|chhuti|chali)\s+(?:chuki|chuka|gayi|gyi)|(?:nikli|chali)\s+hai|(?:niklegi|niklega|niklengi|niklenge)/i;
+  /\bdepart(?:ed|ure)?\b|(?:nikal|nikli|chhoot|chhuti|chali)\s+(?:chuki|chuka|gayi|gyi)|(?:nikli|chali|chalta|chalti|chalte)\s+hai|(?:niklegi|niklega|niklengi|niklenge)|kab\s+(?:chalti|chalta|chalte|nikalti|nikalta)/i;
 
 const DEPART_VERB_WORDS = new Set([
   "depart", "departed", "departure", "nikal", "nikli", "nikalna", "nikalke", "chali", "chhoot", "chhuti", "chuki", "chuka", "gayi", "gyi", "niklegi", "niklega", "niklengi", "niklenge", "kya", "abhi", "ho", "hui", "tha", "thi", "waqt", "se",
@@ -1146,7 +1146,15 @@ export async function departureFromStationTurn(
     const m = matchStop(tok);
     if (m) stop = m;
   }
-  if (!stop) return null; // route mein asked station nahi — normal flow honest jawab dega
+  if (!stop) {
+    /* Round-45: route me nahi hone wala station — "se chalti hi nahi" (warna live dump aa jaata tha). */
+    const chk = await checkStationsOnRoute(trainNo, {}, raw).catch(() => null);
+    if (chk && chk.stops.length >= 2 && chk.bad) {
+      const name0 = "trainName" in (sched.schedule ?? {}) ? String((sched.schedule as { trainName?: string }).trainName ?? "") : "";
+      return { reply: `${trainNo}${name0 ? ` ${name0}` : ""} — ${routeMismatchTail(chk.bad, "se chalti hi nahi")}`, trainNumber: trainNo, trainName: name0 || null };
+    }
+    return null; // station resolve hi nahi hua — normal flow honest jawab dega
+  }
   const name = "trainName" in (sched.schedule ?? {}) ? String((sched.schedule as { trainName?: string }).trainName ?? "") : "";
   const depTime = stop.departure && !(stop === stops[stops.length - 1] && stop.departure === "00:00") ? stop.departure : null;
 
@@ -1320,7 +1328,16 @@ export async function arrivalAtStationTurn(
     const m = matchStop(tok);
     if (m) stop = m;
   }
-  if (!stop) return null;
+  if (!stop) {
+    /* Round-45: station is train ke route me hi nahi (jaise "12013 haridwar arrival kitne baje") —
+     * pehle ye null deta tha aur normal flow "Kahan jaana hai?" poochh leta tha. Ab seedha sach. */
+    const chk = await checkStationsOnRoute(trainNo, {}, raw).catch(() => null);
+    if (chk && chk.stops.length >= 2 && chk.bad) {
+      const name0 = "trainName" in schedule ? String(schedule.trainName ?? "") : "";
+      return { reply: `${trainNo}${name0 ? ` ${name0}` : ""} — ${routeMismatchTail(chk.bad)}`, trainNumber: trainNo, trainName: name0 || null };
+    }
+    return null;
+  }
 
   /* Source-stop par arrival 00:00 API placeholder hai — hide. */
   const isSource = stops[0] === stop;
@@ -1357,6 +1374,83 @@ export async function arrivalAtStationTurn(
 /** ── Round-44: "train X par rukti hai kya?" — haan/na ka sawaal, route ke sach se ────────────────
  * Haan → us stop ka arr/dep; nahi → saaf "is route me nahi" (+ isi shehar ka route-station, agar ho). */
 const STOPPING_Q_RE = /\b(ruk(?:ti|ta|na|ne|w?ti)?|stop(?:s|ping)?|halt)\b/i;
+
+/** ── Round-45: route-mismatch ka saaf jawab — jab poochha gaya station us train ke route me hi nahi hai.
+ * Arrival / binary ("pahunch gayi kya") / departure — teeno ka ek hi sach: nahi rukti, route kya hai,
+ * aur (mile to) usi shehar ka route-par wala station. (R43e rule: jhoothi seat/board listing nahi.) */
+type RouteBad = { code: string; name?: string | null; first: string; last: string; nearby?: { code: string; name?: string | null } };
+function routeMismatchTail(bad: RouteBad, verb = "par rukti hi nahi"): string {
+  const sib = bad.nearby ? ` Isi shehar ka ${bad.nearby.code}${bad.nearby.name ? ` (${bad.nearby.name})` : ""} route par hai.` : "";
+  return `${bad.code}${bad.name ? ` (${bad.name})` : ""} ${verb} (is train ka route ${bad.first} → ${bad.last} hai).${sib}`;
+}
+
+/** Round-45: model kai baar saaf sawaal (train + station diya hua) par bhi khokhla jawab de deta hai —
+ * "Kahan jaana hai? Station bataiye." (R44 screenshots ki jadd). Aisa jawab tabhi badla jaata hai jab
+ * hamare paas usi sawaal ka VERIFIED deterministic jawab maujood ho (arrival/live/seat handlers) —
+ * warna model ka jawab hi jaata hai. AI-first wahi rehta hai: model pehle chalta hai. */
+const EVASIVE_REPLY_RE =
+  /\b(kahan\s+se\s+(?:jaana|jana)|kahan\s+(?:jaana|jana)\s+hai|station\s+batai?ye|station\s+batao|kaunsi\s+station|kis\s+station|train\s+(?:number|no\.?)\s+batai?ye|train\s+batai?ye|which\s+(?:train|station))\b/i;
+function isEvasiveReply(reply: string): boolean {
+  const r = String(reply ?? "").trim();
+  return r.length <= 200 && EVASIVE_REPLY_RE.test(r);
+}
+
+/** Round-45: sawaal ki QISM — adequacy net isi par decide karta hai ki model ka jawab "us sawaal ka
+ * jawab" hai ya nahi. Ye per-question rule nahi hai (R43k), sirf 3 qismein: seat / arrival-family / live. */
+type AnswerKind45 = "seat" | "arrival" | "live";
+export function answerKind45(text: string): AnswerKind45 | null {
+  const t = String(text ?? "");
+  if (/\b(seat|seats|berth|availab\w*|avl|rac|waitlist|wk|wl|confirmation)\b/i.test(t) && /\b\d{4,5}\b/.test(t)) return "seat";
+  if (
+    BINARY_ARRIVAL_RE.test(t) ||
+    ARRIVAL_QUESTION_RE.test(t) ||
+    HALT_QUESTION_RE.test(t) ||
+    STOPPING_Q_RE.test(t) ||
+    DEPART_QUESTION_RE.test(t) ||
+    /\b(kab\s+pahunch\w*|kitne\s+baje\s+pahunch\w*)\b/i.test(t)
+  ) return "arrival";
+  if (/\b(kahan\s+hai|kahaan\s+hai|kaha\s+hai|abhi\s+kahan|kahan\s+tak|kahan\s+pahunchi|live\s+status|running\s+status|late\s+hai|delayed|delay\s+hai)\b/i.test(t)) return "live";
+  return null;
+}
+
+/** Model ka jawab us sawaal ka jawab hai ya nahi — REAL data wali cheez dhoondo, lafzon ka jaal nahi.
+ *  seat    → availability ka data (AVAILABLE/WL/RAC/₹/N/A)
+ *  arrival → sawaal ka station (code/naam) + waqt, ya saaf "rukuti/chalti hi nahi" (route ka sach)
+ *  live    → waqt/position (ya "start hi nahi hua" wali line)
+ * Jawab na ho to null na do — neeche deterministic rescue (verified tool data) chalega. */
+export function replyAdequateFor45(kind: AnswerKind45, reply: string, question: string): boolean {
+  const r = String(reply ?? "").trim();
+  if (!r) return false;
+  if (isEvasiveReply(r)) return false;
+  if (kind === "seat") return /availab|rac|waitlist|\bwl\b|₹|rs\.?\s*\d|n\/a/i.test(r);
+  /* Route ka sach (nahi rukti/chalti) — khud me poora jawab hai. */
+  if (/ruk(?:ti|ta)\s+hi\s+nahi|chalti\s+hi\s+nahi|nahi\s+ruk(?:ti|ta)|route\s+[A-Z]{2,5}\s*(?:→|->)/i.test(r)) return true;
+  if (kind === "live") {
+    /* Live jawab: waqt, delay ya asli POSITION ("LUDHIANA JN ke aage, delay 6 min, agla stop UMB"). */
+    return /\b\d{1,2}:\d{2}\b|delay\s*\d|\d+\s*(?:min|minute)s?\s*(?:late|delay)|ke\s+(?:aage|paas|peeche)|agla\s+stop|next\s+stop|pahunch\s+(?:gayi|chuki)|nahi\s+pahunchi|start\s+(?:ho|chuka|hota)|\brunning\b|chalu/i.test(r);
+  }
+  /* Arrival: sawaal ka STATION (code/naam) + waqt/pahunchne ka sach — warna wo us sawaal ka jawab nahi. */
+  const asked = arrivalStationTokens(question);
+  const low = r.toLowerCase();
+  const mentionsStation = !asked.length || asked.some((tok) => tok.length >= 3 && low.includes(tok.slice(0, 3)));
+  const hasData = /\b\d{1,2}:\d{2}\b/.test(r) || /pahunch\s+(?:gayi|chuki|gaya|chuka)|nahi\s+pahunchi|pahunch\s+chuki/i.test(r);
+  return mentionsStation && hasData;
+}
+
+/** Round-45 rescue: us sawaal ki qism ke hisaab se pehla milne wala VERIFIED deterministic jawab. */
+async function deterministicRescue45(kind: AnswerKind45 | null, req: AgentRequest, seeded: AgentContext): Promise<AgentResponse | null> {
+  const order: Array<() => Promise<AgentResponse | null>> =
+    kind === "seat"
+      ? [() => singleTrainSeatTurn(req, seeded), () => arrivalFamilyTurn(req, seeded), () => livePrecheckTurn(req)]
+      : kind === "live"
+        ? [() => livePrecheckTurn(req), () => arrivalFamilyTurn(req, seeded), () => departureTurn(req, seeded)]
+        : [() => arrivalFamilyTurn(req, seeded), () => departureTurn(req, seeded), () => livePrecheckTurn(req), () => singleTrainSeatTurn(req, seeded)];
+  for (const fn of order) {
+    const r = await fn().catch(() => null);
+    if (r) return r;
+  }
+  return null;
+}
 
 export async function stoppingQuestionTurn(
   text: string,
@@ -1446,7 +1540,17 @@ export async function arrivalBinaryTurn(
     const m = stops.find((st) => st.code.toLowerCase() === tok || (tok.length >= 4 && (clean(st.name).includes(clean(tok)) || clean(st.name).startsWith(clean(tok)))));
     if (m) stop = m;
   }
-  if (!stop) return null;
+  if (!stop) {
+    /* Round-45: binary sawaal ("haridwar pahunch gayi kya") non-route station par — pehle live ka
+     * raw dump aa jaata tha. Ab route ka sach (R43e: train ke route me na hone wale station par
+     * seat/board nahi, saaf correction). */
+    const chk = await checkStationsOnRoute(trainNo, {}, raw).catch(() => null);
+    if (chk && chk.stops.length >= 2 && chk.bad) {
+      const name0 = "trainName" in (sched?.schedule ?? {}) ? String((sched?.schedule as { trainName?: string })?.trainName ?? "") : "";
+      return { reply: `${trainNo}${name0 ? ` ${name0}` : ""} — ${routeMismatchTail(chk.bad)}`, trainNumber: trainNo, trainName: name0 || null };
+    }
+    return null;
+  }
   const name = "trainName" in (sched?.schedule ?? {}) ? String((sched?.schedule as { trainName?: string })?.trainName ?? "") : "";
   const askedDate = runDateLabel(raw, nowIso);
   const dateArg = askedDate ? isoOfLabel(askedDate, nowIso) : null;
@@ -1587,116 +1691,16 @@ async function askStationChoiceFirst(
   }
 }
 
-export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
-  const seeded = seedContext(req);
-  /* Round-18m-32 (user: "HAR question AI ke paas jaaye — train search, station lookup, live, seats, general —
-   * AI decide kare kaunsa API/scrape"): code-first shortcuts (arrival/departure fast-path, live fast-path,
-   * name-picker) ab sirf tab jab AI configured na ho ya AI_OWNS_FLOW=0. Warna AI pehle; ye sab uske TOOLS hain. */
-  const aiFirst = agenticConfigured() && process.env.AI_OWNS_FLOW !== "0" && !isBookingMutation(req);
-
-  /* ── 1) AI-DRIVEN TOOL CALLING (primary engine) ────────────────────
-   * Model request + multi-turn state dekh kar KHUD decide karta hai kaunse
-   * approved tools call karne hain (multi-step chaining allowed). Sirf
-   * booking mutations model tak nahi pahunchte (booking tool hai hi nahi).
-   * Cheap deterministic slot-merge (no network) context compile karta hai. */
-  let agenticFailureReason: string | null = null;
-
-  /* Station-choice reply ("4" / "NDLS" / "New Delhi") — pichhle turn mein
-   * station options puche gaye the to slot yahin resolve karo. Dono engines
-   * (agentic known + deterministic ctx) ko milta hai; model/history-parse
-   * fail ho tab bhi flow aage badhta hai. */
-  let stationPick: StationPick = null;
-  try {
-    stationPick = await resolveStationPick(req.text, req.history, seeded);
-  } catch {
-    /* pick optional hai — normal flow continue */
-  }
-  if (stationPick) {
-    if (stationPick.side === "to" && !seeded.destination) {
-      seeded.destination = { code: stationPick.code, name: stationPick.name, city: stationPick.city };
-    } else if (stationPick.side === "from" && !seeded.origin) {
-      seeded.origin = { code: stationPick.code, name: stationPick.name, city: stationPick.city };
-    }
-  }
-
-  /* Train NAAM se resolve (2026-09-05): "swarn shatabdi ka time batao" jaisi
-   * queries pichhli selected train par galti se na chal jayein. Ek solid match
-   * → dono engines ke liye selectedTrain set; ambiguous/zero → honest clarify
-   * (model ko galat train answer karne ka mauka hi nahi). */
-  let nameClarify: string | null = null;
-  let namePicker: TrainPickerResult | null = null;
-  let nameResolvedTrain: { number: string; name: string } | null = null;
-  if (!isBookingMutation(req)) {
-    try {
-      const resolved = await resolveTrainByName(req.text, seeded);
-      if (resolved && "trainNumber" in resolved) {
-        nameResolvedTrain = { number: resolved.trainNumber, name: resolved.trainName };
-        seeded.selectedTrainNumber = resolved.trainNumber;
-        seeded.selectedTrainName = resolved.trainName;
-      } else if (resolved && "clarify" in resolved && !aiFirst) {
-        /* AI-first: ambiguous naam par picker code nahi dega — AI TRAIN_NAME_SEARCH/SEARCH_TRAIN_BY_NAME tool se
-         * khud options dikhayega (ya sawaal general ho to seedha jawab). */
-        nameClarify = resolved.clarify;
-        namePicker = resolved.picker ?? null;
-      }
-    } catch {
-      /* optional hai — normal flow continue */
-    }
-  }
-
-  /* ── Round-39: CAPABILITY/META sawaal — "tum kya kar sakte ho", "kya nahi kar sakte",
-   * "tum kaun ho" (live battery me "kya nahi kar sakte" par model ne booking flow shuru kar
-   * diya: "Kahan se jaana hai?" 😑). Ye jawab fixed aur honest hai — koi tool nahi. */
-  {
-    const t = String(req.text ?? "").toLowerCase();
-    const capabilityQ =
-      /\b(tum|aap|tu|you)\b[^?!.]{0,40}\b(kya|kaun|kaunsi|kaunsa|kaise|what|who)\b[^?!.]{0,40}\b(kar sakte|kar sakta|kar sakt[ae]|kar sakti|nahi kar|nhi kar|na kar|kaun ho|koi ho|limits?|limit)\b/i.test(t) ||
-      /\b(kya nahi kar|kya nhi kar|what can'?t you|what can you not|tumhari limits?|tumhari kya limit|aap kya nahi)\b/i.test(t) ||
-      /\b(tum|aap|tu|you)\b[^?!.]{0,30}\b(kaun|koun|who)\b[^?!.]{0,20}\b(ho|hain|are you)\b/i.test(t) ||
-      /\b(what can you do|tum kya kya kar|aap kya kya kar|tum kya kar sakti ho)\b/i.test(t);
-    if (capabilityQ && !/\b(\d{4,5})\b/.test(t)) {
-      const detCap = await deterministicUnderstand(req.text, {
-        now: req.now ? new Date(req.now) : undefined,
-        lastAsked: req.lastAsked ?? null,
-        known: { from: seeded.origin, to: seeded.destination, date: seeded.date, passengerCount: seeded.passengers },
-      });
-      return {
-        nlu: detCap,
-        source: "nlu",
-        context: { ...emptyAgentContext() },
-        tool: null,
-        toolOk: null,
-        reply:
-          "Main RailBook AI hoon — Indian Railways ka assistant. Main ye sab kar sakta hoon:\n" +
-          "• Train search (from → to + date) — direct/connecting, timings, kis class me seat hai, fare\n" +
-          "• Kisi bhi train ka: naam · route · timetable/stops · live status (abhi kahan hai) · kitni late\n" +
-          "• Seat availability & fare (ConfirmTkt · RailYatri · eRail se real data), WL/RAC ka sach\n" +
-          "• Booking aage badhana: class/seat chun kar passenger form kholna (IRCTC handoff)\n" +
-          "• PNR status · station code/naam/city · general railway rules (tatkal · RAC/WL · luggage · khana · refund)\n" +
-          "• General railway knowledge (itihaas, speed, sabse lambi route, sabse bada station jaise sawaal)\n\n" +
-          "Do cheezein main NAHI karta (aapke rule ke hisaab se): (1) IRCTC par 'Continue to IRCTC' main aapki taraf se click nahi karta, (2) aapke passenger details / OTP / payment main khud nahi bharta — wo aap karte ho. " +
-          "Aur jo data verified nahi hota, main guess nahi karta — saaf bolta hoon aur jo sach me pata hai wahi deta hoon.",
-        interrupt: false,
-        resumeAsk: null,
-        resumeText: null,
-        trains: null,
-        confirmBook: false,
-        missingFields: [],
-        modelUsed: null,
-        latencyMs: 0,
-        failureReason: "capability_meta_answer",
-        engine: "deterministic",
-        agenticFailureReason: null,
-        grounded: true,
-      };
-    }
-  }
-
-  /* ── Round-43 (27 Sep 2026, user screenshot: "12054 ki seat availability btana" par poora 16-train
-   * board khul gaya, uska jawab nahi mila — jabki ChatGPT usi sawaal par 27/28/29 Sep ki saaf
-   * date-wise availability deta hai). Ab KHAAS TRAIN ke seat sawaal par usi train ka
-   * CHECK_AVAILABILITY chalta hai (FIND_SEATS ka route-board NAHI) — date na ho to aaj + kal dono. */
-  {
+/* ══ ROUND-45 (28 Sep 2026) — FULL AI-FIRST (user: "jab AI ke paas saare tools hain, to har query pehle
+ * AI ke paas jaani chahiye — tum handlers/rules kyun update karte ho?") ═════════════════════════════
+ * Ab HAR sawaal pehle model ke paas jaata hai (agentic tool-calling, saare tools). Neeche wale char
+ * deterministic handlers pehle SHORTCUTS the (model se pehle chalte the) — ab ye sirf FALLBACK hain:
+ *   (a) AI configured hi na ho (key nahi / AI_OWNS_FLOW=0), ya
+ *   (b) model fail ho (timeout / http error / empty reply) — tab usi sawaal ka verified deterministic
+ *       jawab turant (wahi tools: routeCheck / CHECK_AVAILABILITY / routedLiveStatus).
+ * Dono engine ek hi sach bolte hain — model aur fallback alag-alag jawab kabhi nahi (R44 screenshots).
+ */
+export async function singleTrainSeatTurn(req: AgentRequest, seeded: AgentContext): Promise<AgentResponse | null> {
     const t = String(req.text ?? "");
     /* Round-43b (multi-turn): train pehle turn me aa chuki hai (ctx me selected) aur ab user date/route/
      * class de raha hai ("Date aaj ki ludhiana se hw ki") → usi train ki availability dobara dikhao
@@ -1884,21 +1888,20 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
         }
       }
     }
-  }
+  return null;
+}
 
-  /* ── Round-43d (27 Sep 2026, battery: "12054 late hai kya" ❌ model date poochh kar ruk gaya) ──
-   * Khaas train ka live sawaal ("kahan hai" / "late hai kya" / running status) aur user ne koi date nahi
-   * boli → seedha wahi live probe (date ke bina — router khud aaj ka origin-idle run skip kar ke chalta
-   * hua run deta hai, Round-16p logic). Pehle ye model ke paas jaata tha jo date poochh kar ruk jaata tha. */
-  if (!aiFirst && !isBookingMutation(req)) {
+export async function livePrecheckTurn(req: AgentRequest): Promise<AgentResponse | null> {
     const t = String(req.text ?? "");
     const tnum = (/\b(\d{4,5})\b/.exec(t) ?? [])[1] ?? null;
     const liveQ = /\b(kahan hai|kahaan hai|kaha hai|abhi kahan|abhi kaha|kahan tak|kahan pahunchi|live status|running status|live hai|late hai|late h\b|late chal|delayed|delay hai|kitni der|der se chal)\b/i.test(t);
     const anyDate = /\b(aaj|kal|parso|parson|tomorrow|today|yesterday|\d{1,2}\s*(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*|20\d\d-\d\d-\d\d|\d{1,2}\/\d{1,2})\b/i.test(t);
-    /* Round-44: ye precheck sirf non-AI mode ka hai (AI ke paas TRACK_TRAIN/GET_TRAIN_HISTORY hai) —
-     * binary arrival sawaal ("LDH pahunch gayi kya") ke liye arrival handler ke baad deterministic net. */
-    if (!aiFirst && tnum && liveQ && !anyDate) {
-      try {
+    /* Round-45: guard (pehle ye inner-if me tha) — sirf AAJ/date-ke-bina live sawaal par chale. */
+    if (!tnum || !liveQ || anyDate) return null;
+    /* "kitni der rukti hai" me bhi "kitni der" hai (LIVE_TODAY_RE) par wo HALT ka sawaal hai —
+     * stop/route wala jawab chahiye, live status ka nahi. */
+    if (STOPPING_Q_RE.test(t) || HALT_QUESTION_RE.test(t)) return null;
+    try {
         /* Date KE BINA — router khud aaj ka origin-idle run skip kar ke chalta hua run deta hai
          * (Round-16p logic), aur cancel-alert bhi wahi se aata hai. Koi andaza nahi. */
         const liveResult = await executeTool("getLiveStatus", { trainNumber: tnum });
@@ -1938,7 +1941,239 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
       } catch {
         /* live probe optional — normal flow chalta rahe */
       }
+  return null;
+}
+
+export async function arrivalFamilyTurn(req: AgentRequest, seeded: AgentContext): Promise<AgentResponse | null> {
+    try {
+      /* Binary sawaal (pahunch gayi kya) par LIVE data ka jawab; warna timetable ka waqt. */
+      const stopping = await stoppingQuestionTurn(req.text, seeded).catch(() => null);
+      if (stopping) {
+        const detS = await deterministicUnderstand(req.text, {
+          now: req.now ? new Date(req.now) : undefined,
+          lastAsked: req.lastAsked ?? null,
+          known: { from: seeded.origin, to: seeded.destination, date: seeded.date, passengerCount: seeded.passengers },
+        });
+        const ctxS = mergeAgentContext(seeded, detS, req.text, { selectedTrainNumber: stopping.trainNumber, selectedTrainName: stopping.trainName });
+        if (!ctxS.intent || ctxS.intent === "NONE") ctxS.intent = "TRAIN_SCHEDULE";
+        ctxS.pendingAsk = null;
+        return {
+          nlu: detS, source: "nlu" as const, context: ctxS, tool: "getTimetable" as ToolName, toolOk: true,
+          reply: stopping.reply, interrupt: false, resumeAsk: null, resumeText: null, trains: null, confirmBook: false, missingFields: [],
+          modelUsed: null, latencyMs: 0, failureReason: null, engine: "deterministic" as const, agenticFailureReason: null, grounded: true,
+        } as never;
+      }
+      const arrival = BINARY_ARRIVAL_RE.test(req.text)
+        ? (await arrivalBinaryTurn(req.text, seeded, req.now)) ?? (await arrivalAtStationTurn(req.text, seeded, req.now))
+        : (await arrivalAtStationTurn(req.text, seeded, req.now)) ?? (await arrivalBinaryTurn(req.text, seeded, req.now));
+      if (arrival) {
+        const det = await deterministicUnderstand(req.text, {
+          now: req.now ? new Date(req.now) : undefined,
+          lastAsked: req.lastAsked ?? null,
+          known: { from: seeded.origin, to: seeded.destination, date: seeded.date, passengerCount: seeded.passengers },
+        });
+        const ctxArr = mergeAgentContext(seeded, det, req.text, {
+          selectedTrainNumber: arrival.trainNumber,
+          selectedTrainName: arrival.trainName,
+        });
+        if (!ctxArr.intent || ctxArr.intent === "NONE") ctxArr.intent = "TRAIN_SCHEDULE";
+        ctxArr.pendingAsk = null;
+        void neverAutoBook(det.intent, req.bookingFlow);
+        return {
+          nlu: det,
+          source: "nlu",
+          context: ctxArr,
+          tool: "getTimetable",
+          toolOk: true,
+          reply: arrival.reply,
+          interrupt: false,
+          resumeAsk: null,
+          resumeText: null,
+          trains: null,
+          confirmBook: false,
+          missingFields: [],
+          modelUsed: null,
+          latencyMs: 0,
+          failureReason: null,
+          engine: "deterministic",
+          agenticFailureReason: null,
+          grounded: true,
+        };
+      }
+    } catch {
+      /* precheck optional hai — normal flow continue */
     }
+  return null;
+}
+
+export async function departureTurn(req: AgentRequest, seeded: AgentContext): Promise<AgentResponse | null> {
+    try {
+      const dep = await departureFromStationTurn(req.text, seeded);
+      if (dep) {
+        const det = await deterministicUnderstand(req.text, {
+          now: req.now ? new Date(req.now) : undefined,
+          lastAsked: req.lastAsked ?? null,
+          known: { from: seeded.origin, to: seeded.destination, date: seeded.date, passengerCount: seeded.passengers },
+        });
+        const ctxDep = mergeAgentContext(seeded, det, req.text, {
+          selectedTrainNumber: dep.trainNumber,
+          selectedTrainName: dep.trainName,
+        });
+        if (!ctxDep.intent || ctxDep.intent === "NONE") ctxDep.intent = "LIVE_TRAIN_STATUS";
+        ctxDep.pendingAsk = null;
+        void neverAutoBook(det.intent, req.bookingFlow);
+        return {
+          nlu: det,
+          source: "nlu",
+          context: ctxDep,
+          tool: "getLiveStatus",
+          toolOk: true,
+          reply: dep.reply,
+          interrupt: false,
+          resumeAsk: null,
+          resumeText: null,
+          trains: null,
+          confirmBook: false,
+          missingFields: [],
+          modelUsed: null,
+          latencyMs: 0,
+          failureReason: null,
+          engine: "deterministic",
+          agenticFailureReason: null,
+          grounded: true,
+        };
+      }
+    } catch {
+      /* precheck optional hai — normal flow continue */
+    }
+  return null;
+}
+
+export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
+  const seeded = seedContext(req);
+  /* Round-18m-32 (user: "HAR question AI ke paas jaaye — train search, station lookup, live, seats, general —
+   * AI decide kare kaunsa API/scrape"): code-first shortcuts (arrival/departure fast-path, live fast-path,
+   * name-picker) ab sirf tab jab AI configured na ho ya AI_OWNS_FLOW=0. Warna AI pehle; ye sab uske TOOLS hain. */
+  const aiFirst = agenticConfigured() && process.env.AI_OWNS_FLOW !== "0" && !isBookingMutation(req);
+
+  /* ── 1) AI-DRIVEN TOOL CALLING (primary engine) ────────────────────
+   * Model request + multi-turn state dekh kar KHUD decide karta hai kaunse
+   * approved tools call karne hain (multi-step chaining allowed). Sirf
+   * booking mutations model tak nahi pahunchte (booking tool hai hi nahi).
+   * Cheap deterministic slot-merge (no network) context compile karta hai. */
+  let agenticFailureReason: string | null = null;
+
+  /* Station-choice reply ("4" / "NDLS" / "New Delhi") — pichhle turn mein
+   * station options puche gaye the to slot yahin resolve karo. Dono engines
+   * (agentic known + deterministic ctx) ko milta hai; model/history-parse
+   * fail ho tab bhi flow aage badhta hai. */
+  let stationPick: StationPick = null;
+  try {
+    stationPick = await resolveStationPick(req.text, req.history, seeded);
+  } catch {
+    /* pick optional hai — normal flow continue */
+  }
+  if (stationPick) {
+    if (stationPick.side === "to" && !seeded.destination) {
+      seeded.destination = { code: stationPick.code, name: stationPick.name, city: stationPick.city };
+    } else if (stationPick.side === "from" && !seeded.origin) {
+      seeded.origin = { code: stationPick.code, name: stationPick.name, city: stationPick.city };
+    }
+  }
+
+  /* Train NAAM se resolve (2026-09-05): "swarn shatabdi ka time batao" jaisi
+   * queries pichhli selected train par galti se na chal jayein. Ek solid match
+   * → dono engines ke liye selectedTrain set; ambiguous/zero → honest clarify
+   * (model ko galat train answer karne ka mauka hi nahi). */
+  let nameClarify: string | null = null;
+  let namePicker: TrainPickerResult | null = null;
+  let nameResolvedTrain: { number: string; name: string } | null = null;
+  if (!isBookingMutation(req)) {
+    try {
+      const resolved = await resolveTrainByName(req.text, seeded);
+      if (resolved && "trainNumber" in resolved) {
+        nameResolvedTrain = { number: resolved.trainNumber, name: resolved.trainName };
+        seeded.selectedTrainNumber = resolved.trainNumber;
+        seeded.selectedTrainName = resolved.trainName;
+      } else if (resolved && "clarify" in resolved && !aiFirst) {
+        /* AI-first: ambiguous naam par picker code nahi dega — AI TRAIN_NAME_SEARCH/SEARCH_TRAIN_BY_NAME tool se
+         * khud options dikhayega (ya sawaal general ho to seedha jawab). */
+        nameClarify = resolved.clarify;
+        namePicker = resolved.picker ?? null;
+      }
+    } catch {
+      /* optional hai — normal flow continue */
+    }
+  }
+
+  /* ── Round-39: CAPABILITY/META sawaal — "tum kya kar sakte ho", "kya nahi kar sakte",
+   * "tum kaun ho" (live battery me "kya nahi kar sakte" par model ne booking flow shuru kar
+   * diya: "Kahan se jaana hai?" 😑). Ye jawab fixed aur honest hai — koi tool nahi. */
+  {
+    const t = String(req.text ?? "").toLowerCase();
+    const capabilityQ =
+      /\b(tum|aap|tu|you)\b[^?!.]{0,40}\b(kya|kaun|kaunsi|kaunsa|kaise|what|who)\b[^?!.]{0,40}\b(kar sakte|kar sakta|kar sakt[ae]|kar sakti|nahi kar|nhi kar|na kar|kaun ho|koi ho|limits?|limit)\b/i.test(t) ||
+      /\b(kya nahi kar|kya nhi kar|what can'?t you|what can you not|tumhari limits?|tumhari kya limit|aap kya nahi)\b/i.test(t) ||
+      /\b(tum|aap|tu|you)\b[^?!.]{0,30}\b(kaun|koun|who)\b[^?!.]{0,20}\b(ho|hain|are you)\b/i.test(t) ||
+      /\b(what can you do|tum kya kya kar|aap kya kya kar|tum kya kar sakti ho)\b/i.test(t);
+    if (capabilityQ && !/\b(\d{4,5})\b/.test(t)) {
+      const detCap = await deterministicUnderstand(req.text, {
+        now: req.now ? new Date(req.now) : undefined,
+        lastAsked: req.lastAsked ?? null,
+        known: { from: seeded.origin, to: seeded.destination, date: seeded.date, passengerCount: seeded.passengers },
+      });
+      return {
+        nlu: detCap,
+        source: "nlu",
+        context: { ...emptyAgentContext() },
+        tool: null,
+        toolOk: null,
+        reply:
+          "Main RailBook AI hoon — Indian Railways ka assistant. Main ye sab kar sakta hoon:\n" +
+          "• Train search (from → to + date) — direct/connecting, timings, kis class me seat hai, fare\n" +
+          "• Kisi bhi train ka: naam · route · timetable/stops · live status (abhi kahan hai) · kitni late\n" +
+          "• Seat availability & fare (ConfirmTkt · RailYatri · eRail se real data), WL/RAC ka sach\n" +
+          "• Booking aage badhana: class/seat chun kar passenger form kholna (IRCTC handoff)\n" +
+          "• PNR status · station code/naam/city · general railway rules (tatkal · RAC/WL · luggage · khana · refund)\n" +
+          "• General railway knowledge (itihaas, speed, sabse lambi route, sabse bada station jaise sawaal)\n\n" +
+          "Do cheezein main NAHI karta (aapke rule ke hisaab se): (1) IRCTC par 'Continue to IRCTC' main aapki taraf se click nahi karta, (2) aapke passenger details / OTP / payment main khud nahi bharta — wo aap karte ho. " +
+          "Aur jo data verified nahi hota, main guess nahi karta — saaf bolta hoon aur jo sach me pata hai wahi deta hoon.",
+        interrupt: false,
+        resumeAsk: null,
+        resumeText: null,
+        trains: null,
+        confirmBook: false,
+        missingFields: [],
+        modelUsed: null,
+        latencyMs: 0,
+        failureReason: "capability_meta_answer",
+        engine: "deterministic",
+        agenticFailureReason: null,
+        grounded: true,
+      };
+    }
+  }
+
+  /* ── Round-43 (27 Sep 2026, user screenshot: "12054 ki seat availability btana" par poora 16-train
+   * board khul gaya, uska jawab nahi mila — jabki ChatGPT usi sawaal par 27/28/29 Sep ki saaf
+   * date-wise availability deta hai). Ab KHAAS TRAIN ke seat sawaal par usi train ka
+   * CHECK_AVAILABILITY chalta hai (FIND_SEATS ka route-board NAHI) — date na ho to aaj + kal dono. */
+  /* Round-45: FULL AI-FIRST — ye sawaal bhi pehle MODEL ke paas jaata hai; ye deterministic
+   * jawab sirf AI-off ya model-fail par (singleTrainSeatTurn(req, seeded)). */
+  if (!aiFirst) {
+    const turn45 = await singleTrainSeatTurn(req, seeded);
+    if (turn45) return turn45;
+  }
+
+  /* ── Round-43d (27 Sep 2026, battery: "12054 late hai kya" ❌ model date poochh kar ruk gaya) ──
+   * Khaas train ka live sawaal ("kahan hai" / "late hai kya" / running status) aur user ne koi date nahi
+   * boli → seedha wahi live probe (date ke bina — router khud aaj ka origin-idle run skip kar ke chalta
+   * hua run deta hai, Round-16p logic). Pehle ye model ke paas jaata tha jo date poochh kar ruk jaata tha. */
+  /* Round-45: FULL AI-FIRST — ye sawaal bhi pehle MODEL ke paas jaata hai; ye deterministic
+   * jawab sirf AI-off ya model-fail par (livePrecheckTurn(req)). */
+  if (!aiFirst && !isBookingMutation(req)) {
+    const turn45 = await livePrecheckTurn(req);
+    if (turn45) return turn45;
   }
 
   /* ── Round-42 (27 Sep 2026, user: "jaise ChatGPT… sahi tools use karo user query samajhke"): BOOKING
@@ -2126,110 +2361,21 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
    * train kitne baje pahunchi). Isliye arrival-at-station DETERMINISTIC jawab ab AI-first mode me
    * bhi pehle chalta hai (wahi gate-able rule: train + station route me + sirf arrival ka sawaal,
    * koi aur intent nahi) — model ho ya na ho, jawab sahi aur seedha. */
-  if (!nameClarify && !isBookingMutation(req) && (simpleArrivalQuestion(req.text) || BINARY_ARRIVAL_RE.test(req.text) || STOPPING_Q_RE.test(req.text))) {
-    try {
-      /* Binary sawaal (pahunch gayi kya) par LIVE data ka jawab; warna timetable ka waqt. */
-      const stopping = await stoppingQuestionTurn(req.text, seeded).catch(() => null);
-      if (stopping) {
-        const detS = await deterministicUnderstand(req.text, {
-          now: req.now ? new Date(req.now) : undefined,
-          lastAsked: req.lastAsked ?? null,
-          known: { from: seeded.origin, to: seeded.destination, date: seeded.date, passengerCount: seeded.passengers },
-        });
-        const ctxS = mergeAgentContext(seeded, detS, req.text, { selectedTrainNumber: stopping.trainNumber, selectedTrainName: stopping.trainName });
-        if (!ctxS.intent || ctxS.intent === "NONE") ctxS.intent = "TRAIN_SCHEDULE";
-        ctxS.pendingAsk = null;
-        return {
-          nlu: detS, source: "nlu" as const, context: ctxS, tool: "getTimetable" as ToolName, toolOk: true,
-          reply: stopping.reply, interrupt: false, resumeAsk: null, resumeText: null, trains: null, confirmBook: false, missingFields: [],
-          modelUsed: null, latencyMs: 0, failureReason: null, engine: "deterministic" as const, agenticFailureReason: null, grounded: true,
-        } as never;
-      }
-      const arrival = BINARY_ARRIVAL_RE.test(req.text)
-        ? (await arrivalBinaryTurn(req.text, seeded, req.now)) ?? (await arrivalAtStationTurn(req.text, seeded, req.now))
-        : (await arrivalAtStationTurn(req.text, seeded, req.now)) ?? (await arrivalBinaryTurn(req.text, seeded, req.now));
-      if (arrival) {
-        const det = await deterministicUnderstand(req.text, {
-          now: req.now ? new Date(req.now) : undefined,
-          lastAsked: req.lastAsked ?? null,
-          known: { from: seeded.origin, to: seeded.destination, date: seeded.date, passengerCount: seeded.passengers },
-        });
-        const ctxArr = mergeAgentContext(seeded, det, req.text, {
-          selectedTrainNumber: arrival.trainNumber,
-          selectedTrainName: arrival.trainName,
-        });
-        if (!ctxArr.intent || ctxArr.intent === "NONE") ctxArr.intent = "TRAIN_SCHEDULE";
-        ctxArr.pendingAsk = null;
-        void neverAutoBook(det.intent, req.bookingFlow);
-        return {
-          nlu: det,
-          source: "nlu",
-          context: ctxArr,
-          tool: "getTimetable",
-          toolOk: true,
-          reply: arrival.reply,
-          interrupt: false,
-          resumeAsk: null,
-          resumeText: null,
-          trains: null,
-          confirmBook: false,
-          missingFields: [],
-          modelUsed: null,
-          latencyMs: 0,
-          failureReason: null,
-          engine: "deterministic",
-          agenticFailureReason: null,
-          grounded: true,
-        };
-      }
-    } catch {
-      /* precheck optional hai — normal flow continue */
-    }
+  /* Round-45: FULL AI-FIRST — ye sawaal bhi pehle MODEL ke paas jaata hai; ye deterministic
+   * jawab sirf AI-off ya model-fail par (arrivalFamilyTurn(req, seeded)). */
+  if (!aiFirst && !nameClarify && !isBookingMutation(req)) {
+    const turn45 = await arrivalFamilyTurn(req, seeded);
+    if (turn45) return turn45;
   }
 
   /* ── ROUND-11 (screenshot fix): "12411 kya ludhiana departure kar gyi?" —
    * deterministic departure-from-station jawab (live + route-order), taaki
    * SEARCH_TRAIN ka "Kahan jaana hai?" na aaye. */
+  /* Round-45: FULL AI-FIRST — ye sawaal bhi pehle MODEL ke paas jaata hai; ye deterministic
+   * jawab sirf AI-off ya model-fail par (departureTurn(req, seeded)). */
   if (!aiFirst && !nameClarify && !isBookingMutation(req)) {
-    try {
-      const dep = await departureFromStationTurn(req.text, seeded);
-      if (dep) {
-        const det = await deterministicUnderstand(req.text, {
-          now: req.now ? new Date(req.now) : undefined,
-          lastAsked: req.lastAsked ?? null,
-          known: { from: seeded.origin, to: seeded.destination, date: seeded.date, passengerCount: seeded.passengers },
-        });
-        const ctxDep = mergeAgentContext(seeded, det, req.text, {
-          selectedTrainNumber: dep.trainNumber,
-          selectedTrainName: dep.trainName,
-        });
-        if (!ctxDep.intent || ctxDep.intent === "NONE") ctxDep.intent = "LIVE_TRAIN_STATUS";
-        ctxDep.pendingAsk = null;
-        void neverAutoBook(det.intent, req.bookingFlow);
-        return {
-          nlu: det,
-          source: "nlu",
-          context: ctxDep,
-          tool: "getLiveStatus",
-          toolOk: true,
-          reply: dep.reply,
-          interrupt: false,
-          resumeAsk: null,
-          resumeText: null,
-          trains: null,
-          confirmBook: false,
-          missingFields: [],
-          modelUsed: null,
-          latencyMs: 0,
-          failureReason: null,
-          engine: "deterministic",
-          agenticFailureReason: null,
-          grounded: true,
-        };
-      }
-    } catch {
-      /* precheck optional hai — normal flow continue */
-    }
+    const turn45 = await departureTurn(req, seeded);
+    if (turn45) return turn45;
   }
 
   if (!nameClarify && !isBookingMutation(req) && agenticConfigured()) {
@@ -2514,6 +2660,23 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
         /provider se nahi mil|andaza nahi lagaunga/i.test(String(turn.reply ?? "")) &&
         webRescueEligible(String(req.text ?? ""), turn.steps);
       if (unhelpfulGeneral) agenticFailureReason = "unhelpful_summary_general_question";
+      /* ── Round-45 ADEQUACY NET (model-first ka insurance) ────────────────────────────────────────
+       * Model PEHLE chalta hai (AI-first — user ka explicit choice). Par agar uska jawab us sawaal ka
+       * jawab hi nahi hai (train ki summary bhej di, "Kahan jaana hai?" poochh liya) aur hamare paas
+       * usi sawaal ka REAL tool-data wala jawab maujood hai → wahi do. Koi per-question rule nahi:
+       * sawaal ki qism (seat / arrival / live) + jawab me expected data hai ya nahi — bas itna.
+       * Jawab "theek lag raha hai" par bhi sahi ho, iske liye model ka jawab hi rakha jaata hai. */
+      if (aiFirst && turn.reply && !isBookingMutation(req) && !pickReasked && !unhelpfulNoData && !unhelpfulGeneral && !skippedStationStep) {
+        const kind45 = answerKind45(String(req.text ?? ""));
+        if (kind45 && !replyAdequateFor45(kind45, String(turn.reply), String(req.text ?? ""))) {
+          const resc45 = await deterministicRescue45(kind45, req, seeded);
+          if (resc45) {
+            /* Prod telemetry (jaise modelFallbacks): model ne kya diya tha — andaza nahi, log. */
+            console.log(JSON.stringify({ adequacyRescue: kind45, modelHad: String(turn.reply).slice(0, 200) }));
+            return { ...resc45, agenticFailureReason: "inadequate_reply_rescued" };
+          }
+        }
+      }
       if (turn.reply && !pickReasked && !unhelpfulNoData && !unhelpfulGeneral && !skippedStationStep) {
         /* Round-33: model ne jo pax khud samjha (jaise "Kal,1" → 1) wo ctx me yaad rakho —
          * agle turn me AI dobara "kitne passengers?" nahi poochhega. */
@@ -2567,6 +2730,14 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
       // Deterministic fallback chalega par wajah record hogi.
       agenticFailureReason = `throw:${err instanceof Error ? err.message : "unknown"}`;
     }
+  }
+
+  /* ── Round-45: FULL AI-FIRST ka promise — model fail (timeout/error/empty) hua to usi sawaal ka
+   * VERIFIED deterministic jawab turant (wahi handlers + wahi tools: routeCheck/CHECK_AVAILABILITY/
+   * routedLiveStatus) — warna "Kahan jaana hai?" jaisa adhoora jawab chala jaata (R44 screenshots). */
+  if (aiFirst && agenticFailureReason && !isBookingMutation(req)) {
+    const rescue = await deterministicRescue45(answerKind45(String(req.text ?? "")), req, seeded);
+    if (rescue) return { ...rescue, agenticFailureReason };
   }
 
   /* ── 2) DETERMINISTIC FALLBACK (existing architecture, preserved) ── */

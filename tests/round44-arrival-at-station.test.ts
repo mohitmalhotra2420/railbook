@@ -111,12 +111,30 @@ describe("Round-44 · arrival-at-station (koi bhi phrasing: Hindi/English/typo, 
     }
   });
 
-  it("AI-first mode me bhi deterministic arrival jeetta hai (model galat jawab de to bhi)", async () => {
+  it("R45: AI-first — model ka sahi jawab hi jaata hai (deterministic pehle nahi chalta)", async () => {
+    process.env.NVIDIA_API_KEY = "nvapi-test";
+    setAgenticNvidiaFetch(async () =>
+      new Response(JSON.stringify({ choices: [{ message: { role: "assistant", content: "12013 ka LDH arrival 20:16 hai (Confirmed: timetable)." } }], model: "test" }), { status: 200, headers: { "Content-Type": "application/json" } }),
+    );
+    const r = await runAgent({ text: "12013 ka LDH arrival btao", known: {}, now: "2026-09-28T01:40:00+05:30" });
+    expect(r.engine).toBe("agentic_tool_calling");
+    expect(String(r.reply ?? "")).toMatch(/20:16/);
+  });
+
+  it("R45: model ka jawab ADHOORA ho (" + '"Kahan jaana hai?"' + ") to verified deterministic jawab (rescue)", async () => {
     process.env.NVIDIA_API_KEY = "nvapi-test";
     setAgenticNvidiaFetch(async () =>
       new Response(JSON.stringify({ choices: [{ message: { role: "assistant", content: "Kahan jaana hai? Station bataiye." } }], model: "test" }), { status: 200, headers: { "Content-Type": "application/json" } }),
     );
     const r = await runAgent({ text: "At what time 12013 arrived ldh on 27 sept", known: {}, now: "2026-09-28T01:40:00+05:30" });
+    expect(String(r.reply ?? "")).toMatch(/arrival 20:16/);
+    expect(String(r.reply ?? "")).not.toMatch(/Kahan jaana hai/);
+  });
+
+  it("R45: model poora FAIL ho (network error) to bhi verified deterministic jawab", async () => {
+    process.env.NVIDIA_API_KEY = "nvapi-test";
+    setAgenticNvidiaFetch(async () => { throw new Error("network down"); });
+    const r = await runAgent({ text: "12013 ludhiana arrival btao", known: {}, now: "2026-09-28T01:40:00+05:30" });
     expect(String(r.reply ?? "")).toMatch(/arrival 20:16/);
     expect(String(r.reply ?? "")).not.toMatch(/Kahan jaana hai/);
   });
