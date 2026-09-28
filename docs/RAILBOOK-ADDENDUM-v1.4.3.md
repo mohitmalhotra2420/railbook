@@ -80,3 +80,26 @@ User: "kya abh mai ek ek test kru!? Possible nhi hai… AI kyu nahi sahi answer 
 **Proof (prod `2f9c008`, live 3/3, 0 leak):** `12013 haridwar pahunch gayi kya` → "…Haridwar **HW** is route par nahi hai…" (§133s) · `12013 haridwar par rukti hai kya` → "Timetable mein Haridwar/**HW** ka koi stop nahi hai" (§49s) · seat case unchanged (`12054 (ASR → HW) — 28/29 Sep CC/2S…`, §57s). Full suite **125 files / 1366 tests pass** (`/tmp/r46-suite1.log`).
 
 **Workspace note:** is round me workspace 11th baar reset hua (HEAD stale `1b8be9f`) — `recover.sh` se `2abdaf0` wapas, `npm ci`, aur R46 ke naye files (backup se) restore; koi kaam nahi gira.
+
+## §9.39 — Round-47 (28 Sep 2026): chat ki UI padhne-layak (sections + chips + timetable) aur naya header
+
+**User (screenshot, 28 Sep):** "first screenshot mein dekho etna lamba chat padhna kitna mushkil ho rha, thoda attractive banao so that readable ho, clean UI ho, response ko clear cards, larger text, spacing, status chip aur timetable sections mein divide kiya jaaye" + "header bhi wahan se payment ka sign hta do aur header bhi better banao naye buttons rakho yeh purane htado". Scope boundary saaf: **"baki AI, API, backend, architecture kuch mat touch Krna"**.
+
+**Kya kiya (sirf `src/` — koi server/AI/API change nahi):**
+- **Naya component `src/components/AnswerCard.tsx`** — prose jawab ko padhne-layak sections me:
+  1. **status chips** — jo baat reply me sach me likhi hai wahi chip banti hai (delay/on-time/stale/cancelled/scheduled/date/WL/available). Kuch invent nahi; na ho to chip hi nahi.
+  2. **headline** — pehla jumla bada (16.5px, weight 650).
+  3. **timetable board** — arrival/departure waqt bade numbers me + station code/naam (do shakal: `Ludhiana Jn (LDH)` aur `Ludhiana Jn LDH par`).
+  4. **body** — baaki jumle alag-alag, line-height 1.62, sections ke beech spacing; waqt/date/₹/seat-count highlight.
+  5. **source footer** — `Source: …` chhota aur muted (pehle body ke andar chipka tha; ab paragraph ke aakhir me chipka ho to bhi alag ho jaata hai).
+  - Model ke `**bold**` markers ab highlight ban jaate hain (literal asterisk user ko nahi dikhta).
+  - `⚙️ Route/schedule dekha → Live position dekhi` jaisi tool-line ab **chips** me — prose ke andar nahi.
+- **Wiring:** `ReplyText` ka fallback (jab seat rows na mile) aur Concierge ka AI-note path dono AnswerCard par. Seat-rows wala `ReplyText` path **waise hi** hai (data bilkul same).
+- **Header:** ₹ (wallet/payment) button header se **hata diya** (wallet booking flow ke apne buttons — `onWallet` — se khulta rehta hai). Purane text-glyphs `✚ ▦ ☰` ki jagah naye **SVG icons** (`IconChat`, `IconBoard`, `IconGrid`, `IconTicket` gold accent) — 42px tap target, hover/active states, gradient topbar + build-tag chip. Booking ka safar ab **dots + ticks** stepper me (✓ Journey · **Train** · 3 Passengers · 4 Payment) — labels wahi 4.
+- **Readability polish:** user bubble 15px, thread padding, `msg-kicker` refine, assistant text sections me.
+
+**Tests:** `tests/round47-chat-ui.test.tsx` (8) — chips sirf text se, timetable/station (dono shakal), screenshot ka asli jawab (headline + board + chips + source + **koi lafz chhupta nahi**, jumla-wise check), inline-source footer, tool-line chips, ReplyText integration, header glyph/₹ assertions, stepper+CSS. 3 purane UI tests (R20/R22/R29) **R47 semantics** me update: pehle "prose paragraph hi rehta hai" assert karte the — ab AnswerCard sections + whitespace-insensitive "poora text maujood" check. Full suite **126 files / 1374 tests pass** (`/tmp/r47-suite1.log`).
+
+**Preview:** `tools/build-round47-preview.mts` asli React components se render + asli built CSS inline karta hai (preview aur app bilkul ek jaise) — `/home/user/RailBook/previews/RailBook-round47-2026-09-28.html` (95943 B), pehle (screenshot wala look) vs ab, side-by-side dono phone frames.
+
+**Proof (prod `69992d5`, live):** deployed CSS/JS bundle me naye classes maujood (`ac-board`/`ac-chip`/`ai-step` — grep se verify). Build: `npx vite build` clean (83.55 kB CSS / 494 kB JS).
