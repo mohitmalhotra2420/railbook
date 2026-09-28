@@ -103,3 +103,24 @@ User: "kya abh mai ek ek test kru!? Possible nhi hai… AI kyu nahi sahi answer 
 **Preview:** `tools/build-round47-preview.mts` asli React components se render + asli built CSS inline karta hai (preview aur app bilkul ek jaise) — `/home/user/RailBook/previews/RailBook-round47-2026-09-28.html` (95943 B), pehle (screenshot wala look) vs ab, side-by-side dono phone frames.
 
 **Proof (prod `69992d5`, live):** deployed CSS/JS bundle me naye classes maujood (`ac-board`/`ac-chip`/`ai-step` — grep se verify). Build: `npx vite build` clean (83.55 kB CSS / 494 kB JS).
+
+## §9.40 — Round-48 (29 Sep 2026): seat card me SAARI classes (parser fix)
+
+**User (2 screenshots, 29 Sep):** "green wale portion mein sabhi classes mein available seats sahi bta rha lekin neeche card mein sabhi classes show nhi ho rhi" — green line (server ka asli data) me `12054 2S AVL 660 ₹150 · CC AVL 17 ₹480` likha tha, par usi train ka card "1 class" (sirf 2S) dikha raha tha; `15015` ki 4 classes me se 3; `12030` / `12204` / `12498` ke cards hi nahi ban rahe the.
+
+**Root cause (UI parser — `src/components/ReplyText.tsx`):** server ki compact seat line me **train ka naam nahi hota** (`12054 2S AVL 660 ₹150 · CC AVL 17 ₹480`). Purana `ROW_RE` naam maangta tha, isliye:
+- `2S AVL 660 ₹150` ko **naam** maan leta tha aur agla class chip (`CC`) hi asli row ban jaata tha → pehli class gayab, aur baaki classes `rest` (plain text) me chali jaati thin;
+- pehla segment ("💺 sab class me seat wali 19 trains — 12054 …") lead-in hone ki wajah se `rowOf` hi fail karta tha → us train ka card banta hi nahi tha;
+- fare me trailing comma aa jaata tha (`₹510,`).
+
+**Fix (sirf UI, AI/API/backend untouched):**
+- `ROW_COMPACT_RE` + `COMPACT_HEAD_RE`: number ke turant baad class code ho to **compact row** (naam khaali) — jaisa text me hai waisa hi.
+- Train ke naam me ab **ank nahi** aate (`[^…\d]{2,60}`) — "2S AVL 660 ₹150" kabhi naam nahi ban sakta.
+- Lead-in `… — 12054 …` / `… : 12054 …` head chip me alag (aur lead-in khud row na ho — negative lookahead).
+- Fare regex `₹\s?\d(?:[\d,]*\d)?` — trailing comma band (teenon regexes me).
+- `groupReplyRowsByTrain`: same train+class+status+count+fare do jagah likha ho (AI ki per-train lines **aur** neeche ki compact line dono me — 29 Sep ka live case) to card me **ek hi baar**, aur jo info kisi ek me thi wo bachi rehti hai (`dep` fill; input rows mutate nahi hoti).
+
+**Proof (aapke exact text par + live):** `parseReply(SCREENSHOT_LINE)` → 12 cards, 26 class rows; `12054 → [2S AVAILABLE 660, CC AVAILABLE 17]`, `14680 → [2S, CC]`, `12014 → [CC, EC]`, `15015 → [3E, SL, 2A, 1A]`, `15708 → 4 classes`; lead-in head chip me; render me cards 12 aur `.rp-crow` 26. Live (prod text): `sab class me seat wali trains batao` → 19 cards / 54 rows, `12054` 2 classes, `15015` 4 classes; dono-sections wala case ab duplicate nahi (12054 = 2 rows).
+**Suite:** 127 files / **1379 tests** pass (`/tmp/r48-suite2.log`); naye `tests/round48-seat-card-all-classes.test.tsx` (5) + purane R20/R22/R25/R26/R27/R29 wire formats waise hi pass.
+**Live:** code `60c7401` + `e501ddc` → deploy `dep-datd2pdg1s2s738tlm9g`, `/api/version` = `e501ddc`, bundle me naya parser confirm.
+**Preview:** `RailBook-round48-2026-09-29.html` (pehle vs ab phones + train-wise before/after table).
