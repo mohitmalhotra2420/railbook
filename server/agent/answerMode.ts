@@ -1,3 +1,5 @@
+import { verifyStationCodes } from "./stationCodes.js";
+
 /* ── Round-40 (27 Sep 2026) ──────────────────────────────────────────────────────────────────────
  * User (3 baar): "AI khud kyu nhi samajhke sahi se outcome deta? jaise chatgpt/gemini/claude/manus —
  * koi bhi trains/Indian railway/booking/live status/stations sawaal par ek dum accurate answer/outcome do."
@@ -181,7 +183,10 @@ export function scrubInternalNotes(reply: string): string {
     .replace(/\n{3,}/g, "\n\n")
     .trim();
   /* Puri reply hi internal-noise thi (kuch bacha nahi) → original hi de do (blank se behtar). */
-  return out.length >= 12 ? out : String(reply).trim();
+  const cleaned = out.length >= 12 ? out : String(reply).trim();
+  /* Round-46: station-code verification net — reply ke "Naam (CODE)" jodi hamare station data se
+   * verify; sirf galat code theek hota hai (jaise "Haridwar (HWR)" → "Haridwar (HW)"). */
+  return verifyStationCodes(cleaned).reply;
 }
 
 /** Round-43: khaas train ki seat availability ka sawaal ("12054 ki seat availability batao") —
