@@ -76,14 +76,30 @@ const CLASSES = "1A|2A|3A|3E|SL|CC|2S|EC|EA|FC|2A\\+|GN";
  * aur time ke baad "departure" shabd bhi. Dono add kiye (purane –/-/| formats waise hi chalte hain). */
 const SEP = "[–\\-—|•:·]"; /* en-dash, hyphen, EM-DASH, pipe, bullet, colon, middle-dot */
 const ROW_RE = new RegExp(
-  "^(?:\\*|•|\\d+[.)])?\\s*(?<number>\\d{4,5})\\s+(?<name>[^–\\-—|•*·]{2,60}?)\\s*" + SEP + "?\\s*(?<cls>" +
+  "^(?:\\*|•|\\d+[.)])?\\s*(?<number>\\d{4,5})\\s+(?<name>[^–\\-—|•*·\\d]{2,60}?)\\s*" + SEP + "?\\s*(?<cls>" +
     CLASSES +
-    ")(?<clslabel>\\b(?!\\d))\\s*(?:" + SEP + "\\s*)?(?<status>AVAILABLE|AVAIL|AVL|RAC|WAITLIST|WL|NOT[ _]?AVAILABLE|N\\/A|REGRET|DEPARTED|CANCELLED)?\\s*(?<count>\\d{1,4})?\\s*(?<scale>seats?)?\\s*(?:" + SEP + "\\s*)?(?<fare>₹\\s?[\\d,]+)?\\s*,?\\s*(?:" + SEP + "\\s*)?(?<dep>(?:dep(?:arture)?\\.?\\s*:?)?\\s*\\d{1,2}:\\d{2}(?:\\s*(?:departure|dep\\.?))?)?",
+    ")(?<clslabel>\\b(?!\\d))\\s*(?:" + SEP + "\\s*)?(?<status>AVAILABLE|AVAIL|AVL|RAC|WAITLIST|WL|NOT[ _]?AVAILABLE|N\\/A|REGRET|DEPARTED|CANCELLED)?\\s*(?<count>\\d{1,4})?\\s*(?<scale>seats?)?\\s*(?:" + SEP + "\\s*)?(?<fare>₹\\s?\\d(?:[\\d,]*\\d)?)?\\s*,?\\s*(?:" + SEP + "\\s*)?(?<dep>(?:dep(?:arture)?\\.?\\s*:?)?\\s*\\d{1,2}:\\d{2}(?:\\s*(?:departure|dep\\.?))?)?",
   "i",
 );
+/* Round-48 (29 Sep, user screenshot: "green wale portion mein sabhi classes sahi bta rha lekin neeche card
+ * mein sabhi classes show nhi ho rhi"): server ki compact seat line me train ka NAAM nahi hota —
+ * "💺 sab class me seat wali 19 trains — 12054 2S AVL 660 ₹150 · CC AVL 17 ₹480 | …". Purane ROW_RE ko
+ * naam chahiye tha, isliye wo "2S AVL 660 ₹150" ko NAME maan leta tha aur agla class chip (CC) hi asli
+ * row ban jaata tha — baaki classes gayab. Ab: number ke turant baad class code ho to compact row
+ * (naam khaali) — jaisa text me hai waisa hi, kuch invent nahi. */
+const ROW_COMPACT_RE = new RegExp(
+  "^(?:\\*|•|\\d+[.)])?\\s*(?<number>\\d{4,5})\\s+(?<cls>" +
+    CLASSES +
+    ")(?<clslabel>\\b(?!\\d))\\s*(?:" + SEP + "\\s*)?(?<status>AVAILABLE|AVAIL|AVL|RAC|WAITLIST|WL|NOT[ _]?AVAILABLE|N\\/A|REGRET|DEPARTED|CANCELLED)?\\s*(?<count>\\d{1,4})?\\s*(?<scale>seats?)?\\s*(?:" + SEP + "\\s*)?(?<fare>₹\\s?\\d(?:[\\d,]*\\d)?)?\\s*,?\\s*(?:" + SEP + "\\s*)?(?<dep>(?:dep(?:arture)?\\.?\\s*:?)?\\s*\\d{1,2}:\\d{2}(?:\\s*(?:departure|dep\\.?))?)?",
+  "i",
+);
+const COMPACT_HEAD_RE = new RegExp("^\\s*(?:\\*|•)?\\s*\\d{4,5}\\s+(?:" + CLASSES + ")(?:\\b(?!\\d))", "i");
+
 
 function rowOf(seg: string): { row: Row; tail: string } | null {
-  const m = ROW_RE.exec(seg.trim());
+  const src = seg.trim();
+  /* Round-48: compact (naam-rahit) row pehle — tabhi jab number ke turant baad class code ho. */
+  const m = (COMPACT_HEAD_RE.test(src) ? ROW_COMPACT_RE.exec(src) : null) ?? ROW_RE.exec(src);
   if (!m?.groups) return null;
   const g = m.groups as Record<string, string | undefined>;
   const consumed = m[0].length;
@@ -129,7 +145,7 @@ const CLASS_CHIP_RE = new RegExp(
     SEP +
     "\\s*)?(?<status>AVAILABLE|AVAIL|AVL|RAC|WAITLIST|WL|NOT[ _]?AVAILABLE|N\\/A|REGRET|DEPARTED|CANCELLED)\\b\\s*(?<count>\\d{1,4})?\\s*(?<scale>seats?)?\\s*(?:" +
     SEP +
-    "\\s*)?(?<fare>₹\\s?[\\d,]+)?\\s*(?:[·•|,]|—|–|-)?\\s*",
+    "\\s*)?(?<fare>₹\\s?\\d(?:[\\d,]*\\d)?)?\\s*(?:[·•|,]|—|–|-)?\\s*",
   "i",
 );
 const DEP_RE = /^(?:dep(?:arture)?\.?\s*:?\s*)?(\d{1,2}:\d{2})(?:\s*(?:departure|dep\.?))?/i;
@@ -187,7 +203,7 @@ function segmentsOf(line: string): string[] {
   return [t];
 }
 
-function parseReply(text: string): Parsed {
+export function parseReply(text: string): Parsed {
   const out: Parsed = { head: [], rows: [], rest: [] };
   const lines = String(text ?? "").split("\n");
   for (const line of lines) {
@@ -198,7 +214,7 @@ function parseReply(text: string): Parsed {
        * 174 seats — ₹150"). Pehle label 40 akshar tak hi match hota tha, isliye wo row head me chali
        * jaati thi aur summary usse ginnti nahi thi (10 trains par "9 me seat"). Ab label 140 tak —
        * row alag ho jaati hai aur count match karta hai. */
-      const lab = /^([^:]{2,140}):\s*(?=\d{4,5}\s)/.exec(seg);
+      const lab = /^(?!\s*\d{4,5}\s)([^:—]{2,140})[:—]\s*(?=\d{4,5}\s)/.exec(seg);
       if (lab) {
         if (!out.rows.length && out.head.length < 3) out.head.push(lab[1].trim());
         seg = seg.slice(lab[0].length);
