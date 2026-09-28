@@ -65,3 +65,18 @@ User: "kya abh mai ek ek test kru!? Possible nhi hai… AI kyu nahi sahi answer 
 **Khuli baatein (agle round ke liye):**
 - **Latency:** AI-first me simple sawaal 40–125s le rahe hain (model ka round 20–35s + tools; R44 me yahi 1–3s the). Knob: `AI_AGENTIC_TURN_BUDGET_MS` / `AI_PRIMARY_MIN_MS` / model chain order — user bole to 20–30s me laa denge.
 - **Model ne `HWR` likh diya** (Haridwar = `HW`) — model ki slip, hamare data me sahi. Candidate: reply ke station codes ko apne station-data se verify karne wala general net.
+
+## §9.38 — Round-46 (28 Sep 2026): station-code verification net (model ke galat code band)
+
+**Live case (R45 battery):** `12013 haridwar pahunch gayi kya` par model ne likha "…isme **Haridwar (HWR)** station nahi aata" — route sahi tha par **code galat**: IR me Haridwar = `HW`, aur `HWR` asli me **HATWAR** hai. User code hi IRCTC me type karta hai — isliye galat code = galat data (user ka standing rule: "kuch bhi fake mat rakho").
+
+**Fix — general verification (per-question rule nahi, R43k wahi soch):**
+- Naya data: `server/data/station-codes.ts` — **8989 IR stations** (code → naam), source **datameet/railways stations.json** (data.gov.in list). Regenerate: `node tools/build-station-codes.mjs` (source repo me: `tools/station-list-source.json`).
+- Naya module `server/agent/stationCodes.ts`: `verifyStationCodes(reply)` reply ke **code+naam jodi** dhoondta hai — teen forms: `Naam (CODE)`, `CODE Naam`, `Naam — CODE`; naam ko normalize karta hai (jn/junction/cantt/city suffix hata; "new" jaisa shabd nahi hata — warna New Delhi = Delhi ho jaata).
+- **Sirf tab badalta hai jab naam hamare data me ho aur uska code kuch aur ho** (jaise Haridwar→HW, jabki reply me HWR), warna reply ko haath nahi lagaya jaata. Code asli station ka ho aur naam se milta ho (New Delhi ↔ Delhi, Ambala ↔ UMB/UBC) → chhod diya jaata hai; naam hi hamare data me na ho (jaise "Someplace (ZZZZ)") → kuch nahi (andaza nahi).
+- **Wiring:** `scrubInternalNotes()` ke aakhir me (wahi ek darwaza jahan se model ka reply jaata hai — leak nets bhi wahi lagte hain). Telemetry: `{stationCodeFix:{label,from,to,why}}` prod log me.
+- **Tests:** `tests/round46-station-codes.test.ts` (7) — live case, dono forms, unknown-code case, **false-positive battery** (10 asli reply lines: sibling DDL/Dhandari Kalan, route line, seat/fare line, "Delay: … Next stop: …", source line — sab untouched), scrub integration, aur end-to-end (model ka reply `HWR` ke saath → user ko `HW` milta hai).
+
+**Proof (prod `2f9c008`, live 3/3, 0 leak):** `12013 haridwar pahunch gayi kya` → "…Haridwar **HW** is route par nahi hai…" (§133s) · `12013 haridwar par rukti hai kya` → "Timetable mein Haridwar/**HW** ka koi stop nahi hai" (§49s) · seat case unchanged (`12054 (ASR → HW) — 28/29 Sep CC/2S…`, §57s). Full suite **125 files / 1366 tests pass** (`/tmp/r46-suite1.log`).
+
+**Workspace note:** is round me workspace 11th baar reset hua (HEAD stale `1b8be9f`) — `recover.sh` se `2abdaf0` wapas, `npm ci`, aur R46 ke naye files (backup se) restore; koi kaam nahi gira.
