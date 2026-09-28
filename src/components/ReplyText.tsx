@@ -54,15 +54,18 @@ export function groupReplyRowsByTrain(rows: Row[]): TrainRowGroup[] {
     }
     const g = groups[i];
     if (!g.name && r.name) g.name = r.name;
-    const dup = g.rows.some(
-      (x) =>
-        x.cls === r.cls &&
-        x.status === r.status &&
-        x.count === r.count &&
-        (x.fare ?? "") === (r.fare ?? "") &&
-        (x.dep ?? "") === (r.dep ?? ""),
+    /* Round-48: ek hi train+class+status+count+fare agar DO jagah likha ho (jaise AI ki per-train
+     * lines AUR neeche ki compact seat line dono me — 29 Sep ka live case), to card me wahi class do
+     * baar dikhti thi. Ab ek hi baar — aur dono jagah se jo bhi info thi wo bachi rehti hai (dep
+     * kisi ek me ho to wo bhar diya jaata hai). Alag status/count/fare wala record chhupta nahi. */
+    const sameIdx = g.rows.findIndex(
+      (x) => x.cls === r.cls && x.status === r.status && x.count === r.count && (x.fare ?? "") === (r.fare ?? ""),
     );
-    if (dup) continue;
+    if (sameIdx >= 0) {
+      const prev = g.rows[sameIdx];
+      if (!prev.dep && r.dep) g.rows[sameIdx] = { ...prev, dep: r.dep }; /* input rows mutate nahi hoti */
+      continue;
+    }
     g.rows.push(r);
   }
   return groups;

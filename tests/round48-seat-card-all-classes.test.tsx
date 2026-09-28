@@ -75,6 +75,18 @@ describe("Round-48 · seat card me SAARI classes (naam-rahit compact line bhi)",
     expect(b).toMatchObject({ train: "12014", name: "AMRITSAR SHATABDI", cls: "CC", status: "AVAILABLE", count: 475, fare: "₹510" });
   });
 
+  it("dono sections me same row ho (AI lines + compact seat line) to class card me do baar nahi", () => {
+    const text = [
+      "* 12054 HW JANSHATABDI — 2S AVL 660 ₹150 · CC AVL 17 ₹480 — 06:50 departure",
+      "* 12498 SHANE PUNJAB — 2S AVL 486 ₹130 — 15:10 departure",
+      "💺 sab class me seat wali 2 trains — 12054 2S AVL 660 ₹150 · CC AVL 17 ₹480 | 12498 2S AVL 486 ₹130. (ASR → UMB · live board)",
+    ].join("\n");
+    const groups = groupReplyRowsByTrain(parseReply(text).rows);
+    expect(groups.map((g) => `${g.number}:${g.rows.length}`)).toEqual(["12054:2", "12498:1"]);
+    /* dep bhi bacha rahta hai (pehli line se) */
+    expect(groups[0].rows.find((r) => r.cls === "CC")?.dep).toBe("06:50");
+  });
+
   it("adhoora match safety: aadhe shabd par text nahi kaatta (R29 wala case)", () => {
     const text = "22432 SFG MCTM SF EXP, SVDK → LDH ke liye 3A ki availability check karne ke liye journey date chahiye. Kis date ka availability chahiye?";
     const { container } = render(<ReplyText text={text} />);
