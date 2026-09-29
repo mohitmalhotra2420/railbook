@@ -1,5 +1,44 @@
 # RailBook ke liye AI model — recommendation (Round-53, 29 Sep 2026)
 
+## 0. FREE me kya best hai (aapki requirement: “free model best work karega”)
+
+**Mera pick (free, bina card):** **Cerebras free** (`zai-glm-4.7` ya `gpt-oss-120b`) — 10 lakh tokens/din, sabse tez; iske baad **Groq free** (`openai/gpt-oss-120b`). Dono ek hi din me bina paise ke lag jaate hain. **Hinglish/Hindi** me sabse aage **Google AI Studio ka Gemini Flash free** hai.
+
+| # | FREE provider | Model (chain me daalo) | Free limit | Card? | Hamare app ke liye |
+|---|---|---|---|---|---|
+| 1 | **Cerebras** | `zai-glm-4.7` (ya `gpt-oss-120b`) | ~10,00,000 tokens/**din**, ~5 req/min | Nahi | Sabse zyada daily quota + sabse tez (2000+ tok/s). Dhyaan: free tier me context ~8K — hamara system prompt lamba hai, isliye pehle test karenge |
+| 2 | **Groq** | `openai/gpt-oss-120b` | 30 req/min · 1,000 req/**din** · 8K tok/min · 2,00,000 tok/din | Nahi | Best quality-per-free-token; **prompt caching** se bada system prompt quota se bahar rah jaata hai (~500 tok/s) |
+| 3 | **Google AI Studio** | `gemini-2.5-flash` (ya 3-flash) | Flash free tier ~10–15 req/min | Nahi | **Hinglish/Indic samajh me best**; daily quota acha, RPM seemit |
+| 4 | **OpenRouter** | `deepseek/deepseek-r1:free`, `qwen/qwen3-coder:free`, `nvidia/nemotron-3-ultra-550b-a55b:free` | 20 req/min · **50 req/din** (free models) | Nahi ($5 credit se 1,000/din tier) | Ek key, 300+ models — **fallback chain** ke liye behtareen |
+| 5 | Mistral | `mistral-small` (free Experiment) | free plan | Phone verify | Theek, par tool-calling me upar wale jakke nahi |
+| 6 | Cloudflare Workers AI | `@cf/openai/gpt-oss-120b` | 10,000 neurons/din | Nahi | Server se hi chalta hai, demo ke liye theek |
+| 7 | xAI (Grok) | `grok-4.1-fast` | $25 free credits (one-time) | Haan | Sabse sasta frontier, par "free" sirf shuruaat me |
+
+**Copy-paste (ek free provider lagane ke liye — Render me 3 env vars):**
+```
+# Groq (recommended first try)
+AI_LLM_BASE_URL = https://api.groq.com/openai/v1
+AI_LLM_API_KEY  = gsk_...                       # console.groq.com → API keys
+AI_LLM_MODELS   = openai/gpt-oss-120b,openai/gpt-oss-20b
+
+# Cerebras (sabse zyada free quota)
+AI_LLM_BASE_URL = https://api.cerebras.ai/v1
+AI_LLM_API_KEY  = csk-...                       # cloud.cerebras.ai
+AI_LLM_MODELS   = zai-glm-4.7,gpt-oss-120b
+
+# Google AI Studio (Hinglish ke liye best)
+AI_LLM_BASE_URL = https://generativelanguage.googleapis.com/v1beta/openai/
+AI_LLM_API_KEY  = AIza...                       # aistudio.google.com → API key
+AI_LLM_MODELS   = gemini-2.5-flash
+
+# OpenRouter (ek key, kai provider ka fallback chain)
+AI_LLM_BASE_URL = https://openrouter.ai/api/v1
+AI_LLM_API_KEY  = sk-or-v1-...
+AI_LLM_MODELS   = deepseek/deepseek-r1:free,qwen/qwen3-coder:free
+```
+**Imaandari se ek baat:** free tier par ye providers **daily/rate limit** lagate hain (Cerebras 10 lakh tok/din, Groq 2 lakh tok/din, OpenRouter 50 req/din). RailBook ke sawaal bade hote hain (system prompt bhaari), isliye ek hi free provider par poora app bharosemand nahi rehta — behtar hai **do free providers** (jaise Groq primary + Cerebras/Gemini fallback). Abhi code me ek waqt me ek provider ka chain chalta hai; ye bata dena, main **do-provider chain** (har model ka apna base/key) 15 minute me add kar dunga jab aap key laayein.
+
+
 > **Ek line me:** aapki nayi key lagane ke liye code chhedna nahi padega — sirf 3 environment variables.
 > Best value combo: **Groq (free tier) primary + OpenRouter fallback**, ya quality-first ke liye
 > **Claude Sonnet 4.6 / GLM-5**.

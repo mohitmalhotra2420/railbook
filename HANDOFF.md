@@ -20,6 +20,9 @@ eRail). Web app: React + Vite + Express (`server/`), aur Android WebView wrapper
 ## Fresh workspace bootstrap (workspace reset ho jaata hai — pehla kaam yahi)
 1. `bash /home/user/recover.sh` → GitHub se latest code + `npm ci` (agar `node_modules` na ho) + APK bridge.
 2. `cd /home/user/work/railbook && npm ci` (agar node_modules missing).
+2b. **Android source reset ho jaata hai** (sandbox purane commit par chala jaata hai): `/home/user/work/app/android-app` ko
+    `/home/user/RailBook/APKs/RailBook-Android-v1.5.0-Source.zip` se wapas laao (`app/src` + `app/build.gradle.kts`) —
+    warna `tests/round53-app-nav-and-irctc-return.test.ts` fail karega (nav bar/back code chala jaata hai).
 3. Server typecheck: `./node_modules/.bin/tsc -p tsconfig.server.json --noEmit` (client me ~130 purane
    errors hain — sirf apne files grep karo).
 4. Tests: `npx vitest run` (134 files / 1421 tests, 2–4 min).
