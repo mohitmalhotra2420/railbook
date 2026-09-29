@@ -250,9 +250,10 @@ const ArgSchemas = {
   }),
   FIND_SEATS: z.object({
     /* R55c: from/to optional — sirf train number wale sawaal ("12094 me 3A kitni seat khali hai") par
-     * server khud train ka poora route timetable se le leta hai (pehle schema hi reject kar deta tha). */
-    from: z.string().trim().min(2).max(40).nullish(),
-    to: z.string().trim().min(2).max(40).nullish(),
+     * server khud train ka poora route timetable se le leta hai (pehle schema hi reject kar deta tha).
+     * Khaali string bhi chalti hai (model "" bhejta hai) — usse server "station nahi bataya" maan leta hai. */
+    from: z.string().trim().max(40).nullish(),
+    to: z.string().trim().max(40).nullish(),
     date: Ymd,
     class_code: z.string().trim().max(30).nullish(),
     only_available: z.coerce.boolean().nullish(),

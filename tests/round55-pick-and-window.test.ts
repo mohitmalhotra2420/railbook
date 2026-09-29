@@ -159,6 +159,19 @@ describe("Round-55 · (d) sirf train number diya (station nahi) → poora route 
     expect(res.summary).toMatch(/POORA route timetable se liya gaya/);
     expect(rowNums(res)).toContain("12094");
   });
+
+  it("model khaali string bheje ('' / '  ') to bhi wahi hota hai — schema reject nahi karta", async () => {
+    for (const empty of ["", "  "]) {
+      const res = await executeApprovedTool(
+        "FIND_SEATS",
+        { from: empty, to: empty, date: "2026-09-30", class_code: "3A", train_numbers: "12094" },
+        { userText: "12094 me 3A me kitni seat khali hai kal" },
+      );
+      expect(res.ok, `from/to='${empty}'`).toBe(true);
+      expect(res.summary).not.toMatch(/Invalid arguments/);
+      expect((res.data as { from?: string }).from).toBe("ASR"); /* default mock schedule ASR → LDH */
+    }
+  });
 });
 
 describe("Round-55 · (b) chupke se lagaya time-window khud hat jaaye", () => {
