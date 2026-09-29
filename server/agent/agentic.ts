@@ -1749,12 +1749,18 @@ export async function executeApprovedTool(
       }
       case "FIND_SEATS": {
         /* 24 Sep 2026: AI khud seat sawaal ka jawab deta hai — server sirf live rows laata hai. */
+        /* Round-53f (prod probe): user "confirm seat…" maangta hai par model tool me `only_available:
+         * false` bhej deta hai → tool WL trains ka data bhi deta hai, model unhe jawab me likh deta hai,
+         * aur cards (confirm ke hisaab se) sirf seat-wali trains dikhate hain → mismatch. User ka niyam:
+         * "agar confirm bola to confirm dikhao na sirf". Isliye user ki wording pakki ho (confirmedOnly)
+         * to flag force hota hai — model ke paas WL-only trains likhne ko hoti hi nahi. */
+        const forcedOnlySeats = parseSeatIntent(String(ctx.userText ?? "")).confirmedOnly;
         const res = await runFindSeatsTool({
           from: String(a.from ?? ""),
           to: String(a.to ?? ""),
           date: String(a.date ?? ""),
           class_code: (a.class_code as string | undefined) ?? null,
-          only_available: (a.only_available as boolean | undefined) ?? null,
+          only_available: forcedOnlySeats ? true : (a.only_available as boolean | undefined) ?? null,
           depart_after: (a.depart_after as string | number | undefined) ?? null,
           depart_before: (a.depart_before as string | number | undefined) ?? null,
           sort_by: (a.sort_by as "cheapest" | "fastest" | undefined) ?? null,
