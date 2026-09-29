@@ -282,7 +282,9 @@ export function createApp() {
          * hain: `cap.onlyAvailable || slots.onlyAvailable`. */
         const capSlots = parseSeatIntent(String(body?.text ?? ""));
         seatClassCodes = cap.classCodes?.length ? cap.classCodes : capSlots.classCodes;
-        seatOnlyAvailable = Boolean(cap.onlyAvailable) || capSlots.onlyAvailable;
+        /* Sirf saaf "confirm/confirmed" wording (confirmedOnly) — "seat availability batao" jaisa sawaal
+         * available-only nahi hai (wahan user ko saari trains chahiye, WL bhi). */
+        seatOnlyAvailable = Boolean(cap.onlyAvailable) || capSlots.confirmedOnly;
       }
       if (env.seatFilterServer && !seatFilter) {
         const slots = parseSeatIntent(String(body?.text ?? ""));
@@ -367,26 +369,39 @@ export function createApp() {
             ? `${replyWithSeats}\n\n${seatLine}`
             : seatLine
           : replyWithSeats,
-        seatFilter: seatFilter
-          ? {
-              classCodes: seatClassCodes,
-              line: seatLine,
-              rows: seatFilter.rows,
-              /* Round-53 (user: *"Agar confirm bola to confirm dikhao na sirf"*): jab user ne
-               * confirm/available maanga ho (onlyAvailable), cards me WL rows SIRF unhi trains ki
-               * dikhti hain jinme seat mili hai (Round-51 ka usool — usi train ki baaki classes
-               * chhupao mat), warna poora board (WL/N-A trains bhi) jaisa Round-25 me tay hua tha. */
-              wlRows: seatOnlyAvailable
-                ? seatFilter.wlRows.filter((r) => new Set(seatFilter!.rows.map((x) => x.number)).has(r.number))
-                : seatFilter.wlRows,
-              trainsSeen: seatFilter.trainsSeen,
-              source: seatFilter.source,
-              /* Round-49: jo trains destination tak nahi jaati thin, unka note client card me bhi. */
-              dropNote: seatFilter.dropNote ?? null,
-              /* Round-50: unme se seat-detih trains ka alag section (jaise JAT tak). */
-              nearbyNote: seatFilter.nearbyNote ?? null,
-            }
-          : null,
+        seatFilter: (() => {
+          if (!seatFilter) return null;
+          /* ── Round-53c (prod probe 50b23b6): text aur cards ka train-set BILKUL wahi ho ──────────────
+           * "confirm seat" par model 4 trains likhta hai → cards me wahi 4. Par "saari trains … availability
+           * batao" par model 12 trains (WL wali bhi) likhta hai → cards me bhi wahi 12 (pehle wahan sirf
+           * 4 reh jaati thin — ulta mismatch). Isliye cards ke trains = model ke jawab me likhi trains ∩
+           * payload ke trains. Jawab me koi train number na ho (capability/PNR jaise sawaal) to poora
+           * payload waisa hi rehta hai — kuch chhupta nahi. Class-level details payload se hi aati hain
+           * (text me sirf 1 class likhi ho to bhi us train ki baaki classes card me dikhti hain). */
+          const seatWinnerSet = new Set(seatFilter.rows.map((x) => x.number));
+          const payloadTrains = new Set([...seatFilter.rows, ...seatFilter.wlRows].map((r) => r.number));
+          const replyTrains = new Set(
+            (aiReplyText.match(/\b\d{5}\b/g) ?? []).filter((t) => payloadTrains.has(t)),
+          );
+          const keep = (r: { number: string }) => !replyTrains.size || replyTrains.has(r.number);
+          const rows = seatFilter.rows.filter(keep);
+          const wlBase = seatFilter.wlRows.filter(keep);
+          return {
+            classCodes: seatClassCodes,
+            line: seatLine,
+            rows,
+            /* Round-53 (user: *"Agar confirm bola to confirm dikhao na sirf"*): jab user ne confirm
+             * maanga ho, cards me WL rows SIRF unhi trains ki dikhti hain jinme seat mili hai (Round-51
+             * ka usool — usi train ki baaki classes chhupao mat), warna jaisa Round-25 me tay hua tha. */
+            wlRows: seatOnlyAvailable ? wlBase.filter((r) => seatWinnerSet.has(r.number)) : wlBase,
+            trainsSeen: seatFilter.trainsSeen,
+            source: seatFilter.source,
+            /* Round-49: jo trains destination tak nahi jaati thin, unka note client card me bhi. */
+            dropNote: seatFilter.dropNote ?? null,
+            /* Round-50: unme se seat-detih trains ka alag section (jaise JAT tak). */
+            nearbyNote: seatFilter.nearbyNote ?? null,
+          };
+        })(),
         seatFilterFallback: Boolean(seatLine && aiFailed),
         interrupt: result.interrupt,
         resumeAsk: result.resumeAsk,

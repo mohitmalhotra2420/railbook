@@ -296,6 +296,10 @@ export async function runFindSeatsTool(args: FindSeatsArgs): Promise<FindSeatsRe
   lines.push("Jawab me SAARI trains ki lines likho (jo SEAT rows me hain) — 'baaki trains kisi card me hain' jaisi baat kabhi mat likho, chat me aisa koi card nahi dikhta.");
   /* Round-51: per-train completeness — jo train jawab me hai uski har class ka status likho. */
   lines.push("Har train ki line me uski SAARI classes likho (SEAT wali pehle, phir usi train ki OTHER/WAITLIST classes status ke saath) — koi class chhupao mat, warna user ko lagta hai wo class hi nahi hai.");
+  /* Round-53b (prod probe 50b23b6): "saari trains ki seat availability batao" par model ne pivot-jaise
+   * table banaya jisme ek hi class/status 9 baar repeat ho gaya (2A WL, 2A WL (2) …) — padhne layak nahi.
+   * Isliye saaf instruction: har train EK line/row, koi column-repeat nahi. */
+  lines.push("Formatting: har train ki EK line likho (jaise yahan upar hai) — table/pivot-columns mat banao aur ek hi class/status kisi train ke liye ek hi baar likho; repeat ya (2),(3) wale duplicates kabhi nahi.");
 
   return {
     ok: true,
