@@ -263,9 +263,9 @@ const statusTone = (s: string) =>
   s === "AVAILABLE" ? "ok" : s === "RAC" ? "rac" : s === "WAITLIST" ? "wl" : "bad";
 
 function statusText(r: Row): string {
-  if (r.status === "AVAILABLE") return `AVL ${r.count ?? "—"}`;
-  if (r.status === "RAC") return `RAC ${r.count ?? "—"}`;
-  if (r.status === "WAITLIST") return `WL ${r.count ?? "—"}`;
+  if (r.status === "AVAILABLE") return r.count != null ? `AVL ${r.count}` : "AVL";
+  if (r.status === "RAC") return r.count != null ? `RAC ${r.count}` : "RAC";
+  if (r.status === "WAITLIST") return r.count != null ? `WL ${r.count}` : "WL";
   if (r.status === "NOT_AVAILABLE" || r.status === "UNKNOWN") return r.status === "UNKNOWN" ? "status nahi mila" : "N/A";
   if (r.status === "REGRET") return "Regret";
   return r.count ? String(r.count) : r.status;

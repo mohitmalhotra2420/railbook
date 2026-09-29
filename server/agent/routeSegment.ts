@@ -145,8 +145,8 @@ function classBit(c: ClassRow): string | null {
   const code = String(c.classCode ?? c.code ?? "").trim().toUpperCase();
   if (!code) return null;
   const st = String(c.status ?? "").toUpperCase();
-  if (st === "AVAILABLE") return `${code} AVL ${c.seats ?? "—"}`;
-  if (st === "RAC") return `${code} RAC ${c.rac ?? "—"}`;
+  if (st === "AVAILABLE") return c.seats != null ? `${code} AVL ${c.seats}` : `${code} AVL`;
+  if (st === "RAC") return c.rac != null ? `${code} RAC ${c.rac}` : `${code} RAC`;
   return null;
 }
 

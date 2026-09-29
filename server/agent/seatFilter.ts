@@ -156,13 +156,15 @@ export const SEAT_LINE_MAX = 12;
 
 const inr = (n: number | null) => (n == null ? "—" : `₹${n.toLocaleString("en-IN")}`);
 const trainCount = (rows: SeatFilterRow[]) => new Set(rows.map((r) => r.number)).size;
+/* Round-50: count provider ne hi nahi di (jaise RailYatri ka "RLWL/AVAILABLE") to "AVL —" ki jagah
+ * sirf "AVL" — number ka na hona saaf dikhta hai, adhoora dash nahi. */
 const statusText = (r: SeatFilterRow): string =>
   r.status === "AVAILABLE"
-    ? `AVL ${r.seats ?? "—"}`
+    ? (r.seats != null ? `AVL ${r.seats}` : "AVL")
     : r.status === "RAC"
-      ? `RAC ${r.rac ?? "—"}`
+      ? (r.rac != null ? `RAC ${r.rac}` : "RAC")
       : r.status === "WAITLIST"
-        ? `WL ${r.waitlist ?? "—"}`
+        ? (r.waitlist != null ? `WL ${r.waitlist}` : "WL")
         : "N/A";
 
 /** Ek hi train ki rows ko ek text me — "12013 CC AVL 444 ₹675 · 3A AVL 71 ₹520".
@@ -185,7 +187,7 @@ export function groupRowsByTrain(rows: SeatFilterRow[]): { number: string; name:
 }
 
 const fmtRow = (r: SeatFilterRow) => {
-  const status = r.status === "AVAILABLE" ? `AVL ${r.seats ?? "—"}` : r.status === "RAC" ? `RAC ${r.rac ?? "—"}` : r.status === "WAITLIST" ? `WL ${r.waitlist ?? "—"}` : "N/A";
+  const status = statusText(r);
   return `${r.number} ${r.classCode} ${status}${r.fare != null ? ` ${inr(r.fare)}` : ""}${r.departure ? ` (${r.departure})` : ""}`;
 };
 
