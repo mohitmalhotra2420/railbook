@@ -337,7 +337,30 @@ export function matchStation(raw: string): Station | undefined {
     }
     return false;
   };
-  return CLIENT_STATIONS.find((s) => s.city.toLowerCase() === q || hasWord(q, s.city.toLowerCase()));
+  const byCityWord = CLIENT_STATIONS.find((s) => s.city.toLowerCase() === q || hasWord(q, s.city.toLowerCase()));
+  if (byCityWord) return byCityWord;
+  return stationWordInPhrase(q);
+}
+
+/**
+ * Round-51 (user screenshot 11:10: `"Yaar Ldh" ke liye exact station chahiye` — jabki "Ldh" = LDH):
+ * user apni baat aise likhta hai — "yaar LDH se SVDK…", "bhai ldh", "kal ldh". Poore phrase par
+ * exact/word match fail ho jaata tha, isliye poora phrase hi "unresolved station" ban jaata tha aur
+ * app station poochhne lagta tha (purane builds me model isse samajh jaata tha).
+ *
+ * Yahan phrase ke andar ka **saaf station word** dekha jaata hai — par sirf tab jab ek hi station
+ * nikle (poora route likha ho — "ldh se svdk" — to yahan se kuch nahi; wo from/to parser ka kaam
+ * hai) aur koi cluster-city (delhi/mumbai/… jo clarification maangti hain) na ho. Alias/code list se
+ * hi match hota hai, isliye "kal"/"yaar"/"se" jaise shabd station ban hi nahi sakte.
+ */
+function stationWordInPhrase(q: string): Station | undefined {
+  if (!q.includes(" ")) return undefined;
+  const hits = findStationsInText(q);
+  if (!hits.length) return undefined;
+  if (hits.some((st) => CLUSTER_CITIES.has(st.city.toLowerCase()))) return undefined;
+  const codes = [...new Set(hits.map((st) => st.code))];
+  if (codes.length !== 1) return undefined;
+  return stationByCode(codes[0]);
 }
 
 const ALIAS_KEYS = Object.keys(ALIASES).sort((a, b) => b.length - a.length);

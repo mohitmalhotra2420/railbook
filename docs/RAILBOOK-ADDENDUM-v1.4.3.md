@@ -160,3 +160,21 @@ User: "kya abh mai ek ek test kru!? Possible nhi hai… AI kyu nahi sahi answer 
 **Deploy:** `0db7048` → deploy `dep-datkn6qd0e5s73cgmvgg`; `b604eaf` (R50b) → deploy `dep-datkpp7avr4c73dusd50` — `/api/version` = `b604eaf` MATCH.
 **Prod verify (b604eaf):** (1) `Mujhe ludhiana se SVDK jaana hai kal confirm seat findout krke do` → 7.0s, rows sirf `20433`, `dropNote` + **`nearbyNote`** dono reply aur client payload me (`🧭 JAT tak … 12265 (2A AVL 5 · 3A AVL 10) | 13151 (SL AVL 8) | 12237 (1A AVL 1)`); (2) `LDH se JAT kal confirm seat batao` → 7.0s, **koi drop nahi** (`nearbyNote null`), 12265 `3A AVL 10 · 2A AVL 5`, 20433 `3E AVL ₹565` (dash gaya).
 **Preview:** `RailBook-round50-2026-09-29.html` (pehle vs ab phones + 2S ka poora sach table).
+
+## §9.43 — Round-51 (29 Sep 2026): user ki wording ("Yaar LDH se…") + confirm/available par SAARI classes
+
+**User (29 Sep, build b604eaf ke do screenshots):**
+1. `Yaar LDH se SVDK ke liye kal ke liye confirm seat find out karke do na` → app ne jawab diya *`"Yaar Ldh" ke liye exact station chahiye — station ka naam ya code bataiye.`* — jabki "Ldh" = LDH. User: *"purane build mein to AI meri wording ko samjh rha tha latest build mein kyu nhi"*.
+2. *"12265 mein 2S available seat nahi show hui thi … sabhi class kyu nahi show hoti jabh bhi specifically confirm, available poocho"*.
+
+**Root cause (1):** `legacy-stations.matchStation` poore phrase par exact/alias/city-word match karta tha; "Yaar Ldh" / "bhai ldh" / "kal ldh" jaise phrase se kuch match nahi hota tha → wahi phrase `unresolvedFrom` ban jaati thi → `routedStationSearch("Yaar Ldh")` kuch nahi deta → "exact station chahiye" sawaal (aur `atlasFallback`/rescue se wahi jawab user tak). Purane builds me model isse apne aap samajh jaata tha, par deterministic rescue path me ye gap tha.
+
+**Fix (1) — general, tool-level (per-question rule nahi):** `stationWordInPhrase()` — poore-phrase wale saare purane checks ke **baad**, phrase ke andar ka saaf station word dhoondha jaata hai (alias/code list se, word-boundary Unicode-safe). Do shartein: (a) exactly **ek** station nikle (poora route likha ho — "ldh se svdk" — to yahan se kuch nahi; wo from/to parser ka kaam hai), (b) koi **cluster-city** (delhi/mumbai/kolkata…) hit na ho (unke liye clarification hi chahiye). Isse NLU ka from/to **aur** AI-extraction (`mapExtraction` bhi `matchStation` hi use karta hai) dono theek hote hain — jo bhi filler likho ("yaar", "bhai", "kal", "please"), station word phaans nahi jaata.
+
+**Root cause (2):** "confirm/available" maangne par `seatSummaryLine` ka seat-branch sirf `pick.seat` (AVAILABLE/RAC rows) likhta tha — usi train ki baaki classes (jaise 12265 ki 2S/SL/1A) line me aati hi nahi thin (card rows+wlRows jodta hua tha, par text aur card match nahi karte the — R48 ka usool tuth raha tha).
+
+**Fix (2):** ab jawab me jo train hai, uski **SAARI classes** usi line me aati hain — AVAILABLE/RAC pehle, phir usi train ki WL/N-A rows status ke saath (`12265 3A AVL 10 ₹860 · 2A AVL 5 ₹870 · 1A WL 1 ₹1,435 · SL WL 3 ₹355 · 2S WL 1 ₹225`). Sirf-WL trains list me **nahi** aati (R25 ka usool: available-only filter trains par lagta hai, train ke andar classes chhupane par nahi). AI path me bhi: `runFindSeatsTool` ab `OTHER CLASSES (inhi trains ki baaki classes — inhe bhi status ke saath likho, chhupao mat): …` line + instruction *"Har train ki line me uski SAARI classes likho"* bhejta hai. Sab data live board se — kuch banaya nahi jaata.
+
+**Proof (local, AI on, aapka exact sawaal):** `Yaar LDH se SVDK ke liye kal ke liye confirm seat find out karke do na` → 21.1s, NLU `from=LDH, to=SVDK`, koi unresolved nahi, jawab: `* 20433 JAMMU MAIL — 1A AVL 1 ₹1,530 · 3E AVL 1 ₹625 — 01:47 departure` + `💺 … 20433 1A AVL 1 ₹1,530 · 3E AVL 1 ₹625 · 2A WL 1 ₹925 · 3A WL 1 ₹675 · SL N/A ₹270` + drop note + `🧭 JAT tak …`. Probe: `matchStation("Yaar Ldh")=LDH`, `"bhai ldh"=LDH`, `"kal ldh"=LDH`; control: `"delhi"`/`"mumbai"`/`"blorp xqz"` → undefined (clarification wahi).
+**Suite:** 131 files / **1402 tests** pass; naya `tests/round51-station-filler-allclasses.test.ts` (5).
+**Preview:** `RailBook-round51-2026-09-29.html` (pehle vs ab phones).

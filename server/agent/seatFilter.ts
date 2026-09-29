@@ -247,7 +247,14 @@ export function seatSummaryLine(
      * us card ko Round-21c me chat se hata diya gaya tha, isliye pointer jhootha tha (aur AI wahi
      * line copy karke "…Seat Finder card mein hain" likh deta tha). Ab SAARI seat rows isi line me
      * aati hain (koi card pointer nahi) — bahut zyada hon to hi "+N aur bhi hain" (bina kisi card ke). */
-    const grouped = groupRowsByTrain(pick.seat);
+    /* Round-51 (user: *"sabhi class kyu nahi show hoti jab bhi specifically confirm, available
+     * poocho"* — 12265 ki 2S usi train me thi par jawab me gayab): jo train is jawab me hai, uski
+     * SAARI classes dikhao — available wali pehle (jaise pick me hain), phir usi train ki WL/N-A
+     * rows (wl pick se). Sirf-WL trains list me nahi aati (Round-25 ka usool wahi rehta hai). */
+    const seatNums = new Set(pick.seat.map((r) => r.number));
+    const have = new Set(pick.seat.map((r) => `${r.number}:${r.classCode}`));
+    const otherClasses = (pick.wl ?? []).filter((r) => seatNums.has(r.number) && !have.has(`${r.number}:${r.classCode}`));
+    const grouped = groupRowsByTrain(otherClasses.length ? [...pick.seat, ...otherClasses] : pick.seat);
     const shown = grouped
       .slice(0, SEAT_LINE_MAX)
       .map((g) => `${g.number} ${trainClassesText(g.classes)}`)

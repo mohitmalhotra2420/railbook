@@ -26,6 +26,7 @@ cp -a "$RBDIR/APKs" "$DEST/apks"
 cp -a "$RBDIR/previews" "$DEST/previews"
 cp -a "$RBDIR/docs/." "$DEST/docs/"
 cp "$REPO/START-HERE.md" "$DEST/START-HERE.md"
+cp "$REPO/HANDOFF.md" "$DEST/HANDOFF.md"
 cp /home/user/apk-build-v1*.sh "$DEST/host-scripts/" 2>/dev/null || true
 
 rm -f "$OUT"

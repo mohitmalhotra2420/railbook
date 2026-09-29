@@ -283,6 +283,16 @@ export async function runFindSeatsTool(args: FindSeatsArgs): Promise<FindSeatsRe
    * hain (SEAT_LINE_MAX tak) taaki jawab me saari trains aayein — koi card pointer nahi. */
   if (pick.seat.length) lines.push(`SEAT (${pick.seat.length} rows): ${pick.seat.slice(0, SEAT_LINE_MAX).map(fmt).join(" | ")}`);
   if (wlPick.wl.length) lines.push(`WAITLIST/N-A (${wlPick.wl.length} rows, confirm% NAHI batana): ${wlPick.wl.slice(0, SEAT_LINE_MAX).map(fmt).join(" | ")}`);
+  /* Round-51 (user: *"sabhi class kyu nahi show hoti jab bhi specifically confirm, available
+   * poocho"*): jab user ne confirm/available seat maange, jawab me us train ki baaki classes bhi
+   * aani chahiye — warna 2S jaisi class (jo usi train me hai) gayab lagti hai. Ye rows sirf un
+   * trains ki hain jinme seat mili hai (WL-only trains jawab me nahi). */
+  const seatNums = new Set(pick.seat.map((r) => r.number));
+  const seatHave = new Set(pick.seat.map((r) => `${r.number}:${r.classCode}`));
+  const otherClasses = pick.seat.length ? wlPick.wl.filter((r) => seatNums.has(r.number) && !seatHave.has(`${r.number}:${r.classCode}`)) : [];
+  if (otherClasses.length) {
+    lines.push(`OTHER CLASSES (inhi trains ki baaki classes — inhe bhi status ke saath likho, chhupao mat): ${otherClasses.slice(0, SEAT_LINE_MAX).map(fmt).join(" | ")}`);
+  }
   if (pick.missingClass) lines.push(`${pick.missingClass} trains me ye class hi nahi hai — unhe "seat nahi" mat maano.`);
   /* Round-49: hati hui trains (jo ${to} tak nahi jaati) — model ise jawab me saaf likh de. */
   if (dropLine) lines.push(`ROUTE: ${dropLine.replace(/^ℹ️\s*/, "")}`);
@@ -290,6 +300,8 @@ export async function runFindSeatsTool(args: FindSeatsArgs): Promise<FindSeatsRe
   if (pick.unknownTime) lines.push(`${pick.unknownTime} rows ka time nahi mila (time filter laga tha).`);
   lines.push(`Source: ${board.provider ?? "live board"} · ${pool.length} trains dekhe (${enriched.size} ka alag board check kiya).`);
   lines.push("Jawab me SAARI trains ki lines likho (jo SEAT rows me hain) — 'baaki trains kisi card me hain' jaisi baat kabhi mat likho, chat me aisa koi card nahi dikhta.");
+  /* Round-51: per-train completeness — jo train jawab me hai uski har class ka status likho. */
+  lines.push("Har train ki line me uski SAARI classes likho (SEAT wali pehle, phir usi train ki OTHER/WAITLIST classes status ke saath) — koi class chhupao mat, warna user ko lagta hai wo class hi nahi hai.");
 
   return {
     ok: true,
