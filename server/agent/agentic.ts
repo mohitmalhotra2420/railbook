@@ -3217,6 +3217,8 @@ export async function runAgenticTurn(input: {
   /* Round-52: recently-fail wale model aakhir me (dekho orderModelChain). */
   const modelChain = orderModelChain(transport.models);
   let repaired = false;
+  /* Round-54b: live-data sawaal par bina tool jawab → ek corrective round. */
+  let zeroToolRepaired = false;
   /* Round-34 (user: "agla kadam na humesha AI hi chunne sabh sochke… agla kadam fallback pe verified
    * data se mat aaye"): agar model ne [NEXT] nahi di par is turn me kaam ka tool data hai, to EK
    * chhoti repair call se model se hi agla kadam maanga jaata hai — reply wahi purana rehta hai. */
@@ -4038,6 +4040,31 @@ export async function runAgenticTurn(input: {
         modelUsed, modelFallbacks, latencyMs: Date.now() - startedAll,
         failureReason: "model_asked_instead_of_answered",
       };
+    }
+
+    /* ── Round-54b: ZERO-TOOL SELF-REPAIR (ChatGPT ka feedback loop, RailBook me) ────────────────────
+     * Live-data sawaal (seat/fare/status/PNR/timetable/board/cancellation) par model ne koi tool hi
+     * nahi chalaya — aur jawab me data jaise numbers ya "mere paas access nahi hai" likh diya. User ka
+     * niyam: aisa jawab kabhi nahi. Ye per-question patch nahi — general loop hai (system rule 25b ka
+     * programmatic roop): ek corrective round, phir usi data se jawab. */
+    const legitClarify = /kaun\w* station|station\s+(?:chun|choose|select|batao)|kitne (?:passenger|log|aadmi)|kis date|konsi date|kis din/i.test(clean);
+    const liveZeroTool =
+      steps.length === 0 &&
+      !zeroToolRepaired &&
+      step < MAX_STEPS &&
+      liveDataQuestion(String(input.text ?? "")) &&
+      !legitClarify &&
+      (/(₹|AVL|WL|RAC|AVAILABLE|WAITLIST|\b\d{5}\b|\b\d{1,2}:\d{2}\b)/i.test(clean) ||
+        /access nahi|nahi de sakta|nahi bata sakta|nahi kar sakta|IRCTC par (?:check|dekh)|khud dekh|mera access|available nahi hai mere/i.test(clean));
+    if (liveZeroTool) {
+      zeroToolRepaired = true;
+      messages.push({ role: "assistant", content });
+      messages.push({
+        role: "user",
+        content:
+          "SYSTEM CHECK: ye LIVE data ka sawaal hai aur tumne abhi koi tool call NAHI kiya. Bina tool ke seat/fare/status/PNR/time/board ka jawab dena MANA hai — aur 'mere paas access nahi hai' likhna bilkul galat hai (ye saare tools tumhare paas hain). Abhi SAHI tool call karo: live status → TRACK_TRAIN · seat/availability → CHECK_AVAILABILITY ya FIND_SEATS · fare → GET_FARE · PNR → CHECK_PNR · timetable/route → GET_TIMETABLE · station board → GET_STATION_BOARD · cancelled trains → GET_CANCELLED_TRAINS — phir usi tool ke data se jawab likho.",
+      });
+      continue;
     }
 
     // System prompt (date map, resolver line, known context) server-generated hai —

@@ -11,9 +11,15 @@ for (const line of fs.readFileSync(".env", "utf8").split("\n")) {
   const m = /^([A-Z0-9_]+)=(.*)$/.exec(line.trim());
   if (m) process.env[m[1]] = m[2];
 }
-import request from "supertest";
-const { createApp } = await import("../server/app.js");
-const app = createApp();
+/* `--prod` ke saath wahi 12 sawaal LIVE server par chalti hain (localhost app boot nahi hota). */
+const PROD = process.argv.includes("--prod");
+const PROD_URL = process.env.PROD_URL || "https://railbook-gegs.onrender.com";
+let app: unknown = null;
+if (!PROD) {
+  const request = (await import("supertest")).default;
+  const { createApp } = await import("../server/app.js");
+  app = createApp();
+}
 
 /** expect: kaun se tool(s) sahi maane jaate hain (koi ek chale to pass) */
 const CASES: { q: string; expect: string[]; note: string }[] = [
@@ -38,10 +44,22 @@ for (const c of CASES) {
   let engine = "";
   let reply = "";
   try {
-    const res = await request(app).post("/api/agent").send({ text: c.q, history: [], known: {} }).timeout({ response: 300000, deadline: 300000 });
-    engine = res.body.engine ?? "";
+    let res: { body: Record<string, unknown> };
+    if (PROD) {
+      const r = await fetch(`${PROD_URL}/api/agent`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: c.q, history: [], known: {} }),
+        signal: AbortSignal.timeout(300000),
+      });
+      res = { body: (await r.json()) as Record<string, unknown> };
+    } else {
+      const request = (await import("supertest")).default;
+      res = (await request(app).post("/api/agent").send({ text: c.q, history: [], known: {} }).timeout({ response: 300000, deadline: 300000 })) as { body: Record<string, unknown> };
+    }
+    engine = (res.body.engine as string) ?? "";
     reply = String(res.body.reply ?? "");
-    tools = (res.body.toolTrace ?? []).map((s: { tool?: string; ok?: boolean }) => `${s.tool}${s.ok ? "" : "(✗)"}`);
+    tools = (res.body.toolTrace ?? []).map((s) => `${s.tool}${s.ok ? "" : "(✗)"}`);
   } catch (e) {
     reply = `ERROR ${String(e).slice(0, 80)}`;
   }
