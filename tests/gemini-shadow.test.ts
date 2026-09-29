@@ -22,15 +22,11 @@ describe("Gemini is shadow-only and cannot take money", () => {
   it("Production AI models intentional hain: primary planner Muse-Glimmer, fallback + NLU GPT-OSS", () => {
     // 2026-09-07 Round-14 intentional switch: Muse-Glimmer-30B primary planner (bench 11/12, 1.9s p50),
     // GPT-OSS-20B fallback + NLU layer par. Gemini/RapidAPI shadow-only guard intact.
-    /* Round-52 (29 Sep 2026, user: "AI first for everything — model khud samjhe"): default chain ab FAST model se
-   * shuru hoti hai (gpt-oss-20b primary, Nemotron-3-Nano-Omni fallback, Muse chain me baad me) — prod me
-   * Muse bade agentic prompt par 30s+ le raha tha aur turn timeout ho kar jawab deterministic rescue se aa
-   * jaata tha. Intent wahi hai (NVIDIA primary, HF sirf cross-provider fallback) — sirf order badla. */
-    expect(env.nvidiaModel).toBe("openai/gpt-oss-20b");
-    /* Chain ka doosra model: .env me jo set hai (prod/local) — warna env.ts ka default (Nemotron-3-Nano-Omni).
-     * Dono hi case me "ek aur asli NVIDIA model chain me hai" yahi intent hai. */
-    expect(env.nvidiaFallbackModel).toBe(process.env.NVIDIA_FALLBACK_MODEL || "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning");
-    expect(env.nvidiaFallbackModel).toMatch(/muse-glimmer|nemotron/);
+    /* Round-61 (30 Sep 2026, user: "Muse ko primary kro and gpt ko secondary yan fallback"): chain
+     * Muse se shuru (samajh/multi-tool behtar) aur gpt-oss-20b fast fallback. Bade prompt ke liye ab
+     * alag primary timeout cap hai (AI_PRIMARY_TIMEOUT_MS) — isliye R52 wali "fast pehle" majboori nahi. */
+    expect(env.nvidiaModel).toBe("meta/muse-glimmer-30b");
+    expect(env.nvidiaFallbackModel).toBe("openai/gpt-oss-20b");
     expect(env.nluModel).toBe("openai/gpt-oss-20b");
     expect(env.geminiShadow).toBe(false);
   });

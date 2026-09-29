@@ -383,3 +383,21 @@ Leg-list row ka area sirf **127px** chaura tha — train naam 2 line me tootta t
 
 **Tests:** `tests/round60-station-choice.test.ts` (5) + `tests/round60-classgrid-layout.test.tsx` (3). Full suite **144 files / 1484 PASS**; server typecheck + undefined-name gate clean. Deploy **a424d4a** → prod MATCH.
 Screenshots: `previews/r60-station-choice.png`, `previews/r60-prod-plan-legs.png`, `previews/r60-classes-layout.png`.
+
+## §9.53 — Round 61 (30 Sep 2026): Muse primary + gpt-oss fallback, zip ka permanent link, aur R60 confirmations
+
+**User:** *"Muse ko primary kro and gpt ko secondary yan fallback and zip workspace se download nhi ho rhi kyunki available hi na hai yan git pe poore project ko push krdo"*
+
+**1. Model chain ulti kar di (user ka faisla).**
+- Prod (Render env): `NVIDIA_MODEL=meta/muse-glimmer-30b`, `NVIDIA_FALLBACK_MODEL=openai/gpt-oss-20b`; naya `AI_PRIMARY_TIMEOUT_MS=90000`.
+- Code default bhi wahi (`server/env.ts`) — R52 ka "fast model pehle" default revert.
+- **Kyun R52 ka darr ab lagu nahi hota:** turn budget 180s hai; pehle primary ko bhi 45s cap milta tha, isliye Muse bade prompt par round timeout kha kar poora kaam dobara karta tha (live: 106s ka turn, jisme ek 45s timeout round). Ab **primary ke liye alag cap** (`AI_PRIMARY_TIMEOUT_MS`, prod 90s) aur fallbacks ke liye 6s/model reserve — total budget se aage nahi jaata.
+- 3 purane tests (R52 ke assertion) naye chain par update; local `.env` bhi prod jaisa.
+- Live verify @9ae3741: `/api/version` → `meta/muse-glimmer-30b / openai/gpt-oss-20b`; chhota sawaal ("Delhi jaana hai") **10s** me jawab + 6 station options (dropdown bhi Muse ke saath kaam karta hai); bada seat sawaal Muse se hi poora (per-train saari classes, real AVL/fare).
+
+**2. Zip ka permanent link (workspace reset se azaad).**
+Workspace har reset par `/home/user/RailBook` wipe kar deta hai — isliye zip kabhi-kabhi "available hi nahi" hoti thi. Ab zip **GitHub Release asset** hai:
+`https://github.com/mohitmalhotra2420/railbook/releases/download/r61-2026-09-30/RailBook-FULL-2026-09-30.zip`
+(35.4 MB · 1,535 files · verify: HTTP 200 + valid zip + START-HERE.md andar). Repo bhi poora pushed hai (`33cdcbe`) — source, tests, docs, previews, android-app sab. Release page: `https://github.com/mohitmalhotra2420/railbook/releases/tag/r61-2026-09-30`
+
+**3. R60 wali teen cheezein prod par pehle se live hain** (dobara confirm): station dropdown (Delhi → 6 options), plan page ka touch scroll (scrollTop 0 → 746), leg classes ka naya grid (Best + Book).
