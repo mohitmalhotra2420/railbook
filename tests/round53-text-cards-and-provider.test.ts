@@ -386,6 +386,10 @@ describe("Round-53d · model sirf tool ke data wali trains likhe (fake train nah
     const reply = String(res.body.reply ?? "");
     expect(reply).toContain("11449");
     expect(reply).not.toContain("14661");
+    /* Non-confirm sawaal → cards me tool ka POORA snapshot (12919 bhi, chahe model ne uski line chhodi).
+     * Isse pointer/tail line ("N trains ke rows neeche cards me hain") sach rehti hai. */
+    const sf = res.body.seatFilter as { rows: { number: string }[]; wlRows: { number: string }[] } | null;
+    expect([...new Set([...sf!.rows, ...sf!.wlRows].map((r) => r.number))].sort()).toEqual(["11449", "12919"]);
     setAgenticNvidiaFetch(null);
     process.env.NVIDIA_API_KEY = "";
   });
@@ -428,10 +432,8 @@ describe("Round-53d · model sirf tool ke data wali trains likhe (fake train nah
     expect(reply).not.toContain("22461");
     const sf = res.body.seatFilter as { rows: { number: string }[]; wlRows: { number: string }[] } | null;
     expect(sf!.rows.map((r) => r.number)).toContain("11449");
-    /* Cards = tool ka POORA snapshot — model ne 12919 ki line chhodi thi, par card me wo bhi rehta hai
-     * (aur jawab me us train ka zikr pointer/tail line kar deti hai). Isse cards kabhi chhote nahi rehte
-     * — yahi "trains card me nahi dikh rhi" ka aakhri ilaaj hai. */
-    expect([...new Set([...sf!.rows, ...sf!.wlRows].map((r) => r.number))].sort()).toEqual(["11449", "12919"]);
+    /* Ye sawaal confirm-only hai → cards me sirf seat-wali train (R53b/R53d niyam). */
+    expect([...new Set([...sf!.rows, ...sf!.wlRows].map((r) => r.number))]).toEqual(["11449"]);
     setAgenticNvidiaFetch(null);
     process.env.NVIDIA_API_KEY = "";
   });
