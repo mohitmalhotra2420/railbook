@@ -348,18 +348,28 @@ export function createApp() {
       const rawReply = String(result.reply ?? "").trim();
       const scrubFabricated = (text: string): string => {
         if (!allowedTrains || !text) return text;
-        const kept: string[] = [];
-        for (const line of text.split("\n")) {
-          const nums = line.match(/\b\d{5}\b/g) ?? [];
-          /* Line me koi aisa 5-digit number hai jo data me nahi → wo line (fabricated train) hata do.
-           * Lekin line "train line" jaisi honi chahiye (number ke saath class/status/shuru me dikhe) —
-           * warna general baat (jaise "20 trains dekhe") chhoti na ho. */
-          const isTrainLine = /^\s*[-*•]?\s*\*{0,2}\s*\d{5}\b/.test(line) || /\d{5}\b[^\n]{0,24}(AVL|WL|RAC|N\/A|₹)/.test(line);
-          const hasUnknown = nums.some((n) => !allowedTrains.has(n));
-          if (isTrainLine && hasUnknown) continue;
-          kept.push(line);
-        }
-        return kept.join("\n").trim();
+        /* Segment-level: ek line me kai trains " · " ya " | " se judi hoti hain. Sirf WAHI segment
+         * hatta hai jisme aisa 5-digit number ho jo asli data me nahi (fabricated train); baaki jawab
+         * jaisa hai waisa rehta hai — poora jawab kabhi nahi girta. */
+        const cleanSegment = (seg: string): string | null => {
+          const nums = seg.match(/\b\d{5}\b/g) ?? [];
+          const isTrainSeg = /^\s*[-*•]?\s*\*{0,2}\s*\d{5}\b/.test(seg) || (nums.length > 0 && /(AVL|WL|RAC|N\/A|₹|AVAILABLE|WAITLIST)/.test(seg));
+          if (isTrainSeg && nums.some((n) => !allowedTrains.has(n))) return null;
+          return seg;
+        };
+        return text
+          .split("\n")
+          .map((line) =>
+            line
+              .split(/(\s+[|·]\s+)/)
+              .map((part) => (/\s*[|·]\s*/.test(part) ? part : cleanSegment(part) ?? ""))
+              .join("")
+              .replace(/\s{2,}/g, " ")
+              .trim(),
+          )
+          .filter((l) => l.length > 0)
+          .join("\n")
+          .trim();
       };
       const aiReplyText = scrubFabricated(rawReply);
       /* Sirf wahi rows jo query ne maangi thi (seatFilter.rows) — WL/N-A rows alag se nahi thopte,
@@ -416,13 +426,12 @@ export function createApp() {
            * payload waisa hi rehta hai — kuch chhupta nahi. Class-level details payload se hi aati hain
            * (text me sirf 1 class likhi ho to bhi us train ki baaki classes card me dikhti hain). */
           const seatWinnerSet = new Set(seatFilter.rows.map((x) => x.number));
-          const payloadTrains = new Set([...seatFilter.rows, ...seatFilter.wlRows].map((r) => r.number));
-          const replyTrains = new Set(
-            (aiReplyText.match(/\b\d{5}\b/g) ?? []).filter((t) => payloadTrains.has(t)),
-          );
-          const keep = (r: { number: string }) => !replyTrains.size || replyTrains.has(r.number);
-          const rows = seatFilter.rows.filter(keep);
-          const wlBase = seatFilter.wlRows.filter(keep);
+          /* Cards me WO SAARI trains rehti hain jo tool ne is turn me di (text ke saath ek hi snapshot).
+           * Model ne kisi train ki line chhoti kar di ho to bhi card me poori class-detail rehti hai, aur
+           * jawab me us train ka zikr pointer/tail line se hota hai — yaani text aur cards kabhi alag
+           * snapshots ke nahi hote (R53 ka asli maqsad). */
+          const rows = seatFilter.rows;
+          const wlBase = seatFilter.wlRows;
           return {
             classCodes: seatClassCodes,
             line: seatLine,

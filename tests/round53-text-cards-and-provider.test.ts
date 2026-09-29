@@ -358,7 +358,39 @@ describe("Round-53d · model sirf tool ke data wali trains likhe (fake train nah
     expect(res.summary).toMatch(/baaki 1 trains me sirf WL\/N-A/);
   });
 
-  it("jawab me data se bahar ka train number ho to wo line hata di jaati hai (fake data nahi)", async () => {
+  it("segment-level scrub: ek line me juda fake train hatta hai, asli jawab bacha rehta hai", async () => {
+    process.env.NVIDIA_API_KEY = "nvapi-r53e";
+    process.env.NVIDIA_MODEL = "openai/gpt-oss-20b";
+    delete process.env.NVIDIA_FALLBACK_MODEL;
+    routeBoard.mockResolvedValue({
+      trains: [
+        { trainNumber: "11449", trainName: "JBP SVDK EXP", classes: [{ classCode: "3A", status: "AVAILABLE", seats: 6, fare: 625 }] },
+        { trainNumber: "12919", trainName: "MALWA EXP", classes: [{ classCode: "SL", status: "WAITLIST", seats: null, waitlist: 18, fare: 270 }] },
+      ],
+      provider: "web_confirmtkt",
+      at: Date.now(),
+    });
+    classBoard.mockResolvedValue({ classes: [], provider: "none" });
+    let call = 0;
+    setAgenticNvidiaFetch(async () => {
+      call += 1;
+      const body = (b: unknown) => new Response(JSON.stringify(b), { status: 200, headers: { "Content-Type": "application/json" } });
+      if (call === 1) {
+        return body({ model: "openai/gpt-oss-20b", choices: [{ message: { role: "assistant", tool_calls: [{ id: "c1", type: "function", function: { name: "FIND_SEATS", arguments: JSON.stringify({ from: "LDH", to: "SVDK", date: "2026-09-30", class_code: "ALL" }) } }] } }] });
+      }
+      /* Line me " · " se juda fabricated train (14661) — sirf wahi segment hatna chahiye. */
+      return body({ model: "openai/gpt-oss-20b", choices: [{ message: { role: "assistant", content: "11449 JBP SVDK EXP – 3A AVL 6 ₹625 · 14661 SHALIMAR MALANI – 3A WL 4 ₹625" } }] });
+    });
+    const { createApp } = await import("../server/app");
+    const res = await request(createApp()).post("/api/agent").send({ text: "LDH se SVDK kal saari trains batao", history: [], known: {} });
+    const reply = String(res.body.reply ?? "");
+    expect(reply).toContain("11449");
+    expect(reply).not.toContain("14661");
+    setAgenticNvidiaFetch(null);
+    process.env.NVIDIA_API_KEY = "";
+  });
+
+  it("cards me tool ka POORA snapshot rehta hai (pointer line sach bole)", async () => {
     /* Prod probe: model apni memory se trains jod deta tha (payload 3 trains, jawab 7). */
     process.env.NVIDIA_API_KEY = "nvapi-r53d";
     process.env.NVIDIA_MODEL = "openai/gpt-oss-20b";
@@ -394,8 +426,12 @@ describe("Round-53d · model sirf tool ke data wali trains likhe (fake train nah
     expect(reply).toContain("11449");
     expect(reply).not.toContain("14609");
     expect(reply).not.toContain("22461");
-    const sf = res.body.seatFilter as { rows: { number: string }[] } | null;
+    const sf = res.body.seatFilter as { rows: { number: string }[]; wlRows: { number: string }[] } | null;
     expect(sf!.rows.map((r) => r.number)).toContain("11449");
+    /* Cards = tool ka POORA snapshot — model ne 12919 ki line chhodi thi, par card me wo bhi rehta hai
+     * (aur jawab me us train ka zikr pointer/tail line kar deti hai). Isse cards kabhi chhote nahi rehte
+     * — yahi "trains card me nahi dikh rhi" ka aakhri ilaaj hai. */
+    expect([...new Set([...sf!.rows, ...sf!.wlRows].map((r) => r.number))].sort()).toEqual(["11449", "12919"]);
     setAgenticNvidiaFetch(null);
     process.env.NVIDIA_API_KEY = "";
   });
