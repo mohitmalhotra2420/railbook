@@ -434,6 +434,10 @@ export type AgentResponse = {
   agenticFailureReason?: string | null;
   /** Round-32: model ka khud chuna hua "agla kadam" (us turn ke verified data se validate hokar). */
   nextActions?: import("./agentic.js").NextAction[] | null;
+  /** Round-53 (user: "Green portion wali trains card mein nahi dikh rahi"): model ne jo FIND_SEATS
+   * chalaya usi ka poora live data — app isi se cards banata hai, isliye jawab ka text aur cards
+   * bilkul ek hi snapshot ke hote hain (pehle cards ke liye dobara board fetch hota tha). */
+  seatCapture?: SearchCapture["seat"] | null;
 };
 
 /**
@@ -2740,6 +2744,8 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
           grounded: turn.grounded,
           /* Round-32: model ne khud jo agla kadam chuna (agar diya ho). */
           nextActions: turn.nextActions ?? null,
+          /* Round-53: model ke FIND_SEATS ka live data — app isi se cards banata hai (text=cards). */
+          seatCapture: capture.seat ?? null,
         };
       }
       // Agentic chala par reply nahi bana — wajah record karo, fallback chalo.

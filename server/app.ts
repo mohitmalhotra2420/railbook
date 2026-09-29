@@ -261,7 +261,25 @@ export function createApp() {
       let seatClassCodes: string[] = [];
       /* Round-26: "sirf available" maanga gaya hai ya nahi — default false (saari trains, WL bhi). */
       let seatOnlyAvailable = false;
-      if (env.seatFilterServer) {
+      /* ── Round-53 (user screenshot 29 Sep: "Green portion wali trains card mein nahi dikh rahi") ──────
+       * Jab model ne KHUD FIND_SEATS chalaya, usi ka poora live data yahan aa jaata hai — cards isi se
+       * bante hain. Pehle cards ke liye dobara board fetch hota tha (do alag snapshots → text me 17
+       * trains aur cards me kuch aur). Ab text, cards aur payload — teeno EK hi snapshot ke. */
+      const cap = result.seatCapture ?? null;
+      if (env.seatFilterServer && cap && (cap.rows.length || cap.wlRows.length) && /^\d{4}-\d{2}-\d{2}$/.test(String(cap.date ?? ""))) {
+        seatFilter = {
+          line: "",
+          rows: cap.rows,
+          wlRows: cap.wlRows,
+          trainsSeen: cap.trainsSeen,
+          source: cap.source,
+          dropNote: cap.dropNote ?? null,
+          nearbyNote: cap.nearbyNote ?? null,
+        };
+        seatClassCodes = cap.classCodes ?? [];
+        seatOnlyAvailable = Boolean(cap.onlyAvailable);
+      }
+      if (env.seatFilterServer && !seatFilter) {
         const slots = parseSeatIntent(String(body?.text ?? ""));
         seatClassCodes = slots.classCodes;
         seatOnlyAvailable = slots.onlyAvailable;
@@ -311,10 +329,23 @@ export function createApp() {
               seatOnlyAvailable ? seatFilter.rows : [...seatFilter.rows, ...seatFilter.wlRows],
             )
           : [];
+      /* Round-53: jab cards me SAARI trains hain (model ke apne FIND_SEATS data se — capRows hata diya),
+       * to jawab me 15 lines ki wall jodne ki zaroorat nahi. Sirf EK saaf line: kaunsi trains neeche
+       * cards me hain (live board se). Ye ab sach hai — cards me wahi rows dikhti hain. */
+      const seatCardPointer =
+        cap && !hasPlanCard && aiReplyText && seatExtra.length > 0
+          ? `➕ ${seatExtra.length} trains ke rows neeche cards me hain (live board se) — jaise ${seatExtra
+              .slice(0, 4)
+              .map((l) => l.replace(/^\*\s*(\S+).*$/, "$1"))
+              .join(", ")}${seatExtra.length > 4 ? " …" : ""}`
+          : null;
+      if (seatCardPointer) seatExtra.length = 0;
       const replyWithSeats =
         seatExtra.length > 0
           ? `${String(result.reply ?? "").trim()}\n${seatExtra.join("\n")}`.trim()
-          : result.reply;
+          : seatCardPointer
+            ? `${String(result.reply ?? "").trim()}\n${seatCardPointer}`.trim()
+            : result.reply;
       /* AI ne jawab nahi diya (ya generic "provider se nahi mil" line di) → seat line akele bhi kaafi hai. */
       const aiFailed =
         !result.reply ||

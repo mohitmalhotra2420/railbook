@@ -153,6 +153,10 @@ export function pickSeatRows(
 
 /* Round-25: ek jawab me kitni rows dikhayein — "koi cap nahi" ke saath, par jawab padhne layak rahe. */
 export const SEAT_LINE_MAX = 12;
+/* Round-53 (user: "Green portion wali trains card mein nahi dikh rahi"): TEXT line me 12 trains ka cap
+ * theek hai (padhne layak), par CARDS ka payload cap nahi hona chahiye — jo trains jawab me hain wo
+ * saari cards me dikhni chahiye. Isliye payload ke liye alag, bada cap. */
+export const SEAT_PAYLOAD_MAX_TRAINS = 60;
 
 const inr = (n: number | null) => (n == null ? "—" : `₹${n.toLocaleString("en-IN")}`);
 const trainCount = (rows: SeatFilterRow[]) => new Set(rows.map((r) => r.number)).size;
@@ -230,7 +234,9 @@ export function seatSummaryLine(
       .slice(0, SEAT_LINE_MAX)
       .map((g) => `${g.number} ${trainClassesText(g.classes)}`)
       .join(" | ");
-    const more = grouped.length > SEAT_LINE_MAX ? ` | +${grouped.length - SEAT_LINE_MAX} trains aur bhi hain` : "";
+    /* Round-53: jo trains is line me nahi aayi wo NEECHE CARDS me hain (cards ka payload ab saara hai) —
+     * pehle yahan bas "+N aur bhi hain" likha tha jiska koi pata nahi tha (user ki shikayat). */
+    const more = grouped.length > SEAT_LINE_MAX ? ` | +${grouped.length - SEAT_LINE_MAX} trains neeche cards me` : "";
     const countBit =
       pick.seat.length && pick.wl.length
         ? `${withSeat} me seat (AVL/RAC), ${wlOnly} me WL/N-A`
@@ -259,13 +265,15 @@ export function seatSummaryLine(
       .slice(0, SEAT_LINE_MAX)
       .map((g) => `${g.number} ${trainClassesText(g.classes)}`)
       .join(" | ");
-    const more = grouped.length > SEAT_LINE_MAX ? ` | +${grouped.length - SEAT_LINE_MAX} trains aur bhi hain` : "";
+    /* Round-53: jo trains is line me nahi aayi wo NEECHE CARDS me hain (cards ka payload ab saara hai) —
+     * pehle yahan bas "+N aur bhi hain" likha tha jiska koi pata nahi tha (user ki shikayat). */
+    const more = grouped.length > SEAT_LINE_MAX ? ` | +${grouped.length - SEAT_LINE_MAX} trains neeche cards me` : "";
     return `💺 ${cls} me seat wali ${trains} train${trains === 1 ? "" : "s"}${when}${sortNote} — ${shown}${more}. (${head})`;
   }
   if (pick.wl.length) {
     const trains = trainCount(pick.wl);
     const top = pick.wl.slice(0, SEAT_LINE_MAX).map(fmtRow).join(" · ");
-    const wlMore = pick.wl.length > SEAT_LINE_MAX ? ` · +${pick.wl.length - SEAT_LINE_MAX} aur bhi hain` : "";
+    const wlMore = pick.wl.length > SEAT_LINE_MAX ? ` · +${pick.wl.length - SEAT_LINE_MAX} neeche cards me` : "";
     /* WL number hi dikhate hain — confirm% nahi (wo data hamare paas nahi hai). */
     return `💺 ${cls} me abhi koi AVAILABLE/RAC seat nahi${when} — WL wali ${trains} train${trains === 1 ? "" : "s"} ${trains === 1 ? "hai" : "hain"}: ${top}${wlMore}. Confirm% hum nahi dete (data nahi); booking se pehle IRCTC par check karo. (${head})`;
   }
@@ -432,7 +440,8 @@ export async function seatFilterFor(opts: {
     (nearbyNote ? `\n${nearbyNote}` : "");
   /* Round-25: payload/line me saari seat-wali trains (12 tak) — default 8 se badhaya.
    * Round-27: cap ab *trains* par — har train ki SAARI classes isi jawab/block me aani chahiye. */
-  const max = opts.maxRows ?? SEAT_LINE_MAX;
+  /* Round-53: cards me SAARI trains (payload cap bada) — text line ka cap alag hai. */
+  const max = opts.maxRows ?? SEAT_PAYLOAD_MAX_TRAINS;
   return {
     line,
     rows: capRowsByTrain(pick.seat, max),

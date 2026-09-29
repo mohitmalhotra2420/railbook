@@ -186,6 +186,23 @@ export type SearchCapture = {
   /** Round-33: model ne pax khud samjha (jaise "Kal,1" → 1) aur gate ne accept kiya — ye
    * client ko wapas jaata hai taaki agle turn me AI dobara "kitne passengers?" na poochhe. */
   passengers?: number | null;
+  /** Round-53 (user screenshot 29 Sep: "Green portion wali trains card mein nahi dikh rahi"):
+   * jab model ne KHUD FIND_SEATS chalaya, uska poora live data yahan capture hota hai. App isi data
+   * se cards banata hai (pehle cards ke liye dobara board fetch hota tha — do alag snapshots bante the,
+   * isliye text me 17 trains aur cards me kuch aur). Ab jawab ka text aur cards EK hi data se. */
+  seat?: {
+    from: string;
+    to: string;
+    date: string;
+    rows: import("./seatFilter.js").SeatFilterRow[];
+    wlRows: import("./seatFilter.js").SeatFilterRow[];
+    source: string | null;
+    dropNote: string | null;
+    nearbyNote: string | null;
+    trainsSeen: number;
+    onlyAvailable: boolean;
+    classCodes: string[];
+  } | null;
 };
 
 /* ── Injectable NVIDIA fetch (tests) ─────────────────────────────── */
@@ -2856,9 +2873,11 @@ function agenticTransport(): AgenticTransport | null {
     ? [benchOverride]
     : [env.nvidiaModel, ...(env.nvidiaFallbackModel && env.nvidiaFallbackModel !== env.nvidiaModel ? [env.nvidiaFallbackModel] : [])];
   /* Round-13b: HF (GLM) chain ke end mein — NIM drift par bhi agentic zinda
-   * rahe (ai-ping prod: deepseek-v4-flash hang, llama/qwen/kimi 410/404). */
+   * rahe (ai-ping prod: deepseek-v4-flash hang, llama/qwen/kimi 410/404).
+   * Round-53: AI_LLM_* override (naya provider key) lagne par HF fallback band — user ki di hui
+   * chain hi chalti hai (HF credits khatam hain). */
   const hfFallback =
-    env.hfToken && env.hfModel && !benchOverride && !models.includes(env.hfModel)
+    !env.aiLlmOverrideActive && env.hfToken && env.hfModel && !benchOverride && !models.includes(env.hfModel)
       ? { model: env.hfModel, url: `${env.hfBaseUrl.replace(/\/$/, "")}/chat/completions`, apiKey: env.hfToken }
       : null;
   return {
@@ -3618,6 +3637,33 @@ export async function runAgenticTurn(input: {
         if (input.capture && (toolName === "SEARCH_TRAIN_BY_NUMBER" || toolName === "SEARCH_TRAIN_BY_NAME")) {
           const pk = result.data as TrainPickerResult | null;
           if (pk && Array.isArray(pk.matches) && pk.matches.length) input.capture.trainPicker = pk;
+        }
+        /* Round-53: FIND_SEATS ka poora live data capture — cards isi se bante hain (text/cards ek data). */
+        if (result.ok && input.capture && toolName === "FIND_SEATS") {
+          const d = result.data as {
+            from?: string; to?: string; date?: string;
+            rows?: import("./seatFilter.js").SeatFilterRow[];
+            wlRows?: import("./seatFilter.js").SeatFilterRow[];
+            onlyAvailable?: boolean; classCodes?: string[];
+            trainsSeen?: number;
+          } | null;
+          if (d && Array.isArray(d.rows)) {
+            const drop = /ROUTE:\s*(.+)/.exec(String(result.summary ?? ""))?.[1] ?? null;
+            const near = /NEARBY:\s*([\s\S]*?)(?:\n\d+ rows|\nSource:|$)/.exec(String(result.summary ?? ""))?.[1] ?? null;
+            input.capture.seat = {
+              from: String(d.from ?? args.from ?? ""),
+              to: String(d.to ?? args.to ?? ""),
+              date: String(d.date ?? args.date ?? ""),
+              rows: d.rows,
+              wlRows: Array.isArray(d.wlRows) ? d.wlRows : [],
+              source: result.source ?? null,
+              dropNote: drop ? `ℹ️ ${drop.trim()}` : null,
+              nearbyNote: near ? `🧭 ${near.trim()}` : null,
+              trainsSeen: Number(d.trainsSeen ?? d.rows.length),
+              onlyAvailable: Boolean(d.onlyAvailable),
+              classCodes: Array.isArray(d.classCodes) ? d.classCodes : [],
+            };
+          }
         }
         if (result.ok && input.capture && toolName === "FIND_ALTERNATIVE_TRAINS") {
           input.capture.alternatives = result.data as AlternativeTrainsResult;
