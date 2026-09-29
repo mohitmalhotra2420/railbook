@@ -9,7 +9,14 @@ import { describe, it, expect } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 
-const ANDROID = "/home/user/work/app/android-app";
+/* Round-53 reset-lesson: Android source sandbox reset me udd jaata tha (nav bar/back code gayab) —
+ * ab iski ek copy REPO me bhi rehti hai (`android-app/`), aur test pehle wahi dekhta hai. Build script
+ * (/home/user/apk-build-v150.sh) repo copy se hi chalta hai, isliye dono ek hi jagah se aate hain. */
+const REPO_ANDROID = path.resolve(__dirname, "..", "android-app");
+const WORK_ANDROID = "/home/user/work/app/android-app";
+const ANDROID = fs.existsSync(path.join(REPO_ANDROID, "app/src/main/java/com/railbook/assist/MainActivity.kt"))
+  ? REPO_ANDROID
+  : WORK_ANDROID;
 const activity = fs.readFileSync(path.join(ANDROID, "app/src/main/java/com/railbook/assist/MainActivity.kt"), "utf8");
 const layout = fs.readFileSync(path.join(ANDROID, "app/src/main/res/layout/activity_main.xml"), "utf8");
 const gradle = fs.readFileSync(path.join(ANDROID, "app/build.gradle.kts"), "utf8");

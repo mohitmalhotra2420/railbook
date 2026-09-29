@@ -58,3 +58,34 @@ diye jaate hain) — bata dijiye, ek line ka kaam hai; abhi maine accuracy ko pe
 - Battery ko har release par chalana (ab tool ban gaya) — jo sawaal FAIL ho, uska ilaaj **tool description
   ya policy rule** me karna (us sawaal par patch nahi), bilkul waise jaise upar pillar 5 me likha hai.
 - `AI_LLM_*` env se naya provider lagne par battery dobara — alag model ka routing behaviour alag hota hai.
+
+## 5. LIVE PROD battery (deploy 5df4cd4 — 29 Sep 2026, asli app par)
+
+```
+PASS | live status        | 15s | TRACK_TRAIN                         | 12326 late hai kya
+PASS | timetable/route    | 24s | GET_TIMETABLE                       | 12013 ka poora route batao
+PASS | route seat         | 28s | FIND_SEATS ×2                       | LDH se JAT kal confirm seat batao
+PASS | train+class seat   | 11s | CHECK_AVAILABILITY (fail→hint)      | 12094 me 3A me kitni seat khali hai kal
+PASS | fare               |  5s | GET_FARE                            | 12013 ka kiraya LDH se ASR 3A
+PASS | PNR                | 28s | CHECK_PNR ✗ → WEB_SEARCH            | PNR 1234567890 ka status batao
+PASS | cancellations      |  5s | GET_CANCELLED_TRAINS                | aaj koi train cancel hui hai kya
+PASS | station board      | 47s | GET_STATION_BOARD                   | LDH par abhi kaunsi trains aa rahi hain
+KB   | rule               |  0s | (curated KB)                        | tatkal booking kitne baje khulti hai
+KB   | general knowledge  |  0s | (curated KB)                        | sabse lambi train kaun si hai
+PASS | coach position     | 33s | GET_COACH_POSITION ✗ → GET_TRAIN_INFO| 12013 me coach position kya hai
+PASS | route + timing     | 27s | FIND_SEATS ×2                       | kal subah LDH se DLI jane wali trains ke timings
+
+ROUTING PASS: 10/12 (KB path: 2) — prod par wahi natija jo local par.
+```
+**Dhyaan dene wali baat:** `CHECK_PNR ✗ → WEB_SEARCH` aur `GET_COACH_POSITION ✗ → GET_TRAIN_INFO` — yaani jab pehla tool fail hua, model ne **hint ke hisaab se khud agla sahi tool chalaya** (R54 loop, live prod par kaam karta dikha).
+
+## 6. Round-54b — "zero-tool self-repair" (ChatGPT wala sudhaar-loop, ab humare paas bhi)
+
+Problem: model kabhi bina koi tool chalaye seedha jawab likh deta tha — jaise *"12326 25 minute late hai"* ya *"mere paas live data ka access nahi hai"* (dono hi galat; numbers banaye hue, aur tools uske paas hain). Ab server ek **feedback loop** chalata hai:
+
+- Sawaal LIVE type ka ho (seat/fare/status/PNR/timetable/board/cancellation) **aur** ek bhi tool na chala ho **aur** jawab me data jaise numbers ya "access nahi hai" jaisi baat ho →
+- server ek **corrective round** bhejta hai: *"ye LIVE sawaal hai, bina tool ke jawab mana hai — abhi sahi tool chalao"* + kaam ke hisaab se tool ka naam (status → TRACK_TRAIN, seat → CHECK_AVAILABILITY/FIND_SEATS, fare → GET_FARE, PNR → CHECK_PNR, timetable → GET_TIMETABLE, board → GET_STATION_BOARD).
+- Model phir tool chalata hai aur usi data se jawab deta hai. Ye round **user ko dikhta nahi** (system ke andar hota hai).
+- Legit clarification (station/passenger/date poochna) isse chhooti hai — wahan poochhna hi sahi hai.
+
+Test: `tests/round54-self-repair.test.ts` (2) — pehla test dekhta hai ki bina-tool jawab par corrective round jaata hai aur phir asli tool chalta hai; doosra ki legit clarification par loop trigger nahi hota.
