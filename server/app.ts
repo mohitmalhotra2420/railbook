@@ -276,8 +276,13 @@ export function createApp() {
           dropNote: cap.dropNote ?? null,
           nearbyNote: cap.nearbyNote ?? null,
         };
-        seatClassCodes = cap.classCodes ?? [];
-        seatOnlyAvailable = Boolean(cap.onlyAvailable);
+        /* Round-53b (prod probe 0bd2aee): model tool me `only_available` bhejna bhool jaata hai (ya false
+         * bhejta hai) par user ne khud confirm/available maanga hota hai — tab bhi cards me sirf seat-wali
+         * trains dikhni chahiye (text me wahi hota hai). Isliye user ki wording ka seat-intent bhi dekhte
+         * hain: `cap.onlyAvailable || slots.onlyAvailable`. */
+        const capSlots = parseSeatIntent(String(body?.text ?? ""));
+        seatClassCodes = cap.classCodes?.length ? cap.classCodes : capSlots.classCodes;
+        seatOnlyAvailable = Boolean(cap.onlyAvailable) || capSlots.onlyAvailable;
       }
       if (env.seatFilterServer && !seatFilter) {
         const slots = parseSeatIntent(String(body?.text ?? ""));

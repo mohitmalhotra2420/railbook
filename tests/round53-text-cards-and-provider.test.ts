@@ -173,6 +173,61 @@ describe("Round-53 · (a) text aur cards EK hi data se", () => {
     setAgenticNvidiaFetch(null);
     process.env.NVIDIA_API_KEY = "";
   });
+
+  it("Round-53b: tool me only_available na ho, par user ne confirm maanga ho → cards phir bhi sirf seat-wali trains", async () => {
+    /* Prod probe (0bd2aee) me model ne FIND_SEATS `only_available` ke bina call kiya (jawab me sirf
+     * confirmed 4 trains likhe) — par cards me poore board ke 12 trains aa gaye (wlRows 52). Fix:
+     * capture branch me user ki wording ka seat-intent bhi dekha jaata hai. */
+    process.env.NVIDIA_API_KEY = "nvapi-r53b";
+    process.env.NVIDIA_MODEL = "openai/gpt-oss-20b";
+    delete process.env.NVIDIA_FALLBACK_MODEL;
+    routeBoard.mockResolvedValue({
+      trains: [
+        {
+          trainNumber: "12265",
+          trainName: "JAT DURONTO EXP",
+          classes: [
+            { classCode: "3A", status: "AVAILABLE", seats: 10, fare: 860 },
+            { classCode: "2S", status: "WAITLIST", seats: null, waitlist: 2, fare: 225 },
+          ],
+        },
+        { trainNumber: "13151", trainName: "KOAA JAT EXPRES", classes: [{ classCode: "SL", status: "WAITLIST", seats: null, waitlist: 5, fare: 355 }] },
+        { trainNumber: "14661", trainName: "SHALIMAR MALANI", classes: [{ classCode: "3A", status: "WAITLIST", seats: null, waitlist: 11, fare: 565 }] },
+      ],
+      provider: "web_confirmtkt",
+      at: Date.now(),
+    });
+    classBoard.mockResolvedValue({ classes: [], provider: "none" });
+    let call = 0;
+    setAgenticNvidiaFetch(async () => {
+      call += 1;
+      const body = (b: unknown) => new Response(JSON.stringify(b), { status: 200, headers: { "Content-Type": "application/json" } });
+      if (call === 1) {
+        return body({
+          model: "openai/gpt-oss-20b",
+          choices: [
+            {
+              message: {
+                role: "assistant",
+                /* joom: only_available BHEJA HI NAHI (prod jaisa) */
+                tool_calls: [{ id: "c1", type: "function", function: { name: "FIND_SEATS", arguments: JSON.stringify({ from: "LDH", to: "JAT", date: "2026-09-30", class_code: "ALL" }) } }],
+              },
+            },
+          ],
+        });
+      }
+      return body({ model: "openai/gpt-oss-20b", choices: [{ message: { role: "assistant", content: "12265 JAT DURONTO EXP 3A AVL 10 ₹860 (2S WL 2 ₹225). [NEXT] 3A book => 12265 mein 3A book krdo" } }] });
+    });
+    const { createApp } = await import("../server/app");
+    const res = await request(createApp()).post("/api/agent").send({ text: "LDH se JAT kal confirm seat batao", history: [], known: {} });
+    const sf = res.body.seatFilter as { rows: { number: string }[]; wlRows: { number: string }[] } | null;
+    expect(sf).not.toBeNull();
+    const cardTrains = [...new Set([...sf!.rows, ...sf!.wlRows].map((r) => r.number))].sort();
+    /* Sirf 12265 (jisme seat hai) — 13151/14661 (sirf WL) cards me nahi. */
+    expect(cardTrains).toEqual(["12265"]);
+    setAgenticNvidiaFetch(null);
+    process.env.NVIDIA_API_KEY = "";
+  });
 });
 
 describe("Round-53 · (b) line par honest pointer, payload par bada cap", () => {
