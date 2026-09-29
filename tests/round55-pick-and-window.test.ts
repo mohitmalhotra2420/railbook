@@ -18,9 +18,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 const routeBoard = vi.fn();
 const classBoard = vi.fn();
 const searchTrains = vi.fn();
+const schedule = vi.fn();
 vi.mock("../server/railway/router.js", () => ({
   routedRouteBoard: (...a: unknown[]) => routeBoard(...a),
   routedClassBoard: (...a: unknown[]) => classBoard(...a),
+  routedSchedule: (...a: unknown[]) => schedule(...a),
   routedStationSearch: async () => ({ stations: [], needChoice: false }),
   routedLiveStatus: async () => null,
   enrichTrainsFreshness: async () => 0,
@@ -64,6 +66,10 @@ const rowNums = (res: { data: unknown }): string[] => {
 beforeEach(() => {
   routeBoard.mockReset().mockResolvedValue(board());
   classBoard.mockReset().mockResolvedValue({ classes: [], provider: "none" });
+  schedule.mockReset().mockResolvedValue({
+    schedule: { trainName: "MOCK EXP", stops: [{ code: "ASR" }, { code: "LDH" }] },
+    provider: "mock",
+  });
   searchTrains.mockReset().mockResolvedValue([
     { number: "12716", departure: "09:30", arrival: "12:10", durationMinutes: 160 },
     { number: "13006", departure: "19:45", arrival: "22:30", durationMinutes: 165 },
@@ -74,6 +80,7 @@ afterEach(() => {
   routeBoard.mockReset();
   classBoard.mockReset();
   searchTrains.mockReset();
+  schedule.mockReset();
 });
 
 describe("Round-55 · (a) 'in me se best' follow-up ka pata chale", () => {
@@ -112,6 +119,45 @@ describe("Round-55 · (a) 'in me se best' follow-up ka pata chale", () => {
     expect(res.ok).toBe(true);
     expect(rowNums(res).sort()).toEqual(["12716", "15708"]);
     expect(rowNums(res)).not.toContain("13006"); /* board me hai par list me nahi thi → dump nahi */
+  });
+});
+
+describe("Round-55 · (c) schema pick ke liye kaafi chauda ho", () => {
+  it("12-candidate comma string (71 chars) schema-fail nahi hota (pehle max 60 tha)", async () => {
+    const twelve = ["15708", "18104", "14624", "18238", "13006", "14632", "12926", "12904", "20808", "14542", "18102", "12716"];
+    const res = await executeApprovedTool(
+      "FIND_SEATS",
+      { from: "ASR", to: "LDH", date: "2026-09-30", class_code: "3A", train_numbers: twelve.join(",") },
+      { userText: "esmein se best train batao", pickCandidates: twelve },
+    );
+    expect(res.ok).toBe(true);
+    expect(res.summary).not.toMatch(/Invalid arguments/);
+    expect(rowNums(res)).toContain("12716");
+  });
+});
+
+describe("Round-55 · (d) sirf train number diya (station nahi) → poora route khud", () => {
+  it("time-table se origin→destination liya jaata hai (station poochne ke bajaye)", async () => {
+    schedule.mockResolvedValue({
+      schedule: { trainName: "ASR JAT EXP", stops: [{ code: "LDH" }, { code: "ASR" }, { code: "JAT" }] },
+      provider: "web_confirmtkt",
+    });
+    routeBoard.mockResolvedValue({
+      trains: [{ trainNumber: "12094", trainName: "ASR JAT EXP", classes: [{ code: "3A", status: "AVAILABLE", seats: 5, fare: 700 }] }],
+      provider: "web_confirmtkt",
+      at: Date.now(),
+    });
+    const res = await executeApprovedTool(
+      "FIND_SEATS",
+      { date: "2026-09-30", class_code: "3A", train_numbers: "12094" },
+      { userText: "12094 me 3A me kitni seat khali hai kal" },
+    );
+    expect(res.ok).toBe(true);
+    const d = res.data as { from?: string; to?: string; rows?: { number: string }[] };
+    expect(d.from).toBe("LDH");
+    expect(d.to).toBe("JAT");
+    expect(res.summary).toMatch(/POORA route timetable se liya gaya/);
+    expect(rowNums(res)).toContain("12094");
   });
 });
 

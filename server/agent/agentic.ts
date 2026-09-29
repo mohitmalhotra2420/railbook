@@ -249,15 +249,19 @@ const ArgSchemas = {
     date: Ymd,
   }),
   FIND_SEATS: z.object({
-    from: z.string().trim().min(2).max(40),
-    to: z.string().trim().min(2).max(40),
+    /* R55c: from/to optional — sirf train number wale sawaal ("12094 me 3A kitni seat khali hai") par
+     * server khud train ka poora route timetable se le leta hai (pehle schema hi reject kar deta tha). */
+    from: z.string().trim().min(2).max(40).nullish(),
+    to: z.string().trim().min(2).max(40).nullish(),
     date: Ymd,
     class_code: z.string().trim().max(30).nullish(),
     only_available: z.coerce.boolean().nullish(),
     depart_after: z.union([z.string().trim().max(30), z.number()]).nullish(),
     depart_before: z.union([z.string().trim().max(30), z.number()]).nullish(),
     sort_by: z.enum(["cheapest", "fastest"]).nullish(),
-    train_numbers: z.union([z.string().trim().max(60), z.array(z.string().trim().max(10)).max(12)]).nullish(),
+    /* R55b: pick follow-up me 12 candidates ka comma-string 71 chars ka hota tha → purani max(60) par
+     * model ka call schema-fail hota tha (probe me step-1 fail dikha). 20 numbers (120 chars) tak allow. */
+    train_numbers: z.union([z.string().trim().max(200), z.array(z.string().trim().max(10)).max(20)]).nullish(),
     quota: z.string().regex(/^[A-Za-z]{2}$/).nullish(),
     passengers: z.coerce.number().int().min(1).max(6).nullish(),
   }),
@@ -1804,7 +1808,7 @@ export async function executeApprovedTool(
         /* Follow-up chunav ("in me se best") me candidates WAHI rehne chahiye jo pichhle jawab me the —
          * model aadhi list bhej de to bhi server poori candidates par check karta hai (list na badle). */
         const pickCands = ctx?.pickCandidates?.length ? ctx.pickCandidates : [];
-        if (pickCands.length >= 2) seatArgs.train_numbers = pickCands.join(",");
+        if (pickCands.length >= 2) seatArgs.train_numbers = pickCands.slice(0, 20).join(",");
         const res = await runFindSeatsTool({
           from: String(a.from ?? ""),
           to: String(a.to ?? ""),

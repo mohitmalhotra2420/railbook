@@ -20,7 +20,7 @@
  *   train_numbers: sirf in trains par (jaise "12029,12497")
  */
 import { getProvider } from "../providers/index.js";
-import { enrichTrainsFreshness, routedClassBoard, routedRouteBoard, routedStationSearch } from "../railway/router.js";
+import { enrichTrainsFreshness, routedClassBoard, routedRouteBoard, routedSchedule, routedStationSearch } from "../railway/router.js";
 import { filterTrainsServingSegment, nearbyCandidatesNote, routeDropNote } from "./routeSegment.js";
 import { resolveStationArg } from "./stationArg.js";
 import { searchStations as searchLocalStations } from "../data/stations.js";
@@ -104,8 +104,27 @@ async function stationCode(raw: string): Promise<string | null> {
  * AI ke args se seat jawab. Sirf live rows — jo na mile wo saaf likha jaata hai, gadha nahi jaata.
  */
 export async function runFindSeatsTool(args: FindSeatsArgs): Promise<FindSeatsResult> {
-  const from = await stationCode(args.from);
-  const to = await stationCode(args.to);
+  let from = await stationCode(args.from);
+  let to = await stationCode(args.to);
+  /* R55c (battery: "12094 me 3A me kitni seat khali hai kal"): user ne sirf train number diya, koi
+   * station nahi — pehle tool "station batao" bol kar ruk jaata tha. Ab specific train ka POORA route
+   * timetable se liya jaata hai (origin → destination) — kuch bhi maan-leya nahi, schedule hi sach hai.
+   * Sirf tab jab DONO stations missing ho (aadha-adhoora guess nahi karte). */
+  let autoRouteNote: string | null = null;
+  const wantTrainsEarly = (Array.isArray(args.train_numbers) ? args.train_numbers : String(args.train_numbers ?? "").split(/[\s,]+/))
+    .map((n) => String(n).trim())
+    .filter((n) => /^\d{4,5}$/.test(n));
+  if (!from && !to && wantTrainsEarly.length) {
+    const sched = await routedSchedule(wantTrainsEarly[0]).catch(() => null);
+    const stops = sched?.schedule && "stops" in sched.schedule ? ((sched.schedule as { stops?: { code?: string }[] }).stops ?? []) : [];
+    const first = String(stops[0]?.code ?? "").trim().toUpperCase();
+    const last = String(stops[stops.length - 1]?.code ?? "").trim().toUpperCase();
+    if (stops.length >= 2 && first && last) {
+      from = first;
+      to = last;
+      autoRouteNote = `ℹ User ne station nahi bataya tha — ${wantTrainsEarly[0]} ka POORA route timetable se liya gaya (${first} → ${last}); jawab me isi route ka context saaf likho (aisa na bolo ki user ne ye route maanga tha).`;
+    }
+  }
   const date = String(args.date ?? "").trim();
   if (!from || !to) {
     return { ok: false, source: null, summary: `Station resolve nahi hua (from="${args.from}", to="${args.to}") — user se poochho.`, data: null };
@@ -336,7 +355,7 @@ export async function runFindSeatsTool(args: FindSeatsArgs): Promise<FindSeatsRe
   return {
     ok: true,
     source: board.provider ?? null,
-    summary: lines.join("\n"),
+    summary: autoRouteNote ? `${autoRouteNote}\n${lines.join("\n")}` : lines.join("\n"),
     data: {
       from,
       to,
@@ -366,6 +385,8 @@ export const FIND_SEATS_DESCRIPTION =
   "Jab user seat/berth/class/availability ya 'kis train me seat hai' poochhe — jaise '2A me seat kaunsi train me hai', " +
   "'AC trains dikhao', 'sabse sasti seat wali train', 'raat 9 ke baad sleeper me seat', 'sirf confirmed wali dikhao', " +
   "'12029 me seat hai kya' — to PEHLE ye tool call karo aur uske result se hi jawab do (kabhi memory se seat mat batao). " +
+  "STATION NA HO TO: user ne sirf train number diya aur koi station nahi bola ('12094 me 3A me kitni seat khali hai') — " +
+  "from/to khaali chhod do, server khud us train ka POORA route timetable se le lega (user se station poochne ki zaroorat nahi). " +
   "Args: class_code = 'ALL' | 'AC' (1A/2A/3A/3E/CC/EC) | '2A','3A','SL','CC','EC','2S','3E','1A' (comma se kai); " +
   "only_available = true SIRF tab jab user ne khud 'available/khali/sirf available/confirmed seat' maanga ho; " +
   "warna false bhejo (default) — tab WL/N-A trains bhi aati hain aur jawab me saari trains status ke saath likhni hain; " +
@@ -380,8 +401,8 @@ export const FIND_SEATS_DESCRIPTION =
 export const FIND_SEATS_PARAMETERS = {
   type: "object",
   properties: {
-    from: { type: "string", description: "Origin station code (LDH) ya city naam (Ludhiana)" },
-    to: { type: "string", description: "Destination station code (BEAS) ya city naam (Beas)" },
+    from: { type: "string", description: "Origin station code (LDH) ya city naam (Ludhiana). Agar user ne station nahi bataya (sirf train number diya) to khaali chhodo — server train ka poora route khud le lega" },
+    to: { type: "string", description: "Destination station code (BEAS) ya city naam (Beas). Station na bata ho to khaali chhodo (server route khud lega)" },
     date: { type: "string", description: "Journey date YYYY-MM-DD" },
     class_code: { type: "string", description: "'ALL' | 'AC' | '1A'|'2A'|'3A'|'3E'|'SL'|'CC'|'EC'|'2S' (comma-separated bhi)" },
     only_available: { type: "boolean", description: "true = sirf AVAILABLE/RAC (sirf jab user ne available/confirmed maanga ho); false (default) = WL/N-A bhi dikhao" },
@@ -392,5 +413,5 @@ export const FIND_SEATS_PARAMETERS = {
     quota: { type: "string", description: "GN (default) | TQ (tatkal) | PT (premium tatkal) | LD (ladies)" },
     passengers: { type: "number", description: "Kitne log (1-6) — sirf jawab me context ke liye" },
   },
-  required: ["from", "to", "date"],
+  required: ["date"],
 } as const;
