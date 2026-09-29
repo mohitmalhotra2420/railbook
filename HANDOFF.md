@@ -9,6 +9,8 @@ eRail). Web app: React + Vite + Express (`server/`), aur Android WebView wrapper
 ## Kahan kya hai (paths)
 - **Repo:** `/home/user/work/railbook` (git; push `https://${GITHUB_TOKEN}@github.com/mohitmalhotra2420/railbook.git HEAD:main`)
 - **Android app:** `/home/user/work/app/android-app` · **APKs:** `/home/user/RailBook/APKs`
+  - **R53 v1.5.0:** nav bar (`btnBack`/`btnHome`/`btnReload` + `navWhere` label) · `goBackSmart()` (IRCTC → RailBook home; warna history; home par double-back exit) · `onResume()` par IRCTC page ho to RailBook home (reopen fix) · build: `bash /home/user/apk-build-v150.sh` → APK + SHA `APKs/`.
+
 - **Previews (HTML):** `/home/user/RailBook/previews` · **Docs:** `/home/user/RailBook/docs` + repo `docs/`
 - **Full-project zip:** `/home/user/RailBook/RailBook-FULL-<date>.zip` — `OUT=... bash tools/build-full-zip.sh`
 - **Credentials:** repo `.env` — `GITHUB_TOKEN`, `RENDER_API_KEY`, `RAILCORE_API_KEY`, `RAILKIT_API_KEY`,
@@ -20,8 +22,9 @@ eRail). Web app: React + Vite + Express (`server/`), aur Android WebView wrapper
 2. `cd /home/user/work/railbook && npm ci` (agar node_modules missing).
 3. Server typecheck: `./node_modules/.bin/tsc -p tsconfig.server.json --noEmit` (client me ~130 purane
    errors hain — sirf apne files grep karo).
-4. Tests: `npx vitest run` (~130 files / ~1400 tests, 2–3 min).
-5. UI build: `npx vite build` (preview builders `dist/assets` ki CSS use karte hain — pehle build).
+4. Tests: `npx vitest run` (134 files / 1421 tests, 2–4 min).
+5. UI build: `./node_modules/.bin/vite build` (**`npx vite build` mat chalao** — vite@8.3.1 par UNRESOLVED_ENTRY; preview builders `dist/assets` ki CSS use karte hain — pehle build).
+5b. Preview builder: `./node_modules/.bin/tsx tools/build-round53-preview.mts` → `/home/user/RailBook/previews/`.
 6. Deploy: Render `POST https://api.render.com/v1/services/srv-dae34rqd0e5s73evgjsg/deploys` body
    `{"clearCache":"clear"}` (Bearer RENDER_API_KEY) → phir `https://railbook-gegs.onrender.com/api/version`
    poll karke commit match karo. (`railbook-api.onrender.com` dead hai.)
@@ -31,6 +34,8 @@ eRail). Web app: React + Vite + Express (`server/`), aur Android WebView wrapper
 - `server/agent/run.ts` — orchestrator. **AI-first (R45):** `aiFirst = agenticConfigured() && AI_OWNS_FLOW!=="0" && !isBookingMutation`; deterministic sirf rescue. `atlasFallback` = travel ka deterministic path.
 - `server/agent/seatFilter.ts` — live board → seat rows, `seatSummaryLine` (chat ki `💺 …` line), `missingSeatLines`.
 - `server/agent/seatFinderTool.ts` — `FIND_SEATS` (AI ka tool; summary = data + instructions model ko).
+- **R53:** FIND_SEATS ka result `SearchCapture.seat` me capture hota hai (`agentic.ts`) → `run.ts` `AgentResponse.seatCapture` → `app.ts` **cards usi se banata hai** (`seatFilterFor()` dobara nahi chalta). Card payload cap: `SEAT_PAYLOAD_MAX_TRAINS=60`; text line `SEAT_LINE_MAX=12` + honest tail. Confirm/available par payload ke `wlRows` sirf seat-wali trains ke.
+- **R53 — naya provider sirf env se:** `AI_LLM_BASE_URL` + `AI_LLM_API_KEY` + `AI_LLM_MODELS` (comma chain) set karte hi poora AI stack us provider par (NVIDIA/HF default path safe). Docs: `docs/MODEL-RECOMMENDATION.md`.
 - `server/agent/routeSegment.ts` — destination-tak route verification, drop note, "🧭 … tak (aage ka safar khud)" section.
 - `server/railway/router.ts` — provider chain + live probe (`enrichTrainsFreshness`, `secondOpinionRow`);
   `confirmtkt.ts` (route board, `ctCacheTimeMs`), `webscrape.ts` (RailYatri/eRail/ConfirmTkt scrape).
