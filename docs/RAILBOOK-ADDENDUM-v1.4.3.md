@@ -401,3 +401,22 @@ Workspace har reset par `/home/user/RailBook` wipe kar deta hai — isliye zip k
 (35.4 MB · 1,535 files · verify: HTTP 200 + valid zip + START-HERE.md andar). Repo bhi poora pushed hai (`33cdcbe`) — source, tests, docs, previews, android-app sab. Release page: `https://github.com/mohitmalhotra2420/railbook/releases/tag/r61-2026-09-30`
 
 **3. R60 wali teen cheezein prod par pehle se live hain** (dobara confirm): station dropdown (Delhi → 6 options), plan page ka touch scroll (scrollTop 0 → 746), leg classes ka naya grid (Best + Book).
+
+## §9.54 — Round 61 final verification (30 Sep 2026): 1484/1484 tests green, repo + zip dono permanent
+
+**Aakhri do test files bhi naye chain par.**
+§9.53 ke baad full suite dobara chali: 1482 pass / **2 fail** — dono `tests/gemini-shadow.test.ts` aur `tests/rapidapi-gemini-shadow.test.ts` ke R52-era assertions ("primary = openai/gpt-oss-20b") the. Wahi intent reh gaya, sirf chain ka order user ke faisle (Muse primary) par update kiya. Ab:
+
+```
+Test Files  144 passed (144)
+Tests       1484 passed (1484)   ← 0 fail, 141.7s
+```
+
+Commit `6bf1863` (push verified: remote main = `6bf18631d651`). Ye test-only commit hai — prod runtime pehle se @`9ae3741` par hai (Muse primary / gpt-oss fallback), isme koi behaviour change nahi.
+
+**Permanent artifacts (workspace reset-proof):**
+- Repo: `https://github.com/mohitmalhotra2420/railbook` → main @`6bf1863` (poora project: server, client, tests, docs, previews, android-app, tools).
+- Zip (permanent, hamesha downloadable): `https://github.com/mohitmalhotra2420/railbook/releases/tag/r61-2026-09-30` → asset `RailBook-FULL-2026-09-30.zip`, is final state (`6bf1863`) se dobara build karke replace kiya gaya; verify: HTTP 200 + valid zip + `START-HERE.md` andar.
+- Prod: `https://railbook.onrender.com` → `/api/version` = `meta/muse-glimmer-30b / openai/gpt-oss-20b`, `AI_PRIMARY_TIMEOUT_MS=90000`.
+
+**R60 ki teen reporting cheezein** (choice dropdown, plan-page touch scroll, leg classes grid) prod @`a424d4a` se live hain — R61 ne koi logic nahi chheda ("logic mat change Krna").
