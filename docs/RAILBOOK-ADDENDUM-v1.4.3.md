@@ -347,3 +347,21 @@ React ne poora tree **unmount** kar diya → screen par sirf khaali cream page (
 **Zip:** `RailBook-FULL-2026-09-29.zip` ab **33.2 MB** (pehle 60.3 MB) — builder ab sirf **latest APK + v1.4.9** (bridge recovery) pack karta hai, purane 6 APKs `RailBook/APKs` me waise hi hain. Proof screenshots: `previews/r58-blank-before.png` (blank) aur `previews/r58-blank-fixed.png` (same query, poora render).
 
 **Deploy:** `9211dd4` → prod `/api/version` MATCH; playwright se live verify (@9211dd4, poora jawab + cards render, koi pageerror nahi).
+
+## §9.51 — Round 59 (29 Sep 2026): Connecting plan ka apna PAGE (Leg 1 → Leg 2 + Book) — aur card kabhi khaali na jaaye
+
+**User (screenshots 23:19):** *"Connecting trains are not showing leg 1 and leg 2 and don't change the logic jo humne set kara tha connecting trains ke liye and connecting trains next chat page pe open ho same chat page par nhi"*
+
+**Do alag cheezein thin (dono fix hui):**
+
+1. **Card hi nahi banta tha (data ki dikkat nahi, shart ki thi).** `Concierge` me journey card sirf tab banta tha jab `routeOptions.length` ya `directUnavailable` ho — **connecting-only plan** (routeOptions khaali, par `connections`/`legPlans` bhare) me card skip ho jaata tha aur user ke paas sirf lamba text bachta tha (17 ek line wale "Leg 1 – ASR → NDLS …" — screenshot 2 bilkul yahi). Ab `planIsShowable()`: routeOptions / connections / legPlans / directUnavailable — kisi ek me bhi data ho to card banta hai (wahi data, kuch invent nahi).
+2. **Page chahiye tha, chat nahi.** Seat board ke `Connecting trains` / `Alternative trains` button ab **PlanPageSheet** kholte hain — full-screen page: header me route/date/pax + ↻, andar JourneyOptions embedded mode me (apna header nahi, double header nahi) seedha `connect`/`alt` page par. **Chat me koi naya message nahi jaata** — "← Wapas" dabao to chat bilkul waisi. Plan maangne ka text/logic **R57 wala hi** hai (`planPageAsk()`): *"ASR se LDH 2026-09-30 ka poora plan banao — connecting trains aur leg-wise seat bhi dikhao (1 passenger ke liye)"*. Loading par asli progress; plan na mile to saaf message + **Dobara try** (retry) + **Chat me poochho** — jhooth nahi.
+
+**R59b (prod verification me mila):** model ne ek turn par plan ka **sirf TEXT** diya (markdown table!) aur koi payload nahi → page ne imaandaari se "Plan abhi nahi mila" dikhaya. Fix structural: `isPlanAsk()` (plan ka saaf ishaara — "poora plan banao"/"plan bana do") + AI-first branch me rescue — model payload na de to **wahi `planJourney` engine** chalta hai jo har jagah chalta hai (R45 ka usool: deterministic sirf rescue; logic bilkul same, sirf guarantee ki payload khaali na jaaye).
+
+**Prod proof (@65d19d0, playwright headless Chrome):**
+- ASR→LDH: page header *"Connecting trains · Leg 1 → Leg 2 · ASR → LDH · 2026-10-01 · 1 passenger"*; card me **Leg 1 = 14680 ASR DLI EXP (2S AVL 459 · ₹65, 06:15 ASR → 07:34 JRC)**, layover line *"Change @ Jalandhar Cantt (JRC) · layover 36m"*, **Leg 2 = 12550 MCTM DURG SF EXP (SL AVL 19 · ₹180, 08:10 JRC → 08:55 LDH)** — har leg par Bhasha me hint + **Book Leg 1 · 2S / Book Leg 2 · SL** (aur class chips par Book). → `previews/r59-plan-page-legs.png`
+- LDH→ASR (jahan engine ko combo nahi mila): page phir bhi poora khulta hai — 25 direct/13 seat ka plan + honest note *"Is din is route par connecting combo nahi mila…"*. → `previews/r59-plan-page-nocombos.png`
+- "← Wapas" ke baad: `planpage=false`, chat waisi (2 messages), koi pageerror nahi.
+
+**Tests:** `tests/round59-plan-page.test.tsx` (7 — planIsShowable, phrasing wahi, leg 1/2 + Book, back, error+retry, honest note) + `tests/round59b-plan-payload-rescue.test.ts` (2 — isPlanAsk + control). Full suite **142 files / 1476 PASS**; `tsc -p tsconfig.server.json` clean; undefined-name gate PASS. Deploy `65d19d0` → prod `/api/version` MATCH.
