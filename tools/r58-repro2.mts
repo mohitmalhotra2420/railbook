@@ -42,7 +42,20 @@ for (let i = 0; i < 60; i++) {
   });
   say(`tick ${i}: root=${st.rootLen} msgs=${st.msgs} (u${st.userMsgs}/a${st.assistMsgs}) composer=${st.composer} progress="${st.progress.slice(0, 60)}" body="${st.text}"`);
   if (i % 3 === 0) await page.screenshot({ path: `/tmp/r58b-${TAG}-${i}.png` });
-  if (st.rootLen > 2000 && st.assistMsgs >= 1 && i >= 1) { await page.waitForTimeout(6000); await page.screenshot({ path: `/tmp/r58b-${TAG}-final.png` }); say("done-looking"); break; }
+  /* "done" = streaming ruk gaya: koi progress/thinking nahi aur jawab ka text aa gaya. */
+  const working = /checks completed|Understanding|Seat checks|Soch|plan/i.test(st.progress);
+  if (!working && st.rootLen > 3000 && i >= 2) {
+    await page.waitForTimeout(5000);
+    const after = await page.evaluate(() => ({
+      len: (document.body.innerText || "").length,
+      progress: (document.querySelector(".ai-progress")?.innerText || "").replace(/\n+/g, " "),
+      msgs: document.querySelectorAll("article.msg").length,
+      cards: document.querySelectorAll("article.msg .jx-card, article.msg .sf-card, article.msg .rp-table, article.msg table").length,
+    }));
+    say(`done-looking: len=${after.len} msgs=${after.msgs} cards=${after.cards} progress="${after.progress.slice(0, 40)}"`);
+    await page.screenshot({ path: `/tmp/r58b-${TAG}-final.png` });
+    break;
+  }
 }
 say("END");
 W.end();

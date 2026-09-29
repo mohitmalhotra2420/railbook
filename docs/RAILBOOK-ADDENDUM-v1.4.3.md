@@ -323,3 +323,27 @@ User: "kya abh mai ek ek test kru!? Possible nhi hai… AI kyu nahi sahi answer 
 **Test:** `tests/round57-chat-table-and-connect-book.test.tsx` (9) — table default (2+ rows) + toggle + row tap → 12926 booking callback, control (1 row = no table), bullets + bold label, seat board ke dono next-page callbacks (aur callback na ho to button nahi), connecting ke dono legs par Book + click ka payload (15098/LDH/3A/2026-09-30), aur availability ke bina Book nahi. Full suite **138 files / 1459 tests PASS**; `tsc -p tsconfig.server.json` clean.
 
 **Deploy:** `c2573f2` → prod `/api/version` MATCH (startedAt 2026-09-29T16:30:14.944Z). Preview (real data: ASR→LDH live board + LDH→JAT poora plan): `previews/RailBook-round57-2026-09-29.html`.
+
+## §9.50 — Round 58 (29 Sep 2026): "results page blank" — ek undefined naam poora app gira deta tha (+ zip halka)
+
+**User (screenshots 22:28/22:29):** *"Yeh pehle ese search krta hai fir results page blank aa rha and secondly zip workspace mein nhi load ho rha plz …give me zip workspace bhi over load hai"*
+
+**Asli wajah (playwright + prod console se, andaza nahi):** R57 me `BlockView` ke props me **`onOpenPlanPage` destructure hona reh gaya tha**, par use kiya gaya tha. Jawab aate hi render ke waqt:
+```
+ReferenceError: onOpenPlanPage is not defined
+    at BlockView …
+```
+React ne poora tree **unmount** kar diya → screen par sirf khaali cream page (kuch bhi nahi, composer bhi nahi). Server side bilkul theek tha (jawab 15s me aa gaya) — sirf UI mara.
+
+**Fix (3 layer, taaki ye class dobara kabhi na ho):**
+1. **Asli bug:** `onOpenPlanPage` BlockView ke props me destructure ho gaya. Verify playwright se — wahi sawaal ab poori tarah render hota hai (pills, class rows, per-train cards, seat board).
+2. **ErrorBoundary (naya, general):** app-level + har message (text) + har card ke around. Ab koi bhi render error sirf apni jagah "⚠️ … dikha nahi paaya" card deta hai (retry + refresh buttons ke saath); baaki chat, purane messages aur composer chalta rehta hai. `resetKey` se naya message aane par boundary khud reset.
+3. **Gate:** `tools/check-undefined-names.sh` — frontend `tsc` me purane type-noise (TS2322/2339/18047…) hain, par **undefined name** (TS2304/TS2552) hamesha runtime crash hota hai; wahi 2 codes ab fail karte hain. R58 se pehle yahi line prod par 1 error deti thi.
+
+**Bonus fix (usi screenshot me dikha):** progress line "**18/6** checks completed" — total done se chhota. Ab `router.getAvailability` ke andar **har asli provider check** par `addChecks(1)` + `finally { checkDone() }` (dedupe/limit ke andar, isliye double count nahi) aur `turnScope.checkDone` me safety net (`total < done` → `total = done`). Naya test: `tests/round58-checks-count.test.ts` (3).
+
+**Tests:** `tests/round58-blank-screen.test.tsx` (5 — boundary fallback, ek card phatne par doosra theek, retry, seat board wiring, asli prod reply ka render) + round58-checks-count (3). Full suite **138 files / 1467 PASS**; `tsc -p tsconfig.server.json` clean; `check-undefined-names.sh` PASS.
+
+**Zip:** `RailBook-FULL-2026-09-29.zip` ab **33.2 MB** (pehle 60.3 MB) — builder ab sirf **latest APK + v1.4.9** (bridge recovery) pack karta hai, purane 6 APKs `RailBook/APKs` me waise hi hain. Proof screenshots: `previews/r58-blank-before.png` (blank) aur `previews/r58-blank-fixed.png` (same query, poora render).
+
+**Deploy:** `9211dd4` → prod `/api/version` MATCH; playwright se live verify (@9211dd4, poora jawab + cards render, koi pageerror nahi).
