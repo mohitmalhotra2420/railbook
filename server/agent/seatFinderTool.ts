@@ -265,7 +265,13 @@ export async function runFindSeatsTool(args: FindSeatsArgs): Promise<FindSeatsRe
   const wlPick = onlyAvailable
     ? pickSeatRows(pool, { ...slots, onlyAvailable: false }, times)
     : pick;
-  const head = seatSummaryLine({ ...pick, wl: wlPick.wl }, slots, { from, to });
+  /* Round-53d: available-only (confirm/available) maangne par model ko WL-only trains ka data bhejna hi
+   * nahi hai — warna wo unhe jawab me likh deta hai aur cards (jo sirf seat-wali trains dikhate hain)
+   * se mismatch ho jaata hai. Isliye WL rows sirf UN trains ki rakh-te hain jinka koi class AVL/RAC hai;
+   * baaki trains ka sirf COUNT instruction me jaata hai (model ek honest line likh sakta hai). */
+  const winnerSet = new Set(pick.seat.map((r) => r.number));
+  const wlForReply = onlyAvailable ? wlPick.wl.filter((r) => winnerSet.has(r.number)) : wlPick.wl;
+  const head = seatSummaryLine({ ...pick, wl: wlForReply }, slots, { from, to });
 
   const fmt = (r: SeatFilterRow) =>
     `${r.number} ${r.name} · ${r.classCode} · ${r.status === "AVAILABLE" ? `AVAILABLE ${r.seats ?? "?"} seats` : r.status === "RAC" ? `RAC ${r.rac ?? "?"}` : r.status === "WAITLIST" ? `WL ${r.waitlist ?? "?"}` : "N/A"}${r.fare != null ? ` · ₹${r.fare}` : ""}${r.departure ? ` · ${r.departure}` : ""}`;
@@ -276,7 +282,7 @@ export async function runFindSeatsTool(args: FindSeatsArgs): Promise<FindSeatsRe
    * likh deta tha, jabki chat me koi Seat Finder card nahi dikhta. Ab saari rows isi call me jaati
    * hain (SEAT_LINE_MAX tak) taaki jawab me saari trains aayein — koi card pointer nahi. */
   if (pick.seat.length) lines.push(`SEAT (${pick.seat.length} rows): ${pick.seat.slice(0, SEAT_LINE_MAX).map(fmt).join(" | ")}`);
-  if (wlPick.wl.length) lines.push(`WAITLIST/N-A (${wlPick.wl.length} rows, confirm% NAHI batana): ${wlPick.wl.slice(0, SEAT_LINE_MAX).map(fmt).join(" | ")}`);
+  if (wlForReply.length) lines.push(`WAITLIST/N-A (${wlForReply.length} rows, confirm% NAHI batana): ${wlForReply.slice(0, SEAT_LINE_MAX).map(fmt).join(" | ")}`);
   /* Round-51 (user: *"sabhi class kyu nahi show hoti jab bhi specifically confirm, available
    * poocho"*): jab user ne confirm/available seat maange, jawab me us train ki baaki classes bhi
    * aani chahiye — warna 2S jaisi class (jo usi train me hai) gayab lagti hai. Ye rows sirf un
@@ -300,6 +306,22 @@ export async function runFindSeatsTool(args: FindSeatsArgs): Promise<FindSeatsRe
    * table banaya jisme ek hi class/status 9 baar repeat ho gaya (2A WL, 2A WL (2) …) — padhne layak nahi.
    * Isliye saaf instruction: har train EK line/row, koi column-repeat nahi. */
   lines.push("Formatting: har train ki EK line likho (jaise yahan upar hai) — table/pivot-columns mat banao aur ek hi class/status kisi train ke liye ek hi baar likho; repeat ya (2),(3) wale duplicates kabhi nahi.");
+  /* Round-53d (prod probe 161cf03 saboot): "confirm seat" wale sawaal par model ne jawab me 7 trains likhi
+   * (jinme 4 poori WL/N-A thin) jabki SEAT rows sirf 3 trains ki thi → cards chhote reh gaye aur user ko
+   * laga "trains card me nahi dikh rahi". User ki maang saaf hai: "agar confirm bola to confirm dikhao na
+   * sirf". Isliye available-only request par JAWAB bhi sirf seat-wali trains ka hota hai. */
+  if (onlyAvailable) {
+    const winnerNums = [...new Set(pick.seat.map((r) => r.number))];
+    const wlOnly = [...new Set(wlPick.wl.map((r) => r.number))].filter((n) => !winnerNums.includes(n));
+    lines.push(
+      `USER NE SIRF CONFIRM/AVAILABLE MAANGA HAI — jawab me SIRF inhi ${winnerNums.length} trains ki lines likho jinme kam se kam ek class AVL/RAC hai` +
+        (wlOnly.length
+          ? ` (baaki ${wlOnly.length} trains me sirf WL/N-A hai — unka number/naam jawab me mat likho; chaho to ek chhoti line: "baaki ${wlOnly.length} trains me sirf WL/N-A hai")`
+          : "") +
+        ".",
+    );
+    lines.push("Jis train ki line likho, uski SAARI classes (AVL + WL/N-A) usi line me likho — koi class chhupao mat (Round-51 ka niyam).");
+  }
 
   return {
     ok: true,
@@ -319,7 +341,8 @@ export async function runFindSeatsTool(args: FindSeatsArgs): Promise<FindSeatsRe
       trainsSeen: pool.length,
       enriched: enriched.size,
       rows: pick.seat,
-      wlRows: wlPick.wl,
+      /* available-only par sirf seat-wali trains ke WL rows (dekho upar wlForReply ki wajah). */
+      wlRows: wlForReply,
       missingClass: pick.missingClass,
       unknownTime: pick.unknownTime,
       summary: head,

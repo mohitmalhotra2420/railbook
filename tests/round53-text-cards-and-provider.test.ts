@@ -333,3 +333,70 @@ describe("Round-53 · (c) naya provider sirf ENV se (AI_LLM_*)", () => {
     }
   });
 });
+
+describe("Round-53d · model sirf tool ke data wali trains likhe (fake train nahi)", () => {
+  it("available-only par tool ke data me WL-only trains ki rows hi nahi jaati", async () => {
+    const { runFindSeatsTool } = await import("../server/agent/seatFinderTool");
+    routeBoard.mockResolvedValue({
+      trains: [
+        { trainNumber: "11449", trainName: "JBP SVDK EXP", classes: [{ classCode: "3A", status: "AVAILABLE", seats: 6, fare: 625 }] },
+        { trainNumber: "12919", trainName: "MALWA EXP", classes: [{ classCode: "SL", status: "WAITLIST", seats: null, waitlist: 18, fare: 270 }] },
+      ],
+      provider: "web_confirmtkt",
+      at: Date.now(),
+    });
+    const res = (await runFindSeatsTool({ from: "LDH", to: "SVDK", date: "2026-09-30", class_code: "ALL", only_available: true })) as {
+      ok: boolean;
+      summary: string;
+      data: { rows: { number: string }[]; wlRows: { number: string }[] };
+    };
+    expect(res.ok).toBe(true);
+    expect([...new Set(res.data.rows.map((r) => r.number))]).toEqual(["11449"]);
+    /* WL-only train ka data model ko nahi jaata (warna wo jawab me likh deta hai). */
+    expect([...new Set(res.data.wlRows.map((r) => r.number))]).toEqual([]);
+    expect(res.summary).toContain("SIRF inhi 1 trains");
+    expect(res.summary).toMatch(/baaki 1 trains me sirf WL\/N-A/);
+  });
+
+  it("jawab me data se bahar ka train number ho to wo line hata di jaati hai (fake data nahi)", async () => {
+    /* Prod probe: model apni memory se trains jod deta tha (payload 3 trains, jawab 7). */
+    process.env.NVIDIA_API_KEY = "nvapi-r53d";
+    process.env.NVIDIA_MODEL = "openai/gpt-oss-20b";
+    delete process.env.NVIDIA_FALLBACK_MODEL;
+    routeBoard.mockResolvedValue({
+      trains: [
+        { trainNumber: "11449", trainName: "JBP SVDK EXP", classes: [{ classCode: "3A", status: "AVAILABLE", seats: 6, fare: 625 }] },
+        { trainNumber: "12919", trainName: "MALWA EXP", classes: [{ classCode: "SL", status: "WAITLIST", seats: null, waitlist: 18, fare: 270 }] },
+      ],
+      provider: "web_confirmtkt",
+      at: Date.now(),
+    });
+    classBoard.mockResolvedValue({ classes: [], provider: "none" });
+    let call = 0;
+    setAgenticNvidiaFetch(async () => {
+      call += 1;
+      const body = (b: unknown) => new Response(JSON.stringify(b), { status: 200, headers: { "Content-Type": "application/json" } });
+      if (call === 1) {
+        return body({
+          model: "openai/gpt-oss-20b",
+          choices: [{ message: { role: "assistant", tool_calls: [{ id: "c1", type: "function", function: { name: "FIND_SEATS", arguments: JSON.stringify({ from: "LDH", to: "SVDK", date: "2026-09-30", class_code: "ALL", only_available: true }) } }] } }],
+        });
+      }
+      /* Model ne apni yaad se 14609/22461 bhi jod diye (data me nahi hain) — wo lines nahi dikhni chahiye. */
+      return body({
+        model: "openai/gpt-oss-20b",
+        choices: [{ message: { role: "assistant", content: "11449 JBP SVDK EXP – 3A AVL 6 ₹625\n14609 HEMKUNT EXP – 3A WL 4 ₹625\n22461 SHRI SHAKTI EXP – 1A WL 6 ₹1,530" } }],
+      });
+    });
+    const { createApp } = await import("../server/app");
+    const res = await request(createApp()).post("/api/agent").send({ text: "Yaar LDH se SVDK kal confirm seat find out karke do na", history: [], known: {} });
+    const reply = String(res.body.reply ?? "");
+    expect(reply).toContain("11449");
+    expect(reply).not.toContain("14609");
+    expect(reply).not.toContain("22461");
+    const sf = res.body.seatFilter as { rows: { number: string }[] } | null;
+    expect(sf!.rows.map((r) => r.number)).toContain("11449");
+    setAgenticNvidiaFetch(null);
+    process.env.NVIDIA_API_KEY = "";
+  });
+});

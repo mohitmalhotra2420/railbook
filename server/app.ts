@@ -324,7 +324,44 @@ export function createApp() {
        * (wahi live board rows) usi jawab me jod di jaati hain — koi card, koi andaza nahi. */
       /* Sirf tab jab AI ka apna jawab hai — AI fail hone par wahi compact seat line (💺 …) dikhti hai,
        * usme saari trains pehle se hain, isliye rows dobara nahi jodte. */
-      const aiReplyText = String(result.reply ?? "").trim();
+      /* ── Round-53d guard: "kuch bhi fake mat karo" ───────────────────────────────────────────────
+       * Prod probe me dikha ki seat ke jawab me model kabhi apni yaad se train numbers add kar deta hai
+       * (jaise 7 trains likhi, jinme 4 kisi tool ke data me hi nahi thin). Cards sirf asli data dikhate
+       * hain — isliye jawab aur cards ka mismatch ban jaata tha. Guard: agar seat payload maujood hai to
+       * jawab ki wahi lines rakhi jaati hain jinke train numbers ASLI data me hain (payload + journey/
+       * alternatives/picker + user ka maanga train number). Sirf bandar-haath wali lines hatti hain —
+       * jawab ka baaki sab, aur jawab ka wording, model ka hi rehta hai. */
+      const allowedTrains = (() => {
+        if (!seatFilter) return null;
+        const set = new Set<string>([...seatFilter.rows, ...seatFilter.wlRows].map((r) => r.number));
+        const extra = JSON.stringify({
+          j: result.journey ?? null,
+          a: result.alternatives ?? null,
+          p: result.trainPicker ?? null,
+          t: result.trains ?? null,
+        });
+        for (const m of extra.match(/\b\d{5}\b/g) ?? []) set.add(m);
+        const asked = result.nlu?.trainNumber ?? null;
+        if (asked) set.add(asked);
+        return set;
+      })();
+      const rawReply = String(result.reply ?? "").trim();
+      const scrubFabricated = (text: string): string => {
+        if (!allowedTrains || !text) return text;
+        const kept: string[] = [];
+        for (const line of text.split("\n")) {
+          const nums = line.match(/\b\d{5}\b/g) ?? [];
+          /* Line me koi aisa 5-digit number hai jo data me nahi → wo line (fabricated train) hata do.
+           * Lekin line "train line" jaisi honi chahiye (number ke saath class/status/shuru me dikhe) —
+           * warna general baat (jaise "20 trains dekhe") chhoti na ho. */
+          const isTrainLine = /^\s*[-*•]?\s*\*{0,2}\s*\d{5}\b/.test(line) || /\d{5}\b[^\n]{0,24}(AVL|WL|RAC|N\/A|₹)/.test(line);
+          const hasUnknown = nums.some((n) => !allowedTrains.has(n));
+          if (isTrainLine && hasUnknown) continue;
+          kept.push(line);
+        }
+        return kept.join("\n").trim();
+      };
+      const aiReplyText = scrubFabricated(rawReply);
       /* Sirf wahi rows jo query ne maangi thi (seatFilter.rows) — WL/N-A rows alag se nahi thopte,
        * warna "seat wali trains" ke jawab me 18 lines aa jaati hain (live check me dikha). Agar user
        * ne WL bhi poochha ho (only_available=false) to rows me WL pehle se hote hain. */
@@ -349,10 +386,10 @@ export function createApp() {
       if (seatCardPointer) seatExtra.length = 0;
       const replyWithSeats =
         seatExtra.length > 0
-          ? `${String(result.reply ?? "").trim()}\n${seatExtra.join("\n")}`.trim()
+          ? `${aiReplyText}\n${seatExtra.join("\n")}`.trim()
           : seatCardPointer
-            ? `${String(result.reply ?? "").trim()}\n${seatCardPointer}`.trim()
-            : result.reply;
+            ? `${aiReplyText}\n${seatCardPointer}`.trim()
+            : aiReplyText || result.reply;
       /* AI ne jawab nahi diya (ya generic "provider se nahi mil" line di) → seat line akele bhi kaafi hai. */
       const aiFailed =
         !result.reply ||
