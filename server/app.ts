@@ -38,6 +38,7 @@ import { runAutonomousAgent } from "./agent/autonomous.js";
  * hain — AI ka search/tools/API/planner ko chhua nahi gaya. */
 import { parseSeatIntent } from "./understand/seatIntent.js";
 import { missingSeatLines, seatFilterFor, seatSummaryLine, type SeatFilterResult } from "./agent/seatFilter.js";
+import { filterTrainsServingSegment, routeDropNote } from "./agent/routeSegment.js";
 import { reconcileNextActions } from "./agent/agentic.js";
 import { JOURNEY_CONFIG, findAlternativeTrains, findConnections, findPartialRouteSeats, findVacantSeats, planJourney } from "./journey/engine.js";
 import { pickTrains } from "./journey/trainpicker.js";
@@ -789,11 +790,21 @@ export function createApp() {
           .map((t) => t.trim())
           .filter(Boolean);
         const board = await routedRouteBoard(from, to, date, extraTrains);
-        res.json(
-          board
-            ? { trains: board.trains, source: board.provider, at: new Date(board.at).toISOString() }
-            : { trains: [], source: "none" },
-        );
+        if (!board) {
+          res.json({ trains: [], source: "none" });
+          return;
+        }
+        /* Round-49: sirf wo trains jo `to` tak sach me jaati hain (ConfirmTkt board paas ke bade
+         * station wali trains bhi deta hai — jaise LDH→SVDK me JAT tak wali). */
+        const seg = await filterTrainsServingSegment(
+          board.trains.map((t) => ({ trainNumber: String(t.trainNumber ?? "").trim(), trainName: String(t.trainName ?? "") })),
+          from,
+          to,
+        ).catch(() => null);
+        const keptNums = new Set((seg?.trains ?? board.trains.map((t) => ({ trainNumber: String(t.trainNumber ?? "").trim() }))).map((t) => t.trainNumber));
+        const trains = board.trains.filter((t) => keptNums.has(String(t.trainNumber ?? "").trim()));
+        const routeNote = seg ? routeDropNote(seg.dropped, to) : null;
+        res.json({ trains, source: board.provider, at: new Date(board.at).toISOString(), ...(routeNote ? { routeNote } : {}) });
         return;
       }
       if (!rawClass) {

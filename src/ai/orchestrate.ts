@@ -95,6 +95,8 @@ export type Block =
       source?: string | null;
       /** Round-30: user ne kis train ki baat ki (message se) — block sirf usi train ka dikhta hai. */
       focus?: string[];
+      /** Round-49: jo trains maangi hui destination tak nahi jaati thin, unka saaf note (server se). */
+      dropNote?: string | null;
       rows: {
         number: string;
         name: string;

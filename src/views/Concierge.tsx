@@ -1032,6 +1032,7 @@ export function Concierge() {
                 toName: agentRes.nlu?.to?.name ?? state.to?.name ?? null,
                 date: agentRes.nlu?.date ?? state.date,
                 source: sf.source,
+                dropNote: sf.dropNote ?? null,
                 focus: focus.length ? focus : undefined,
                 rows,
               });
@@ -2284,6 +2285,7 @@ export function SeatListBlock({
           );
         })}
       </div>
+      {block.dropNote && <div className="sf-note drop">{block.dropNote}</div>}
       <div className="sf-note muted">Class chip par tap karo → usi train/class ka passenger form (IRCTC jaisa) khul jaayega.</div>
     </div>
   );

@@ -14,6 +14,7 @@
  */
 import { getProvider } from "../providers/index.js";
 import { routedRouteBoard } from "../railway/router.js";
+import { filterTrainsServingSegment, routeDropNote } from "./routeSegment.js";
 import type { SeatIntentSlots } from "../understand/seatIntent.js";
 
 export interface SeatBoardClass {
@@ -326,6 +327,8 @@ export interface SeatFilterResult {
   wlRows: SeatFilterRow[];
   trainsSeen: number;
   source: string | null;
+  /** Round-49: jo trains segment tak nahi jaati thin, unka saaf note (jaise SVDK me JAT wali). */
+  dropNote?: string | null;
 }
 
 /**
@@ -342,8 +345,20 @@ export async function seatFilterFor(opts: {
 }): Promise<SeatFilterResult | null> {
   const { from, to, date, slots } = opts;
   if (!from || !to || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
-  const board = await routedRouteBoard(from, to, date, []).catch(() => null);
-  if (!board || !board.trains.length) return null;
+  const boardRaw = await routedRouteBoard(from, to, date, []).catch(() => null);
+  if (!boardRaw || !boardRaw.trains.length) return null;
+  /* Round-49: jo train maangi hui destination tak jaati hi nahi (ConfirmTkt board me JAT tak wali
+   * trains bhi aa jaati hain), use list se hata do + saaf note — warna user "SVDK" maang kar JAT ki
+   * seat dekh raha hota hai (unbookable). Route pata na chale to train rakhi jaati hai. */
+  const seg = await filterTrainsServingSegment(
+    boardRaw.trains.map((t) => ({ trainNumber: String(t.trainNumber ?? "").trim(), trainName: String(t.trainName ?? "") })),
+    from,
+    to,
+  ).catch(() => ({ trains: boardRaw.trains.map((t) => ({ trainNumber: String(t.trainNumber ?? "").trim(), trainName: String(t.trainName ?? "") })), dropped: [] }));
+  const keptNums = new Set(seg.trains.map((t) => t.trainNumber));
+  const board = { ...boardRaw, trains: boardRaw.trains.filter((t) => keptNums.has(String(t.trainNumber ?? "").trim())) };
+  if (!board.trains.length) return null;
+  const dropNote = routeDropNote(seg.dropped, to);
 
   /* Round-33 (user 26 Sep: "trains list krdi without fare and timings"): pehle times sirf tab aate the
    * jab time-window/fastest-sort maanga ho — ab HAR seat turn par (wahi ek search call, deduped) taaki
@@ -371,7 +386,7 @@ export async function seatFilterFor(opts: {
   const wlPick = slots.onlyAvailable
     ? pickSeatRows(board.trains as SeatBoardTrain[], { ...slots, onlyAvailable: false }, times)
     : pick;
-  const line = seatSummaryLine({ ...pick, wl: wlPick.wl }, slots, { from, to });
+  const line = seatSummaryLine({ ...pick, wl: wlPick.wl }, slots, { from, to }) + (dropNote ? `\n${dropNote}` : "");
   /* Round-25: payload/line me saari seat-wali trains (12 tak) — default 8 se badhaya.
    * Round-27: cap ab *trains* par — har train ki SAARI classes isi jawab/block me aani chahiye. */
   const max = opts.maxRows ?? SEAT_LINE_MAX;
@@ -381,5 +396,6 @@ export async function seatFilterFor(opts: {
     wlRows: capRowsByTrain(wlPick.wl, max),
     trainsSeen: board.trains.length,
     source: board.provider ?? null,
+    dropNote,
   };
 }

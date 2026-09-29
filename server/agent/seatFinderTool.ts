@@ -21,6 +21,7 @@
  */
 import { getProvider } from "../providers/index.js";
 import { routedClassBoard, routedRouteBoard, routedStationSearch } from "../railway/router.js";
+import { filterTrainsServingSegment, routeDropNote } from "./routeSegment.js";
 import { searchStations as searchLocalStations } from "../data/stations.js";
 import {
   AC_CLASSES,
@@ -141,7 +142,20 @@ export async function runFindSeatsTool(args: FindSeatsArgs): Promise<FindSeatsRe
     .map((n) => String(n).trim())
     .filter((n) => /^\d{4,5}$/.test(n));
 
-  const board = await routedRouteBoard(from, to, date, []).catch(() => null);
+  const boardRaw = await routedRouteBoard(from, to, date, []).catch(() => null);
+  /* Round-49: jo train `to` tak jaati hi nahi (ConfirmTkt board me paas ke bade station wali bhi aati
+   * hain — jaise LDH→SVDK me JAT tak wali), wo pool me hi nahi aani chahiye. Warna AI unki seat
+   * rows likh deta hai aur user us train me book nahi kar sakta. */
+  const seg = boardRaw
+    ? await filterTrainsServingSegment(
+        boardRaw.trains.map((t) => ({ trainNumber: String(t.trainNumber ?? "").trim(), trainName: String(t.trainName ?? "") })),
+        from,
+        to,
+      ).catch(() => ({ trains: boardRaw.trains.map((t) => ({ trainNumber: String(t.trainNumber ?? "").trim() })), dropped: [] }))
+    : null;
+  const keptNums = new Set((seg?.trains ?? []).map((t) => String(t.trainNumber).trim()));
+  const board = boardRaw ? { ...boardRaw, trains: boardRaw.trains.filter((t) => keptNums.has(String(t.trainNumber ?? "").trim())) } : null;
+  const dropLine = seg ? routeDropNote(seg.dropped, to) : null;
   if (!board || !board.trains.length) {
     return {
       ok: false,
@@ -247,6 +261,8 @@ export async function runFindSeatsTool(args: FindSeatsArgs): Promise<FindSeatsRe
   if (pick.seat.length) lines.push(`SEAT (${pick.seat.length} rows): ${pick.seat.slice(0, SEAT_LINE_MAX).map(fmt).join(" | ")}`);
   if (wlPick.wl.length) lines.push(`WAITLIST/N-A (${wlPick.wl.length} rows, confirm% NAHI batana): ${wlPick.wl.slice(0, SEAT_LINE_MAX).map(fmt).join(" | ")}`);
   if (pick.missingClass) lines.push(`${pick.missingClass} trains me ye class hi nahi hai — unhe "seat nahi" mat maano.`);
+  /* Round-49: hati hui trains (jo ${to} tak nahi jaati) — model ise jawab me saaf likh de. */
+  if (dropLine) lines.push(`ROUTE: ${dropLine.replace(/^ℹ️\s*/, "")}`);
   if (pick.unknownTime) lines.push(`${pick.unknownTime} rows ka time nahi mila (time filter laga tha).`);
   lines.push(`Source: ${board.provider ?? "live board"} · ${pool.length} trains dekhe (${enriched.size} ka alag board check kiya).`);
   lines.push("Jawab me SAARI trains ki lines likho (jo SEAT rows me hain) — 'baaki trains kisi card me hain' jaisi baat kabhi mat likho, chat me aisa koi card nahi dikhta.");
