@@ -417,6 +417,6 @@ Commit `6bf1863` (push verified: remote main = `6bf18631d651`). Ye test-only com
 **Permanent artifacts (workspace reset-proof):**
 - Repo: `https://github.com/mohitmalhotra2420/railbook` → main @`6bf1863` (poora project: server, client, tests, docs, previews, android-app, tools).
 - Zip (permanent, hamesha downloadable): `https://github.com/mohitmalhotra2420/railbook/releases/tag/r61-2026-09-30` → asset `RailBook-FULL-2026-09-30.zip`, is final state (`6bf1863`) se dobara build karke replace kiya gaya; verify: HTTP 200 + valid zip + `START-HERE.md` andar.
-- Prod: `https://railbook.onrender.com` → `/api/version` = `meta/muse-glimmer-30b / openai/gpt-oss-20b`, `AI_PRIMARY_TIMEOUT_MS=90000`.
+- Prod: `https://railbook-gegs.onrender.com` → `/api/version` = `meta/muse-glimmer-30b / openai/gpt-oss-20b`, `AI_PRIMARY_TIMEOUT_MS=90000`.
 
 **R60 ki teen reporting cheezein** (choice dropdown, plan-page touch scroll, leg classes grid) prod @`a424d4a` se live hain — R61 ne koi logic nahi chheda ("logic mat change Krna").

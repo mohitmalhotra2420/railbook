@@ -1,4 +1,4 @@
-# RailBook — poora project (continue karne ke liye) · 25 Sep 2026
+# RailBook — poora project (continue karne ke liye) · 30 Sep 2026 (Round 61)
 
 Ye zip aapke **poore project** ka snapshot hai — web app + server + Android app + tests + previews + APKs.
 Naye workspace me bas extract karke `npm ci` chalao aur wahin se aage badho (git history bhi andar hai).
@@ -9,24 +9,34 @@ railbook-full/
 ├── railbook/                  ← asli repo (Vite + React + TS client + Express/TS server + tests)
 │   ├── src/                   ← client (views/, components/, booking/, ai/, irctc/, seatfinder.ts…)
 │   ├── server/                ← server (app.ts, agent/, railway/ scrapers…)
-│   ├── tests/                 ← 110 files (vitest) — source-of-truth behaviour
-│   ├── docs/                  ← RAILBOOK-ADDENDUM (round-by-round history, §9.21 = latest)
+│   ├── tests/                 ← 144 files (vitest) — source-of-truth behaviour
+│   ├── docs/                  ← RAILBOOK-ADDENDUM (round-by-round history, §9.54 = latest)
 │   ├── provas/                ← real payload samples (live se liye gaye)
 │   ├── tools/                 ← preview/verification tools (Round-29: build-round29-preview.mjs, probe-live-r29*.mjs)
 │   ├── .env                   ← GITHUB_TOKEN + RENDER_API_KEY (deploy ke liye — isko commit NAHI karna)
-│   └── .git/                  ← poori history (HEAD: de97b12)
+│   └── .git/                  ← poori history (HEAD: R61 final, main branch)
 ├── android-app/               ← Android WebView app (Kotlin + autofill assets, keystore ke saath)
 ├── host-scripts/              ← apk-build-v149.sh (APK banane ka script, latest = v149)
 ├── previews/                  ← har round ke real-render previews (HTML)
 └── apks/                      ← latest release APKs (v1.4.8, v1.4.9 — r29 me naya APK nahi)
 ```
 
+## 0. Current state (30 Sep 2026 — Round 61)
+
+- **ZIP ka permanent link (workspace reset-proof):** `https://github.com/mohitmalhotra2420/railbook/releases/download/r61-2026-09-30/RailBook-FULL-2026-09-30.zip`
+  (release page: `https://github.com/mohitmalhotra2420/railbook/releases/tag/r61-2026-09-30`). Isi workspace ka har reset ke baad bhi downloadable rehta hai.
+- **Poora project GitHub par pushed:** `https://github.com/mohitmalhotra2420/railbook` (main) — server, client, 144 test files, docs, previews, android-app, tools.
+- **Prod live:** `https://railbook-gegs.onrender.com` · `/api/version` = `{"commit":"9ae3741","primaryModel":"meta/muse-glimmer-30b","fallbackModel":"openai/gpt-oss-20b"}` (service `srv-dae34rqd0e5s73evgjsg`).
+- **Round 61 ka faisla:** Muse-Glimmer primary planner, GPT-OSS-20B fallback + NLU; primary ke liye alag timeout `AI_PRIMARY_TIMEOUT_MS=90000` (warna bade prompt par 45s cap round barbaad kar deta tha).
+- **Tests:** `npx vitest run` → **144 files / 1484 tests, 0 fail**. Server TS: `tsc -p tsconfig.server.json` clean.
+- **R60 ki teen reporting cheezein** (prod par pehle se live): station-choice dropdown, plan page ka touch scroll, leg classes ka naya grid.
+
 ## 1. Turant shuru karne ke liye
 
 ```bash
 cd railbook
 npm ci --include=dev            # node_modules (~130 MB)
-npx vitest run                  # poora suite: 99 files / 1006 tests (≈2 min)
+npx vitest run                  # poora suite: 144 files / 1484 tests, sab PASS (≈2.5 min)
 ./node_modules/.bin/tsc -p tsconfig.server.json   # server TS clean hona chahiye
 ./node_modules/.bin/tsc --noEmit -p tsconfig.json  # client: 68 puraane errors baseline (koi naya nahi hona chahiye)
 npm run build                   # client bundle (dist/)
