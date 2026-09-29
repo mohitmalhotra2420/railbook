@@ -775,6 +775,23 @@ export function Concierge() {
     return { searched: false, prefs: turn.prefs };
   }
 
+  /* ── Round-57 (user: "available mein connecting ka option jo next page pe open ho, alternate trains
+   * ka bhi"): seat board ka button chat se wahi route/date ka plan maangta hai, aur jo plan card aata
+   * hai wo SEEDHA usi page par khulta hai (connect ya alt). Page ka data usi AI/server plan se — kuch
+   * banaya hua nahi. ── */
+  const pendingPlanPageRef = useRef<"connect" | "alt" | null>(null);
+  function openPlanPage(page: "connect" | "alt", from: string, to: string, date: string) {
+    if (!from || !to) return;
+    pendingPlanPageRef.current = page;
+    const pax = state.paxProvided && state.passengerCount ? state.passengerCount : 1;
+    /* "poora plan banao" phrasing hi plan card banata hai (verified plan flow) — usi par page khulta hai. */
+    const want =
+      page === "connect"
+        ? `poora plan banao — connecting trains aur leg-wise seat bhi dikhao`
+        : `poora plan banao — alternative trains aur doosri dates bhi dikhao`;
+    void handleText(`${from} se ${to} ${date} ka ${want} (${pax} passenger ke liye)`);
+  }
+
   /* Round-18e: BEST FOR YOU card ka explicit CTA — tabhi TrainBoard khulta hai. */
   async function openBoardFor(fromCode: string, toCode: string, date: string) {
     const c = agentCtxRef.current;
@@ -1975,6 +1992,12 @@ export function Concierge() {
                 onWallet={() => go("wallet")}
                 onBookings={() => go("bookings")}
                 onOpenBoard={(from, to, date) => void openBoardFor(from, to, date)}
+                onOpenPlanPage={(page, from, to, date) => openPlanPage(page, from, to, date)}
+                consumePlanPage={() => {
+                  const p = pendingPlanPageRef.current;
+                  pendingPlanPageRef.current = null;
+                  return p;
+                }}
                 onBookClass={(q) => openBookingFromChip(q)}
                 onBookSeat={(r, ctx) => openBookingFromSeatRow(r, ctx)}
                 seatFinder={seatFind}
@@ -2229,9 +2252,14 @@ export function ClassChoiceCard({
 export function SeatListBlock({
   block,
   onPick,
+  onOpenPage,
 }: {
   block: Extract<Block, { type: "seatlist" }>;
   onPick: (row: SeatRow) => void;
+  /** Round-57 (user: "available mein connecting ka option jo next page pe open ho, alternate trains ka
+   * bhi"): ye do entry-points us board ke route/date ke liye naya page kholte hain. Data real rehta
+   * hai — page usi plan call se bharta hai jo AI/server deta hai (kuch invent nahi). */
+  onOpenPage?: (page: "connect" | "alt", from: string, to: string, date: string) => void;
 }) {
   /* Grouping pure helper me (src/chatText.ts → seatListGroups) taaki test ho sake. */
   const groups = seatListGroups(block.rows);
@@ -2295,6 +2323,26 @@ export function SeatListBlock({
         </div>
       )}
       <div className="sf-note muted">Class chip par tap karo → usi train/class ka passenger form (IRCTC jaisa) khul jaayega.</div>
+      {onOpenPage && (
+        <div className="sf-nextpages">
+          <button type="button" className="sf-np connect" onClick={() => onOpenPage("connect", block.from, block.to, block.date)}>
+            <span className="sf-np-ic" aria-hidden>🔗</span>
+            <span className="sf-np-txt">
+              <strong>Connecting trains · Leg 1 → Leg 2</strong>
+              <span>{block.dropNote ? "Is route par direct kam hai — do train jod kar jaayein (dono leg par seat)" : "Do train jod kar jaayein — dono legs par verified seat, alag-alag ticket"}</span>
+            </span>
+            <span className="sf-np-go">Kholo ›</span>
+          </button>
+          <button type="button" className="sf-np alt" onClick={() => onOpenPage("alt", block.from, block.to, block.date)}>
+            <span className="sf-np-ic" aria-hidden>🔁</span>
+            <span className="sf-np-txt">
+              <strong>Alternative trains &amp; dates</strong>
+              <span>Doosri trains, doosra station, doosri date — seat ke saath</span>
+            </span>
+            <span className="sf-np-go">Kholo ›</span>
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -2318,6 +2366,7 @@ function BlockView({
   onOpenBoard,
   onBookClass,
   onBookSeat,
+  consumePlanPage,
   seatFinder,
 }: {
   block: Block;
@@ -2338,6 +2387,10 @@ function BlockView({
   /** Round-18e: explicit "Sabhi trains · Book" CTA from BEST FOR YOU card → TrainBoard. */
   onOpenBoard?: (from: string, to: string, date: string, trainNumber: string | null) => void;
   /* Round-20: card/Seat Finder ke class chip tap → seedha passenger form (train no/date/from→to bhare hue). */
+  /* Round-57: seat board se "Connecting"/"Alternative" page kholna (chat se plan aayega, page usi data se). */
+  onOpenPlanPage?: (page: "connect" | "alt", from: string, to: string, date: string) => void;
+  /** Round-57: "Kholo" se maanga gaya page — plan card aane par ek hi baar khulta hai (one-shot). */
+  consumePlanPage?: () => "connect" | "alt" | null;
   onBookClass?: (q: {
     trainNumber: string;
     classCode: string;
@@ -2365,6 +2418,7 @@ function BlockView({
         onPick={(row) =>
           onBookSeat?.(row, { from: block.from, to: block.to, toName: block.toName ?? null, date: block.date })
         }
+        onOpenPage={onOpenPlanPage}
       />
     );
   }
@@ -2432,6 +2486,26 @@ function BlockView({
         onPickDate={(d) => onChip(`${block.plan.query.from} se ${block.plan.query.to} ${d} ki trains dikhao`)}
         onPickStations={(f, t) => onChip(`${f} se ${t} ${block.plan.query.date} ki trains dikhao`)}
         onOpenBoard={onOpenBoard ? () => onOpenBoard(block.plan.query.from, block.plan.query.to, block.plan.query.date, block.plan.best?.trainNumbers[0] ?? null) : undefined}
+        /* Round-57: seat board ke "Kholo" se aaya ho to seedha wahi page (connect/alt) khula dikhe. */
+        initialPage={consumePlanPage?.() ?? null}
+        /* Round-57: connecting/alternative leg par Book → passenger form (verified class/segment se). */
+        onBookLeg={(l) => {
+          if (!onBookClass) return;
+          onBookClass({
+            trainNumber: l.trainNumber,
+            classCode: l.classCode ?? "",
+            from: l.ticketFrom ?? l.from,
+            to: l.ticketUpto ?? l.to,
+            date: l.date,
+            row: (l.availability as { status?: string | null; seats?: number | null; rac?: number | null; waitlist?: number | null; fare?: number | null } | null) ?? null,
+            trainName: l.trainName ?? null,
+            departure: l.departure ?? null,
+            arrival: l.arrival ?? null,
+            durationLabel: l.durationLabel ?? null,
+            fromName: null,
+            toName: null,
+          });
+        }}
         /* Round-19d (user: "Card filter karo lekin connecting/alternatives mein change na aayein"):
          * user ne time window bola ho ("kal subah") to card ki DIRECT list usi window ki — connecting,
          * alternatives, dates ka data/logic waisa hi rehta hai. Filter client-side hai (plan untouched). */

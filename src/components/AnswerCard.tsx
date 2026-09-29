@@ -188,14 +188,22 @@ export function AnswerCard({ text }: { text: string }): JSX.Element {
           </div>
         </div>
       )}
+      {/* ── Round-57 (user: "automatically UI table form mein yan bullet form mein aaye") ──────────
+       * Prose jawab ab deewar nahi — bullets. "Label: baaki baat" wale jumle bullets ban jaate hain
+       * (jaise ChatGPT ke "Main Base: … / Flavor Profile: …"), baaki jumle bhi bullet rows me. Text
+       * waisa hi rehta hai — sirf padhne-layak baant diya jaata hai. */}
       {rest.length > 0 && (
-        <div className="ac-body">
-          {rest.map((s, i) => (
-            <p key={i} className="ac-p">
-              {highlight(s)}
-            </p>
-          ))}
-        </div>
+        <ul className="ac-bullets ac-bulletlist">
+          {rest.map((s, i) => {
+            const labelled = /^([A-Z][A-Za-z0-9 /&'’\-]{1,28}):\s+(?=\S)/.exec(s);
+            return (
+              <li key={i}>
+                <span className="ac-bdot" aria-hidden />
+                <span>{labelled ? <><strong>{labelled[1]}:</strong> {highlight(s.slice(labelled[0].length))}</> : highlight(s)}</span>
+              </li>
+            );
+          })}
+        </ul>
       )}
       {source && (
         <div className="ac-src">

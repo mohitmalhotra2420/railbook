@@ -13,7 +13,7 @@
  *   • "SEAT (15 rows): A | B | C"                                          → teen rows
  *   • bullet na ho to pehle jaisa paragraph (kuch chhupta nahi, kuch invent nahi).
  */
-import type { JSX } from "react";
+import { useState, type JSX } from "react";
 import { AnswerCard } from "./AnswerCard";
 
 export type Row = {
@@ -281,11 +281,82 @@ function groupTone(rows: Row[]): ReturnType<typeof statusTone> {
 /** Tappable = booking ka rasta khulta hai (available/RAC/WL ya status pata nahi). N/A par jhootha button nahi. */
 const isTappable = (status: string) => status === "AVAILABLE" || status === "RAC" || status === "WAITLIST" || status === "UNKNOWN";
 
+/* ── Round-57 (29 Sep 2026, user screenshot: ChatGPT ne "esmein se best kon si rahegi" ka jawab
+ * TABLE me diya — "LDH departure | ASR arrival | Journey" columns) ────────────────────────────────
+ * User: "automatically UI table form mein yan bullet form mein aaye". Isliye jab jawab me 2+ trains ki
+ * rows hon to wahi rows ek saaf comparison TABLE me dikhti hain (Train · Class · Status · Fare · Dep).
+ * Ye SIRF presentation hai — rows wahi hain jo server/AI ke text se parse hui (kuch invent nahi), aur
+ * table/cards ka data ek hi source se aata hai (R48 ka usool: text aur card kabhi mismatch na ho). */
+function rowToneOf(r: Row): string {
+  return r.status === "AVAILABLE" ? "ok" : r.status === "RAC" ? "rac" : r.status === "WAITLIST" ? "wl" : "bad";
+}
+
+function SeatCompareTable({ rows, onBook, groupOf }: { rows: Row[]; onBook?: (r: Row, g: TrainRowGroup) => void; groupOf: (r: Row) => TrainRowGroup }) {
+  const showDep = rows.some((r) => r.dep);
+  return (
+    <div className="rp-tablewrap">
+      <table className="rp-table">
+        <thead>
+          <tr>
+            <th>Train</th>
+            <th>Class</th>
+            <th>Status</th>
+            <th>Fare</th>
+            {showDep && <th>Dep</th>}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r, i) => {
+            const t = rowToneOf(r);
+            const tap = Boolean(onBook) && isTappable(r.status);
+            const cells = (
+              <>
+                <td className="rp-td-train">
+                  <span className="rp-tno">{r.train}</span>
+                  {r.name && <span className="rp-tname">{r.name}</span>}
+                </td>
+                <td>{r.cls}</td>
+                <td className={`rp-td-st ${t}`}>{statusText(r)}</td>
+                <td>{r.fare ?? "—"}</td>
+                {showDep && <td>{r.dep ?? "—"}</td>}
+              </>
+            );
+            return tap ? (
+              <tr
+                key={`${r.train}-${r.cls}-${i}`}
+                className={`rp-tr tappable ${t}`}
+                tabIndex={0}
+                role="button"
+                aria-label={`${r.train} ${r.cls} ${statusText(r)} — passenger form kholo`}
+                title={`${r.train} ${r.cls} — passenger form kholo`}
+                onClick={() => onBook!(r, groupOf(r))}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") onBook!(r, groupOf(r));
+                }}
+              >
+                {cells}
+              </tr>
+            ) : (
+              <tr key={`${r.train}-${r.cls}-${i}`} className={`rp-tr ${t}`}>
+                {cells}
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      <div className="rp-tablefoot">Row par tap karo → usi train/class ka passenger form (IRCTC)</div>
+    </div>
+  );
+}
+
 export function ReplyText({
   text,
   onBook,
+  initialView,
 }: {
   text: string;
+  /** Sirf preview/demo ke liye — app flow me hamesha auto (2+ rows → table). */
+  initialView?: "table" | "cards";
   /** Round-29: class par tap → usi train+class ka passenger form (Concierge deta hai). */
   onBook?: (row: Row, group: TrainRowGroup) => void;
 }): JSX.Element {
@@ -296,6 +367,10 @@ export function ReplyText({
   if (parsed.rows.length === 0) return <AnswerCard text={text} />;
   /* Round-29: display-level grouping — server ka text/rows waisa hi rehta hai, sirf card ek per train. */
   const groups = groupReplyRowsByTrain(parsed.rows);
+  /* Round-57: default view — 2+ rows ho to TABLE (ChatGPT jaisa comparison), 1 row ho to card.
+   * User toggle bhi kar sakta hai; data dono me ek hi hai. */
+  const [view, setView] = useState<"table" | "cards">(initialView ?? (parsed.rows.length >= 2 ? "table" : "cards"));
+  const groupOf = (r: Row): TrainRowGroup => groups.find((g) => g.number === r.train) ?? { number: r.train, name: r.name, rows: [r] };
   return (
     <div className="rp">
       {headChips(parsed.head).length > 0 && (
@@ -324,7 +399,15 @@ export function ReplyText({
           </div>
         );
       })()}
-      <div className="rp-rows">
+      {parsed.rows.length >= 2 && (
+        <div className="rp-view">
+          <span className="rp-view-l">Dekho:</span>
+          <button type="button" className={`rp-viewb${view === "table" ? " on" : ""}`} onClick={() => setView("table")}>Table</button>
+          <button type="button" className={`rp-viewb${view === "cards" ? " on" : ""}`} onClick={() => setView("cards")}>Cards</button>
+        </div>
+      )}
+      {view === "table" && parsed.rows.length >= 2 && <SeatCompareTable rows={parsed.rows} onBook={onBook} groupOf={groupOf} />}
+      <div className="rp-rows" style={view === "table" && parsed.rows.length >= 2 ? { display: "none" } : undefined}>
         {groups.map((g) => {
           const tone = groupTone(g.rows);
           return (

@@ -2573,3 +2573,64 @@ button.rp-crow:active { transform: translateY(1px); }
   line-height: 1.55;
 }
 .sf-note.near > div + div { margin-top: 3px; color: var(--muted); }
+
+/* ══ Round-57 (29 Sep 2026): chat ke jawab AUTOMATIC table/bullet me + connecting page ka saaf
+ * layout + next-page entry points. Sab sirf presentation (data waisa hi rehta hai). ══ */
+
+/* (a) Seat comparison table — ChatGPT jaise columns, phone par horizontally scroll */
+.rp-view { display: flex; align-items: center; gap: 6px; margin: 2px 0 6px; }
+.rp-view-l { font-size: 11.5px; font-weight: 800; color: #7b8a9c; text-transform: uppercase; letter-spacing: .03em; }
+.rp-viewb { font: inherit; font-size: 12px; font-weight: 800; padding: 4px 10px; border-radius: 999px; border: 1px solid #dbe4ee; background: #fff; color: #40556e; cursor: pointer; }
+.rp-viewb.on { background: #0b3b66; border-color: #0b3b66; color: #fff; }
+.rp-tablewrap { overflow-x: auto; -webkit-overflow-scrolling: touch; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+.rp-table { width: 100%; border-collapse: collapse; font-size: 12.5px; min-width: 100%; }
+.rp-table thead th { position: sticky; top: 0; background: #f6f8fb; color: #5b6b7f; font-size: 11px; text-transform: uppercase; letter-spacing: .03em; text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.rp-table tbody td { padding: 8px; border-bottom: 1px solid #f0f2f6; vertical-align: middle; white-space: nowrap; }
+.rp-table tbody tr:last-child td { border-bottom: none; }
+.rp-td-train { white-space: normal; max-width: 150px; }
+.rp-tno { font-weight: 800; color: #0f172a; }
+.rp-tname { display: block; font-size: 11.5px; color: #6b7a8d; font-weight: 600; }
+.rp-td-st.ok { color: #0f7a3d; font-weight: 800; }
+.rp-td-st.rac { color: #1d4ed8; font-weight: 800; }
+.rp-td-st.wl { color: #b45309; font-weight: 800; }
+.rp-td-st.bad { color: #b91c1c; font-weight: 700; }
+.rp-tr.tappable { cursor: pointer; }
+.rp-tr.tappable:active { background: #f2f8f4; }
+.rp-tr.ok { box-shadow: inset 3px 0 0 var(--green); }
+.rp-tr.rac { box-shadow: inset 3px 0 0 #1d4ed8; }
+.rp-tr.wl { box-shadow: inset 3px 0 0 var(--amber); }
+.rp-tr.bad { box-shadow: inset 3px 0 0 var(--red); }
+.rp-tablefoot { font-size: 11px; color: #7b8a9c; padding: 6px 8px 8px; }
+
+/* (b) Prose jawab → heading + bullets (pehle deewar jaisa paragraph tha) */
+.ac-bullets { display: grid; gap: 7px; margin: 2px 0 0; }
+.ac-bullets li { display: flex; gap: 8px; align-items: flex-start; font-size: 13.8px; line-height: 1.5; color: #1f2a37; }
+.ac-bullets li .ac-bdot { flex: none; margin-top: 6px; width: 6px; height: 6px; border-radius: 999px; background: #9bb3cc; }
+.ac-bullets li strong { color: #0f172a; }
+.ac-bulletlist { list-style: none; padding: 0; margin: 0; }
+
+/* (c) Seat board ke neeche next-page cards (connecting + alternate) */
+.sf-nextpages { display: grid; gap: 8px; margin-top: 10px; }
+.sf-np { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; padding: 10px 12px; border-radius: 13px; border: 1.5px solid #dbe4ee; background: linear-gradient(180deg, #fff, #f7fafd); font: inherit; cursor: pointer; }
+.sf-np:active { transform: scale(.996); }
+.sf-np-ic { flex: none; width: 32px; height: 32px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; background: #eaf2fb; color: #0b3b66; font-size: 15px; }
+.sf-np-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.sf-np-txt strong { font-size: 13.5px; color: #0f172a; }
+.sf-np-txt span { font-size: 11.5px; color: #6b7a8d; font-weight: 600; }
+.sf-np-go { flex: none; font-size: 12px; font-weight: 900; color: #0b3b66; white-space: nowrap; }
+.sf-np.connect { border-color: #cfe8d8; background: linear-gradient(135deg, #f4fbf6 0%, #eef8f1 60%, #fbfefc 100%); }
+.sf-np.alt { border-color: #f5d08a; background: linear-gradient(135deg, #fffaef 0%, #fff6e2 60%, #fffdf8 100%); }
+
+/* (d) Connecting page ka layout — leg cards saaf, "Book" button alag, layover line highlight */
+.jx-leg { position: relative; flex-wrap: wrap; }
+.jx-leg-book { flex: none; align-self: flex-end; margin-left: auto; font: inherit; font-size: 12px; font-weight: 900; padding: 6px 12px; border-radius: 999px; border: 1.5px solid #0f7a3d; background: #f2fbf5; color: #0f7a3d; cursor: pointer; }
+.jx-leg-book.wl { border-color: #b45309; background: #fff8ee; color: #b45309; }
+.jx-leg-book:active { transform: scale(.98); }
+.jx-leg-hint { flex-basis: 100%; font-size: 11.5px; color: #6b7a8d; font-weight: 600; margin-top: 4px; }
+.jx-leg-change { display: flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 800; color: #0b3b66; background: #f2f7fd; border: 1px dashed #cbdcee; border-radius: 10px; padding: 6px 10px; margin: 7px 0; }
+.jx-conn { padding: 10px; }
+.jx-conn-foot { font-weight: 700; color: #5b6b7f; }
+.jx-lrow-book { grid-column: 1 / -1; display: flex; justify-content: flex-end; padding-top: 2px; }
+.jx-cchip-go { font-size: 10.5px; font-weight: 900; letter-spacing: .02em; color: inherit; opacity: .85; }
+/* R57: leg card ab div hai (button ke andar button invalid HTML thi) — dikhne me waisa hi rahe. */
+.jx-leg[role="button"]:focus-visible, .jx-lrow-leg[role="button"]:focus-visible { outline: 2px solid var(--navy); outline-offset: 2px; }
