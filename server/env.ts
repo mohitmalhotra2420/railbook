@@ -63,15 +63,43 @@ export const env = {
     const v = (process.env.SEAT_FILTER_SERVER ?? "1").trim().toLowerCase();
     return !(v === "0" || v === "false" || v === "off");
   },
-  /** NVIDIA NIM — never log these values. */
+  /* ── Round-53 (user: "kon sa model best work karega mere railbook ke liye, uski key main baad mein
+   * dunga"): naya provider sirf ENV se lag jaata hai — code chhedne ki zaroorat nahi. Ye teen var set
+   * karte hi poora AI stack (agentic brain + NLU/extraction + journey decisions) usi OpenAI-compatible
+   * endpoint par chala jaata hai:
+   *     AI_LLM_BASE_URL=https://api.groq.com/openai/v1     (OpenAI/OpenRouter/Cerebras/Together/Gemini-compat…)
+   *     AI_LLM_API_KEY=...
+   *     AI_LLM_MODELS=llama-3.3-70b-versatile,qwen/qwen3-32b      (chain — pehla primary, aage fallback)
+   * Neeche ke getters isi override ko sabse pehle dekhte hain; warna NVIDIA wala purana path bilkul
+   * waisa hi rehta hai (default NVIDIA, backward compatible). */
+  get aiLlmBaseUrl() {
+    return (process.env.AI_LLM_BASE_URL ?? "").trim().replace(/\/$/, "");
+  },
+  get aiLlmApiKey() {
+    return (process.env.AI_LLM_API_KEY ?? "").trim();
+  },
+  /** Chain (comma-separated). Khaali = override off. */
+  get aiLlmModels(): string[] {
+    return (process.env.AI_LLM_MODELS ?? "")
+      .split(",")
+      .map((m) => m.trim())
+      .filter(Boolean);
+  },
+  get aiLlmOverrideActive() {
+    return Boolean(this.aiLlmBaseUrl && this.aiLlmApiKey && this.aiLlmModels.length);
+  },
+  /** NVIDIA NIM (ya AI_LLM_* override) — never log these values. */
   get nvidiaApiKey() {
+    if (this.aiLlmOverrideActive) return this.aiLlmApiKey;
     return (process.env.NVIDIA_API_KEY ?? "").trim();
   },
   get nvidiaBaseUrl() {
+    if (this.aiLlmOverrideActive) return this.aiLlmBaseUrl;
     const named = (process.env.NVIDIA_BASE_URL ?? "").trim().replace(/\/$/, "");
     return named || NVIDIA_DEFAULT_BASE;
   },
   get nvidiaModel() {
+    if (this.aiLlmOverrideActive) return this.aiLlmModels[0];
     return (process.env.NVIDIA_MODEL ?? "").trim() || NVIDIA_DEFAULT_MODEL;
   },
   /** NLU/fallback layer ka model. Default = NVIDIA_MODEL (backward compat).
@@ -111,6 +139,9 @@ export const env = {
   },
   /** Secondary agentic model — GPT-OSS fail hone par ek hi retry isi se (default: Nemotron 3.5 Lightning). */
   get nvidiaFallbackModel() {
+    /* Round-53: AI_LLM_* override lagne par chain user ki di hui hai (AI_LLM_MODELS ka doosra model);
+     * koi doosra model na ho to "" — fallback slot khaali. */
+    if (this.aiLlmOverrideActive) return this.aiLlmModels[1] ?? "";
     return (process.env.NVIDIA_FALLBACK_MODEL ?? "").trim() || NVIDIA_DEFAULT_FALLBACK_MODEL;
   },
   get aiRequestTimeoutMs() {
