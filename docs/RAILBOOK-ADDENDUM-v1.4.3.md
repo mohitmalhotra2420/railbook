@@ -238,3 +238,15 @@ User: "kya abh mai ek ek test kru!? Possible nhi hai… AI kyu nahi sahi answer 
 **Prod verify (c259803):** `LDH se JAT kal confirm seat batao` → **agentic**, `FIND_SEATS ✓`, **34s**, payload trains `11077, 12237, 15651` = jawab ke trains (**MATCH**); `LDH se JAT kal saari trains ki seat availability batao` → **agentic**, `FIND_SEATS ✓` (2 calls), **19s**, payload `11077, 12207, 12237, 12355, 12475, 12919, 15651, 18309, 22431` = jawab ke trains (**MATCH**). Suite: **134 files / 1423 tests PASS** (`round53-text-cards-and-provider` ab 8 tests).
 
 **Final chain (R53):** `d4dda38` → `f893a2c` → `6660596` → `84494a1` → `0bd2aee` → `50b23b6` → `c259803` → `6adfcf4` → `2d745a6` → `161cf03` → `938fc51` → `b5e3a40` → `2109cf4` → `1cdc071` → `6cd72e9` → `d32ed39` → **`f43f63f`** — prod LIVE (`/api/version` MATCH).
+
+**R53e — cards kabhi chhote nahi, kabhi bade nahi (pointer bhi sach):**
+- **Cards ab tool ka POORA snapshot dikhate hain** (R53c ka "jawab me likhi trains" wala filter hata diya). Kyun: us filter se ek naya jhooth bana — jawab ke saath jo pointer line judti thi (`➕ 8 trains ke rows neeche cards me hain …`) un trains ke naam batati thi jo cards me aati hi nahi thin. Ab text me kam trains ho to card me poori class-detail rehti hai + pointer line sach bolti hai.
+- **Fabricated-train guard segment-level** (line-level nahi): `·`/`|` se judi line me sirf wahi hissa hatta hai jisme aisa 5-digit number ho jo kisi tool ke data me nahi; baaki jawab (aur model ki wording) bacha rehta hai.
+- **Do FIND_SEATS calls wale turn:** khaali result pehle wale kaam ka capture overwrite nahi karta (warna cards ka data hi khatam — prod probe me payload 0, jawab me 2 trains).
+- **Jab KISI train me confirmed seat hi na ho:** tool WL rows poora deta hai (warna model ke paas honest jawab ka data nahi hota aur grounding check jawab reject kar deta), aur cards bhi WL trains dikhate hain — text+cards dono: *"is waqt koi confirmed seat nahi hai… ye trains WL me hain"*.
+- **Test:** `round53-text-cards-and-provider` ab **12 tests**.
+
+**R53f — user "confirm" bole to tool me `only_available` force:** prod probe me model ne `only_available: false` bhej diya (user "confirm" maang raha tha) → tool ne WL trains ka poora data diya, model ne 9 trains likh di, par cards (confirm ke hisaab se) sirf 3 seat-wali trains dikhate the. Fix (`agentic.ts` FIND_SEATS case): user ki wording confirmedOnly ho to flag force — model ke paas WL-only trains likhne ko hoti hi nahi.
+**Prod verify (f43f63f):** `LDH se JAT kal confirm seat batao` → payload 5 = jawab 5 (**MATCH**, 21s); `Yaar LDH se SVDK … confirm seat find out karke do na` → payload 3 = jawab 3 (**MATCH**, 11s). Suite **134 files / 1427 tests PASS**.
+
+**Final chain (R53):** `d4dda38` → `f893a2c` → `6660596` → `84494a1` → `0bd2aee` → `50b23b6` → `c259803` → `6adfcf4` → `2d745a6` → `161cf03` → `938fc51` → `b5e3a40` → `2109cf4` → `1cdc071` → `6cd72e9` → `d32ed39` → `f43f63f` → **`6f5b94e`** — prod LIVE (`/api/version` MATCH).
