@@ -367,7 +367,13 @@ export function createApp() {
               classCodes: seatClassCodes,
               line: seatLine,
               rows: seatFilter.rows,
-              wlRows: seatFilter.wlRows,
+              /* Round-53 (user: *"Agar confirm bola to confirm dikhao na sirf"*): jab user ne
+               * confirm/available maanga ho (onlyAvailable), cards me WL rows SIRF unhi trains ki
+               * dikhti hain jinme seat mili hai (Round-51 ka usool — usi train ki baaki classes
+               * chhupao mat), warna poora board (WL/N-A trains bhi) jaisa Round-25 me tay hua tha. */
+              wlRows: seatOnlyAvailable
+                ? seatFilter.wlRows.filter((r) => new Set(seatFilter!.rows.map((x) => x.number)).has(r.number))
+                : seatFilter.wlRows,
               trainsSeen: seatFilter.trainsSeen,
               source: seatFilter.source,
               /* Round-49: jo trains destination tak nahi jaati thin, unka note client card me bhi. */
