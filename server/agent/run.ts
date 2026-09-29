@@ -47,6 +47,10 @@ import type { JourneyPlan } from "../journey/types.js";
 import { webSourceLabel } from "../railway/webscrape.js";
 import {findWikipediaPage, webSearch, generalWebSearch, scrapeWebPage } from "./websearch.js";
 import { railKbAnswer } from "./railkb.js";
+import { runFindSeatsTool } from "./seatFinderTool.js";
+import { isPickFollowup, previousListTrains } from "./seatPick.js";
+import type { SeatFilterRow } from "./seatFilter.js";
+type SeatRowLike = SeatFilterRow;
 import { wikiTableForPage } from "./websearch.js";
 
 /** Atlas analyse intents — decideTool inhe map nahi karta (model ki zimmedari hai),
@@ -1416,7 +1420,7 @@ function isEvasiveReply(reply: string): boolean {
 
 /** Round-45: sawaal ki QISM — adequacy net isi par decide karta hai ki model ka jawab "us sawaal ka
  * jawab" hai ya nahi. Ye per-question rule nahi hai (R43k), sirf 3 qismein: seat / arrival-family / live. */
-type AnswerKind45 = "seat" | "arrival" | "live";
+type AnswerKind45 = "seat" | "arrival" | "live" | "pick";
 export function answerKind45(text: string): AnswerKind45 | null {
   const t = String(text ?? "");
   if (/\b(seat|seats|berth|availab\w*|avl|rac|waitlist|wk|wl|confirmation)\b/i.test(t) && /\b\d{4,5}\b/.test(t)) return "seat";
@@ -1442,6 +1446,12 @@ export function replyAdequateFor45(kind: AnswerKind45, reply: string, question: 
   if (!r) return false;
   if (isEvasiveReply(r)) return false;
   if (kind === "seat") return /availab|rac|waitlist|\bwl\b|₹|rs\.?\s*\d|n\/a/i.test(r);
+  /* Round-55 (pick): chunne wale sawaal ka jawab = EK winner (naam/number) + "kyun" — poora dump nahi. */
+  if (kind === "pick") {
+    const nums = [...new Set(r.match(/\b\d{5}\b/g) ?? [])];
+    const namesIt = /best|sabse|behtar|recommend|suggest|सबसे|सुझाव|yeh\s+(?:le|lo|book)|isko\s+book/i.test(r);
+    return nums.length >= 1 && nums.length <= 3 && namesIt;
+  }
   /* Route ka sach (nahi rukti/chalti) — khud me poora jawab hai. */
   if (/ruk(?:ti|ta)\s+hi\s+nahi|chalti\s+hi\s+nahi|nahi\s+ruk(?:ti|ta)|route\s+[A-Z]{2,5}\s*(?:→|->)/i.test(r)) return true;
   if (kind === "live") {
@@ -1457,9 +1467,113 @@ export function replyAdequateFor45(kind: AnswerKind45, reply: string, question: 
 }
 
 /** Round-45 rescue: us sawaal ki qism ke hisaab se pehla milne wala VERIFIED deterministic jawab. */
+/* ── Round-55: "in me se best kaunsi?" ka VERIFIED jawab ─────────────────────────────────────────────
+ * Candidates = pichhle jawab me likhi trains (wahi list jo user ne dekhi). Unka live re-check hota hai
+ * (wahi route/date/class), phir data se EK winner chuna jaata hai — sabse zyada confirmed seat, phir
+ * jaldi departure; seat na ho to kam WL; uske baad RAC. Jawab me 1 line "kyun" + runner-up. Kuch bhi
+ * banaya nahi — sab tool ke rows se. */
+export async function pickBestTurn(req: AgentRequest, seeded: AgentContext): Promise<AgentResponse | null> {
+  const text = String(req.text ?? "");
+  const cands = previousListTrains(req.history);
+  if (!isPickFollowup(text, req.history)) return null;
+  const from = seeded.origin?.code ?? req.known?.from?.code ?? null;
+  const to = seeded.destination?.code ?? req.known?.to?.code ?? null;
+  const date = seeded.date ?? req.known?.date ?? null;
+  if (!from || !to || !date) return null;
+  const cls = (text.match(/\b(1A|2A|3A|3E|2S|SL|CC|EC|FC|1E)\b/i)?.[1] ?? seeded.classCode ?? "ALL").toUpperCase();
+  const res = (await runFindSeatsTool({
+    from,
+    to,
+    date,
+    class_code: cls === "ALL" ? "ALL" : cls,
+    train_numbers: cands,
+    only_available: false,
+  })) as {
+    ok: boolean;
+    source: string | null;
+    summary: string;
+    data: { rows: SeatRowLike[]; wlRows: SeatRowLike[]; trainsSeen?: number; classCodes?: string[] };
+  };
+  if (!res?.ok) return null;
+  type Pick = SeatRowLike;
+  const all: Pick[] = [...(res.data.rows ?? []), ...(res.data.wlRows ?? [])];
+  if (!all.length) return null;
+  const rank = (r: Pick) => (r.status === "AVAILABLE" ? 0 : r.status === "RAC" ? 1 : r.status === "WAITLIST" ? 2 : 3);
+  const depMin = (r: Pick) => {
+    const m = /^(\d{1,2}):(\d{2})/.exec(String(r.departure ?? ""));
+    return m ? Number(m[1]) * 60 + Number(m[2]) : 9999;
+  };
+  const sorted = [...all].sort((a, b) => {
+    if (rank(a) !== rank(b)) return rank(a) - rank(b);
+    if (a.status === "AVAILABLE" && b.status === "AVAILABLE") {
+      if ((b.seats ?? 0) !== (a.seats ?? 0)) return (b.seats ?? 0) - (a.seats ?? 0);
+      if (depMin(a) !== depMin(b)) return depMin(a) - depMin(b);
+      if ((a.durationMinutes ?? 1e9) !== (b.durationMinutes ?? 1e9)) return (a.durationMinutes ?? 1e9) - (b.durationMinutes ?? 1e9);
+      return (a.fare ?? 1e9) - (b.fare ?? 1e9);
+    }
+    if (a.status === "RAC" && b.status === "RAC") return (b.rac ?? 0) - (a.rac ?? 0);
+    if (a.status === "WAITLIST" && b.status === "WAITLIST") return (a.waitlist ?? 99) - (b.waitlist ?? 99);
+    return depMin(a) - depMin(b);
+  });
+  const win = sorted[0];
+  const second = sorted.find((r) => r.number !== win.number) ?? null;
+  const clsText = (r: Pick) =>
+    r.status === "AVAILABLE"
+      ? `${r.classCode} AVL ${r.seats ?? "?"}${r.fare != null ? ` · ₹${r.fare}` : ""}`
+      : r.status === "RAC"
+        ? `${r.classCode} RAC ${r.rac ?? "?"}${r.fare != null ? ` · ₹${r.fare}` : ""}`
+        : r.status === "WAITLIST"
+          ? `${r.classCode} WL ${r.waitlist ?? "?"}${r.fare != null ? ` · ₹${r.fare}` : ""}`
+          : `${r.classCode} N/A${r.fare != null ? ` · ₹${r.fare}` : ""}`;
+  const why: string[] = [];
+  if (win.status === "AVAILABLE") {
+    why.push("is list me sabse zyada confirmed seats");
+    if (win.departure) why.push(`departure ${win.departure}`);
+    if (win.durationMinutes != null) why.push(`${Math.floor(win.durationMinutes / 60)}h ${String(win.durationMinutes % 60).padStart(2, "0")}m ka safar`);
+  } else if (win.status === "RAC") {
+    why.push("baaki sab WL/N-A — isme RAC mil raha hai");
+  } else if (win.status === "WAITLIST") {
+    why.push(`is waqt kisi me confirmed seat nahi — sabse kam WL (${win.waitlist ?? "?"})`);
+  } else {
+    why.push("is waqt in trains me seat hi nahi (N/A) — ye list sabse kam kharab hai");
+  }
+  const head =
+    win.status === "AVAILABLE"
+      ? `**Best: ${win.number} ${win.name} — ${clsText(win)}${win.departure ? ` · ${win.departure} departure` : ""}**`
+      : `**Sabse behtar (is waqt): ${win.number} ${win.name} — ${clsText(win)}${win.departure ? ` · ${win.departure}` : ""}**`;
+  const lines = [head, `Kyun: ${why.join(", ")}.`];
+  if (second) lines.push(`Runner-up: ${second.number} ${second.name} — ${clsText(second)}${second.departure ? ` · ${second.departure}` : ""}.`);
+  lines.push(`(Ye wahi ${cands.length} trains hain jo pichhle jawab me thi — abhi live re-check kiya gaya.)`);
+  lines.push(`[NEXT] Book ${win.number}${/[A-Z0-9]{2,3}/.test(win.classCode) ? ` · ${win.classCode}` : ""} => ${win.number} ${win.classCode} seat book krdo`);
+  const drop = /ROUTE:\s*(.+)/.exec(String(res.summary ?? ""))?.[1] ?? null;
+  return {
+    source: "agentic_model" as never,
+    nlu: undefined,
+    context: { ...seeded, classCode: cls === "ALL" ? seeded.classCode : cls },
+    tool: "FIND_SEATS" as never,
+    toolOk: true,
+    reply: lines.join("\n"),
+    seatCapture: {
+      from,
+      to,
+      date,
+      rows: res.data.rows ?? [],
+      wlRows: res.data.wlRows ?? [],
+      source: res.source,
+      dropNote: drop ? `ℹ️ ${drop.trim()}` : null,
+      nearbyNote: null,
+      trainsSeen: res.data.trainsSeen ?? all.length,
+      onlyAvailable: false,
+      classCodes: res.data.classCodes ?? [],
+    },
+  } as unknown as AgentResponse;
+}
+
 async function deterministicRescue45(kind: AnswerKind45 | null, req: AgentRequest, seeded: AgentContext): Promise<AgentResponse | null> {
   const order: Array<() => Promise<AgentResponse | null>> =
-    kind === "seat"
+    kind === "pick"
+      ? [() => pickBestTurn(req, seeded), () => singleTrainSeatTurn(req, seeded)]
+      : kind === "seat"
       ? [() => singleTrainSeatTurn(req, seeded), () => arrivalFamilyTurn(req, seeded), () => livePrecheckTurn(req)]
       : kind === "live"
         ? [() => livePrecheckTurn(req), () => arrivalFamilyTurn(req, seeded), () => departureTurn(req, seeded)]
@@ -2689,7 +2803,9 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
        * sawaal ki qism (seat / arrival / live) + jawab me expected data hai ya nahi — bas itna.
        * Jawab "theek lag raha hai" par bhi sahi ho, iske liye model ka jawab hi rakha jaata hai. */
       if (aiFirst && turn.reply && !isBookingMutation(req) && !pickReasked && !unhelpfulNoData && !unhelpfulGeneral && !skippedStationStep) {
-        const kind45 = answerKind45(String(req.text ?? ""));
+        const kind45: AnswerKind45 | null = isPickFollowup(String(req.text ?? ""), req.history)
+          ? "pick"
+          : answerKind45(String(req.text ?? ""));
         if (kind45 && !replyAdequateFor45(kind45, String(turn.reply), String(req.text ?? ""))) {
           const resc45 = await deterministicRescue45(kind45, req, seeded);
           if (resc45) {

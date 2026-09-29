@@ -49,6 +49,7 @@ eRail). Web app: React + Vite + Express (`server/`), aur Android WebView wrapper
 - `docs/RAILBOOK-ADDENDUM-v1.4.3.md` — har round ka § (naya § append karo); `START-HERE.md` — project brief.
 - **`tools/round54-routing-battery.mts`** — 12-sawaal ka tool-routing battery (`./node_modules/.bin/tsx tools/round54-routing-battery.mts`); PASS/KB/FAIL report. Naya provider lagane ya prompt badalne ke baad ise chalao.
 - `docs/TOOL-ROUTING-EXPLAINER.md` — "ChatGPT sahi tool kaise chunta hai" ka 5-pillar naksha + RailBook me kahan kya hai.
+- **`server/agent/seatPick.ts`** (R55) — "in me se best" follow-up (`isPickFollowup`/`previousListTrains`/`pickBestTurn`) + chupke lagaye gaye time-window ka guard (`askedTimeWindow`/`dropUnaskedWindow`). Test: `tests/round55-pick-and-window.test.ts`.
 
 ## User ke standing rules (inka khayal rakho)
 - **Sab data REAL** — kuch fake/invent nahi; jo provider se nahi mila wo saaf likho.

@@ -19,6 +19,7 @@ import { env } from "../env.js";
 /* 24 Sep 2026 (user: "AI sabh handle kare — do not specific to 2A"): AI khud seat sawaal ka
  * poora jawab deta hai is tool se (live board + per-train rows). */
 import { FIND_SEATS_DESCRIPTION, FIND_SEATS_PARAMETERS, runFindSeatsTool } from "./seatFinderTool.js";
+import { dropUnaskedWindow, isPickFollowup, previousListTrains } from "./seatPick.js";
 import { parseSeatIntent } from "../understand/seatIntent.js";
 import { getProvider } from "../providers/index.js";
 import { todayYmd } from "../util.js";
@@ -1211,6 +1212,8 @@ export type ToolExecContext = {
   /** User ka original message — WEB_SEARCH isse Hinglish sawaal ka topic
    * (speed/history/coach) samajh kar Wikipedia se focused jawab nikalta hai. */
   userText?: string;
+  /** Round-55: "in me se best" follow-up me candidates (pichhle jawab ki trains) — list na badle. */
+  pickCandidates?: string[];
   /** Round-18m-9: passengers from known context — seat filters use it. */
   passengers?: number | null;
   /** Round-18m-29: agentic loop → planner ka decision final-answer call mein merge (AI 3→2). */
@@ -1790,20 +1793,37 @@ export async function executeApprovedTool(
          * "agar confirm bola to confirm dikhao na sirf". Isliye user ki wording pakki ho (confirmedOnly)
          * to flag force hota hai — model ke paas WL-only trains likhne ko hoti hi nahi. */
         const forcedOnlySeats = parseSeatIntent(String(ctx.userText ?? "")).confirmedOnly;
+        /* ── Round-55b: chupke se lagaye gaye filters band (user ka asli case) ──────────────────────────
+         * Screenshot: "ASR se LDH 3A me seat batao" par list badal gayi aur ek train (Sachkhand) gayab
+         * ho gayi. Wajah: model ne khud se `depart_after: subah` jaisa waqt ka filter laga diya (user ne
+         * waqt bola hi nahi tha) — us window se bahar wali trains chhup gayi. Ab: user ke shabdon me waqt
+         * ka zikr na ho to window filter HATA diya jaata hai (data chhupane ka koi bahana nahi). */
+        const userAskText = String(ctx.userText ?? "");
+        /* Watch: user ne waqt nahi bataya to chupke lagaya window filter yahin hat jaata hai (seatPick.ts). */
+        const { args: seatArgs, dropped: windowDropped } = dropUnaskedWindow(userAskText, a as Record<string, unknown>);
+        /* Follow-up chunav ("in me se best") me candidates WAHI rehne chahiye jo pichhle jawab me the —
+         * model aadhi list bhej de to bhi server poori candidates par check karta hai (list na badle). */
+        const pickCands = ctx?.pickCandidates?.length ? ctx.pickCandidates : [];
+        if (pickCands.length >= 2) seatArgs.train_numbers = pickCands.join(",");
         const res = await runFindSeatsTool({
           from: String(a.from ?? ""),
           to: String(a.to ?? ""),
           date: String(a.date ?? ""),
           class_code: (a.class_code as string | undefined) ?? null,
-          only_available: forcedOnlySeats ? true : (a.only_available as boolean | undefined) ?? null,
-          depart_after: (a.depart_after as string | number | undefined) ?? null,
-          depart_before: (a.depart_before as string | number | undefined) ?? null,
-          sort_by: (a.sort_by as "cheapest" | "fastest" | undefined) ?? null,
-          train_numbers: (a.train_numbers as string | string[] | undefined) ?? null,
+          only_available: forcedOnlySeats ? true : (seatArgs.only_available as boolean | undefined) ?? null,
+          depart_after: (seatArgs.depart_after as string | number | undefined) ?? null,
+          depart_before: (seatArgs.depart_before as string | number | undefined) ?? null,
+          sort_by: (seatArgs.sort_by as "cheapest" | "fastest" | undefined) ?? null,
+          train_numbers: (seatArgs.train_numbers as string | string[] | undefined) ?? null,
           quota: (a.quota as string | undefined) ?? null,
           passengers: (a.passengers as number | undefined) ?? null,
         });
-        return res.ok ? okResult(res.source, res.summary, res.data) : failResult(res.source, res.summary, res.data);
+        /* Round-55b: agar model ne khud se window lagayi thi aur server ne hata di, to model ko sach batao
+         * — warna wo apne jawab me wahi (na-lagi) window likh deta hai aur user confuse hota hai. */
+        const seatSummary = windowDropped
+          ? `ℹ Server ne tumhara time-window filter hata diya (user ne waqt nahi bataya) — neeche POORE din ka board hai; jawab me bhi koi window (subah/shaam/04:00-12:00) mat likho. ${res.summary}`
+          : res.summary;
+        return res.ok ? okResult(res.source, seatSummary, res.data) : failResult(res.source, seatSummary, res.data);
       }
       case "CHECK_AVAILABILITY": {
         /* Round-43k: station train ke route me hai ya nahi — shared checker (routeCheck.ts) verify karta
@@ -2323,6 +2343,8 @@ function systemPrompt(
     "28. SAWAAL KA MATLAB PEHLE (user 2026-09-26: 'kya AI meri baat samajh nahi paaya?'): 'plan banao / journey plan / kya best rahega' = RANK_JOURNEY_OPTIONS ya JOURNEY_ANALYZE (timings + fare + best option) — seat board ki list NAHI. 'alternative trains / doosri trains / koi aur option / iske alawa' = FIND_ALTERNATIVE_TRAINS (us train ke aage/peeche wali trains, timing+fare ke saath) — wahi purani list dobara NAHI. 'trains batao / kaunsi trains chalti hain' = SEARCH_TRAINS. 'seat/berth/AVL/kitni seat khali' = FIND_SEATS ya CHECK_AVAILABILITY. Har TRAIN LIST jawab me timing (departure → arrival + duration) aur fare (jo tool ne diya ho) ZAROOR likho — 'sirf train ke naam' wali list adhoori hai (user ki shikayat: 'trains list krdi without fare and timings'). CLASS AMBIGUOUS HO TO PEHLE POOCHHO (user 2026-09-26: '19028 mein book krdo' par AI ne class nahi poochhi, seedha ek class ka form khol diya, jabki us train me kai classes khuli thi — 'AI khud kyu nhi soch rha, har cheez thodi btani padegi'): agar user booking maange ('book krdo', '<train> mein book') aur usne class NA boli ho aur us train me EK SE ZYADA class khuli ho, to pehle SAAF poochho 'kaunsi class me book karun?' aur [NEXT] me wahi classes chips ke roop me do (jaise '[NEXT] 19028 · 3A (AVL 26 ₹565) => 19028 mein 3A book krdo') — uski class ke bina aage mat badho; ek hi class khuli ho to seedha wahi class bata do (poochhne ki zaroorat nahi).",
     "33. RESOLVE-ONLY RESULT (user 2026-09-28: 'AI kyu nahi sahi answer de rha jo poocho usse'): agar kisi tool ka result sirf itna ho ki train/station resolve ho gaya (jaise SEARCH_TRAIN_BY_NUMBER ka number+naam) aur user ne asli sawaal kuch AUR poochha hai (status/time/seat/fare/route), to AB usi sawaal ka tool call karo — sirf confirm karke mat ruko, aur user ko tool ka data/instruction text mat dikhao. Jo poochha gaya wahi jawab do.",
     "32. SAHI TOOL CHUNO (user 2026-09-27: 'jaise chatgpt/gemini/manus sahi tools use karte hain sahi as per user query — mera AI bhi ek dum perfectly sahi tools use kare, user query samajhke'): pehle sawaal ka IRADA pehchano, phir usi ka tool lagao (galat tool = galat jawab; tool fail ho to agla sahi tool, ya sach batao — dump nahi):\n   • 'kahan hai / abhi kahan / kitni late / late hai kya' → TRACK_TRAIN\n   • 'stops / route / timetable / kitne baje kahan' (train number ke saath) → GET_TIMETABLE\n   • 'train ki jankari / naam / number / type' → GET_TRAIN_INFO ya SEARCH_TRAIN_BY_NUMBER\n   • 'time par chalti hai / punctual / mostly late' → GET_TRAIN_HISTORY (date poochhne ki zaroorat nahi)\n   • 'seat / berth / AVL / kitni seat khali / RAC / WL' (train+date+class) → CHECK_AVAILABILITY (khaali berth chahiye to FIND_VACANT_SEATS; aadhi yatra ho to FIND_PARTIAL_ROUTE_SEATS)\n   • route-level seat sawaal (do station ke beech 'confirm seat / seat batao / seat find karo / seat hai kya', koi ek train+class fix nahi, PASSENGERS bhi nahi bataye) → **FIND_SEATS** — ye tool pax count maangta NAHI (board pura deta hai). Aise sawaal par JOURNEY_ANALYZE/RANK_JOURNEY_OPTIONS MAT chalao (wo pax maangte hain aur turn wahin atak jaata hai).\n   • 'fare / kiraya / kitne ka' → GET_FARE\n   • 'trains batao / kaunsi trains' → SEARCH_TRAINS · 'plan/best/timings' → JOURNEY_ANALYZE · 'rank/preference' → RANK_JOURNEY_OPTIONS · 'aur options / alternative' → FIND_ALTERNATIVE_TRAINS · 'connecting / ho kar' → FIND_CONNECTIONS\n   • 'PNR' → CHECK_PNR · 'cancelled trains' → GET_CANCELLED_TRAINS · 'station code / kaunsa station' → SEARCH_STATIONS · 'station board / aa rahi trains' → GET_STATION_BOARD · 'coach position' → GET_COACH_POSITION (na mile to sach batao: departure se ~1–2 ghante pehle station board/app par milta hai)\n   • comparison ('X aur Y me fark', 'vs', 'behtar kaun') → DONO ke bare me WEB_SEARCH/KB se laao, phir bullet-wise compare karo (sirf ek cheez ka jawab adhoora hai)\n   • history/records/rules/counts ('sabse lambi', 'kitne zones', 'kab shuru', 'kya rule') → WEB_SEARCH + KB (Wikipedia) — live tools se MAT maango\n   • booking hukm ('book krdo') → pehle class ambiguity clear, phir CHECK_AVAILABILITY/GET_FARE se real data, phir form. (a) agar upar ka koi tool fail ho (provider down) to usi kaam ka doosra tool try karo; dono fail hon to user ko saaf batao kab/kaise milega (app, station board, ya thodi der baad) — 'data nahi mila' dump kabhi nahi; (c) kisi tool ka ✗ (fail) ye matlab NAHI ki list khaali hai — fail par us cheez ka koi claim mat karo (jaise 'koi train cancel nahi hui') — saaf bolo 'list abhi nahi mili' aur (agar ho) kisi train ka alert data do; (b) jo sawaal user ne poochha, uska tool hi pehla — doosre sawaal ka data laa kar jawab mat badlo.",
+    "36. WAQT KA ZIKR (user 2026-09-29): user ne khud waqt na bataya ho (subah/shaam/raat/\d baje/am-pm/HH:MM) to na koi time-window filter lagao aur na apne jawab me 'subah 04:00-12:00' jaisi window likho — poore din ka board do ('poore din' likho). Window sirf tab jab user ne khud waqt maanga ho; tab bhi window ke bahar wali trains alag line me batao, chhupao mat.",
+    "35. 'IN ME SE BEST' (user 2026-09-29): jab user pichhli list me se chunne/compare karne ko kahe ('in me se', 'esmein se', 'isme se', 'inse', 'among these', 'best kaunsi', 'sabse acchi', 'recommend karo') — to usi list ke trains lo (naya board MAT laao; FIND_SEATS ko train_numbers ke saath call karo) aur jawab me EK best train chuno + ek line me kyun + runner-up. Poori list dobara likhna galat hai.",
     "34. SIRF TOOL KA DATA (user 2026-09-29: 'kuch bhi fake mat karo; sabh data real ho'): jawab me koi bhi train number YA train ka naam SIRF usi tool ke result se likho jo tumne is turn me chalaya. Apni memory/general knowledge se koi train number, naam ya uski availability kabhi mat likho — chahe tumhe yaad ho ki wo train us route par chalti hai. Tool result me jitni trains hain, utni hi likhni hain (kam bhi nahi, zyada bhi nahi). Agar lagta hai koi train reh gayi, to koi doosra tool/params try karo — andaza se list nahi lambi karni.",
     "31. KHUD KA DIMAAG (user 2026-09-27: 'jaise chatgpt/gemini/manus khud ka brain use karte hain… unko pehle batana nahi padta, wo khud se samajhte hain ki kya missing hai, user se kya poochhna chahiye, kaunsa tool lagana hai — waise hi mera AI bhi khud se samjhe'): har turn tum YE 4 kadam khud karo, koi tumhe batayega nahi — (1) SAMJHO: user ki baat apne shabdon me (typo/adhoora bhi ho to matlab nikaalo, jaise 'statsu'=status, 'gaadi'=train, 'ldh'=Ludhiana, 'asr'=Amritsar; haan/na/thanks jaise jawaab pichhle sawaal ka jawab maano). (2) CHECK KARO — kya missing hai?: jawab/kaam ke liye koi cheez zaroori hai jo user ne nahi boli (route? date? passengers? class kaunsi? train kaunsa? seat ya live?) to wo khud pehchano aur BAS wahi ek zaroori sawaal poochho (jab tak ek se zyada sach me na atke hon), saath me [NEXT] chips se options do (dates: aaj/kal/parso; classes; trains). Jo user bata chuka hai (route/date/class/pax) wo FINAL maano — dobara MAT poochho. Jo sawaal tu poochhega wahi user ke liye agla kadam hai — usme wo choices do jo sach me aage badhaayein. (3) TOOLS KHUD CHUNO: jawab ke liye jo tool chahiye wo tumhare paas hai — lagao, jitne chahiye. Live/seat/fare/status/PNR → CHECK_AVAILABILITY/GET_FARE/TRACK_TRAIN/CHECK_PNR (ConfirmTkt → RailYatri → eRail order tools ke andar hi hai); train jankari → GET_TRAIN_INFO/GET_TIMETABLE/SEARCH_TRAIN_BY_NUMBER; route/train list → SEARCH_TRAINS/JOURNEY_ANALYZE; general knowledge (history/speed/rules/counts/records) → WEB_SEARCH (Wikipedia) + KB. Tool ne kuch reject kiya (date/passengers missing) to wo tumhe batata hai — us par apne shabdon me user se wahi ek sawaal poochho. (4) JAWAB + AAGE: seedha, poora, confident jawab (numbers sahi), phir [NEXT] se agla kadam. KABHI mat likho 'mujhe batao kya karna hai' / 'aap bataayein kya chahiye' — ye tumhara kaam hai. KABHI 'provider se data nahi mila' bol kar mat ruko jab sawaal general knowledge ka hai. (f) Agar system ne date/route resolve kar di (hint line me 'FINAL' likha ho) to use FINAL maano — jo cheez user keh chuka ya system resolve kar chuka hai uska sawaal DOBARA mat poochho; sirf wo poochho jo SACH ME missing hai (jaise passengers).",
     "30. DO MODES (user 2026-09-27: 'jaise chatgpt/gemini/claude/manus — koi bhi sawaal par ek dum accurate answer'): (a) LIVE mode = kisi khaas train ka seat/availability/fare/live status/PNR/coach/platform, ya aaj/kal ki booking ya journey-timing — inme SIRF tools ka verified data use karo, koi number khud se mat likho. (b) KNOWLEDGE mode = baaki sab (general railway knowledge, rules, history, comparison, station info, 'kitne platform', 'kaunsi sabse tez train', 'bachche ka ticket', 'kya tum ye kar sakte ho') — inme tum duniya ka sabse acha assistant ho: apne knowledge se seedha, poora, confident jawab do, aur zaroorat pade to WEB_SEARCH se verify karo. (c) KNOWLEDGE sawaal par 'data nahi mila' bolna MANA hai jab jawab tumhe pata hai — ChatGPT jaisa seedha batao (numbers/dates sahi hone chahiye; shak ho to web se confirm karo). (d) Spelling galat/adhoori ho sakti hai (statsu=status, gaadi=train, 'ldh se asr') — SAMJH kar jawab do, spelling ke bahane sawaal dobara mat poochho. (e) User ne JO poochha uska JAWAB do — uske sawaal ki jagah apna naya sawaal sirf tab jab sach me aage badhne ke liye zaroori ho.",
@@ -3169,7 +3191,24 @@ export async function runAgenticTurn(input: {
   const historyTurns = (Array.isArray(input.history) ? input.history : [])
     .filter((h) => h && (h.role === "user" || h.role === "assistant") && typeof h.content === "string" && h.content.trim())
     .slice(-8)
-    .map((h) => ({ role: h.role, content: redact(h.content.slice(0, 700)) }));
+    /* Round-55: assistant ke jawab me poori list hoti hai — 700 chars par kat jaati thi (trains context se
+     * gayab ho jaati thin), isliye assistant ke liye zyada jagah. User ke sawaal chhote hote hain. */
+    .map((h) => ({ role: h.role, content: redact(h.content.slice(0, h.role === "assistant" ? 1500 : 700)) }));
+  /* ── Round-55: "in me se best train batao" jaise follow-up par CANDIDATES block ────────────────────
+   * User ki shikayat: pehli list me Sachkhand tha, agle sawaal par list badal gayi aur AI ne poora dump
+   * kar diya. Ab: pichhle jawab ki wahi trains candidates banti hain (dobara poora board nahi), aur
+   * model ko saaf kaha jaata hai — inhi me se EK best chuno + 1 line kyun + runner-up. */
+  const pickFollowup = isPickFollowup(String(input.text ?? ""), input.history);
+  const pickCandidates = pickFollowup ? previousListTrains(input.history) : [];
+  const pickBlock =
+    pickCandidates.length >= 2
+      ? `FOLLOW-UP (chunav): user PICHHLI list me se chunna chahta hai — candidate trains: ${pickCandidates.join(", ")}. ` +
+        `Ab poora naya board MAT laao: FIND_SEATS ko train_numbers="${pickCandidates.slice(0, 12).join(",")}" ke saath call karo ` +
+        `(wahi route/date jo pichhle turn me thi; date na pata ho to user se ek hi line me poochho). ` +
+        `Jawab ka dhaancha: (1) pehli line me EK winner — "Best: <number> <name> — <class> <AVL x|WL y|RAC> · ₹fare · departure"; ` +
+        `(2) "Kyun:" ek chhoti line (sabse zyada confirmed seats / earliest departure / sasta / kam WL — jo data kehta ho); ` +
+        `(3) "Runner-up: <number> ..." ek line; (4) [NEXT] book chip. Poori list dobara likhna MANA hai — sirf winner + runner-up.`
+      : null;
   const routeFact = await routeFactLine(String(input.text ?? "")).catch(() => null);
   const messages: ChatMsg[] = [
     {
@@ -3193,6 +3232,7 @@ export async function runAgenticTurn(input: {
         input.text,
       ),
     },
+    ...(pickBlock ? [{ role: "system" as const, content: pickBlock }] : []),
     ...(routeFact ? [{ role: "system" as const, content: routeFact }] : []),
     ...historyTurns,
     {
@@ -3673,7 +3713,7 @@ export async function runAgenticTurn(input: {
         ) {
           input.capture.passengers = args.passengers;
         }
-        result = await executeApprovedTool(toolName, args, { userText: input.text, capture: input.capture ?? null, passengers: input.known?.passengers ?? (typeof args.passengers === "number" && args.passengers >= 1 && args.passengers <= 6 && userStatedPax(input.text, args.passengers, { bareDigitIsPax: lastAskedPax }) ? args.passengers : null), deferDecision: true });
+        result = await executeApprovedTool(toolName, args, { userText: input.text, capture: input.capture ?? null, pickCandidates: isPickFollowup(String(input.text ?? ""), input.history) ? previousListTrains(input.history) : [], passengers: input.known?.passengers ?? (typeof args.passengers === "number" && args.passengers >= 1 && args.passengers <= 6 && userStatedPax(input.text, args.passengers, { bareDigitIsPax: lastAskedPax }) ? args.passengers : null), deferDecision: true });
         }
         // Structured table capture (user feedback 2026-09-05): SEARCH/JOURNEY
         // success par rows nikalo — client proper <table> render karega, aur
