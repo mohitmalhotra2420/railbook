@@ -20,8 +20,8 @@
  *   train_numbers: sirf in trains par (jaise "12029,12497")
  */
 import { getProvider } from "../providers/index.js";
-import { routedClassBoard, routedRouteBoard, routedStationSearch } from "../railway/router.js";
-import { filterTrainsServingSegment, routeDropNote } from "./routeSegment.js";
+import { enrichTrainsFreshness, routedClassBoard, routedRouteBoard, routedStationSearch } from "../railway/router.js";
+import { filterTrainsServingSegment, nearbyCandidatesNote, routeDropNote } from "./routeSegment.js";
 import { searchStations as searchLocalStations } from "../data/stations.js";
 import {
   AC_CLASSES,
@@ -156,6 +156,15 @@ export async function runFindSeatsTool(args: FindSeatsArgs): Promise<FindSeatsRe
   const keptNums = new Set((seg?.trains ?? []).map((t) => String(t.trainNumber).trim()));
   const board = boardRaw ? { ...boardRaw, trains: boardRaw.trains.filter((t) => keptNums.has(String(t.trainNumber ?? "").trim())) } : null;
   const dropLine = seg ? routeDropNote(seg.dropped, to) : null;
+  /* Round-50: jo trains segment tak nahi jaati par seat-detih hain — alag section (jaise JAT tak). */
+  const nearbyLine = seg
+    ? nearbyCandidatesNote(
+        (boardRaw?.trains ?? []).filter((t) => seg.dropped.some((d) => d.number === String(t.trainNumber ?? "").trim())) as { trainNumber: string; trainName?: string; classes?: never[] }[],
+        seg.dropped,
+        from,
+        to,
+      )
+    : null;
   if (!board || !board.trains.length) {
     return {
       ok: false,
@@ -243,6 +252,20 @@ export async function runFindSeatsTool(args: FindSeatsArgs): Promise<FindSeatsRe
     windowLabel,
     sortBy,
   };
+  /* Round-50: dikhaayi jaane wali trains ke purane/future rows ka live probe (IRCTC se ulat ho sakta
+   * hai — user ka 2S case). Live row na mile to purani row waise hi rehti hai. */
+  try {
+    if (typeof enrichTrainsFreshness === "function") {
+      const probe = pickSeatRows(pool, slots, times);
+      const probeWl = onlyAvailable ? pickSeatRows(pool, { ...slots, onlyAvailable: false }, times) : probe;
+      const order: string[] = [];
+      for (const r of [...probe.seat, ...probeWl.wl]) if (!order.includes(r.number) && order.length < 6) order.push(r.number);
+      if (order.length) await enrichTrainsFreshness(trains as { trainNumber: string; trainName: string; classes: never[] }[], order, from, to, date, quota);
+    }
+  } catch {
+    /* freshness optional — board data waise hi */
+  }
+
   const pick = pickSeatRows(pool, slots, times);
   /* WL rows alag se (onlyAvailable par bhi), taaki "seat nahi par WL itni" sach bata sake. */
   const wlPick = onlyAvailable
@@ -263,6 +286,7 @@ export async function runFindSeatsTool(args: FindSeatsArgs): Promise<FindSeatsRe
   if (pick.missingClass) lines.push(`${pick.missingClass} trains me ye class hi nahi hai — unhe "seat nahi" mat maano.`);
   /* Round-49: hati hui trains (jo ${to} tak nahi jaati) — model ise jawab me saaf likh de. */
   if (dropLine) lines.push(`ROUTE: ${dropLine.replace(/^ℹ️\s*/, "")}`);
+  if (nearbyLine) lines.push(`NEARBY: ${nearbyLine.replace(/^🧭\s*/gm, "")}`);
   if (pick.unknownTime) lines.push(`${pick.unknownTime} rows ka time nahi mila (time filter laga tha).`);
   lines.push(`Source: ${board.provider ?? "live board"} · ${pool.length} trains dekhe (${enriched.size} ka alag board check kiya).`);
   lines.push("Jawab me SAARI trains ki lines likho (jo SEAT rows me hain) — 'baaki trains kisi card me hain' jaisi baat kabhi mat likho, chat me aisa koi card nahi dikhta.");

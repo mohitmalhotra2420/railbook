@@ -13,8 +13,8 @@
  * WL ka confirm% hum nahi dete (data hai hi nahi) — sirf asli WL number.
  */
 import { getProvider } from "../providers/index.js";
-import { routedRouteBoard } from "../railway/router.js";
-import { filterTrainsServingSegment, routeDropNote } from "./routeSegment.js";
+import { enrichTrainsFreshness, routedRouteBoard } from "../railway/router.js";
+import { filterTrainsServingSegment, nearbyCandidatesNote, routeDropNote } from "./routeSegment.js";
 import type { SeatIntentSlots } from "../understand/seatIntent.js";
 
 export interface SeatBoardClass {
@@ -329,6 +329,8 @@ export interface SeatFilterResult {
   source: string | null;
   /** Round-49: jo trains segment tak nahi jaati thin, unka saaf note (jaise SVDK me JAT wali). */
   dropNote?: string | null;
+  /** Round-50: unme se jo seat-detih hain — alag section (aage khud jaana hoga), yahi IRCTC bhi dikhata hai. */
+  nearbyNote?: string | null;
 }
 
 /**
@@ -359,6 +361,17 @@ export async function seatFilterFor(opts: {
   const board = { ...boardRaw, trains: boardRaw.trains.filter((t) => keptNums.has(String(t.trainNumber ?? "").trim())) };
   if (!board.trains.length) return null;
   const dropNote = routeDropNote(seg.dropped, to);
+  /* ── Round-50 (user: "haan banado"): jo trains maangi hui destination tak nahi jaati, unme se jo
+   * seat-detih hain wo alag section me — "JAT tak (aage khud)". User IRCTC par bhi yahi dekhta hai
+   * (LDH→Katra search me JAT-tak wali trains aati hain), isliye option chhupna nahi chahiye — bas
+   * saaf label ke saath, main list se alag. Koi andaza nahi: seats wahi board rows se. */
+  const droppedSet = new Set(seg.dropped.map((d) => d.number));
+  const nearbyNote = nearbyCandidatesNote(
+    boardRaw.trains.filter((t) => droppedSet.has(String(t.trainNumber ?? "").trim())),
+    seg.dropped,
+    from,
+    to,
+  );
 
   /* Round-33 (user 26 Sep: "trains list krdi without fare and timings"): pehle times sirf tab aate the
    * jab time-window/fastest-sort maanga ho — ab HAR seat turn par (wahi ek search call, deduped) taaki
@@ -379,6 +392,24 @@ export async function seatFilterFor(opts: {
     }
   }
 
+  /* ── Round-50: dikhaayi jaane wali trains ke rows LIVE verify karo ──────────────────────────────
+   * User (29 Sep): IRCTC/ConfirmTkt par 12265 ki 2S AVAILABLE thi, par app me nahi dikhi (hamare paas
+   * us row ka purana/future-dated cache tha). Ab pehle ek probe-pick se un trains ka pata chalta hai
+   * jo user ko dikhne wali hain (seat wali pehle, phir WL wali), unke stale/UNKNOWN/future rows ka
+   * live probe (wahi machinery jo /api/availability ke focus trains par chalti hai), phir final pick.
+   * Live row na mile to purani row waise hi rehti hai (kuch invent nahi). */
+  try {
+    if (typeof enrichTrainsFreshness === "function") {
+      const probe = pickSeatRows(board.trains as SeatBoardTrain[], slots, times);
+      const probeWl = slots.onlyAvailable ? pickSeatRows(board.trains as SeatBoardTrain[], { ...slots, onlyAvailable: false }, times) : probe;
+      const order: string[] = [];
+      for (const r of [...probe.seat, ...probeWl.wl]) if (!order.includes(r.number) && order.length < 6) order.push(r.number);
+      if (order.length) await enrichTrainsFreshness(board.trains as { trainNumber: string; trainName: string; classes: never[] }[], order, from, to, date, "GN");
+    }
+  } catch {
+    /* freshness optional hai — board ka data waise hi chalta hai */
+  }
+
   const pick = pickSeatRows(board.trains as SeatBoardTrain[], slots, times);
   /* 24 Sep 2026 (user: "2A ki seats dikhana" → "koi seat wali train nahi mili" par WL ka pata hi
    * nahi chala): onlyAvailable=true par bhi WL rows ALAG se nikaal lo, taaki line bata sake ki
@@ -386,7 +417,10 @@ export async function seatFilterFor(opts: {
   const wlPick = slots.onlyAvailable
     ? pickSeatRows(board.trains as SeatBoardTrain[], { ...slots, onlyAvailable: false }, times)
     : pick;
-  const line = seatSummaryLine({ ...pick, wl: wlPick.wl }, slots, { from, to }) + (dropNote ? `\n${dropNote}` : "");
+  const line =
+    seatSummaryLine({ ...pick, wl: wlPick.wl }, slots, { from, to }) +
+    (dropNote ? `\n${dropNote}` : "") +
+    (nearbyNote ? `\n${nearbyNote}` : "");
   /* Round-25: payload/line me saari seat-wali trains (12 tak) — default 8 se badhaya.
    * Round-27: cap ab *trains* par — har train ki SAARI classes isi jawab/block me aani chahiye. */
   const max = opts.maxRows ?? SEAT_LINE_MAX;
@@ -397,5 +431,6 @@ export async function seatFilterFor(opts: {
     trainsSeen: board.trains.length,
     source: board.provider ?? null,
     dropNote,
+    nearbyNote,
   };
 }

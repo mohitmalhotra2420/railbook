@@ -2560,3 +2560,16 @@ button.rp-crow:active { transform: translateY(1px); }
   font-size: 11.5px;
   line-height: 1.5;
 }
+
+/* Round-50: "JAT tak (aage ka safar khud)" wala alag section — saaf, main list se alag. */
+.sf-note.near {
+  color: #2c4f86;
+  background: #eef4ff;
+  border: 1px solid #d3e0f7;
+  border-radius: 10px;
+  padding: 7px 10px;
+  margin-top: 8px;
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+.sf-note.near > div + div { margin-top: 3px; color: var(--muted); }

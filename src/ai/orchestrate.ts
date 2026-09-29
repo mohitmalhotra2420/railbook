@@ -97,6 +97,8 @@ export type Block =
       focus?: string[];
       /** Round-49: jo trains maangi hui destination tak nahi jaati thin, unka saaf note (server se). */
       dropNote?: string | null;
+      /** Round-50: unme se seat-detih trains ka alag section (jaise JAT tak, aage khud). */
+      nearbyNote?: string | null;
       rows: {
         number: string;
         name: string;

@@ -123,3 +123,59 @@ export function routeDropNote(dropped: SegmentDrop[], to: string): string | null
   const more = dropped.length > 4 ? ` +${dropped.length - 4} aur` : "";
   return `ℹ️ ${shown.join(", ")} — ye ${to} tak nahi jaati, isliye list se hata di.`;
 }
+
+/* ── Round-50 (29 Sep 2026, user "Haan banado"): JAT-tak wali trains ka alag section ───────────────
+ * Jo trains maangi hui destination tak nahi jaati (jaise LDH→SVDK me JAT par khatam hone wali), unme
+ * se jo abhi seat-detih hain wo **alag section** me dikhti hain — saaf label ke saath: "ye sirf JAT tak
+ * jaati hain (aage ka safar khud)". IRCTC bhi Katra search me yahi trains dikhata hai (LDH JN → S M V D
+ * KATRA board me JAT destination ke saath), isliye option chhupna nahi chahiye — bas main list se alag
+ * rehna chahiye. Seats/number wahi board rows se (kuch invent nahi). */
+type ClassRow = {
+  code?: string | null;
+  classCode?: string | null;
+  status?: string | null;
+  seats?: number | null;
+  rac?: number | null;
+  waitlist?: number | null;
+};
+
+/** Sirf seat-detih classes (AVAILABLE/RAC) — section ka maksad "yahaan confirm seat hai" hai; WL
+ *  offer karna jhootha lagega (main list ka rule bhi wahi hai). */
+function classBit(c: ClassRow): string | null {
+  const code = String(c.classCode ?? c.code ?? "").trim().toUpperCase();
+  if (!code) return null;
+  const st = String(c.status ?? "").toUpperCase();
+  if (st === "AVAILABLE") return `${code} AVL ${c.seats ?? "—"}`;
+  if (st === "RAC") return `${code} RAC ${c.rac ?? "—"}`;
+  return null;
+}
+
+export function nearbyCandidatesNote<T extends { trainNumber: string; trainName?: string; classes?: ClassRow[] }>(
+  trains: T[],
+  dropped: SegmentDrop[],
+  from: string,
+  to: string,
+): string | null {
+  if (!trains.length || !dropped.length) return null;
+  const byLast = new Map<string, string[]>();
+  for (const t of trains) {
+    const n = String(t.trainNumber ?? "").trim();
+    const drop = dropped.find((d) => d.number === n);
+    if (!drop) continue;
+    const bits = (t.classes ?? []).map(classBit).filter((x): x is string => Boolean(x)).slice(0, 4);
+    if (!bits.length) continue; /* seat ka data hi nahi — section me kuch nahi likhte */
+    const name = String(t.trainName ?? "").trim();
+    const line = `${n}${name ? ` ${name}` : ""} (${bits.join(" · ")})`;
+    const key = drop.last || "?";
+    const arr = byLast.get(key) ?? [];
+    if (!arr.includes(line)) arr.push(line);
+    byLast.set(key, arr);
+  }
+  if (!byLast.size) return null;
+  const parts: string[] = [];
+  for (const [last, lines] of byLast) {
+    parts.push(`🧭 ${last} tak (aage ka safar khud): ${lines.slice(0, 3).join(" | ")}${lines.length > 3 ? ` | +${lines.length - 3} aur` : ""}`);
+  }
+  const lastStops = [...byLast.keys()];
+  return `${parts.join("\n")}\n(Inme ${from}→${lastStops.join("/")} tak ka ticket hota hai, ${to} ka nahi.)`;
+}
