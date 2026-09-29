@@ -3438,11 +3438,18 @@ export async function runAgenticTurn(input: {
       const isPrimary = qi === 0;
       /* Stage-5L-net: 40s primary floor ate the whole turn when Muse hung; 18s still covers healthy NIM rounds. */
       const primaryMinMs = Math.max(4000, Number(process.env.AI_PRIMARY_MIN_MS ?? 18000));
+      /* Round-61 (user: "Muse ko primary kro"): Muse bade prompt par 30-45s+ le leta hai. Pehle primary ko
+       * bhi wahi 45s cap milta tha → bade sawaal par round timeout → dobara poora kaam (106s ka turn).
+       * Ab primary ke liye alag cap (AI_PRIMARY_TIMEOUT_MS, default = agenticBaseMs): muse ko ek hi baar
+       * poora mauka milta hai, fallback ke liye reserve (6s/model) phir bhi bacha rehta hai — aur total
+       * turn budget (180s) se kabhi aage nahi jaata. */
+      const primaryCapMs = Math.max(agenticBaseMs, Number(process.env.AI_PRIMARY_TIMEOUT_MS ?? 0) || 0);
       const reservePerFallback = 6000;
       const naturalCap = Math.max(4000, timeLeft() - modelsAfterThis * reservePerFallback - 1500);
+      const capMs = isPrimary ? primaryCapMs : agenticBaseMs;
       const agenticTimeoutMs = Math.max(
         3000,
-        Math.min(agenticBaseMs, isPrimary ? Math.max(naturalCap, Math.min(primaryMinMs, timeLeft() - 2000)) : naturalCap),
+        Math.min(capMs, isPrimary ? Math.max(naturalCap, Math.min(primaryMinMs, timeLeft() - 2000)) : naturalCap),
       );
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), agenticTimeoutMs);
