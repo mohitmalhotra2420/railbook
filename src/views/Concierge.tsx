@@ -14,7 +14,7 @@ import { validatePassengers } from "../booking/state";
 import { loadTravellers } from "../data/travellers";
 import { addDays, availabilityLabel, formatShortDate, inr, newId, todayYmd } from "../format";
 import { BERTH_BY_CLASS, CLASS_LABELS, isBookable, type ClassAvailability, type ClassCode, type Passenger, type Station, type TrainResult } from "../types";
-import type { AgentTrainTable } from "../ai/agent";
+import type { AgentJourneyPlan, AgentTrainTable } from "../ai/agent";
 import { JourneyOptions } from "../components/JourneyOptions";
 import { bookingFromChipPayload, bookingFromSeatRow, stationOf } from "../booking/fromOption";
 /* Round-29: booking intent par seedha passenger form (pure resolution logic — test ke liye alag). */
@@ -781,16 +781,71 @@ export function Concierge() {
    * hai wo SEEDHA usi page par khulta hai (connect ya alt). Page ka data usi AI/server plan se — kuch
    * banaya hua nahi. ── */
   const pendingPlanPageRef = useRef<"connect" | "alt" | null>(null);
+  /** Chat wala rasta (R57) — ab sirf fallback ke liye: "Chat me poochho" dabane par. */
   function openPlanPage(page: "connect" | "alt", from: string, to: string, date: string) {
     if (!from || !to) return;
     pendingPlanPageRef.current = page;
     const pax = state.paxProvided && state.passengerCount ? state.passengerCount : 1;
-    /* "poora plan banao" phrasing hi plan card banata hai (verified plan flow) — usi par page khulta hai. */
-    const want =
-      page === "connect"
-        ? `poora plan banao — connecting trains aur leg-wise seat bhi dikhao`
-        : `poora plan banao — alternative trains aur doosri dates bhi dikhao`;
-    void handleText(`${from} se ${to} ${date} ka ${want} (${pax} passenger ke liye)`);
+    void handleText(planPageAsk(page, from, to, date, pax));
+  }
+
+  /* ── Round-59 (user: "connecting trains next chat page pe open ho, same chat page par nhi") ────────
+   * Seat board ka "Connecting trains"/"Alternative trains" button ab ek ALAG full-screen page kholta hai.
+   * Plan wahi maanga jaata hai jo R57 me set hua (phrasing/logic bilkul same — planPageAsk), par is baar
+   * chat me kuch nahi likha jaata: page apna loading dikhata hai aur plan aate hi JourneyOptions usi page
+   * (connect/alt) par render hota hai. Model kabhi khokhla jawab de to ek retry, phir saaf message (jhooth
+   * nahi). Kuch bhi banaya hua nahi — page ka data server ke usi verified plan se. */
+  const [planPage, setPlanPage] = useState<PlanPageState | null>(null);
+
+  async function loadPlanPage(page: "connect" | "alt", from: string, to: string, date: string, attempt = 1) {
+    if (!from || !to) return;
+    setPlanPage((prev) =>
+      prev && prev.from === from && prev.to === to && prev.page === page && prev.date === date
+        ? { ...prev, loading: true, progress: null, error: null, tries: attempt }
+        : { page, from, to, date, fromName: null, toName: null, loading: true, progress: null, plan: null, reply: null, error: null, tries: attempt },
+    );
+    const pax = state.paxProvided && state.passengerCount ? state.passengerCount : 1;
+    try {
+      const agentRes = await api.agentStream(
+        {
+          text: planPageAsk(page, from, to, date, pax),
+          lastAsked,
+          known: {
+            from: state.from,
+            to: state.to,
+            date: state.dateProvided ? state.date || null : null,
+            passengerCount: state.paxProvided ? state.passengerCount : null,
+          },
+          context: agentCtxRef.current ?? undefined,
+          history: (messages.length ? messages : persistedMemory()?.messages ?? [])
+            .slice(-8)
+            .map((m) => ({ role: m.role, content: String(m.text ?? "").slice(0, 500) })),
+          now: new Date().toISOString(),
+          bookingFlow: state.flow ?? undefined,
+        },
+        (e) => setPlanPage((p) => (p ? { ...p, progress: e.total ? `${e.phase}… ${e.done ?? 0}/${e.total} checks` : e.phase } : p)),
+      );
+      if (agentRes.context) agentCtxRef.current = agentRes.context;
+      const plan = agentRes.journey ?? null;
+      if (planIsShowable(plan)) {
+        setPlanPage((p) => (p ? { ...p, loading: false, progress: null, plan, reply: agentRes.reply ?? null } : p));
+        return;
+      }
+      if (attempt < 2) {
+        await loadPlanPage(page, from, to, date, attempt + 1);
+        return;
+      }
+      setPlanPage((p) =>
+        p ? { ...p, loading: false, progress: null, error: String(agentRes.reply ?? "").trim() || "Plan taiyar nahi hua." } : p,
+      );
+    } catch (err) {
+      const msg = err instanceof Error && err.message ? err.message.slice(0, 80) : "timeout";
+      if (attempt < 2) {
+        await loadPlanPage(page, from, to, date, attempt + 1);
+        return;
+      }
+      setPlanPage((p) => (p ? { ...p, loading: false, progress: null, error: `Plan nahi aa paya (${msg}).` } : p));
+    }
   }
 
   /* Round-18e: BEST FOR YOU card ka explicit CTA — tabhi TrainBoard khulta hai. */
@@ -1022,8 +1077,11 @@ export function Concierge() {
               })),
             });
           }
-          if (agentRes.journey && (agentRes.journey.routeOptions.length || agentRes.journey.directUnavailable)) {
-            blocks.push({ type: "journey", plan: agentRes.journey });
+          /* Round-59 (user: "connecting trains leg 1 leg 2 dikh nahi rahe"): pehle card sirf tab banta
+           * tha jab routeOptions/directUnavailable ho — connecting-only plan (routeOptions khaali, par
+           * connections/legPlans bhare) me card hi nahi banta tha aur user ke paas sirf text bachta tha. */
+          if (planIsShowable(agentRes.journey)) {
+            blocks.push({ type: "journey", plan: agentRes.journey! });
           } else if (agentRes.trains && agentRes.trains.rows.length) {
             blocks.push({ type: "traintable", table: agentRes.trains });
           }
@@ -1996,7 +2054,7 @@ export function Concierge() {
                 onWallet={() => go("wallet")}
                 onBookings={() => go("bookings")}
                 onOpenBoard={(from, to, date) => void openBoardFor(from, to, date)}
-                onOpenPlanPage={(page, from, to, date) => openPlanPage(page, from, to, date)}
+                onOpenPlanPage={(page, from, to, date) => void loadPlanPage(page, from, to, date)}
                 consumePlanPage={() => {
                   const p = pendingPlanPageRef.current;
                   pendingPlanPageRef.current = null;
@@ -2094,8 +2152,241 @@ export function Concierge() {
         </button>
         <button type="submit" className="send" aria-label="Send" disabled={voice.listening && !voice.interim.trim()}>➤</button>
       </form>
+      {/* Round-59: plan ka apna page — chat ke upar full-screen (back se wapas wahi chat). */}
+      {planPage && (
+        <PlanPageSheet
+          st={planPage}
+          onClose={() => setPlanPage(null)}
+          onRetry={() => void loadPlanPage(planPage.page, planPage.from, planPage.to, planPage.date, 2)}
+          onChatFallback={() => {
+            const p = planPage;
+            setPlanPage(null);
+            if (p) openPlanPage(p.page, p.from, p.to, p.date);
+          }}
+          onPickTrain={(n) => {
+            const q = planPage.plan?.query;
+            setPlanPage(null);
+            void handleText(`${n} ki seat availability ${q?.travelClass ? q.travelClass + " " : ""}${q?.date ?? planPage.date} ko ${q?.from ?? planPage.from} se ${q?.to ?? planPage.to}`);
+          }}
+          onPickLeg={(l) => {
+            const q = planPage.plan?.query;
+            setPlanPage(null);
+            void handleText(`${l.trainNumber} ki seat availability ${l.classCode ? l.classCode + " " : q?.travelClass ? q.travelClass + " " : ""}${l.date} ko ${l.ticketFrom ?? l.from} se ${l.ticketUpto ?? l.to}${l.ticketFrom && l.ticketFrom !== l.from ? ` (boarding ${l.from} se)` : ""}`);
+          }}
+          onPickClass={(r) => {
+            setPlanPage(null);
+            openBookingFromChip({
+              ...r,
+              row: (r.row as { status?: string | null } | null) ?? null,
+              from: r.from,
+              to: r.to,
+              date: r.date ?? planPage.plan?.query.date ?? planPage.date,
+            });
+          }}
+          onBookLeg={(l) => {
+            setPlanPage(null);
+            openBookingFromChip({
+              trainNumber: l.trainNumber,
+              classCode: l.classCode ?? "",
+              from: l.ticketFrom ?? l.from,
+              to: l.ticketUpto ?? l.to,
+              date: l.date,
+              row: (l.availability as { status?: string | null; seats?: number | null; rac?: number | null; waitlist?: number | null; fare?: number | null } | null) ?? null,
+              trainName: l.trainName ?? null,
+              departure: l.departure ?? null,
+              arrival: l.arrival ?? null,
+              durationLabel: l.durationLabel ?? null,
+              fromName: null,
+              toName: null,
+            });
+          }}
+          onPickDate={(d) => {
+            const q = planPage.plan?.query;
+            setPlanPage(null);
+            void handleText(`${q?.from ?? planPage.from} se ${q?.to ?? planPage.to} ${d} ki trains dikhao`);
+          }}
+          onPickStations={(f, t) => {
+            const q = planPage.plan?.query;
+            setPlanPage(null);
+            void handleText(`${f} se ${t} ${q?.date ?? planPage.date} ki trains dikhao`);
+          }}
+          onOpenBoard={(f, t, d, n) => {
+            setPlanPage(null);
+            void openBoardFor(f, t, d, n);
+          }}
+        />
+      )}
       <div className={`composer-hint ${voice.listening ? "live" : ""}`} role="status" aria-live="polite">
         {voice.listening ? "Sun raha hoon — khatam ho to OK ✓ dabao (mic auto-send nahi karega)" : voice.status === "Tap to speak" ? "🎙️ बोलकर बताएं  ·  ✍️ Type करें" : voice.status}
+      </div>
+    </div>
+  );
+}
+
+/* ══ ROUND-59 (29 Sep 2026) — plan ka apna page ═══════════════════════════════════════════════════════
+ * User: *"connecting trains are not showing leg 1 and leg 2 … connecting trains next chat page pe open ho
+ * same chat page par nhi"*.
+ *
+ * Do cheezein:
+ *   1) Card banna: pehle journey card sirf routeOptions/directUnavailable par banta tha — connecting-only
+ *      plan me card hi nahi aata tha, sirf (adhoore) text. Ab planIsShowable() dekhta hai: routeOptions,
+ *      connections, legPlans ya directUnavailable — jo bhi ho, card banega (kuch invent nahi, wahi data).
+ *   2) Page: seat board ka button ab alag full-screen page kholta hai (PlanPageSheet). Plan maangne ka
+ *      text/logic bilkul wahi (planPageAsk) — sirf dikhne ki jagah badli.
+ */
+
+/** Plan maangne wala text — R57 me set hui phrasing (logic same rehna chahiye, isliye ek hi jagah). */
+export function planPageAsk(page: "connect" | "alt", from: string, to: string, date: string, pax = 1): string {
+  const want =
+    page === "connect"
+      ? `poora plan banao — connecting trains aur leg-wise seat bhi dikhao`
+      : `poora plan banao — alternative trains aur doosri dates bhi dikhao`;
+  return `${from} se ${to} ${date} ka ${want} (${pax} passenger ke liye)`;
+}
+
+/** Plan card kab dikhe — kisi ek hisse me bhi verified data ho to haan. */
+export function planIsShowable(plan: AgentJourneyPlan | null | undefined): plan is AgentJourneyPlan {
+  if (!plan) return false;
+  return Boolean(
+    (plan.routeOptions?.length ?? 0) > 0 ||
+      (plan.connections?.length ?? 0) > 0 ||
+      (plan.legPlans?.length ?? 0) > 0 ||
+      plan.directUnavailable,
+  );
+}
+
+export type PlanPageState = {
+  page: "connect" | "alt";
+  from: string;
+  to: string;
+  date: string;
+  fromName?: string | null;
+  toName?: string | null;
+  loading: boolean;
+  progress: string | null;
+  plan: AgentJourneyPlan | null;
+  reply: string | null;
+  error: string | null;
+  tries: number;
+};
+
+/** Plan ka poora page — chat ke upar khulta hai, back se wapas wahi chat (kuch kho jaata nahi). */
+export function PlanPageSheet({
+  st,
+  onClose,
+  onRetry,
+  onChatFallback,
+  onPickTrain,
+  onPickLeg,
+  onPickClass,
+  onPickDate,
+  onPickStations,
+  onBookLeg,
+  onOpenBoard,
+}: {
+  st: PlanPageState;
+  onClose: () => void;
+  onRetry: () => void;
+  onChatFallback: () => void;
+  onPickTrain?: (trainNumber: string) => void;
+  onPickLeg?: (l: { trainNumber: string; from: string; to: string; date: string; classCode?: string | null; ticketFrom?: string | null; ticketUpto?: string | null }) => void;
+  onPickClass?: (q: { trainNumber: string; classCode: string; from: string; to: string; date?: string | null; boardAt?: string | null; row?: unknown; trainName?: string | null; departure?: string | null; arrival?: string | null; durationLabel?: string | null }) => void;
+  onPickDate?: (d: string) => void;
+  onPickStations?: (f: string, t: string) => void;
+  onBookLeg?: (l: {
+    trainNumber: string;
+    classCode?: string | null;
+    from: string;
+    to: string;
+    date: string;
+    ticketFrom?: string | null;
+    ticketUpto?: string | null;
+    trainName?: string | null;
+    departure?: string | null;
+    arrival?: string | null;
+    durationLabel?: string | null;
+    availability?: unknown;
+  }) => void;
+  onOpenBoard?: (from: string, to: string, date: string, trainNumber: string | null) => void;
+}) {
+  const title = st.page === "connect" ? "Connecting trains · Leg 1 → Leg 2" : "Alternative trains & dates";
+  const q = st.plan?.query;
+  const from = q?.from ?? st.from;
+  const to = q?.to ?? st.to;
+  const date = q?.date ?? st.date;
+  const emptyPage =
+    st.plan && st.page === "connect" && (st.plan.connections?.length ?? 0) === 0 && (st.plan.legPlans?.length ?? 0) === 0;
+  return (
+    <div className="planpage" role="dialog" aria-label={title}>
+      <div className="planpage-top">
+        <button type="button" className="planpage-back" onClick={onClose} aria-label="Wapas">
+          ← Wapas
+        </button>
+        <div className="planpage-head">
+          <strong>{title}</strong>
+          <span className="planpage-sub">
+            {from} → {to} · {date}
+            {st.plan?.query?.passengers ? ` · ${st.plan.query.passengers} passenger` : ""}
+          </span>
+        </div>
+        <button type="button" className="planpage-refresh" onClick={onRetry} aria-label="Dobara check karo" title="Dobara check karo">
+          ↻
+        </button>
+      </div>
+      <div className="planpage-body">
+        {st.loading && (
+          <div className="planpage-load" role="status" aria-live="polite">
+            <div className="planpage-spin" aria-hidden />
+            <div className="planpage-load-t">{st.progress ?? "Plan ban raha hai…"}</div>
+            <div className="planpage-load-s">
+              Live seat check (IRCTC / ConfirmTkt) — {from} → {to}, {date}. Kuch banaya hua nahi, jo mila wahi dikhega.
+            </div>
+          </div>
+        )}
+        {!st.loading && st.plan && (
+          <>
+            <JourneyOptions
+              plan={st.plan}
+              initialPage={st.page}
+              /* Round-59: page ke andar page na ho — isliye embedded (inline, bina apne header). */
+              embedded
+              onPickTrain={onPickTrain}
+              onPickLeg={onPickLeg}
+              onPickClass={onPickClass as never}
+              onPickDate={onPickDate}
+              onPickStations={onPickStations}
+              onBookLeg={onBookLeg as never}
+              onOpenBoard={
+                onOpenBoard ? () => onOpenBoard(from, to, date, st.plan?.best?.trainNumbers?.[0] ?? null) : undefined
+              }
+            />
+            {emptyPage && (
+              <div className="planpage-note">
+                Is din is route par connecting combo nahi mila — upar ↻ se dobara check kar sakte ho, ya direct/alternative
+                list dekh lo (wahi page).
+              </div>
+            )}
+          </>
+        )}
+        {!st.loading && !st.plan && (
+          <div className="planpage-err" role="alert">
+            <div className="planpage-err-t">Plan abhi nahi mila</div>
+            <div className="planpage-err-b">
+              {st.error ?? "Server se plan nahi aaya."} — main andaza nahi lagaunga; dobara try karo ya chat me poochho.
+            </div>
+            <div className="planpage-err-a">
+              <button type="button" className="planpage-btn" onClick={onRetry}>
+                ↻ Dobara try
+              </button>
+              <button type="button" className="planpage-btn ghost" onClick={onChatFallback}>
+                Chat me poochho
+              </button>
+              <button type="button" className="planpage-btn ghost" onClick={onClose}>
+                Wapas chat
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

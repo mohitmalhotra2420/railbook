@@ -467,6 +467,7 @@ export function JourneyOptions({
   onOpenBoard,
   initialPage = null,
   window: win = null,
+  embedded = false,
 }: {
   plan: AgentJourneyPlan;
   onPickTrain?: (trainNumber: string) => void;
@@ -518,6 +519,9 @@ export function JourneyOptions({
   onOpenBoard?: () => void;  /** 24 Sep 2026 (user): "alternative trains ka alag page ho, leg 1/leg 2 ka alag page" —
    *  ye prop sirf preview/demo ke liye page khula hua dikhata hai (app flow wahi rehta hai). */
   initialPage?: "direct" | "alt" | "connect" | null;
+  /** Round-59: jab ye card kisi apne page ke andar chalta hai (PlanPageSheet) — tab page ko
+   *  inline dikhao (fixed overlay nahi) aur uska apna header na lagao (bahar ka page header kaafi hai). */
+  embedded?: boolean;
   /** Round-19d (24 Sep, user: "Card filter karo lekin connecting/alternatives mein change na aayein"):
    *  user ne "subah/dopahar/shaam/raat" ya "X se pehle" bola ho to DIRECT trains ki list (aur hero,
    *  agar wahi direct hai) sirf usi window ki dikhe. Connecting/alternatives/dates ka poora logic aur
@@ -1080,6 +1084,9 @@ export function JourneyOptions({
         </div>
         <ToneLegend />
       </header>
+      {/* Round-59: embedded mode me jab page khula hai to sirf page hi dikhe (summary/hero skip) —
+       *  warna page ke andar page (double header) ho jaata tha. */}
+      {!(embedded && page) && (<>
 
       {pills.length > 0 && (
         <div className="jx-status">
@@ -1384,9 +1391,11 @@ export function JourneyOptions({
         </Section>
       )}
 
+      </>)}
       {/* ── Alag page (full-screen): detail yahan, chat me sirf header ── */}
       {page && (
-        <div className="jx-page" role="dialog" aria-label={page === "direct" ? "Direct trains" : page === "alt" ? "Alternative trains" : "Connecting trains"}>
+        <div className={embedded ? "jx-page jx-page-embed" : "jx-page"} role="dialog" aria-label={page === "direct" ? "Direct trains" : page === "alt" ? "Alternative trains" : "Connecting trains"}>
+          {!embedded && (
           <div className="jx-page-head">
             <button type="button" className="jx-page-back" onClick={() => setPage(null)}>{IC.back} Wapas</button>
             <div className="jx-page-title">
@@ -1397,7 +1406,8 @@ export function JourneyOptions({
               </span>
             </div>
           </div>
-          <div className="jx-page-body">
+          )}
+          <div className={embedded ? "jx-page-body jx-page-body-embed" : "jx-page-body"}>
             {page === "direct" ? directPageBody : page === "alt" ? altPageBody : connectPageBody}
           </div>
         </div>

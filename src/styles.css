@@ -2644,3 +2644,28 @@ button.rp-crow:active { transform: translateY(1px); }
 .eb-btn:hover { background: #fff3e2; }
 .eb-btn.ghost { border-color: #cbd5e1; color: #475569; }
 .eb-hint { margin-top: 8px; font-size: 11px; color: #9a7b52; word-break: break-word; }
+/* Round-59: plan ka apna page (seat board ke Connecting/Alternative button se) — chat ke upar full-screen. */
+.planpage { position: fixed; inset: 0; z-index: 80; background: #f4f0e8; display: flex; flex-direction: column; }
+.planpage-top { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: var(--navy); color: #fff; position: sticky; top: 0; z-index: 2; }
+.planpage-back, .planpage-refresh { font: inherit; font-size: 13.5px; font-weight: 800; color: #fff; background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.28); border-radius: 999px; padding: 7px 13px; cursor: pointer; }
+.planpage-refresh { padding: 7px 11px; font-size: 15px; }
+.planpage-back:hover, .planpage-refresh:hover { background: rgba(255,255,255,.24); }
+.planpage-head { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.planpage-head strong { font-size: 14.5px; font-weight: 900; }
+.planpage-sub { font-size: 11.5px; opacity: .85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.planpage-body { flex: 1; overflow: auto; padding: 12px 12px 26px; -webkit-overflow-scrolling: touch; }
+.planpage-load { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 46px 18px; text-align: center; }
+.planpage-spin { width: 34px; height: 34px; border-radius: 50%; border: 3px solid #d8d2c6; border-top-color: var(--navy); animation: ppspin .9s linear infinite; }
+@keyframes ppspin { to { transform: rotate(360deg); } }
+.planpage-load-t { font-size: 15px; font-weight: 800; color: var(--navy); }
+.planpage-load-s { font-size: 12.5px; color: #6b7280; line-height: 1.6; max-width: 420px; }
+.planpage-note { margin: 10px 2px 0; font-size: 12.5px; color: #6b4a1f; background: #fff8ee; border: 1px solid #f0d3a8; border-radius: 10px; padding: 9px 12px; }
+.planpage-err { margin: 30px auto; max-width: 430px; background: #fff; border: 1px solid #e6e1d8; border-radius: 14px; padding: 16px; text-align: center; }
+.planpage-err-t { font-size: 15px; font-weight: 900; color: #8a3f00; margin-bottom: 6px; }
+.planpage-err-b { font-size: 13px; color: #5b6472; line-height: 1.6; }
+.planpage-err-a { display: flex; gap: 8px; justify-content: center; margin-top: 14px; flex-wrap: wrap; }
+.planpage-btn { font: inherit; font-size: 13px; font-weight: 800; padding: 8px 15px; border-radius: 999px; border: 1.5px solid var(--navy); background: var(--navy); color: #fff; cursor: pointer; }
+.planpage-btn.ghost { background: #fff; color: var(--navy); }
+/* Round-59: embedded page (PlanPageSheet ke andar) — fixed overlay ki jagah inline, aur bahar ka header hi kaafi. */
+.jx-page-embed { position: static; inset: auto; background: transparent; animation: none; }
+.jx-page-body-embed { padding: 0 0 18px; max-width: none; }
