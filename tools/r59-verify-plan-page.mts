@@ -20,12 +20,25 @@ await page.locator(".composer input").first().fill(Q);
 await page.locator(".composer input").first().press("Enter");
 say("sent query");
 
-/* seat board (sf-np buttons) ka intezaar */
+/* seat board (sf-np buttons) ka intezaar — beech me pax sawaal aaye to "1" bol do (jaise asli user). */
 let boardSeen = false;
-for (let i = 0; i < 30; i++) {
+let answered = 0;
+for (let i = 0; i < 42; i++) {
   await page.waitForTimeout(10000);
   const btns = await page.locator(".sf-np").count();
   if (btns >= 2) { boardSeen = true; say(`seat board buttons mil gaye (${btns}) at tick ${i}`); break; }
+  const last = await page.evaluate(() => {
+    const m = [...document.querySelectorAll("article.msg.assistant")].pop();
+    return (m?.textContent || "").slice(-260);
+  });
+  const asksPax = /logon ke liye|passenger|kitne (log|passenger|aadmi)|how many/i.test(last);
+  const done = !/checks completed|Check|dhoondh|Soch|plan/i.test(last);
+  if (asksPax && done && answered < 2) {
+    answered++;
+    await page.locator(".composer input").first().fill("1");
+    await page.locator(".composer input").first().press("Enter");
+    say(`pax sawaal mila → "1" bhej diya (#${answered}) | last="${last.slice(-90).replace(/\n+/g, " ")}"`);
+  }
 }
 if (!boardSeen) { say("NO SEAT BOARD — ruk raha hoon"); await page.screenshot({ path: "/tmp/r59-verify-noboard.png" }); await browser.close(); process.exit(1); }
 
@@ -38,15 +51,20 @@ for (let i = 0; i < 40; i++) {
   await page.waitForTimeout(10000);
   const st = await page.evaluate(() => {
     const pp = document.querySelector(".planpage");
+    const body = (document.querySelector(".planpage-body")?.innerText || "").replace(/\n+/g, " | ").slice(0, 320);
+    const err = !!document.querySelector(".planpage-err");
+    const note = (document.querySelector(".planpage-note")?.innerText || "").slice(0, 120);
     const legs = document.querySelectorAll(".planpage .jx-leg").length;
     const bookLegs = [...document.querySelectorAll(".planpage .jx-leg-book")].map((b) => (b.textContent || "").trim());
     const loading = !!document.querySelector(".planpage-load");
     const head = (document.querySelector(".planpage-head strong")?.textContent || "").trim();
     const chatMsgs = document.querySelectorAll("article.msg").length;
-    return { has: !!pp, legs, bookLegs, loading, head, chatMsgs };
+    return { has: !!pp, legs, bookLegs, loading, head, chatMsgs, body, err, note };
   });
-  say(`tick ${i}: planpage=${st.has} loading=${st.loading} head="${st.head}" legs=${st.legs} books=${JSON.stringify(st.bookLegs)} chatMsgs=${st.chatMsgs}`);
-  if (st.has && !st.loading && st.legs > 0) {
+  say(`tick ${i}: planpage=${st.has} loading=${st.loading} head="${st.head}" legs=${st.legs} books=${JSON.stringify(st.bookLegs)} chatMsgs=${st.chatMsgs} err=${st.err} note="${st.note}"`);
+  if (st.has && !st.loading) say(`   BODY: ${st.body}`);
+  if (st.has && !st.loading && (st.legs > 0 || st.err || st.note)) {
+    await page.screenshot({ path: `/tmp/r59-verify-planstate-${i}.png` });
     await page.screenshot({ path: "/tmp/r59-verify-planpage.png" });
     /* back button → chat waisi hi? */
     await page.locator(".planpage-back").first().click();
@@ -58,7 +76,8 @@ for (let i = 0; i < 40; i++) {
     }));
     say(`back ke baad: planpage=${after.planpage} chatMsgs=${after.chatMsgs} body="${after.text}"`);
     await page.screenshot({ path: "/tmp/r59-verify-after-back.png" });
-    opened = true;
+    if (st.legs > 0) { opened = true; break; }
+    say("   (legs 0 — state dump ho gaya, ruk raha hoon)");
     break;
   }
 }

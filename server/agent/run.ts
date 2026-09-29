@@ -1421,6 +1421,14 @@ function isEvasiveReply(reply: string): boolean {
 /** Round-45: sawaal ki QISM — adequacy net isi par decide karta hai ki model ka jawab "us sawaal ka
  * jawab" hai ya nahi. Ye per-question rule nahi hai (R43k), sirf 3 qismein: seat / arrival-family / live. */
 type AnswerKind45 = "seat" | "arrival" | "live" | "pick";
+/** Round-59 (user: "connecting trains are not showing leg 1 and leg 2"): plan ka saaf ishaara.
+ *  Client ke plan-page ka text isi phrasing par chalta hai ("… ka poora plan banao — …") aur chat me bhi
+ *  user yahi bolta hai. Ye LIST nahi hai — do-tuk wala pattern hai, isliye naye sawaalon par bhi chalta hai. */
+export function isPlanAsk(text: string): boolean {
+  const t = String(text ?? "");
+  return /\b(poora|poori|pura|puri)\s+plan\b/i.test(t) || /\bplan\s+(bana|banao|banado|banade|bna)/i.test(t);
+}
+
 export function answerKind45(text: string): AnswerKind45 | null {
   const t = String(text ?? "");
   if (/\b(seat|seats|berth|availab\w*|avl|rac|waitlist|wk|wl|confirmation)\b/i.test(t) && /\b\d{4,5}\b/.test(t)) return "seat";
@@ -2836,6 +2844,31 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
         // jaisi proactive lines KABHI nahi — user poochhe tabhi aayengi.
         // interrupt/resume mechanism band; slot-filling sawaal reply ke andar hi aate hain.
         void neverAutoBook(det.intent, req.bookingFlow);
+        /* ── Round-59 (user screenshot: Leg 1/Leg 2 dikh hi nahi rahe) ──────────────────────────────
+         * Plan maanga gaya tha par model ne sirf TEXT diya (kabhi kabhi ek markdown table) aur koi plan
+         * payload nahi bheja. Us haalat me card hi nahi banta tha aur user ke paas adhoora text bachta tha.
+         * Ab: plan ka sawaal + slots + model ka payload nahi → wahi engine (planJourney) chalता hai jo
+         * baaki har jagah chalta hai (RANK_JOURNEY_OPTIONS/JOURNEY_ANALYZE). Ye rescue hai (R45 ka usool:
+         * deterministic sirf jab model na de) — logic/data wahi, sirf guarantee ki payload kabhi khaali na
+         * jaaye. Model ka reply text waisa hi rehta hai (jhooth nahi, kuch chhupaya nahi). */
+        let planPayload = capture.plan ?? null;
+        if (!planPayload && isPlanAsk(req.text) && ctx.origin?.code && ctx.destination?.code && ctx.date) {
+          planPayload = await planJourney({
+            from: ctx.origin.code,
+            to: ctx.destination.code,
+            date: ctx.date,
+            travelClass: ctx.classCode ?? null,
+            preference: "best_overall",
+            includeConnections: true,
+            includeAlternativeDates: false,
+            /* capture.table rows AgentTrainRow hote hain (TrainResult nahi) — engine ko trains pass nahi
+             * karte, wo khud route board laayega (wahi source jo baaki jagah use hota hai). */
+            trains: undefined,
+            searchProvider: undefined,
+            passengers: ctx.paxProvided ? ctx.passengers : null,
+          }).catch(() => null);
+          if (planPayload) console.log(JSON.stringify({ planPayloadRescue: ctx.origin.code + "→" + ctx.destination.code, date: ctx.date }));
+        }
         return {
           nlu: det,
           source: "nlu",
@@ -2847,7 +2880,7 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
           resumeAsk: null,
           resumeText: null,
           trains: capture.table,
-          journey: capture.plan ?? null,
+          journey: planPayload,
           alternatives: capture.alternatives ?? null,
           trainPicker: capture.trainPicker ?? null,
           choice: capture.choice ?? null,
