@@ -195,6 +195,31 @@ describe("Round-55 · (d) sirf train number diya (station nahi) → poora route 
   });
 });
 
+describe("Round-55 · (f) soft-field safety net — ek kharab field poora call na maare", () => {
+  it("passengers: 0 → call chalti hai, field gira kar model ko note milta hai", async () => {
+    const res = await executeApprovedTool(
+      "FIND_SEATS",
+      { from: "LDH", to: "JAT", date: "2026-09-30", class_code: "3A", passengers: 0 },
+      { userText: "LDH se JAT kal 3A me seat" },
+    );
+    expect(res.ok).toBe(true);
+    expect(res.summary).not.toMatch(/Invalid arguments/);
+    expect(res.summary).toMatch(/chhod diya gaya/);
+    expect(res.summary).toMatch(/passengers/);
+    expect(rowNums(res)).toContain("12716");
+  });
+
+  it("control: zaroori field (date) kharab ho to call waise hi fail hoti hai", async () => {
+    const res = await executeApprovedTool(
+      "FIND_SEATS",
+      { from: "LDH", to: "JAT", date: "kal", class_code: "3A" },
+      { userText: "LDH se JAT kal 3A me seat" },
+    );
+    expect(res.ok).toBe(false);
+    expect(res.summary).toMatch(/Invalid arguments/);
+  });
+});
+
 describe("Round-55 · (b) chupke se lagaya time-window khud hat jaaye", () => {
   it("waqt ke shabd pata karta hai (aur na hone par safai se 'nahi')", () => {
     for (const t of ["subah 8 baje nikalna hai", "raat ko chalo", "12:30 ke baad ki train", "evening train", "dopahar me"]) {

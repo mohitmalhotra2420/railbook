@@ -1251,7 +1251,29 @@ export async function executeApprovedTool(
   }
 
   const schema = ArgSchemas[name as AgenticToolName];
-  const parsed = schema.safeParse(rawArgs);
+  let parsed = schema.safeParse(rawArgs);
+  /* ── R55f: SOFT-FIELD SAFETY NET ────────────────────────────────────────────────────────────────
+   * 29 Sep ke live probes me baar-baar dekha: model ka poora call sirf ek soft field ki wajah se
+   * marta tha (jaise passengers: 0 → ">=1 chahiye", sort_by: "availability" → enum galat, train_numbers
+   * ka comma-string lamba). Us se live seat sawaal bekaar ho jaata tha. Ab: zod ke bataye hue galat
+   * fields HATA kar dobara try karte hain (baaki call chalti hai, server default/auto behaviour lagata
+   * hai) aur result ke summary me model ko saaf batate hain ki kya gira. Sirf tab fail karte hain jab
+   * hataane ke baad bhi call valid na ho. */
+  let droppedArgsNote: string | null = null;
+  if (!parsed.success) {
+    const bad = new Set(parsed.error.issues.map((i) => String(i.path[0] ?? "")).filter(Boolean));
+    if (bad.size && bad.size < Object.keys(rawArgs).length + 1) {
+      const loose: Record<string, unknown> = { ...rawArgs };
+      for (const k of bad) delete loose[k];
+      const retry = schema.safeParse(loose);
+      if (retry.success) {
+        droppedArgsNote =
+          `ℹ In args ko chhod diya gaya (valid nahi the): ${Array.from(bad).join(", ")}. ` +
+          `Inke bina hi sahi jawab dena hai (user se in fields ke liye alag se mat poochho jab tak zaroori na ho).`;
+        parsed = retry;
+      }
+    }
+  }
   if (!parsed.success) {
     return {
       ok: false,
@@ -1269,6 +1291,8 @@ export async function executeApprovedTool(
   }
 
   try {
+    /* R55f: switch ke result par soft-field note chipkaane ke liye wrapper (niche). */
+    const toolResult = await (async (): Promise<ApprovedToolResult> => {
     switch (name as AgenticToolName) {
       case "WEB_SEARCH": {
         const q = String(a.query ?? "").trim();
@@ -2074,6 +2098,11 @@ export async function executeApprovedTool(
       default:
         return { ok: false, source: null, summary: "Unknown tool.", data: null, rejected: "not_in_allowlist" };
     }
+    })();
+    if (droppedArgsNote && toolResult.summary) {
+      return { ...toolResult, summary: `${droppedArgsNote}\n${toolResult.summary}` };
+    }
+    return toolResult;
   } catch (err) {
     return failResult(null, `Tool execution fail hua: ${err instanceof Error ? err.message : "error"}`);
   }
