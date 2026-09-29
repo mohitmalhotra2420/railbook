@@ -124,3 +124,18 @@ User: "kya abh mai ek ek test kru!? Possible nhi hai… AI kyu nahi sahi answer 
 **Suite:** 127 files / **1379 tests** pass (`/tmp/r48-suite2.log`); naye `tests/round48-seat-card-all-classes.test.tsx` (5) + purane R20/R22/R25/R26/R27/R29 wire formats waise hi pass.
 **Live:** code `60c7401` + `e501ddc` → deploy `dep-datd2pdg1s2s738tlm9g`, `/api/version` = `e501ddc`, bundle me naya parser confirm.
 **Preview:** `RailBook-round48-2026-09-29.html` (pehle vs ab phones + train-wise before/after table).
+
+## §9.41 — Round-49 (29 Sep 2026): board me sirf wahi trains jo maangi hui station TAK JAATI HAIN
+
+**User (3 screenshots, 29 Sep):** `Mujhe ludhiana se SVDK jaana hai kal confirm seat findout krke do` — chat me `12265 JAT DURONTO EXP` aur `13151 KOAA JAT EXPRES` bhi seat rows ke saath aa gayi, jabki dono **Jammu Tawi (JAT) par khatam** hoti hain, SVDK (Katra) tak jaati hi nahi. User: *"maine to svdk tak maangi hai confirm seat wo fir jammu ki kyu dikha rha beech mein"*.
+
+**Root cause:** ConfirmTkt ka route-board `to` ke "paas ka bada station" wali trains bhi deta hai (Katra ke liye JAT) — provider data me gadbad nahi, par user ke liye wo **unbookable** hai: na seat us segment ki hoti hai, na train wahan jaati hai.
+
+**Fix (general — wahi tool-level verification usool, per-question rule nahi):**
+- Naya module `server/agent/routeSegment.ts`: board ke har train ka route **provider timetable** (`routedSchedule`, 6h cache, 6 parallel) se dekha jaata hai; jo train `to` tak nahi jaati (ya `from` par rukti hi nahi / order ulta hai) wo list se **hat jati hai**. **Route pata na chale to train rakhi jaati hai** (andaza nahi — sirf verified-negative hataate hain). Telemetry: `{routeDrop:{from,to,dropped:["12265(JAT)", …]}}`.
+- **Saaf note** (`routeDropNote`): *"ℹ️ 12425 JAMMU RAJDHANI (last stop JAT), … 12265 JAT DURONTO EXP (last stop JAT) — ye SVDK tak nahi jaati, isliye list se hata di."* — reply line me, `FIND_SEATS` output me (taaki AI bhi wahi sach bole), aur client card me (`dropNote` → `seatFilter` serializer → `api.ts` types → `SeatListBlock` me amber note strip).
+- Lagaya teen jagah: `seatFilterFor` (chat line + card rows), `seatFinderTool` (FIND_SEATS pool — AI un trains ki rows likh hi nahi sakta), aur `/api/availability` route-board (wahi bug class UI board me).
+
+**Proof (prod `6531728`, live):** `Mujhe ludhiana se SVDK jaana hai kal confirm seat findout krke do` → `LDH → SVDK` par sirf **20433 JAMMU MAIL** aur **11449 JBP SVDK EXP** (dono sach me SVDK jaati hain) + note me 13 hati trains (`12425, 14661, 12413, 12265, 13151, 11077, 12207, 18309, 12355, 12237, 22431, 15651, 12549`). Control: `LDH → JAT` maangne par `12265 / 13151 / 12237` **waise hi list me** rehti hain (koi false drop nahi). Live spot-check: `12919 Malwa` SVDK=true (rakhi), `15651 → last JAT` / `12549 → last MCTM` (hati).
+**Suite:** 128 files / **1386 tests** pass; naya `tests/round49-seat-segment-verify.test.ts` (7) — servesSegment (order/ulta/unknown), filter + note, resolver-fail par train rakhna, seatFilterFor, FIND_SEATS, JAT maangne par no-drop, aur client-payload wiring.
+**Deploy:** `0ebce68` (main fix) + `6531728` (dropNote client tak) → deploy `dep-datk4anlot8c73fsu7hg`, `/api/version` = `6531728`.
