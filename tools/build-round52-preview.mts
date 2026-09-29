@@ -92,6 +92,9 @@ body { background:#0f1420; color:#e8ecf3; font-family: system-ui, -apple-system,
 <div class="box">
  <b>Proof (local, aapki exact query):</b> <code>engine: agentic_tool_calling</code> · model <code>openai/gpt-oss-20b</code> · <code>toolTrace: FIND_SEATS ✓</code> · jawab me 7 trains × unki saari classes + <code>[NEXT]</code> chip — sab live board se, kuch banaya nahi. Model ne khud stations (LDH/SVDK) resolve kiye, khud date maani (kal), khud tool chuna. Latency 49–82s (aapne 45s+ accept kiya hai). Deterministic path ab sirf <b>rescue</b> hai (AI band/paisa-khatam/hard-fail) — user-facing pehla jawab AI ka hi hota hai.
 </div>
+<div class="box">
+ <b>Prod note (imandari se):</b> Render ke server se NVIDIA NIM ka chat-call queue me atak jaata hai — <code>/api/ai-ping</code> se saaf dikha: chhota “OK” request bhi 30–35s me timeout (gpt-oss, muse, lightning, deepseek — sab), jabki usi host ka <code>GET /models</code> 494ms me chalta hai aur sandbox se wahi chat-call 1–2.5s me jawab deta hai. Isliye prod par ab jawab <b>AI hi</b> deta hai (muse fallback + retry-queue), par latency 170–185s tak ja sakti hai; queue clear ho to 20–50s. HF fallback ab dead hai (credits khatam) — usko chain se hata diya. Asli latency fix = fixed-IP proxy ya doosra provider/key.
+</div>
 <p class="sub">Verify: suite green (132 files / 1410 tests), naye <code>tests/round52-ai-owns-everything.test.ts</code> (8) — model-health ordering, tool-level station samajh, booking-hukm detector, aur “confirm seat par agentic engine chalta hai” ka integration test. Deploy ke baad prod par wahi do sawaal.</p>
 </div></body></html>`;
 

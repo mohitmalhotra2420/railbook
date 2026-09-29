@@ -68,3 +68,9 @@ eRail). Web app: React + Vite + Express (`server/`), aur Android WebView wrapper
   `summary` (rows + wlRows) ki SAARI entries. Chain: `gpt-oss-20b` primary → `muse-glimmer-30b` fallback, budget 90s / call 45s.
 - **Proof:** local probe `engine: agentic_tool_calling`, `FIND_SEATS ✓`, 7 trains × saari classes; suite 132 files / 1410 tests.
 - Docs: `docs/RAILBOOK-ADDENDUM-v1.4.3.md` **§9.44**; preview `RailBook-round52-2026-09-29.html`.
+- **Prod reality (29 Sep, probe):** Render ke egress IP se NVIDIA NIM ka `/chat/completions` **hang** hota hai (chhota
+  "OK" request bhi 30–35s timeout; wahi host ka `GET /models` 494ms) — sandbox se wahi call 1–2.5s. Isliye prod par
+  jawab AI se aata hai par **170–185s** lag sakta hai (retry-queue + muse fallback); HF fallback dead (credits khatam).
+  Aage: provider/fixed-IP proxy ya naya key add karna = prod latency ka asli fix.
+- Chain: `… → bbb7c84 (R51) → dca4fac → 7927f7c → 5877a20 (R52 LIVE)`. Prod env: `AI_AGENTIC_TURN_BUDGET_MS=180000`,
+  `AI_AGENTIC_TIMEOUT_MS=45000`, `NVIDIA_MODEL=openai/gpt-oss-20b`, `NVIDIA_FALLBACK_MODEL=meta/muse-glimmer-30b`, `HF_MODEL=`.
