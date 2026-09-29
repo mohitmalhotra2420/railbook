@@ -35,6 +35,7 @@ eRail). Web app: React + Vite + Express (`server/`), aur Android WebView wrapper
 - `server/agent/seatFilter.ts` — live board → seat rows, `seatSummaryLine` (chat ki `💺 …` line), `missingSeatLines`.
 - `server/agent/seatFinderTool.ts` — `FIND_SEATS` (AI ka tool; summary = data + instructions model ko).
 - **R53:** FIND_SEATS ka result `SearchCapture.seat` me capture hota hai (`agentic.ts`) → `run.ts` `AgentResponse.seatCapture` → `app.ts` **cards usi se banata hai** (`seatFilterFor()` dobara nahi chalta). Card payload cap: `SEAT_PAYLOAD_MAX_TRAINS=60`; text line `SEAT_LINE_MAX=12` + honest tail. Confirm/available par payload ke `wlRows` sirf seat-wali trains ke.
+- **R53b/R53c:** cards ka train-set = jawab me likhi trains ∩ payload (dono taraf ka mismatch khatam); confirm/available ka derivation `cap.onlyAvailable || slots.confirmedOnly`.
 - **R53 — naya provider sirf env se:** `AI_LLM_BASE_URL` + `AI_LLM_API_KEY` + `AI_LLM_MODELS` (comma chain) set karte hi poora AI stack us provider par (NVIDIA/HF default path safe). Docs: `docs/MODEL-RECOMMENDATION.md`.
 - `server/agent/routeSegment.ts` — destination-tak route verification, drop note, "🧭 … tak (aage ka safar khud)" section.
 - `server/railway/router.ts` — provider chain + live probe (`enrichTrainsFreshness`, `secondOpinionRow`);

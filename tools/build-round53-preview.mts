@@ -139,6 +139,7 @@ body { background:#0f1420; color:#e8ecf3; font-family: system-ui, -apple-system,
   <li><b>Cards ab model ke data se hi bante hain.</b> Agentic brain jab <code>FIND_SEATS</code> chalata hai, uska poora result capture hota hai (<code>SearchCapture.seat</code>) — app usi se cards banata hai, dobara board fetch <b>nahi</b> karta. Yaani text me jo train/class hai, card me bhi wahi.</li>
   <li><b>Cards ka cap ab 60 trains</b> (text line par 12 ka cap waise hi — wahan honest tail likhi jaati hai: <i>“+N trains aur bhi hain — neeche poori live list me”</i>, aur Round-25 ka niyam bani rahi hai ki “card” shabd par trains chhupane ka bahana nahi banta).</li>
   <li><b>“confirm” maangne par sirf seat-wali trains</b> — user: <i>“Agar confirm bola to confirm dikhao na sirf”</i>. Confirm/available ki request par cards me sirf unhi trains ke rows aate hain jinme seat hai (usi train ki baaki classes chhupti nahi — Round-51 ka usool).</li>
+  <li><b>Cards = jawab me likhi trains (dono taraf ka mismatch khatam).</b> Prod probe me dikha: <i>“confirm seat”</i> par model 4 trains likhta hai (cards me bhi wahi 4 — Round-53b), aur <i>“saari trains … availability batao”</i> par 12 trains likhta hai (cards me bhi wahi 12 — Round-53c; pehle wahan sirf 4 reh gayi thin). Cards ka train-set = jawab me likhi trains ∩ live payload; class-level detail (usi train ki baaki classes) payload se hi aati hai.</li>
   <li><b>Naya provider bina code chhue.</b> 3 env vars (<code>AI_LLM_BASE_URL</code>, <code>AI_LLM_API_KEY</code>, <code>AI_LLM_MODELS</code>) — poora AI stack (agentic + NLU + journey decisions) kisi bhi OpenAI-compatible provider par chala jaata hai. Aapki nayi key milte hi lag jaayega; abhi ka NVIDIA path waisa hi safe rehta hai.</li>
  </ul>
 </div>
@@ -170,6 +171,9 @@ body { background:#0f1420; color:#e8ecf3; font-family: system-ui, -apple-system,
  <p class="small">Sabak: NVIDIA NIM prod par queue me atak jaata hai (30–60s), jabki wahi model Groq par 1–2 second me jawab deta hai. Isliye chain me do alag provider rakhein — fir koi ek limit na rok sake. (Groq par <code>llama-3.3-70b-versatile</code> 16 Aug 2026 se retire ho gaya hai — purane tutorials mat follow karein.)</p>
 </div>
 
+<div class="box">
+ <b>Prod par verify (deploy c259803):</b> <code>LDH se JAT kal confirm seat batao</code> → <b>agentic</b> · <code>FIND_SEATS ✓</code> · <b>34s</b> · payload trains <code>11077, 12237, 15651</code> = jawab ke trains <b>(MATCH)</b>. <code>LDH se JAT kal saari trains ki seat availability batao</code> → <b>agentic</b> · <code>FIND_SEATS ✓</code> · <b>19s</b> · payload trains <code>11077, 12207, 12237, 12355, 12475, 12919, 15651, 18309, 22431</code> = jawab ke trains <b>(MATCH)</b>. Yaani live app me bhi text aur cards ek hi data ke — aur latency 19–34s (NIM queue khulne par).
+</div>
 <div class="box">
  <b>Proof (local, aapki query):</b> <code>engine: agentic_tool_calling</code> · <code>openai/gpt-oss-20b</code> · <code>FIND_SEATS ✓</code> · <b>22.2s</b> · board me <b>${sf.trainsSeen} trains</b>, seat-wali ${trains.length} (${trains.join(", ")}) — <b>text ke trains: ${trains.join(",")}</b> · payload ${sf.rows.length} seat rows + ${sf.wlRows.length} WL rows · cards unhi se bane. Isi round ke naye tests: <code>round53-text-cards-and-provider</code> (6) + <code>round53-app-nav-and-irctc-return</code> (5) — full suite <b>134 files / 1421 tests PASS</b>. Latency par aapka faisla saaf hai: <i>quality pehle</i> — isliye koi shortcut nahi liya.
 </div>
