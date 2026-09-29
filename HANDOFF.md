@@ -58,3 +58,13 @@ eRail). Web app: React + Vite + Express (`server/`), aur Android WebView wrapper
 - R47 `69992d5`: chat UI (AnswerCard).
 - R45 `4f404d7` + `2abdaf0`: full AI-first. R46 `2f9c008` + `a66a3af`: station-code verification.
 - (Isse purane: repo `git log` dekho; `docs/RAILBOOK-ADDENDUM-v1.4.3.md` me har round ka record hai.)
+
+## Round-52 (29 Sep 2026) — “har query AI ke paas” (live build ka aakhri round)
+- **Root cause:** `run.ts` ka `isBookingMutation()` akela `confirm` shabd par match karta tha → “confirm seat find out karke do na”
+  booking-hukm ban jaata tha → `aiFirst=false` → AI-first flow skip, jawab deterministic engine se (model ne tool chalaya hi nahi).
+- **Fix:** (a) mutation = asli hukm (`book kar do`, `confirm karo`, `payment kar do`…) + “confirm” khud sirf tab jab seat/availability
+  context na ho; (b) model-health ordering (`orderModelChain`) — recently-fail model chain ke aakhir me; (c) `matchStationStrict()`
+  (tools) + NLU ka loose `matchStation()` waisa hi; (d) capability sawaal bhi model ka (`!aiFirst` gate); (e) `FIND_SEATS` jawab me
+  `summary` (rows + wlRows) ki SAARI entries. Chain: `gpt-oss-20b` primary → `muse-glimmer-30b` fallback, budget 90s / call 45s.
+- **Proof:** local probe `engine: agentic_tool_calling`, `FIND_SEATS ✓`, 7 trains × saari classes; suite 132 files / 1410 tests.
+- Docs: `docs/RAILBOOK-ADDENDUM-v1.4.3.md` **§9.44**; preview `RailBook-round52-2026-09-29.html`.

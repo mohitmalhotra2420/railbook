@@ -151,6 +151,12 @@ export function scrubInternalNotes(reply: string): string {
   if (!reply) return reply;
   const instructionRe =
     /\b(jawab me\b[^.]*\blikho|mat likho|likho\s*\(jo|seat rows me hain|card me hain|confirm% ?nahi batana|mat maano|dobara mat poochho|tool hint|tool hint:|internal|system check)\b/i;
+  /* Round-52 (29 Sep 2026): tool summaries me model ke liye likhi imperative lines hoti hain — jab
+   * model ka turn fail ho kar tool-summary user tak jaaye (AI-first ka safety net), to wo lines
+   * user ko kabhi na dikhein. (Live probe me "Har train ki line me uski SAARI classes likho …"
+   * aur "Source: web_confirmtkt ·" user tak chala gaya tha.) */
+  const toolImperative =
+    /\b(?:saari|sabhi|har|inhe|inme|unhe)\b[^.]{0,60}\b(?:likho|likhe|batao mat|chhupao|mat likho)\b|\b(?:likho|chhupao|poochho|mat maano)\b\s*[,.]?\s*$|^\s*(?:source|provider)\s*:|\bconfirm%\s*nahi\b/i;
   const noisyParen = /\([^()]*\b(?:live board|board check kiya|alag board)\b[^()]*\)/gi;
   /* Round-43k: model ke apne control/marker tokens user ko kabhi na dikhein ("[END]", "(END)", "[/NEXT]"…).
    * [NEXT] chips ke liye CLIENT ka marker hai (alag line me) — isliye yahan sirf END/DONE jaise markers. */
@@ -165,9 +171,15 @@ export function scrubInternalNotes(reply: string): string {
   const trainsDekhe = /\b\d+\s*trains? dekhe\s*(?:\([^()]*\))?\.?/gi;
   const out = String(reply)
     .split("\n")
-    .filter((line) => !instructionRe.test(line) && !rawToolEcho.test(line) && !modelInstruction.test(line))
+    .filter((line) => !instructionRe.test(line) && !rawToolEcho.test(line) && !modelInstruction.test(line) && !toolImperative.test(line))
     .map((line) =>
       line
+        /* Round-52: tool summary ke technical prefixes saaf Hinglish me (data wahi rehta hai). */
+        .replace(/^\s*SEAT\s*\(\d+ rows?\)\s*:\s*/i, "")
+        .replace(/^\s*WAITLIST\/N-A\s*\([^)]*\)\s*:\s*/i, "WL/N-A: ")
+        .replace(/^\s*OTHER CLASSES\s*\([^)]*\)\s*:\s*/i, "Isi train ki baaki classes: ")
+        .replace(/^\s*NEARBY\s*:\s*/i, "🧭 ")
+        .replace(/^\s*ROUTE\s*:\s*/i, "ℹ️ ")
         .replace(noisyParen, "")
         .replace(markerJunk, "")
         .replace(trainsDekhe, "")

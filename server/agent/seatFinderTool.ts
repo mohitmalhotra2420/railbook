@@ -22,6 +22,7 @@
 import { getProvider } from "../providers/index.js";
 import { enrichTrainsFreshness, routedClassBoard, routedRouteBoard, routedStationSearch } from "../railway/router.js";
 import { filterTrainsServingSegment, nearbyCandidatesNote, routeDropNote } from "./routeSegment.js";
+import { resolveStationArg } from "./stationArg.js";
 import { searchStations as searchLocalStations } from "../data/stations.js";
 import {
   AC_CLASSES,
@@ -92,18 +93,11 @@ export function timeWindowFromWord(raw: string | null | undefined): { after: num
 }
 
 async function stationCode(raw: string): Promise<string | null> {
-  const s = String(raw ?? "").trim();
-  if (!s) return null;
-  if (/^[A-Z0-9]{2,5}$/.test(s) && /[A-Z]/.test(s)) return s.toUpperCase();
-  const local = searchLocalStations(s);
-  if (local.length) return local[0].code;
-  try {
-    const res = await routedStationSearch(s);
-    if (res.stations?.length) return res.stations[0].code;
-  } catch {
-    /* station lookup fail — neeche null */
-  }
-  return null;
+  /* Round-52: user/model ke haath ka station arg (jaise "Yaar Ldh", "Ldh", "svdk", "smvd katra") —
+   * ek jagah se resolve (stationArg.ts). Pehle yahan sirf local exact + provider search thi, isliye
+   * filler wala phrase resolve hi nahi hota tha aur tool "station resolve nahi hua" de deta tha. */
+  const hit = await resolveStationArg(String(raw ?? ""));
+  return hit?.code ?? null;
 }
 
 /**
@@ -342,7 +336,9 @@ export const FIND_SEATS_DESCRIPTION =
   "YA '17:00' / '5 baje ke baad'; depart_before = '12:00' / '12 baje se pehle'. " +
   "'subah ki trains batao' jaisa sawaal aaye to poora din ka jawab MAT do — usi window ki trains batao. " +
   "sort_by = 'cheapest' | 'fastest'; train_numbers = sirf in trains par (comma-separated). " +
-  "WL ka confirm% kabhi mat batao (data nahi hai) — sirf WL number.";
+  "WL ka confirm% kabhi mat batao (data nahi hai) — sirf WL number. "
+  "Result ke `summary` field me har train ki har class ki line hai (AVAILABLE + WL/N-A dono) — apne jawab me "
+  "wahi SAARI entries likho; sirf AVAILABLE rows likhna adhoora hai (jab tak user ne khud 'sirf available' na maanga ho).";
 
 export const FIND_SEATS_PARAMETERS = {
   type: "object",

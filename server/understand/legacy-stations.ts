@@ -290,6 +290,29 @@ export function matchStationFuzzy(raw: string): Station | undefined {
   return bestSt;
 }
 
+/**
+ * Round-51/52 (29 Sep 2026) — Hinglish sawaalon me station ke aas-paas filler shabd hote hain
+ * ("Yaar LDH se SVDK ke liye kal…", "bhai ldh", "kal katra"). Station ka naam dhoondhne se pehle ye
+ * shabd hata diye jaate hain; station wala hissa bachne par hi match hota hai — aur agar koi AJANAB
+ * shabd bacha ho (jaise "delhi airport" ka "airport") to match NAHI hota (provider/choice-flow ka kaam,
+ * andaza nahi).
+ */
+const PHRASE_FILLERS = new Set([
+  "yaar", "yar", "bhai", "bhaiya", "bro", "dost", "please", "pls", "plz", "zara", "na", "naa", "ya",
+  "mujhe", "muje", "main", "mai", "mera", "meri", "mere", "hum", "hume", "humko", "apna", "aap",
+  "kal", "aaj", "aj", "parso", "parson", "today", "tomorrow", "kalke", "kalh",
+  "se", "ka", "ki", "ke", "ko", "lie", "liye", "liy", "ke liye", "tak", "taraf", "towards",
+  "find", "out", "karke", "karo", "kardo", "kar", "krdo", "krke", "do", "de", "dena", "dijiye",
+  "batao", "bata", "bataiye", "btado", "batana", "chahiye", "chahta", "chahti", "jana", "jaana",
+  "jaunga", "jaungi", "travel", "jana hai", "hai", "hain", "ho", "kya", "kaun", "kaunsi", "konsi",
+  "train", "trains", "gaadi", "ticket", "tickets", "seat", "seats", "berth", "confirm", "confirmed",
+  "availability", "available", "khali", "khaali", "wala", "wali", "wal", "ka", "aur", "and", "to",
+  "from", "the", "for", "at", "in", "of", "morning", "evening", "night", "raat", "subah", "dopahar",
+  /* station qualifiers — ye station ke SAATH aate hain (Agra Cantt / Mathura Jn) */
+  "jn", "jct", "junction", "cantt", "cantonment", "city", "road", "terminal", "central", "halt",
+  "station", "stn", "smvd", "jammu", "tawi",
+]);
+
 const CLUSTER_CITIES = new Set([
   "ambala", "अंबाला", "अम्बाला",
   "delhi", "dilli", "दिल्ली", "दिल्ही",
@@ -337,9 +360,48 @@ export function matchStation(raw: string): Station | undefined {
     }
     return false;
   };
-  const byCityWord = CLIENT_STATIONS.find((s) => s.city.toLowerCase() === q || hasWord(q, s.city.toLowerCase()));
+  /* NLU ke lambe tails ("Delhi Saturday ko 2 passengers ke liye…") ke liye purana loose city-word
+   * match waise hi — ye NLU ka kaam hai (from/to nikaalna), aur galat jagahon ("delhi airport") ki
+   * rok TOOLS me hai (matchStationStrict — dekho neeche). */
+  const byCityWord = CLIENT_STATIONS.find((st) => st.city.toLowerCase() === q || hasWord(q, st.city.toLowerCase()));
   if (byCityWord) return byCityWord;
   return stationWordInPhrase(q);
+}
+
+/**
+ * Round-52 (tool-path ke liye sakht version): sirf wahi match jo sach me station ka naam ho.
+ *  - cluster city (delhi/mumbai…) → undefined (choice-flow ka kaam),
+ *  - exact code/naam/city/alias,
+ *  - phrase: bache shabd (filler hatane ke baad) 1-2 aur wahi station — "Yaar Ldh" ✓, "Delhi airport" ✗,
+ *  - spelling-tolerant fuzzy sirf usi chhote phrase par.
+ * Tools (SEARCH_TRAINS/JOURNEY_ANALYZE/FIND_SEATS) isi ko use karte hain — warna "Delhi airport" jaisa
+ * ajanab phrase chup-chaap NDLS ban jaata tha (aur user ka galat station search hota tha).
+ */
+export function matchStationStrict(raw: string): Station | undefined {
+  const q = raw.trim().toLowerCase().replace(/\s+/g, " ");
+  if (!q) return undefined;
+  if (CLUSTER_CITIES.has(q)) return undefined;
+  const alias = ALIASES[q];
+  if (alias) return stationByCode(alias);
+  const exact = CLIENT_STATIONS.find(
+    (s) => s.code.toLowerCase() === q || s.city.toLowerCase() === q || s.name.toLowerCase() === q,
+  );
+  if (exact) return exact;
+  const leftovers = q.split(" ").filter(Boolean).filter((w) => !PHRASE_FILLERS.has(w));
+  if (!leftovers.length || leftovers.length > 2) return undefined;
+  const phrase = leftovers.join(" ");
+  if (CLUSTER_CITIES.has(phrase)) return undefined;
+  const pAlias = ALIASES[phrase];
+  if (pAlias) return stationByCode(pAlias);
+  const pExact = CLIENT_STATIONS.find(
+    (s) => s.code.toLowerCase() === phrase || s.city.toLowerCase() === phrase || s.name.toLowerCase() === phrase,
+  );
+  if (pExact) return pExact;
+  if (leftovers.length === 1) {
+    const fuzzy = matchStationFuzzy(phrase);
+    if (fuzzy) return fuzzy;
+  }
+  return undefined;
 }
 
 /**
@@ -355,9 +417,28 @@ export function matchStation(raw: string): Station | undefined {
  */
 function stationWordInPhrase(q: string): Station | undefined {
   if (!q.includes(" ")) return undefined;
+  /* Pehle filler hata kar dekho — "Yaar Ldh"/"bhai ldh"/"kal katra" seedha yahin resolve ho jaate hain. */
+  const leftovers = q.split(" ").filter(Boolean).filter((w) => !PHRASE_FILLERS.has(w));
+  if (leftovers.length && leftovers.length <= 2) {
+    const phrase = leftovers.join(" ");
+    const pAlias = ALIASES[phrase];
+    if (pAlias) return stationByCode(pAlias);
+    const pExact = CLIENT_STATIONS.find(
+      (s) => s.code.toLowerCase() === phrase || s.city.toLowerCase() === phrase || s.name.toLowerCase() === phrase,
+    );
+    if (pExact) return pExact;
+  }
   const hits = findStationsInText(q);
   if (!hits.length) return undefined;
-  if (hits.some((st) => CLUSTER_CITIES.has(st.city.toLowerCase()))) return undefined;
+  /* Cluster-city (delhi/mumbai/kolkata…) ke station yahan se NAHI aate — unka sahi jawab options/
+   * choice-flow hai, aur "delhi airport" jaise phrase ko NDLS maan lena galat hota hai. Check naam
+   * aur city dono par, word-wise (NDLS = "New Delhi"/Delhi, HWH = "Howrah"/Kolkata …). */
+  const clusterWord = (v: string | undefined): boolean =>
+    String(v ?? "")
+      .toLowerCase()
+      .split(/[^\p{L}]+/u)
+      .some((w) => w && CLUSTER_CITIES.has(w));
+  if (hits.some((st) => clusterWord(st.city) || clusterWord(st.name))) return undefined;
   const codes = [...new Set(hits.map((st) => st.code))];
   if (codes.length !== 1) return undefined;
   return stationByCode(codes[0]);

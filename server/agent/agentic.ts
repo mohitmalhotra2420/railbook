@@ -13,6 +13,7 @@
  *  - Grounded answers only: the final reply's numbers must exist in tool
  *    results, otherwise the reply is replaced with deterministic summaries.
  */
+import { STATION_CODES } from "../data/station-codes.js";
 import { z } from "zod";
 import { env } from "../env.js";
 /* 24 Sep 2026 (user: "AI sabh handle kare — do not specific to 2A"): AI khud seat sawaal ka
@@ -574,7 +575,7 @@ export const AGENTIC_TOOLS = [
     function: {
       name: "JOURNEY_ANALYZE",
       description:
-        "Atlas engine: fastest/cheapest/earliest/best_value train rank + optional alternative dates aur connecting routes. Filters: max_fare_inr (budget cap), preferred_class (jaise CC/3A), depart_after/depart_before (HH:MM window). Comparison/optimisation sawaalon ke liye yeh use karo. Origin/destination mein city NAAM (Delhi) ya known rail code (NDLS) do — airport codes mat bhejo (DEL DENDULURU hai, Delhi nahi).",
+        "Atlas engine: fastest/cheapest/earliest/best_value train rank + optional alternative dates aur connecting routes. Filters: max_fare_inr (budget cap), preferred_class (jaise CC/3A), depart_after/depart_before (HH:MM window). Comparison/optimisation sawaalon ke liye yeh use karo. Origin/destination mein city NAAM (Delhi) ya known rail code (NDLS) do — airport codes mat bhejo (DEL DENDULURU hai, Delhi nahi). Seat/berth/availability ka sawaal ho (jaise \"confirm seat find out karo\", \"2A me seat hai kya\") to JOURNEY_ANALYZE ke bajaye FIND_SEATS chalao — wo passenger count ke bina bhi poora seat board deta hai; aise sawaal par user ko pax ke liye roko mat.",
       parameters: {
         type: "object",
         properties: {
@@ -762,7 +763,16 @@ type ResolvedStn = { code: string } | { candidates: { code: string; name: string
 async function resolveStationRef(raw: string): Promise<ResolvedStn> {
   const s = raw.trim();
   if (!s) return { error: "Station khaali hai." };
-  if (/^[A-Z0-9]{2,5}$/.test(s)) return { code: s.toUpperCase() };
+  /* Round-52: ye "code" check sirf ASLI codes par (local dataset) — warna "delhi"/"katra" jaise
+   * naam bhi code ban kar lookup fail kar dete the. */
+  if (/^[A-Z0-9]{2,5}$/.test(s) && STATION_CODES[s.toUpperCase()]) return { code: s.toUpperCase() };
+  /* Round-52 (user: "model apne aap meri wording samjhe"): model tool ko user ki wording jaisa station
+   * bhej sakta hai ("Yaar Ldh", "bhai ldh", "kal katra") — pehle local knowledge (alias/code/city +
+   * phrase ke andar ka station word) dekho, tab provider. Ambiguous city (Delhi/Mumbai…) local me nahi
+   * milti, isliye wahan purana choice-flow waise hi chalega. */
+  const { matchStationStrict } = await import("../understand/legacy-stations.js");
+  const local = matchStationStrict(s);
+  if (local) return { code: local.code.toUpperCase() };
   const res = await routedStationSearch(s);
   if (res.needChoice && res.stations.length > 1) {
     return {
@@ -2197,7 +2207,7 @@ function systemPrompt(
     "Tumhara kaam: user ke sawaal samajhkar APPROVED TOOLS se sachchi railway data laana. Tum khud decide karte ho kaunsa tool chahiye — multi-step allowed hai.",
     /* 24 Sep 2026 (user: "maine mathura jn likha, phir bhi 4 options kyun aaye?"): */
     /* 24 Sep 2026 (user: "AI sabh handle kare, do not specific to 2A — user kuch bhi pooch sakta hai") */
-    "SEAT RULE: seat/berth/class/availability ka sawaal SAARE trains par (\"2A me kaunsi train me seat hai\", \"AC trains dikhao\", \"sabse sasti seat wali\", \"raat 9 ke baad sleeper me seat\", \"sirf confirmed wali\", \"12029 me seat hai kya\") → PEHLE FIND_SEATS call karo (class_code, depart_after, sort_by khud set karo; only_available=true SIRF jab user ne khud \"available/khali/sirf available/confirmed seat\" maanga ho — warna false bhejo taaki WL/N-A trains bhi aayein) aur uske result se hi jawab do. Seat ke number/status kabhi memory se mat likho. WL ka confirm% kabhi mat batao — sirf WL number. Jawab me SAARI seat wali trains ki lines likho (jo tool ke SEAT rows me hain — top 3-5 nahi, sab) — number, naam, class, status+count, fare. Kabhi mat likho ki \"baaki trains kisi card/Seat Finder me hain\" — chat me aisa koi card nahi dikhta, isliye wo baat galat hai; jo trains hain wo isi jawab me aa jaati hain.",
+    "SEAT RULE: seat/berth/class/availability ka sawaal SAARE trains par (\"2A me kaunsi train me seat hai\", \"AC trains dikhao\", \"sabse sasti seat wali\", \"raat 9 ke baad sleeper me seat\", \"sirf confirmed wali\", \"12029 me seat hai kya\") → PEHLE FIND_SEATS call karo (class_code, depart_after, sort_by khud set karo; only_available=true SIRF jab user ne khud \"available/khali/sirf available/confirmed seat\" maanga ho — warna false bhejo taaki WL/N-A trains bhi aayein) aur uske result se hi jawab do. Seat ke number/status kabhi memory se mat likho. WL ka confirm% kabhi mat batao — sirf WL number. Jawab me SAARI lines likho — tool result ke `summary` me har train ki har class ki entry hai (rows + wlRows dono): wahi SAARI entries apne jawab me likho (top 3-5 nahi, sab; ek train ki saari classes bhi, jaise 1A AVL · 2A WL · 3A WL · 3E WL · SL N/A). Sirf AVAILABLE rows likhna ADHOORA jawab hai (user ki shikayat R51: 'saari class kyu nhi show hoti') — jab tak user ne khud 'sirf available/khali dikhao' na maanga ho — number, naam, class, status+count, fare. Kabhi mat likho ki \"baaki trains kisi card/Seat Finder me hain\" — chat me aisa koi card nahi dikhta, isliye wo baat galat hai; jo trains hain wo isi jawab me aa jaati hain.",
     "TIME-WINDOW RULE: user ne waqt bataya ho (subah/subha/morning, dopahar/afternoon, shaam/evening, raat/night, \"9 baje ke baad\", \"12 baje se pehle\") aur trains/seat poochhe ho (\"kal subha ki trains batao\", \"shaam ko kaunsi gaadi\") → FIND_SEATS me wahi window bhejo (depart_after = 'subah'/'shaam'/..., depart_before = '12:00' jaisa) aur jawab me SIRF usi window ki trains batao. Poora din ki list ya \"22 trains\" jaisa jawab us sawaal ka jawab NAHI hai — aur ye kabhi mat maan lo ki subah ka matlab sab trains hain. Window ka label bhi likho (jaise \"subah 04:00–12:00\").",
     "STATION QUERY RULE: user ne station ke saath qualifier likha ho (Jn/Junction/Cantt/Cant/City/Road/Terminal/Central/Halt) to SEARCH_STATIONS me POORA phrase bhejo — \"Mathura Jn\", \"Mathura Cantt\", \"Agra City\". Sirf city (\"Mathura\") mat bhejo — warna bina zaroorat multiple-choice options dikhte hain. Exact station naam mile to options MAT poochho, seedha wahi station use karo.",
     `Aaj ki date (IST): ${todayLabel}.`,
@@ -2258,7 +2268,20 @@ function systemPrompt(
     "31. KHUD KA DIMAAG (user 2026-09-27: 'jaise chatgpt/gemini/manus khud ka brain use karte hain… unko pehle batana nahi padta, wo khud se samajhte hain ki kya missing hai, user se kya poochhna chahiye, kaunsa tool lagana hai — waise hi mera AI bhi khud se samjhe'): har turn tum YE 4 kadam khud karo, koi tumhe batayega nahi — (1) SAMJHO: user ki baat apne shabdon me (typo/adhoora bhi ho to matlab nikaalo, jaise 'statsu'=status, 'gaadi'=train, 'ldh'=Ludhiana, 'asr'=Amritsar; haan/na/thanks jaise jawaab pichhle sawaal ka jawab maano). (2) CHECK KARO — kya missing hai?: jawab/kaam ke liye koi cheez zaroori hai jo user ne nahi boli (route? date? passengers? class kaunsi? train kaunsa? seat ya live?) to wo khud pehchano aur BAS wahi ek zaroori sawaal poochho (jab tak ek se zyada sach me na atke hon), saath me [NEXT] chips se options do (dates: aaj/kal/parso; classes; trains). Jo user bata chuka hai (route/date/class/pax) wo FINAL maano — dobara MAT poochho. Jo sawaal tu poochhega wahi user ke liye agla kadam hai — usme wo choices do jo sach me aage badhaayein. (3) TOOLS KHUD CHUNO: jawab ke liye jo tool chahiye wo tumhare paas hai — lagao, jitne chahiye. Live/seat/fare/status/PNR → CHECK_AVAILABILITY/GET_FARE/TRACK_TRAIN/CHECK_PNR (ConfirmTkt → RailYatri → eRail order tools ke andar hi hai); train jankari → GET_TRAIN_INFO/GET_TIMETABLE/SEARCH_TRAIN_BY_NUMBER; route/train list → SEARCH_TRAINS/JOURNEY_ANALYZE; general knowledge (history/speed/rules/counts/records) → WEB_SEARCH (Wikipedia) + KB. Tool ne kuch reject kiya (date/passengers missing) to wo tumhe batata hai — us par apne shabdon me user se wahi ek sawaal poochho. (4) JAWAB + AAGE: seedha, poora, confident jawab (numbers sahi), phir [NEXT] se agla kadam. KABHI mat likho 'mujhe batao kya karna hai' / 'aap bataayein kya chahiye' — ye tumhara kaam hai. KABHI 'provider se data nahi mila' bol kar mat ruko jab sawaal general knowledge ka hai. (f) Agar system ne date/route resolve kar di (hint line me 'FINAL' likha ho) to use FINAL maano — jo cheez user keh chuka ya system resolve kar chuka hai uska sawaal DOBARA mat poochho; sirf wo poochho jo SACH ME missing hai (jaise passengers).",
     "30. DO MODES (user 2026-09-27: 'jaise chatgpt/gemini/claude/manus — koi bhi sawaal par ek dum accurate answer'): (a) LIVE mode = kisi khaas train ka seat/availability/fare/live status/PNR/coach/platform, ya aaj/kal ki booking ya journey-timing — inme SIRF tools ka verified data use karo, koi number khud se mat likho. (b) KNOWLEDGE mode = baaki sab (general railway knowledge, rules, history, comparison, station info, 'kitne platform', 'kaunsi sabse tez train', 'bachche ka ticket', 'kya tum ye kar sakte ho') — inme tum duniya ka sabse acha assistant ho: apne knowledge se seedha, poora, confident jawab do, aur zaroorat pade to WEB_SEARCH se verify karo. (c) KNOWLEDGE sawaal par 'data nahi mila' bolna MANA hai jab jawab tumhe pata hai — ChatGPT jaisa seedha batao (numbers/dates sahi hone chahiye; shak ho to web se confirm karo). (d) Spelling galat/adhoori ho sakti hai (statsu=status, gaadi=train, 'ldh se asr') — SAMJH kar jawab do, spelling ke bahane sawaal dobara mat poochho. (e) User ne JO poochha uska JAWAB do — uske sawaal ki jagah apna naya sawaal sirf tab jab sach me aage badhne ke liye zaroori ho.",
     "29. JAWAB EK DAMM SEEDHA (user 2026-09-26: 'jaise chatgpt/gemini/claude/manus ek dum se accurate answer dete hai … user ke questions ko samjhe aur ek dum perfect answer ya outcome de'): (a) pehle seedha jawab/outcome, phir chhota context — lecture ya purani baatein dohraana nahi; (b) agar user ne kisi turn me class/date/passengers/train/route bata diya ho to wo FINAL hai — wahi cheez dobara MAT poochho, usi ke hisaab se aage badho; (c) apna pichhla sawaal dobara mat likho (loop mat banao) — user ka naya message us sawaal ka jawab maano; (d) knowledge/general sawaal (railway, trains, rules, history, stations, booking process) ho to duniya ka sabse acha assistant ki tarah confident, sahi aur poora jawab do — zaroorat ho to WEB_SEARCH chala kar verify karo, apni memory se aise fact MAT likho jo verify na ho; (e) kuch pata na ho to SAFAI se bolo (jhoothi certainty kabhi nahi), aur ek chhota aage ka kadam suggest karo.",
-    "26. AGLA KADAM (user requirement 2026-09-26: 'answer ke baad AI ko next step pe leke jaana chahiye'): jawab ke EKDUM aakhir me 1-2 line likho — bilkul is format me, kuch aur nahi: [NEXT] <chhota label> => <wahi baat jo user bhej sakta hai>. Jaise: '[NEXT] Book 12013 · CC (AVL 354 ₹675) => 12013 mein CC book krdo'. Rules: (a) sirf ISI turn ke tool data se banao — koi naya train number/naam/fare/count nahi; (b) label me wahi number jo data me hai; (c) max 2 lines, sabse zaroori pehle; (d) user requirement 26 Sep (round 34 + 36): jab bhi is turn me koi KAAM KA data aaya ho (train/seat/fare/timing/status/plan/route), [NEXT] ZAROOR likho — agla kadam TUM socho aur suggest karo (jaise us train ka booking, doosri class, doosri date, seat availability, timings, live status, ya zaroorat ho to sawaal). Ab koi data-derived fallback nahi hai: [NEXT] nahi diya to user ko agla kadam dikhega hi nahi — isliye sirf tab chhodo jab sach me koi agla kaam ka step na banta ho; (e) reply ke andar [NEXT] ke alawa agla kadam dobara mat likho (UI khud dikhata hai); (f) user requirement 26 Sep (round 36): 'Agla kadam' card SIRF tumhare [NEXT] se banta hai — data se banaya hua koi fallback chip nahi hota, isliye tumne [NEXT] NAHI diya to user ko agla kadam dikhega hi nahi. Isliye apna dimaag lagao jaise ChatGPT/Gemini lagate hain: socho ki user ke liye agla sabse kaam ka kadam kya hai — booking, doosri class/date, seat availability, timings, live status, ya koi saaf sawaal ('kaunsi class me book karun?') — aur wahi [NEXT] me do.",
+        /* Round-52 (29 Sep 2026 — live probe me gpt-oss-20b ne likha: "Mujhe live seat availability ya PNR
+     * status check karne ka access nahi hai… IRCTC par dekh lo" — jabki uske paas FIND_SEATS/CHECK_*
+     * tools maujood the): live data ke liye pehla aur pakka kadam TOOL CALL hai. Aksar chhote model
+     * prompt ko dekh kar "access nahi hai" likh dete hain — user ke liye wo sabse bura jawab hai. */
+    "25b. LIVE DATA TUMHARE PAAS HAI (29 Sep 2026): seat availability, fare, timetable, live running status, PNR, station lookup — ye SAB tumhare tools se aati hain (ConfirmTkt · RailYatri · eRail · RailCore). Isliye KABHI mat likho ki 'mere paas live data ka access nahi hai', 'IRCTC par dekh lo', 'main live check nahi kar sakta' — pehle TOOL call karo, aur tool ka data use karke seedha jawab do. Tool fail ho jaye tab hi saaf batao ki data abhi nahi mila (aur dobara try karne ko kaho).",
+"26. AGLA KADAM (user requirement 2026-09-26: 'answer ke baad AI ko next step pe leke jaana chahiye'): jawab ke EKDUM aakhir me 1-2 line likho — bilkul is format me, kuch aur nahi: [NEXT] <chhota label> => <wahi baat jo user bhej sakta hai>. Jaise: '[NEXT] Book 12013 · CC (AVL 354 ₹675) => 12013 mein CC book krdo'. Rules: (a) sirf ISI turn ke tool data se banao — koi naya train number/naam/fare/count nahi; (b) label me wahi number jo data me hai; (c) max 2 lines, sabse zaroori pehle; (d) user requirement 26 Sep (round 34 + 36): jab bhi is turn me koi KAAM KA data aaya ho (train/seat/fare/timing/status/plan/route), [NEXT] ZAROOR likho — agla kadam TUM socho aur suggest karo (jaise us train ka booking, doosri class, doosri date, seat availability, timings, live status, ya zaroorat ho to sawaal). Ab koi data-derived fallback nahi hai: [NEXT] nahi diya to user ko agla kadam dikhega hi nahi — isliye sirf tab chhodo jab sach me koi agla kaam ka step na banta ho; (e) reply ke andar [NEXT] ke alawa agla kadam dobara mat likho (UI khud dikhata hai); (f) user requirement 26 Sep (round 36): 'Agla kadam' card SIRF tumhare [NEXT] se banta hai — data se banaya hua koi fallback chip nahi hota, isliye tumne [NEXT] NAHI diya to user ko agla kadam dikhega hi nahi. Isliye apna dimaag lagao jaise ChatGPT/Gemini lagate hain: socho ki user ke liye agla sabse kaam ka kadam kya hai — booking, doosri class/date, seat availability, timings, live status, ya koi saaf sawaal ('kaunsi class me book karun?') — aur wahi [NEXT] me do.",
+    /* Round-52 (user 29 Sep: "purane build jaisa — model apne aap meri wording samjhe; har query AI ke
+     * paas jaaye, deterministic path chale hi na"): do rules — (a) user ki Hinglish wording me filler
+     * ("yaar", "bhai", "please", "kal ke liye", "find out karke do") hote hain; inhe ignore karke
+     * station/city/train/date/class nikaalo, aur station word chhota/typo ho to bhi TOOL ko do (tool
+     * khud resolve karta hai — tum "kaun sa station?" mat poochho jab tak sawaal me koi jagah hi na ho).
+     * (b) "tum kya kar sakte ho / kya nahi" ka jawab TUM apne shabdon me do (sach rule 28 me hai). */
+    "27. USER KI WORDING (29 Sep 2026, user ka saaf aadesh): Hinglish/Hindi/English mixed sawaalon me filler shabd aate hain — 'yaar', 'bhai', 'please', 'na', 'zara', 'kal/parso', 'ke liye', 'find out karke do', 'bata do'. Inhe apne aap ignore karo aur user ka ASLI matlab nikaalo (kaun sa station · train · date · class · passengers · kya jaanna hai). Station/city ka naam adhoora ya chhota ho (jaise 'Ldh', 'svdk', 'katra') to seedha TOOL ko do — tools khud resolve karte hain (galti ho to tool bata dega). Jab tak sawaal me koi jagah/city ka zikr hi na ho, tabhi 'kahan se/kahan jaana hai' poochho.",
+    "28. TUM KYA KAR SAKTE HO (capability sawaal): jab user poochhe 'tum kya kar sakte ho', 'kya nahi kar sakte', 'tum kaun ho' — usi bhasha me chhota, saaf, honest jawab do (list format theek hai). Sach: train search/plan (from→to + date, direct/connecting), kisi bhi train ka naam·route·timetable·live status·kitni late, seat availability + fare (ConfirmTkt · RailYatri · eRail se REAL data, WL/RAC ka sach), booking aage badhana (class/seat chun kar passenger form kholna — IRCTC handoff), PNR status, station code/naam/city, general railway rules aur knowledge. Do cheezein NAHI karte (user ke rule se): (1) IRCTC par 'Continue to IRCTC' khud click nahi karte, (2) passenger details/OTP/payment khud nahi bharte. Jo verified nahi, uska andaaza mat lagao — saaf bol do.",
   ]
     .filter(Boolean)
     .join("\n");
@@ -2770,6 +2793,48 @@ type AgenticTransport = {
   hfFallback: { model: string; url: string; apiKey: string } | null;
 };
 
+/* ── Round-52 (29 Sep 2026, user: "har query AI ke paas jaaye — model khud samjhe, jaise ChatGPT"):
+ * ab tak chain ka pehla model (config ka primary) har turn me pehle try hota tha — agar wo sawaal par
+ * slow/timeout ho (prod me Muse 30s+ leta tha), to poora turn budget usi me jaata tha aur fallback ko
+ * 5-6s hi milte the → turn fail → jawab deterministic rescue se aa jaata tha (user ko laga "AI samajh
+ * hi nahi raha"). Ab "model health" yaad rakhi jaati hai: jo model HAAL HI me fail hua ho wo agle
+ * turns me chain ke aakhir me chala jaata hai (aur jo jawab de chuka ho wo aage) — config ka order
+ * default rehta hai, hum sirf usko us model se bachate hain jo abhi kaam nahi kar raha. */
+type ModelHealth = { lastOkAt: number; lastFailAt: number; fails: number; oks: number };
+const modelHealth = new Map<string, ModelHealth>();
+/** Itni der tak ek failure "taaza" maani jaati hai (uske baad model ko dobara mauka milta hai). */
+const MODEL_UNHEALTHY_MS = 10 * 60_000;
+
+/** Chain ko health ke hisaab se stable-order karo: healthy (ya nadaan) models pehle, recently-fail wale aakhir me. */
+export function orderModelChain(chain: string[]): string[] {
+  const now = Date.now();
+  const unhealthy = (m: string): boolean => {
+    const h = modelHealth.get(m);
+    if (!h) return false;
+    return h.lastFailAt > h.lastOkAt && now - h.lastFailAt < MODEL_UNHEALTHY_MS;
+  };
+  const preferred = chain.filter((m) => !unhealthy(m));
+  const demoted = chain.filter((m) => unhealthy(m));
+  return [...preferred, ...demoted];
+}
+
+/** Call ka nateeja yaad rakho (chain ordering ke liye — user-facing kahin nahi jaata). */
+export function noteModelOutcome(model: string, ok: boolean): void {
+  const h = modelHealth.get(model) ?? { lastOkAt: 0, lastFailAt: 0, fails: 0, oks: 0 };
+  if (ok) {
+    h.lastOkAt = Date.now();
+    h.oks += 1;
+  } else {
+    h.lastFailAt = Date.now();
+    h.fails += 1;
+  }
+  modelHealth.set(model, h);
+}
+
+export function _clearModelHealth(): void {
+  modelHealth.clear();
+}
+
 function agenticTransport(): AgenticTransport | null {
   if (env.agenticProvider === "hf") {
   if (!env.hfToken || !env.hfModel) return null;
@@ -3088,7 +3153,8 @@ export async function runAgenticTurn(input: {
 
   // AI chain: NVIDIA = primary (GPT-OSS) -> fallback (Nemotron); HF = single GLM.
   // Model chain poor fail ho to upar caller (runAgent) deterministic fallback chalata hai.
-  const modelChain = transport.models;
+  /* Round-52: recently-fail wale model aakhir me (dekho orderModelChain). */
+  const modelChain = orderModelChain(transport.models);
   let repaired = false;
   /* Round-34 (user: "agla kadam na humesha AI hi chunne sabh sochke… agla kadam fallback pe verified
    * data se mat aaye"): agar model ne [NEXT] nahi di par is turn me kaam ka tool data hai, to EK
@@ -3128,7 +3194,10 @@ export async function runAgenticTurn(input: {
   // Vercel function wall (~30s default) — poora turn is budget ke andar raho.
   // Wall paar hua to jo tool-data mila uska summary return karo (null nahi).
   /* Stage-5L-net: 90s wall + 66s planner left no room for a final AI round; mobile saw "network error". 70s still covers RANK + short reply. */
-  const TURN_TIME_BUDGET_MS = Number(process.env.AI_AGENTIC_TURN_BUDGET_MS ?? 70000);
+  /* Round-52: 70s → 90s default. Prod me 45s set tha — bade sawaal (route verification + model ka
+   * doosra round) me budget khatam ho jaata tha aur jawab deterministic summary par gir jaata tha
+   * (user: "AI samajh hi nahi raha"). User ne latency 40-125s accept ki hai. */
+  const TURN_TIME_BUDGET_MS = Number(process.env.AI_AGENTIC_TURN_BUDGET_MS ?? 90000);
   const timeLeft = () => TURN_TIME_BUDGET_MS - (Date.now() - startedAll);
 
   for (let step = 1; step <= MAX_STEPS; step++) {
@@ -3162,6 +3231,7 @@ export async function runAgenticTurn(input: {
     /* Round-18g: har model-fail ek structured log line + response.modelFallbacks —
      * warna "Muse kyun nahi chala" prod par andaza rehta tha. */
     const noteModelFailure = (m: string, why: string, ms: number) => {
+      noteModelOutcome(m, false); /* Round-52: agle turns me ye model chain ke aakhir me jaayega */
       modelFallbacks.push({ model: m, reason: why, ms, round: steps.length });
       console.log(JSON.stringify({ agenticModel: m, failure: why, ms, round: steps.length, budgetLeftMs: timeLeft() }));
     };
@@ -3252,6 +3322,7 @@ export async function runAgenticTurn(input: {
         json = parsed;
         msg = m;
         modelUsed = typeof parsed.model === "string" ? parsed.model : model;
+        noteModelOutcome(model, true); /* Round-52: ye model abhi kaam kar raha hai — aage rakho */
         break;
       } catch (err) {
         clearTimeout(timer);

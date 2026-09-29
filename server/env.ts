@@ -17,8 +17,13 @@ const NVIDIA_DEFAULT_BASE = "https://integrate.api.nvidia.com/v1";
  * (3-hafte prod-proven, 10/12). Per-model timeout stagger (Round-13) se dead
  * primary fallback ko nahi maarta. Env NVIDIA_MODEL / NVIDIA_FALLBACK_MODEL override.
  */
-const NVIDIA_DEFAULT_MODEL = "meta/muse-glimmer-30b";
-const NVIDIA_DEFAULT_FALLBACK_MODEL = "openai/gpt-oss-20b";
+/* Round-52 (29 Sep 2026, user: "AI first for everything — model khud samjhe, deterministic path chale hi na"):
+ * prod par primary `meta/muse-glimmer-30b` bade agentic prompt par 30s+ le raha tha → turn timeout → jawab
+ * deterministic rescue se aa jaata tha (user ko laga "naya build meri wording nahi samajh raha"). Default
+ * chain ab FAST se shuru hoti hai (gpt-oss-20b ~3-7s, reasoning_effort low) aur Nemotron Lightning
+ * (thinking off) doosre slot me — bhaari reasoning model chain ke aakhir me. Ops chahe to env se badal sakta hai. */
+const NVIDIA_DEFAULT_MODEL = "openai/gpt-oss-20b";
+const NVIDIA_DEFAULT_FALLBACK_MODEL = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning";
 
 /** Production default. Explicit `mock` / `railkit` / `authorized` still override. */
 export const DEFAULT_RAILWAY_PROVIDER = "railcore";
@@ -111,7 +116,9 @@ export const env = {
   get aiRequestTimeoutMs() {
     const n = Number(process.env.AI_REQUEST_TIMEOUT_MS ?? 7000);
     if (!Number.isFinite(n)) return 7000;
-    return Math.min(20000, Math.max(50, Math.floor(n)));
+    /* Round-52: cap 20s → 25s (bhaari sawaal par 7s kam pad jaata tha aur AI ka jawab aane se pehle
+     * timeout ho jaata tha) — default wahi 7s, par tuning ki gunjaish zyada. */
+    return Math.min(25000, Math.max(50, Math.floor(n)));
   },
   /** Gemini — shadow/eval only. Never log these values. Never send to the browser. */
   get geminiApiKey() {

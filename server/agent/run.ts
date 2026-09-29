@@ -467,8 +467,21 @@ const BOOKING_MUTATION_STAGES = new Set([
 ]);
 
 /** Hard booking-action phrases — never routed to the model (defense in depth). */
+/* Round-52 (29 Sep 2026, user: "Bss AI pe hi har query jaaye … deterministic path chale hi na"):
+ * pehle ye regex akela "confirm" shabd par bhi match kar leta tha — isliye "confirm seat find out karke
+ * do na" jaise SEAT SAWAAL booking-hukm maan liye jaate the aur poora AI-first flow skip ho jaata tha
+ * (jawab deterministic path se aata tha). Ab mutation = ASLI booking hukm hi:
+ *   ✓ "book kar do" · "12919 book krdo" · "ticket book kar" · "booking karo" · "confirm karo kar do"
+ *   ✓ "confirm & book" · "payment kar do" · "paise de do" · "haan book"
+ *   ✗ "confirm seat find out karke do" · "2S confirm hai kya" · "confirmed ticket wali trains" */
 const BOOKING_MUTATION_TEXT =
-  /\b(book\s*kar(?:\s*do)?|book\s*kardo|confirm(?:\s*karo|\s*kar\s*do|\s*kar)?|pay(?:ment)?\s*(?:kar|karo|kardo|kar\s*do)?|paise\s*(?:de|do)|payment|confirm\s*&\s*book|haan\s*book|yes\s*book|book\s*it)\b/i;
+  /\b(book\s*(?:kar(?:\s*(?:do|de|dijiye|dena))?|kardo|krdo|kro)|ticket\s*(?:book|kata|kat\s*do)|booking\s*(?:kar|karo|kardo|krdo)|confirm\s*(?:&|and|\+)?\s*book|pay(?:ment)?\s*(?:kar(?:\s*do)?|karo|kardo|krdo)|paise\s*(?:de|do)|payment|haan\s*book|yes\s*book|book\s*it)\b/i;
+
+/* Round-52: akela "confirm karo" tab booking-hukm hai jab wo khud command ho — sawaal me
+ * seat/availability ka zikr ho to wo SEAT sawaal hai ("2S confirm hai kya", "seat availability
+ * confirm karo", "kal ki confirmed seat wali trains"). */
+const CONFIRM_IMPERATIVE_TEXT = /\bconfirm\s*(?:kar(?:\s*(?:do|de|dijiye|dena))?|karo|kardo|krdo|kro|kiya|kijiyega)\b/i;
+const SEAT_CONTEXT_TEXT = /\b(seat|seats|berth|avl|availability|available|khaali|khali|rac|wl|waitlist|waiting|confirmed)\b/i;
 
 /** Station-options content detector — numbered list, "Options:" list, ya
  *  bare paren codes "(DLI, DEC, NDLS…)" — model ka format vary karta hai. */
@@ -492,9 +505,11 @@ function asksStationChoice(reply: string | null | undefined): boolean {
   return mentionsStationOptions(r) || /\?/.test(r);
 }
 
-function isBookingMutation(req: AgentRequest): boolean {
+export function isBookingMutation(req: AgentRequest): boolean {
   if (req.bookingFlow && BOOKING_MUTATION_STAGES.has(String(req.bookingFlow).toUpperCase())) return true;
-  return BOOKING_MUTATION_TEXT.test(String(req.text ?? "").trim());
+  const t = String(req.text ?? "").trim();
+  if (BOOKING_MUTATION_TEXT.test(t)) return true;
+  return CONFIRM_IMPERATIVE_TEXT.test(t) && !SEAT_CONTEXT_TEXT.test(t);
 }
 
 /* ── Station-choice reply resolution ────────────────────────────────
@@ -2116,7 +2131,10 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
       /\b(kya nahi kar|kya nhi kar|what can'?t you|what can you not|tumhari limits?|tumhari kya limit|aap kya nahi)\b/i.test(t) ||
       /\b(tum|aap|tu|you)\b[^?!.]{0,30}\b(kaun|koun|who)\b[^?!.]{0,20}\b(ho|hain|are you)\b/i.test(t) ||
       /\b(what can you do|tum kya kya kar|aap kya kya kar|tum kya kar sakti ho)\b/i.test(t);
-    if (capabilityQ && !/\b(\d{4,5})\b/.test(t)) {
+    /* Round-52 (user: "har query AI ke paas jaaye — deterministic path chale hi na"): ye sawaal bhi
+     * ab MODEL ka hai (system prompt rule 28 me wahi honest sach likha hai). Neeche wala fixed jawab
+     * sirf tab chalta hai jab AI configured na ho / AI_OWNS_FLOW=0 ho, ya model fail ho jaye (rescue). */
+    if (capabilityQ && !/\b(\d{4,5})\b/.test(t) && !aiFirst) {
       const detCap = await deterministicUnderstand(req.text, {
         now: req.now ? new Date(req.now) : undefined,
         lastAsked: req.lastAsked ?? null,
