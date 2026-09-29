@@ -237,7 +237,7 @@ User: "kya abh mai ek ek test kru!? Possible nhi hai… AI kyu nahi sahi answer 
 
 **Prod verify (c259803):** `LDH se JAT kal confirm seat batao` → **agentic**, `FIND_SEATS ✓`, **34s**, payload trains `11077, 12237, 15651` = jawab ke trains (**MATCH**); `LDH se JAT kal saari trains ki seat availability batao` → **agentic**, `FIND_SEATS ✓` (2 calls), **19s**, payload `11077, 12207, 12237, 12355, 12475, 12919, 15651, 18309, 22431` = jawab ke trains (**MATCH**). Suite: **134 files / 1423 tests PASS** (`round53-text-cards-and-provider` ab 8 tests).
 
-**Final chain (R53):** `d4dda38` → `f893a2c` → `6660596` → `84494a1` → `0bd2aee` → `50b23b6` → `c259803` → `6adfcf4` → `2d745a6` → `161cf03` → `938fc51` → `b5e3a40` → `2109cf4` → `1cdc071` → `6cd72e9` → `d32ed39` → **`f43f63f`** — prod LIVE (`/api/version` MATCH).
+**Final chain (R53/R54):** `d4dda38` → `f893a2c` → `6660596` → `84494a1` → `0bd2aee` → `50b23b6` → `c259803` → `6adfcf4` → `2d745a6` → `161cf03` → `938fc51` → `b5e3a40` → `2109cf4` → `1cdc071` → `6cd72e9` → `d32ed39` → **`f43f63f`** — prod LIVE (`/api/version` MATCH).
 
 **R53e — cards kabhi chhote nahi, kabhi bade nahi (pointer bhi sach):**
 - **Cards ab tool ka POORA snapshot dikhate hain** (R53c ka "jawab me likhi trains" wala filter hata diya). Kyun: us filter se ek naya jhooth bana — jawab ke saath jo pointer line judti thi (`➕ 8 trains ke rows neeche cards me hain …`) un trains ke naam batati thi jo cards me aati hi nahi thin. Ab text me kam trains ho to card me poori class-detail rehti hai + pointer line sach bolti hai.
@@ -249,4 +249,15 @@ User: "kya abh mai ek ek test kru!? Possible nhi hai… AI kyu nahi sahi answer 
 **R53f — user "confirm" bole to tool me `only_available` force:** prod probe me model ne `only_available: false` bhej diya (user "confirm" maang raha tha) → tool ne WL trains ka poora data diya, model ne 9 trains likh di, par cards (confirm ke hisaab se) sirf 3 seat-wali trains dikhate the. Fix (`agentic.ts` FIND_SEATS case): user ki wording confirmedOnly ho to flag force — model ke paas WL-only trains likhne ko hoti hi nahi.
 **Prod verify (f43f63f):** `LDH se JAT kal confirm seat batao` → payload 5 = jawab 5 (**MATCH**, 21s); `Yaar LDH se SVDK … confirm seat find out karke do na` → payload 3 = jawab 3 (**MATCH**, 11s). Suite **134 files / 1427 tests PASS**.
 
-**Final chain (R53):** `d4dda38` → `f893a2c` → `6660596` → `84494a1` → `0bd2aee` → `50b23b6` → `c259803` → `6adfcf4` → `2d745a6` → `161cf03` → `938fc51` → `b5e3a40` → `2109cf4` → `1cdc071` → `6cd72e9` → `d32ed39` → `f43f63f` → **`6f5b94e`** — prod LIVE (`/api/version` MATCH).
+**Final chain (R53/R54):** `d4dda38` → `f893a2c` → `6660596` → `84494a1` → `0bd2aee` → `50b23b6` → `c259803` → `6adfcf4` → `2d745a6` → `161cf03` → `938fc51` → `b5e3a40` → `2109cf4` → `1cdc071` → `6cd72e9` → `d32ed39` → `f43f63f` → **`6f5b94e`** — prod LIVE (`/api/version` MATCH).
+
+## §9.46 — Round-54 (29 Sep 2026): "ChatGPT sahi tool kaise chunta hai?" — aur uske liye humne kya kiya
+
+**User ka sawaal:** *"ChatGPT ke developer ne sab tools pehle se nahi likhe honge, phir bhi wo har sawaal par sahi tool kaise chun leta hai? Humara AI bhi waisa hi kare."*
+
+**Jawab ka nichod (poora doc: `docs/TOOL-ROUTING-EXPLAINER.md`)** — 5 pillars: (1) tool ka **description** instruction hota hai ("jab X poochhe to pehle ye"), (2) **policy layer** = thode general rules (30/31/32/33/34), (3) model ki **general reasoning** (intent padhna pretraining se), (4) **feedback loops** — grounded check, adequacy net, tool-fail par agla tool, ambiguity par ek saaf sawaal, (5) **eval batteries** — har release par alag-alag sawaalon ki routing jaanch, aur failure ka ilaaj rule/description me (us sawaal par patch nahi).
+
+**R54 me humne kya add kiya:**
+- **Tool-recovery HINT (`agentic.ts`)**: jab koi tool fail hota hai, us ke result ke saath model ko **usi kaam ke agle tools ki list** chali jaati hai (`TRACK_TRAIN` ✗ → `GET_STATION_BOARD, GET_TIMETABLE, WEB_SEARCH` try karo; `CHECK_PNR` ✗ → `WEB_SEARCH`; `FIND_SEATS` ✗ → `CHECK_AVAILABILITY, SEARCH_TRAINS`). Model ko rule yaad rakhne ki zaroorat nahi — hint data ke saath aata hai (ChatGPT ke loop wala hissa). Test: `round53-text-cards-and-provider` (13 tests).
+- **Eval battery repo me permanent**: `tools/round54-routing-battery.mts` — 12 alag-alag sawaal (live status, route, seat, train+class seat, fare, PNR, cancellation, station board, rules, GK, coach position, route+timing) aur har ek ka sahi tool family; report PASS / KB / FAIL. Aaj ka result: **10/12 model ne khud sahi tool chuna**, 2 (rules aur GK) **curated KB** se 0 second me verified jawab (R40b design — model ki memory se galat number aa sakta hai, jaise R40 me 4,273 km).
+- **Aage ka tarika (provider/key aane par):** battery har release par; FAIL ka ilaaj tool description/policy me — per-question patch kabhi nahi.

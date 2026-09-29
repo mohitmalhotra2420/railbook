@@ -473,3 +473,19 @@ describe("Round-53e · jab koi confirmed seat hi na ho", () => {
     process.env.NVIDIA_API_KEY = "";
   });
 });
+
+describe("Round-54 · tool fail hone par model ko agla sahi tool ka hint milta hai", () => {
+  it("har tool ke fail hone par HINT me usi kaam ke doosre tools aate hain (routing ka self-repair)", async () => {
+    const { toolRecoveryHint } = await import("../server/agent/agentic");
+    const trackHint = toolRecoveryHint("TRACK_TRAIN");
+    expect(trackHint).toContain("HINT");
+    expect(trackHint).toMatch(/GET_STATION_BOARD|GET_TIMETABLE/);
+    /* seat/booking-critical tool fail ho to bhi agla sahi raasta hint me aata hai (user ko sach batane ke saath). */
+    const seats = toolRecoveryHint("FIND_SEATS");
+    expect(seats).toMatch(/CHECK_AVAILABILITY|SEARCH_TRAINS/);
+    const pnr = toolRecoveryHint("CHECK_PNR");
+    expect(pnr).toContain("WEB_SEARCH");
+    /* anjaan tool → hint me sirf general baat (koi jhoothi list nahi). */
+    expect(toolRecoveryHint("NOT_A_TOOL")).toContain("HINT");
+  });
+});

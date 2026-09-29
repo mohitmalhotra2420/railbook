@@ -830,6 +830,41 @@ function failResult(source: string | null, summary: string, data: unknown = null
   return { ok: false, source, summary, data };
 }
 
+/* ── Round-54: tool fail hone par model ko AGLA SAHI TOOL khud suggest karo ────────────────────────────
+ * User ka sawaal: "ChatGPT har cheez perfectly samajh kar sahi tool kaise chunta hai?" — us system ka ek
+ * hissa ye hai ki tool ke fail hone par assistant ko pata ho ki usi kaam ka doosra raasta kya hai. Yahan
+ * har tool ke liye "same intent, doosra tool" ka ladder hai; failResult ke saath ye hint model ko jaata
+ * hai (usko rule yaad rakhne ki zaroorat nahi — hint data ke saath aata hai). */
+const TOOL_FALLBACKS: Record<string, string[]> = {
+  TRACK_TRAIN: ["GET_STATION_BOARD", "GET_TIMETABLE", "WEB_SEARCH"],
+  GET_TIMETABLE: ["GET_TRAIN_INFO", "SEARCH_TRAIN_BY_NUMBER", "WEB_SEARCH"],
+  GET_TRAIN_INFO: ["SEARCH_TRAIN_BY_NUMBER", "GET_TIMETABLE", "WEB_SEARCH"],
+  SEARCH_TRAIN_BY_NUMBER: ["GET_TRAIN_INFO", "GET_TIMETABLE", "SEARCH_TRAINS"],
+  CHECK_AVAILABILITY: ["FIND_SEATS", "GET_FARE", "WEB_SEARCH"],
+  FIND_SEATS: ["CHECK_AVAILABILITY", "SEARCH_TRAINS", "WEB_SEARCH"],
+  GET_FARE: ["CHECK_AVAILABILITY", "JOURNEY_ANALYZE"],
+  CHECK_PNR: ["WEB_SEARCH"],
+  GET_CANCELLED_TRAINS: ["WEB_SEARCH", "GET_STATION_BOARD"],
+  GET_STATION_BOARD: ["TRACK_TRAIN", "WEB_SEARCH"],
+  GET_COACH_POSITION: ["GET_TRAIN_INFO", "WEB_SEARCH"],
+  GET_TRAIN_HISTORY: ["TRACK_TRAIN", "GET_TIMETABLE"],
+  SEARCH_TRAINS: ["JOURNEY_ANALYZE", "FIND_SEATS", "WEB_SEARCH"],
+  JOURNEY_ANALYZE: ["SEARCH_TRAINS", "RANK_JOURNEY_OPTIONS"],
+  FIND_ALTERNATIVE_TRAINS: ["SEARCH_TRAINS", "FIND_CONNECTIONS"],
+  SEARCH_STATIONS: ["WEB_SEARCH"],
+  GET_ACTIVE_TRAINS: ["SEARCH_TRAINS", "WEB_SEARCH"],
+  WEB_SEARCH: ["FIND_SEATS", "SEARCH_TRAINS"],
+};
+
+/** Fail hone par result ke saath model ko diya jaane wala hint (asli tool kaam karta ho to kuch nahi). */
+export function toolRecoveryHint(tool: string): string {
+  const alts = TOOL_FALLBACKS[tool] ?? [];
+  return (
+    ` HINT: ye tool is waqt nahi chala. Agar ye sawaal ke liye zaroori tha to abhi in tools me se koi try karo: ` +
+    `${alts.join(", ")} — ya jo pata chala wo user ko sach-sach batao. User ko tool ke andar ki baat (error text) mat dikhao.`
+  );
+}
+
 /** Compile-checked hub list for connection itineraries (Atlas route optimisation). */
 const CONNECTION_HUBS = ["NDLS", "UMB", "LJN", "CNB"] as const;
 
@@ -3822,7 +3857,12 @@ export async function runAgenticTurn(input: {
         messages.push({
           role: "tool",
           tool_call_id: tc.id,
-          content: JSON.stringify({ ok: result.ok, source: result.source, summary: result.summary, data: result.data }),
+          content: JSON.stringify({
+            ok: result.ok,
+            source: result.source,
+            summary: result.ok ? result.summary : `${result.summary}${toolRecoveryHint(toolName)}`,
+            data: result.data,
+          }),
         });
         /* Round-18m-29: planner ka FAISLA ab isi loop ki final call mein (alag decision
          * call nahi → AI calls 3→2). Model ko wahi grounded candidate sheet + principles
