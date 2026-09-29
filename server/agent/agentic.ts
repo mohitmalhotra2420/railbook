@@ -3235,7 +3235,14 @@ export async function runAgenticTurn(input: {
       modelFallbacks.push({ model: m, reason: why, ms, round: steps.length });
       console.log(JSON.stringify({ agenticModel: m, failure: why, ms, round: steps.length, budgetLeftMs: timeLeft() }));
     };
-    for (const model of modelChain) {
+    /* Round-52b (prod telemetry 29 Sep: Render IP se NIM chat-call 60s+ tak kuch jawab nahi deta —
+     * queue/limit; GET /models to 0.5s me chalta hai. Isliye: model chain ke aage-peeche ek dynamic queue —
+     * timeout par (aur poora budget bacha ho) wahi model EK baar dobara try hota hai; http-error par nahi
+     * (wo key/access ka issue hota hai, dobara try karne se sirf time jaata hai). */
+    const modelQueue = [...modelChain];
+    const retriedModels = new Set<string>();
+    for (let qi = 0; qi < modelQueue.length; qi += 1) {
+      const model = modelQueue[qi];
       /* Round-13b: HF fallback model chain ke end mein — uska endpoint/key
        * alag hai (HF router), baaki sab NVIDIA NIM par. */
       const hf = transport.hfFallback && model === transport.hfFallback.model ? transport.hfFallback : null;
@@ -3245,13 +3252,13 @@ export async function runAgenticTurn(input: {
        * NIM par hang ho raha tha — 40s timeout poora budget kha jata tha aur
        * fallback ko ~5s hi milte the (dono timeout). Ab har agle model ke
        * liye 8s RESERVE — primary mara to fallback ko asli mauka mile. */
-      const modelsAfterThis = Math.max(0, modelChain.length - modelChain.indexOf(model) - 1);
+      const modelsAfterThis = Math.max(0, modelQueue.length - qi - 1);
       /* Round-18g (prod telemetry 2026-09-10): Muse-glimmer NIM par 20-35s/round
        * leta hai (tiny prompt bhi 7-15s). Round 2+ mein use sirf 4-8s milte the
        * → har baar timeout → GPT-OSS/GLM jawab dete the. Primary (chain[0]) ko
        * ab kam-se-kam AI_PRIMARY_MIN_MS (default 20s) milta hai jab tak budget
        * bacha ho; fallbacks ke liye reserve 8s → 6s. */
-      const isPrimary = modelChain.indexOf(model) === 0;
+      const isPrimary = qi === 0;
       /* Stage-5L-net: 40s primary floor ate the whole turn when Muse hung; 18s still covers healthy NIM rounds. */
       const primaryMinMs = Math.max(4000, Number(process.env.AI_PRIMARY_MIN_MS ?? 18000));
       const reservePerFallback = 6000;
@@ -3328,6 +3335,10 @@ export async function runAgenticTurn(input: {
         clearTimeout(timer);
         lastFailure = err instanceof Error && err.name === "AbortError" ? "timeout" : "network";
         noteModelFailure(model, lastFailure, Date.now() - callStarted);
+        if (lastFailure === "timeout" && !steps.length && timeLeft() > 45000 && !retriedModels.has(model)) {
+          retriedModels.add(model);
+          modelQueue.push(model);
+        }
         continue;
       }
     }
