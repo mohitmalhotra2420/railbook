@@ -286,3 +286,20 @@ User: "kya abh mai ek ek test kru!? Possible nhi hai… AI kyu nahi sahi answer 
 6. **Model fail/timeout par bhi pick (R55g):** prod probe me primary model timeout (45s) → fallback 500 → deterministic path ne poori list dump kar di (asal screenshot wali galti dobara). Ab model fail wale branch me bhi sawaal "pick" hai to pehle `pickBestTurn` chalta hai (chhota "Best + Kyun + Runner-up" jawab), tab hi list-wala path. Test §(g).
 
 **Live probe (2 turn, asli providers):** turn1 "ASR se LDH kal 3A me seat batao" → 12 trains (12716 SACHKHAND sameth, koi jhoothi window nahi); turn2 "esmein se best train batao" → *"Best: 18104 ASR TATA EXP – 3A AVAILABLE 69 seats ₹520 … Kyun: sabse zyada confirmed seats aur sasta fare. Runner-up: 12926 PASCHIM EXP – 3A AVAILABLE 64 seats ₹565"* — koi dump nahi, wahi list.
+
+## §9.48 — Round-56 (29 Sep 2026): "ChatGPT samajh gaya, mera AI kyu nahi?" — context, not rules
+
+**User ka sawaal (2 screenshots + ChatGPT ka jawab):** *"ChatGPT ke developer ne har baar naya rule thodi likha… tum kitne rule likhoge? ChatGPT ne samajh liya, mera AI kyu nahi?"* Ye bilkul sahi sawaal hai, aur jawab architecture me hai — niyamon me nahi.
+
+**Asli wajah (code me mili, guess nahi):**
+1. **Context katta tha.** Pichhla assistant jawab model ko 1500 characters tak hi jaata tha (pehle 700). 12-trains wali list 900–1200 chars ki hoti hai — yaani model ne apni hi pichhli list poori **kabhi dekhi hi nahi**. ChatGPT ke paas poora thread hota hai; isliye "in me se best" uske liye aasan hai. Yahan wo andha tha.
+2. **Har turn naya board.** Follow-up par bhi app naya live board maangta tha — user ke apne screenshots me list 5 trains → 14 trains badal gayi, Sachkhand (12715) doosri baar aaya pehli baar nahi. ChatGPT ne kuch fetch hi nahi kiya: sawaal usi list ka tha.
+3. **Phir ek chhota free model**, jo adhoori list + "naya data laao" wale mahaul me reasoning nahi kar paaya.
+
+**Fix (structural, ek hi usool — per-question rule nahi):**
+- Assistant history 4000 chars (poori list), user 1500.
+- Pichhli list hone par ek system block: **PICHHLA JAWAB (user abhi yahi screen par dekh raha hai — trains: …)** + wahi text poora + usool: *list-reference sawaal → usi list se jawab, naya board nahi, poori list dobara nahi; fresh board sirf naya route/date/train/class ya "abhi/live" par.*
+- Rule 35 ko phrase-list se hata kar usool bana diya (in me se/2nd wala/usme se/jo bheja tha … "best" tak seemit nahi).
+- Deterministic `pickBestTurn` ab sirf **rescue** hai (model fail/khokhla jawab) — jaisa R45 ka usool hai.
+
+**Test:** `tests/round56-conversation-memory.test.ts` (3) — outgoing model request capture kar ke naapta hai: poori 12-trains list (pehla aur aakhri number dono) model ke paas gayi, "PICHHLA JAWAB" block + usool gaya, aur control (list hi na ho to block nahi).
