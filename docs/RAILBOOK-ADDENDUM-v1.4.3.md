@@ -365,3 +365,21 @@ React ne poora tree **unmount** kar diya → screen par sirf khaali cream page (
 - "← Wapas" ke baad: `planpage=false`, chat waisi (2 messages), koi pageerror nahi.
 
 **Tests:** `tests/round59-plan-page.test.tsx` (7 — planIsShowable, phrasing wahi, leg 1/2 + Book, back, error+retry, honest note) + `tests/round59b-plan-payload-rescue.test.ts` (2 — isPlanAsk + control). Full suite **142 files / 1476 PASS**; `tsc -p tsconfig.server.json` clean; undefined-name gate PASS. Deploy `65d19d0` → prod `/api/version` MATCH.
+
+## §9.52 — Round 60 (30 Sep 2026): station choice wapas · plan page scroll fix · leg classes ka layout
+
+**User (screenshot 00:25):** *"ambiguous station pe ab choice nahi aati … multiple stations pe choice nahi aati; connecting trains page scroll nhi ho rha; screenshot mein jo classes hai uska layout sahi krdo; zip dedena, logic mat change Krna"*
+
+**1. Ambiguous city par dropdown wapas (logic chheda nahi — sirf payload ki guarantee).**
+Prod probe se asli wajah: `"Delhi jaana hai"` / `"Amritsar se Delhi ka poora plan banao"` me NLU city ko chup-chaap **NDLS** maan leta tha (aur model text me "kaunsa station (NDLS, DLI, NZM)?" poochh deta tha) — isliye koi `choice` payload nahi banta tha aur dropdown dikhta hi nahi tha. Sirf wahi phrasing choice deti thi jahan NLU city ko UNRESOLVED chhodta tha. Fix: **`cityStationAmbiguity()`** — slot city-level naam ho (station ka poora naam/code text me na ho) aur us city me 2+ station ho (asli provider search se) → wahi dropdown. Station ka exact naam/code likha ho to kuch nahi poochhte. Ye AI ke jawab ke saath jaata hai (text model ka, dropdown real data ka) — R45 ka usool: deterministic sirf rescue.
+*Prod proof @a424d4a:* "Delhi jaana hai" → **"📍 Delhi — kaunsa station?"** + NDLS/DLI/NZM/DEC/ANVT/DEE tappable rows.
+
+**2. Plan page ka scroll (asli bug, reproduce + proof ke saath).**
+`.planpage-body` par scrollable content tha (scrollHeight 4902) par **touch swipe se kuch nahi hilta tha** — wajah: embedded JourneyOptions par `overflow:auto` + `overscroll-behavior: contain` the, jo scroll ko apne tak rok dete the. Fix: embed mode me dono reset (`overflow: visible; overscroll-behavior: auto`), `.planpage-body` par `min-height:0` + `touch-action: pan-y`.
+*Proof (asli CSS + asli markup, touch events):* control box 588 · **naya CSS 805** · purana CSS wapas **0** (bug reproduce). *Prod @a424d4a:* plan page par touch swipe ke baad `scrollTop 0 → 746`.
+
+**3. Leg classes ka layout (screenshot me overlap).**
+Leg-list row ka area sirf **127px** chaura tha — train naam 2 line me tootta tha aur class chips container se bahar nikal kar seat-pill/chevron ke upar chadh jaate the. Fix: leg rows ka apna stack (`grid-template-areas: "a a" / "b c" / "d chev"`), aur dono jagah (connecting leg card + leg list) **ek hi `ClassGrid`**: leg ki seat pehle **"· Best"** ke saath, phir baaki classes same shakal me, har chip par **Book** (tap = usi class ka passenger form). Class code duplicate ("CC CC AVL") bhi hataya; Book separator saaf.
+
+**Tests:** `tests/round60-station-choice.test.ts` (5) + `tests/round60-classgrid-layout.test.tsx` (3). Full suite **144 files / 1484 PASS**; server typecheck + undefined-name gate clean. Deploy **a424d4a** → prod MATCH.
+Screenshots: `previews/r60-station-choice.png`, `previews/r60-prod-plan-legs.png`, `previews/r60-classes-layout.png`.

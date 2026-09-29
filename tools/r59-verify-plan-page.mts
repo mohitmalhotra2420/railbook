@@ -50,6 +50,7 @@ let opened = false;
 for (let i = 0; i < 40; i++) {
   await page.waitForTimeout(10000);
   const st = await page.evaluate(() => {
+   try {
     const pp = document.querySelector(".planpage");
     const body = (document.querySelector(".planpage-body")?.innerText || "").replace(/\n+/g, " | ").slice(0, 320);
     const err = !!document.querySelector(".planpage-err");
@@ -60,12 +61,28 @@ for (let i = 0; i < 40; i++) {
     const head = (document.querySelector(".planpage-head strong")?.textContent || "").trim();
     const chatMsgs = document.querySelectorAll("article.msg").length;
     return { has: !!pp, legs, bookLegs, loading, head, chatMsgs, body, err, note };
-  });
+   } catch (e) {
+     return { has: false, legs: 0, bookLegs: [] as string[], loading: false, head: "", chatMsgs: 0, body: "EVAL-ERR " + String(e), err: false, note: "" };
+   }
+  }).catch(() => null);
   say(`tick ${i}: planpage=${st.has} loading=${st.loading} head="${st.head}" legs=${st.legs} books=${JSON.stringify(st.bookLegs)} chatMsgs=${st.chatMsgs} err=${st.err} note="${st.note}"`);
   if (st.has && !st.loading) say(`   BODY: ${st.body}`);
   if (st.has && !st.loading && (st.legs > 0 || st.err || st.note)) {
     await page.screenshot({ path: `/tmp/r59-verify-planstate-${i}.png` });
     await page.screenshot({ path: "/tmp/r59-verify-planpage.png" });
+    /* R60: touch scroll naapo (asli device jaisa) */
+    const cdp = await page.context().newCDPSession(page);
+    const before = await page.evaluate(() => (document.querySelector(".planpage-body") as HTMLElement | null)?.scrollTop ?? -1);
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: 206, y: 700 }] });
+    for (let k = 1; k <= 12; k++) {
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: 206, y: 700 - k * 40 }] });
+      await new Promise((r) => setTimeout(r, 12));
+    }
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await page.waitForTimeout(700);
+    const afterScroll = await page.evaluate(() => (document.querySelector(".planpage-body") as HTMLElement | null)?.scrollTop ?? -1);
+    say(`SCROLL TEST: touch swipe ke baad bodyScrollTop ${before} → ${afterScroll}`);
+    await page.screenshot({ path: "/tmp/r60-prod-scrolled.png" });
     /* back button → chat waisi hi? */
     await page.locator(".planpage-back").first().click();
     await page.waitForTimeout(1200);
