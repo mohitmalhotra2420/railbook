@@ -236,7 +236,7 @@ export function seatSummaryLine(
       .join(" | ");
     /* Round-53: jo trains is line me nahi aayi wo NEECHE CARDS me hain (cards ka payload ab saara hai) —
      * pehle yahan bas "+N aur bhi hain" likha tha jiska koi pata nahi tha (user ki shikayat). */
-    const more = grouped.length > SEAT_LINE_MAX ? ` | +${grouped.length - SEAT_LINE_MAX} trains neeche cards me` : "";
+    const more = grouped.length > SEAT_LINE_MAX ? ` | +${grouped.length - SEAT_LINE_MAX} trains aur bhi hain — neeche poori live list me` : "";
     const countBit =
       pick.seat.length && pick.wl.length
         ? `${withSeat} me seat (AVL/RAC), ${wlOnly} me WL/N-A`
@@ -267,13 +267,13 @@ export function seatSummaryLine(
       .join(" | ");
     /* Round-53: jo trains is line me nahi aayi wo NEECHE CARDS me hain (cards ka payload ab saara hai) —
      * pehle yahan bas "+N aur bhi hain" likha tha jiska koi pata nahi tha (user ki shikayat). */
-    const more = grouped.length > SEAT_LINE_MAX ? ` | +${grouped.length - SEAT_LINE_MAX} trains neeche cards me` : "";
+    const more = grouped.length > SEAT_LINE_MAX ? ` | +${grouped.length - SEAT_LINE_MAX} trains aur bhi hain — neeche poori live list me` : "";
     return `💺 ${cls} me seat wali ${trains} train${trains === 1 ? "" : "s"}${when}${sortNote} — ${shown}${more}. (${head})`;
   }
   if (pick.wl.length) {
     const trains = trainCount(pick.wl);
     const top = pick.wl.slice(0, SEAT_LINE_MAX).map(fmtRow).join(" · ");
-    const wlMore = pick.wl.length > SEAT_LINE_MAX ? ` · +${pick.wl.length - SEAT_LINE_MAX} neeche cards me` : "";
+    const wlMore = pick.wl.length > SEAT_LINE_MAX ? ` · +${pick.wl.length - SEAT_LINE_MAX} aur bhi hain — neeche poori live list me` : "";
     /* WL number hi dikhate hain — confirm% nahi (wo data hamare paas nahi hai). */
     return `💺 ${cls} me abhi koi AVAILABLE/RAC seat nahi${when} — WL wali ${trains} train${trains === 1 ? "" : "s"} ${trains === 1 ? "hai" : "hain"}: ${top}${wlMore}. Confirm% hum nahi dete (data nahi); booking se pehle IRCTC par check karo. (${head})`;
   }
