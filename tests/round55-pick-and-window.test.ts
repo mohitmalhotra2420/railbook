@@ -160,6 +160,27 @@ describe("Round-55 · (d) sirf train number diya (station nahi) → poora route 
     expect(rowNums(res)).toContain("12094");
   });
 
+  it("model train_numbers na bheje (sirf user ke text me number) → sawaal se number utha kar route nikalti hai", async () => {
+    const res = await executeApprovedTool(
+      "FIND_SEATS",
+      { from: "", to: "", date: "2026-09-30", class_code: "3A" },
+      { userText: "12094 me 3A me kitni seat khali hai kal" },
+    );
+    expect(res.ok).toBe(true);
+    expect(res.summary).not.toMatch(/Station resolve nahi hua/);
+    expect((res.data as { trainNumbers?: string[] }).trainNumbers).toEqual(["12094"]);
+  });
+
+  it("sort_by ka ulta-seedha shabd poora call fail nahi karta (ignored ho jaata hai)", async () => {
+    const res = await executeApprovedTool(
+      "FIND_SEATS",
+      { from: "ASR", to: "LDH", date: "2026-09-30", class_code: "3A", sort_by: "availability" },
+      { userText: "ASR se LDH 3A me seat batao" },
+    );
+    expect(res.ok).toBe(true);
+    expect(res.summary).not.toMatch(/Invalid enum value/);
+  });
+
   it("model khaali string bheje ('' / '  ') to bhi wahi hota hai — schema reject nahi karta", async () => {
     for (const empty of ["", "  "]) {
       const res = await executeApprovedTool(

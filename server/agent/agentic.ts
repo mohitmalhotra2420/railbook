@@ -259,7 +259,9 @@ const ArgSchemas = {
     only_available: z.coerce.boolean().nullish(),
     depart_after: z.union([z.string().trim().max(30), z.number()]).nullish(),
     depart_before: z.union([z.string().trim().max(30), z.number()]).nullish(),
-    sort_by: z.enum(["cheapest", "fastest"]).nullish(),
+    /* R55e: model kabhi 'availability' / 'seats' jaise shabd bhej deta hai — schema poora call reject na kare,
+     * unknown value server khud ignore karta hai (seatFinderTool me sortBy null ho jaata hai). */
+    sort_by: z.string().trim().max(20).nullish(),
     /* R55b: pick follow-up me 12 candidates ka comma-string 71 chars ka hota tha → purani max(60) par
      * model ka call schema-fail hota tha (probe me step-1 fail dikha). 20 numbers (120 chars) tak allow. */
     train_numbers: z.union([z.string().trim().max(200), z.array(z.string().trim().max(10)).max(20)]).nullish(),
@@ -1810,6 +1812,15 @@ export async function executeApprovedTool(
          * model aadhi list bhej de to bhi server poori candidates par check karta hai (list na badle). */
         const pickCands = ctx?.pickCandidates?.length ? ctx.pickCandidates : [];
         if (pickCands.length >= 2) seatArgs.train_numbers = pickCands.slice(0, 20).join(",");
+        /* R55e: user ne khud train number bola ho ("12094 me 3A kitni seat khali hai") par model ne usse
+         * args me na bheja ho aur station bhi nahi diya — to number sawaal se hi le lo, taaki server route
+         * khud nikaal kar seat bata sake (warna tool "station batao" bol kar ruk jaata tha). */
+        const seatSayTrainNums = [...new Set(String(ctx.userText ?? "").match(/\b\d{5}\b/g) ?? [])];
+        const hasStationArgs = Boolean(String(seatArgs.from ?? "").trim() || String(seatArgs.to ?? "").trim());
+        const hasTrainArgs = Boolean(String(seatArgs.train_numbers ?? "").trim());
+        if (!hasStationArgs && !hasTrainArgs && seatSayTrainNums.length) {
+          seatArgs.train_numbers = seatSayTrainNums.slice(0, 12).join(",");
+        }
         const res = await runFindSeatsTool({
           from: String(a.from ?? ""),
           to: String(a.to ?? ""),
