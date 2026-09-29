@@ -36,7 +36,7 @@ vi.mock("../server/agent/routeSegment.js", async (importOriginal) => {
 });
 
 import { executeApprovedTool, setAgenticNvidiaFetch } from "../server/agent/agentic";
-import { runAgent } from "../server/agent/run";
+import { runAgent, replyAdequateFor45 } from "../server/agent/run";
 import { askedTimeWindow, dropUnaskedWindow, isPickFollowup, previousListTrains } from "../server/agent/seatPick";
 
 const HISTORY = [
@@ -193,6 +193,19 @@ describe("Round-55 · (d) sirf train number diya (station nahi) → poora route 
       expect(res.summary).not.toMatch(/Invalid arguments/);
       expect((res.data as { from?: string }).from).toBe("ASR"); /* default mock schedule ASR → LDH */
     }
+  });
+});
+
+describe("Round-55/56 · pick adequacy general hai (sirf 'best' shabd par nahi)", () => {
+  it("'inme se 2nd wala' / 'sasti' jaise chunav par data wala chhota jawab bhi kaafi hai", () => {
+    /* (a) chunav ka lafz */
+    expect(replyAdequateFor45("pick", "2nd wala: 12926 PASCHIM EXP — 3A AVL 61 ₹565", "inme se 2nd wala kaunsa hai")).toBe(true);
+    /* (b) data mojood ho (lafz na ho) */
+    expect(replyAdequateFor45("pick", "18104 — 3A AVL 69 · ₹520", "inme se 2nd wala kaunsa hai")).toBe(true);
+    /* dump (4+ trains) to bhi khokhla */
+    expect(replyAdequateFor45("pick", "18104 | 12926 | 14624 | 18238 | 20808 — sab dekho", "esmein se best batao")).toBe(false);
+    /* sirf number wala adhoora (koi data nahi) bhi khokhla */
+    expect(replyAdequateFor45("pick", "18104?", "esmein se best batao")).toBe(false);
   });
 });
 

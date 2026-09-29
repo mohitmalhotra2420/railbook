@@ -1448,9 +1448,14 @@ export function replyAdequateFor45(kind: AnswerKind45, reply: string, question: 
   if (kind === "seat") return /availab|rac|waitlist|\bwl\b|₹|rs\.?\s*\d|n\/a/i.test(r);
   /* Round-55 (pick): chunne wale sawaal ka jawab = EK winner (naam/number) + "kyun" — poora dump nahi. */
   if (kind === "pick") {
+    /* R56b: pehle gate sirf "best"-jaise shabd maangta tha — "inme se 2nd wala kaunsa hai" / "sasti kaunsi"
+     * jaise chunav par model ka SAHI chhota jawab bhi khokhla maan kar replace ho jaata tha. Ab do raste:
+     * (a) chunav ka lafz ho, ya (b) candidate ka asli data ho (AVL/WL/₹) — dono soorat me jawab chhota (≤3 trains). */
     const nums = [...new Set(r.match(/\b\d{5}\b/g) ?? [])];
-    const namesIt = /best|sabse|behtar|recommend|suggest|सबसे|सुझाव|yeh\s+(?:le|lo|book)|isko\s+book/i.test(r);
-    return nums.length >= 1 && nums.length <= 3 && namesIt;
+    if (nums.length === 0 || nums.length > 3) return false;
+    const namesIt = /best|sabse|behtar|recommend|suggest|सबसे|सुझाव|yeh\s+(?:le|lo|book)|isko\s+book|pehla|doosra|dusra|2nd|second|kaunsi|kaun\s*si/i.test(r);
+    const hasData = /availab|rac|waitlist|\bwl\b|n\/a|₹/i.test(r);
+    return namesIt || hasData;
   }
   /* Route ka sach (nahi rukti/chalti) — khud me poora jawab hai. */
   if (/ruk(?:ti|ta)\s+hi\s+nahi|chalti\s+hi\s+nahi|nahi\s+ruk(?:ti|ta)|route\s+[A-Z]{2,5}\s*(?:→|->)/i.test(r)) return true;
