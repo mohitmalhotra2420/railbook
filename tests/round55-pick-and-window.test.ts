@@ -35,7 +35,8 @@ vi.mock("../server/agent/routeSegment.js", async (importOriginal) => {
   return { ...actual, filterTrainsServingSegment: async (trains: { trainNumber: string; trainName?: string }[]) => ({ trains, dropped: [] }) };
 });
 
-import { executeApprovedTool } from "../server/agent/agentic";
+import { executeApprovedTool, setAgenticNvidiaFetch } from "../server/agent/agentic";
+import { runAgent } from "../server/agent/run";
 import { askedTimeWindow, dropUnaskedWindow, isPickFollowup, previousListTrains } from "../server/agent/seatPick";
 
 const HISTORY = [
@@ -192,6 +193,42 @@ describe("Round-55 · (d) sirf train number diya (station nahi) → poora route 
       expect(res.summary).not.toMatch(/Invalid arguments/);
       expect((res.data as { from?: string }).from).toBe("ASR"); /* default mock schedule ASR → LDH */
     }
+  });
+});
+
+describe("Round-55 · (g) model fail/timeout par bhi pick ka chhota jawab (dump nahi)", () => {
+  it("model pura fail ho jaye → rescue EK best + runner-up deta hai, poori list nahi", async () => {
+    process.env.AI_OWNS_FLOW = "";
+    process.env.NVIDIA_API_KEY = "test-key";
+    process.env.NVIDIA_BASE_URL = "https://example.invalid/v1";
+    process.env.NVIDIA_MODEL = "test-model";
+    setAgenticNvidiaFetch(async () => {
+      throw new Error("network_down");
+    });
+    const res = await runAgent({
+      text: "esmein se best train batao",
+      history: [
+        { role: "user", content: "ASR se LDH kal 3A me seat batao" },
+        {
+          role: "assistant",
+          content:
+            "15708 ASR KIR EXP – 3A AVAILABLE 12 seats ₹520 | 18104 ASR TATA EXP – 3A AVAILABLE 69 seats ₹520 | 12926 PASCHIM EXPR – 3A AVAILABLE 73 seats ₹565 | 12716 SACHKHAND EXP – 3A N/A ₹565",
+        },
+      ],
+      known: {
+        from: { code: "ASR", name: "Amritsar Jn" },
+        to: { code: "LDH", name: "Ludhiana Jn" },
+        date: "2026-09-30",
+      },
+      today: "2026-09-29",
+    });
+    const reply = String(res.reply ?? "");
+    const nums = [...new Set(reply.match(/\b\d{5}\b/g) ?? [])];
+    expect(reply).toMatch(/Best|best/);
+    expect(nums.length).toBeGreaterThan(0);
+    expect(nums.length).toBeLessThanOrEqual(4);
+    expect(reply).toMatch(/Kyun/);
+    setAgenticNvidiaFetch(null);
   });
 });
 

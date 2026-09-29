@@ -2876,7 +2876,12 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
    * VERIFIED deterministic jawab turant (wahi handlers + wahi tools: routeCheck/CHECK_AVAILABILITY/
    * routedLiveStatus) — warna "Kahan jaana hai?" jaisa adhoora jawab chala jaata (R44 screenshots). */
   if (aiFirst && agenticFailureReason && !isBookingMutation(req)) {
-    const rescue = await deterministicRescue45(answerKind45(String(req.text ?? "")), req, seeded);
+    /* R55g: model fail/timeout par bhi "in me se best" ka jawab chunne wala hi ho — warna deterministic
+     * path poori list dump kar deta hai (exactly wahi jo user ne screenshot me pakda). */
+    const kindFail: AnswerKind45 | null = isPickFollowup(String(req.text ?? ""), req.history)
+      ? "pick"
+      : answerKind45(String(req.text ?? ""));
+    const rescue = await deterministicRescue45(kindFail, req, seeded);
     if (rescue) return { ...rescue, agenticFailureReason };
   }
 
