@@ -202,8 +202,10 @@ describe("Round-55/56 · pick adequacy general hai (sirf 'best' shabd par nahi)"
     expect(replyAdequateFor45("pick", "2nd wala: 12926 PASCHIM EXP — 3A AVL 61 ₹565", "inme se 2nd wala kaunsa hai")).toBe(true);
     /* (b) data mojood ho (lafz na ho) */
     expect(replyAdequateFor45("pick", "18104 — 3A AVL 69 · ₹520", "inme se 2nd wala kaunsa hai")).toBe(true);
-    /* dump (4+ trains) to bhi khokhla */
-    expect(replyAdequateFor45("pick", "18104 | 12926 | 14624 | 18238 | 20808 — sab dekho", "esmein se best batao")).toBe(false);
+    /* ranked chhota jawab (best + runner-up + 2 aur) theek hai */
+    expect(replyAdequateFor45("pick", "Best: 18104 (3A AVL 69 ₹520). Runner-up: 12926 (AVL 61). 14624 aur 18238 bhi acchi hain.", "esmein se best batao")).toBe(true);
+    /* poora dump (12 trains) to bhi khokhla */
+    expect(replyAdequateFor45("pick", "18104 | 12926 | 14624 | 18238 | 20808 | 13006 | 15708 | 12904 | 14632 | 18102 | 14542 | 12716 — sab dekho", "esmein se best batao")).toBe(false);
     /* sirf number wala adhoora (koi data nahi) bhi khokhla */
     expect(replyAdequateFor45("pick", "18104?", "esmein se best batao")).toBe(false);
   });

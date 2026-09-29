@@ -1452,10 +1452,13 @@ export function replyAdequateFor45(kind: AnswerKind45, reply: string, question: 
      * jaise chunav par model ka SAHI chhota jawab bhi khokhla maan kar replace ho jaata tha. Ab do raste:
      * (a) chunav ka lafz ho, ya (b) candidate ka asli data ho (AVL/WL/₹) — dono soorat me jawab chhota (≤3 trains). */
     const nums = [...new Set(r.match(/\b\d{5}\b/g) ?? [])];
-    if (nums.length === 0 || nums.length > 3) return false;
+    if (nums.length === 0) return false;
     const namesIt = /best|sabse|behtar|recommend|suggest|सबसे|सुझाव|yeh\s+(?:le|lo|book)|isko\s+book|pehla|doosra|dusra|2nd|second|kaunsi|kaun\s*si/i.test(r);
     const hasData = /availab|rac|waitlist|\bwl\b|n\/a|₹/i.test(r);
-    return namesIt || hasData;
+    /* Chunav wala lafz ho to chhota ranked jawab (best + runner-up + 1-2 aur) bhi theek hai; lafz na ho
+     * to data wala ek-do number. Poora board dump (kai trains, "sab dekho") khokhla hi hai. */
+    const maxNums = namesIt ? 6 : hasData ? 3 : 1;
+    return nums.length <= maxNums && (namesIt || hasData);
   }
   /* Route ka sach (nahi rukti/chalti) — khud me poora jawab hai. */
   if (/ruk(?:ti|ta)\s+hi\s+nahi|chalti\s+hi\s+nahi|nahi\s+ruk(?:ti|ta)|route\s+[A-Z]{2,5}\s*(?:→|->)/i.test(r)) return true;

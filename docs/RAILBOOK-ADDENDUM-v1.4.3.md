@@ -303,3 +303,5 @@ User: "kya abh mai ek ek test kru!? Possible nhi hai… AI kyu nahi sahi answer 
 - Deterministic `pickBestTurn` ab sirf **rescue** hai (model fail/khokhla jawab) — jaisa R45 ka usool hai.
 
 **Test:** `tests/round56-conversation-memory.test.ts` (3) — outgoing model request capture kar ke naapta hai: poori 12-trains list (pehla aur aakhri number dono) model ke paas gayi, "PICHHLA JAWAB" block + usool gaya, aur control (list hi na ho to block nahi).
+
+**Bonus (R56b):** pick ka adequacy gate pehle sirf `best`-jaise shabdon par chhota jawab sweekar karta tha — "inme se 2nd wala kaunsi hai" jaise chunav par model ka sahi jawab bhi replace ho jaata tha. Ab gate usool par hai: chunav ka lafz ho to ranked chhota jawab (≤6 trains) theek, lafz na ho to data wala 1–3 trains; poora board dump khokhla. Live: *"Inme se 2nd wali train **12926 PASCHIM EXPRESS** hai. ASR → LDH, 30 Sep 2026, 3A · AVAILABLE 61 seats · ₹565"*.
