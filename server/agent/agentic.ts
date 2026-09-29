@@ -3648,7 +3648,14 @@ export async function runAgenticTurn(input: {
             onlyAvailable?: boolean; classCodes?: string[];
             trainsSeen?: number;
           } | null;
-          if (d && Array.isArray(d.rows)) {
+          /* Round-53e: ek hi turn me agar do FIND_SEATS calls hui (jaise pehla poora board, doosra
+           * "sirf confirm" — jo khaali aa gaya), to khaali result pehle wale kaam ke capture ko overwrite
+           * na kare — warna cards ke liye data hi nahi bachta (prod probe: payload 0, jawab me 2 trains). */
+          const richerSeat =
+            !input.capture.seat ||
+            (input.capture.seat.rows.length + input.capture.seat.wlRows.length) <=
+              ((d?.rows?.length ?? 0) + (Array.isArray(d?.wlRows) ? d.wlRows.length : 0));
+          if (d && Array.isArray(d.rows) && richerSeat) {
             const drop = /ROUTE:\s*(.+)/.exec(String(result.summary ?? ""))?.[1] ?? null;
             const near = /NEARBY:\s*([\s\S]*?)(?:\n\d+ rows|\nSource:|$)/.exec(String(result.summary ?? ""))?.[1] ?? null;
             input.capture.seat = {

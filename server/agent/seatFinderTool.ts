@@ -270,7 +270,11 @@ export async function runFindSeatsTool(args: FindSeatsArgs): Promise<FindSeatsRe
    * se mismatch ho jaata hai. Isliye WL rows sirf UN trains ki rakh-te hain jinka koi class AVL/RAC hai;
    * baaki trains ka sirf COUNT instruction me jaata hai (model ek honest line likh sakta hai). */
   const winnerSet = new Set(pick.seat.map((r) => r.number));
-  const wlForReply = onlyAvailable ? wlPick.wl.filter((r) => winnerSet.has(r.number)) : wlPick.wl;
+  /* Round-53e: agar is waqt kisi train me seat hi nahi (winnerSet khaali), to WL rows SAB rakh-te hain —
+   * warna model ke paas honest jawab ("koi confirmed seat nahi, ye WL trains") ka data hi nahi hota aur
+   * grounding check uske jawab ko reject kar deta hai (deterministic summary aa jaati thi). */
+  const wlForReply =
+    onlyAvailable && winnerSet.size > 0 ? wlPick.wl.filter((r) => winnerSet.has(r.number)) : wlPick.wl;
   const head = seatSummaryLine({ ...pick, wl: wlForReply }, slots, { from, to });
 
   const fmt = (r: SeatFilterRow) =>
@@ -313,13 +317,19 @@ export async function runFindSeatsTool(args: FindSeatsArgs): Promise<FindSeatsRe
   if (onlyAvailable) {
     const winnerNums = [...new Set(pick.seat.map((r) => r.number))];
     const wlOnly = [...new Set(wlPick.wl.map((r) => r.number))].filter((n) => !winnerNums.includes(n));
-    lines.push(
-      `USER NE SIRF CONFIRM/AVAILABLE MAANGA HAI — jawab me SIRF inhi ${winnerNums.length} trains ki lines likho jinme kam se kam ek class AVL/RAC hai` +
-        (wlOnly.length
-          ? ` (baaki ${wlOnly.length} trains me sirf WL/N-A hai — unka number/naam jawab me mat likho; chaho to ek chhoti line: "baaki ${wlOnly.length} trains me sirf WL/N-A hai")`
-          : "") +
-        ".",
-    );
+    if (!winnerNums.length) {
+      lines.push(
+        "IS WAQT kisi bhi train me CONFIRMED (AVL/RAC) seat nahi hai. Jawab ki pehli line me SAAF likho: 'is waqt koi confirmed seat nahi hai' — phir jo WL/N-A rows upar di hain wo train-wise ek-ek line me likho (WL number ke saath), aur saaf karo ki ye waitlist hai. Kisi train ki seat AVAILABLE mat likho.",
+      );
+    } else {
+      lines.push(
+        `USER NE SIRF CONFIRM/AVAILABLE MAANGA HAI — jawab me SIRF inhi ${winnerNums.length} trains ki lines likho jinme kam se kam ek class AVL/RAC hai` +
+          (wlOnly.length
+            ? ` (baaki ${wlOnly.length} trains me sirf WL/N-A hai — unka number/naam jawab me mat likho; chaho to ek chhoti line: "baaki ${wlOnly.length} trains me sirf WL/N-A hai")`
+            : "") +
+          ".",
+      );
+    }
     lines.push("Jis train ki line likho, uski SAARI classes (AVL + WL/N-A) usi line me likho — koi class chhupao mat (Round-51 ka niyam).");
   }
 

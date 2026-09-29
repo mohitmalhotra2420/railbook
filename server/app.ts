@@ -439,7 +439,14 @@ export function createApp() {
             /* Round-53 (user: *"Agar confirm bola to confirm dikhao na sirf"*): jab user ne confirm
              * maanga ho, cards me WL rows SIRF unhi trains ki dikhti hain jinme seat mili hai (Round-51
              * ka usool — usi train ki baaki classes chhupao mat), warna jaisa Round-25 me tay hua tha. */
-            wlRows: seatOnlyAvailable ? wlBase.filter((r) => seatWinnerSet.has(r.number)) : wlBase,
+            /* Round-53e: agar is waqt kisi train me CONFIRMED seat hi nahi hai (rows khaali), to cards me
+             * WL rows dikhti hain — kyunki jawab me bhi wahi WL trains honest taur par likhi jaati hain
+             * ("abhi koi confirmed seat nahi, ye trains WL me hain"). Warna text me trains hote aur
+             * neeche koi card na hota — bilkul wahi complaint jo user ne bheji thi. */
+            wlRows:
+              seatOnlyAvailable && rows.length > 0
+                ? wlBase.filter((r) => seatWinnerSet.has(r.number))
+                : wlBase,
             trainsSeen: seatFilter.trainsSeen,
             source: seatFilter.source,
             /* Round-49: jo trains destination tak nahi jaati thin, unka note client card me bhi. */

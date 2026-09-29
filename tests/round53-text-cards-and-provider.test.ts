@@ -438,3 +438,38 @@ describe("Round-53d · model sirf tool ke data wali trains likhe (fake train nah
     process.env.NVIDIA_API_KEY = "";
   });
 });
+
+describe("Round-53e · jab koi confirmed seat hi na ho", () => {
+  it("confirm maanga par kisi train me AVL nahi → cards khaali nahi (WL trains dikhti hain), text se match", async () => {
+    process.env.NVIDIA_API_KEY = "nvapi-r53f";
+    process.env.NVIDIA_MODEL = "openai/gpt-oss-20b";
+    delete process.env.NVIDIA_FALLBACK_MODEL;
+    routeBoard.mockResolvedValue({
+      trains: [
+        { trainNumber: "12919", trainName: "MALWA EXP", classes: [{ classCode: "SL", status: "WAITLIST", seats: null, waitlist: 18, fare: 270 }] },
+        { trainNumber: "12475", trainName: "HAPA SVDK EXP", classes: [{ classCode: "3A", status: "WAITLIST", seats: null, waitlist: 5, fare: 675 }] },
+      ],
+      provider: "web_confirmtkt",
+      at: Date.now(),
+    });
+    classBoard.mockResolvedValue({ classes: [], provider: "none" });
+    let call = 0;
+    setAgenticNvidiaFetch(async () => {
+      call += 1;
+      const body = (b: unknown) => new Response(JSON.stringify(b), { status: 200, headers: { "Content-Type": "application/json" } });
+      if (call === 1) {
+        return body({ model: "openai/gpt-oss-20b", choices: [{ message: { role: "assistant", tool_calls: [{ id: "c1", type: "function", function: { name: "FIND_SEATS", arguments: JSON.stringify({ from: "LDH", to: "SVDK", date: "2026-09-30", class_code: "ALL", only_available: true }) } }] } }] });
+      }
+      return body({ model: "openai/gpt-oss-20b", choices: [{ message: { role: "assistant", content: "is waqt koi confirmed seat nahi hai. 12919 MALWA EXP – SL WL 18 ₹270 | 12475 HAPA SVDK EXP – 3A WL 5 ₹675" } }] });
+    });
+    const { createApp } = await import("../server/app");
+    const res = await request(createApp()).post("/api/agent").send({ text: "Yaar LDH se SVDK kal confirm seat find out karke do na", history: [], known: {} });
+    const sf = res.body.seatFilter as { rows: { number: string }[]; wlRows: { number: string }[] } | null;
+    expect(sf).not.toBeNull();
+    const cardTrains = [...new Set([...sf!.rows, ...sf!.wlRows].map((r) => r.number))].sort();
+    expect(cardTrains).toEqual(["12475", "12919"]);
+    expect(String(res.body.reply ?? "")).toContain("koi confirmed seat nahi");
+    setAgenticNvidiaFetch(null);
+    process.env.NVIDIA_API_KEY = "";
+  });
+});
