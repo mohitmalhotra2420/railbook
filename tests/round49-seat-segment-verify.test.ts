@@ -152,3 +152,19 @@ describe("Round-49 · route segment verification (server)", () => {
     expect(res!.line).not.toContain("nahi jaati");
   });
 });
+
+/* ── Round-49b: dropNote client tak pahunche (card me note dikhta hai) ───────────────────────────── */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
+describe("Round-49b · dropNote client payload me", () => {
+  it("app.ts seatFilter serializer me dropNote hai, api types me bhi, aur card use karta hai", () => {
+    const app = readFileSync(join(__dirname, "..", "server", "app.ts"), "utf8");
+    expect(app).toMatch(/dropNote:\s*seatFilter\.dropNote/);
+    const api = readFileSync(join(__dirname, "..", "src", "api.ts"), "utf8");
+    expect(api).toMatch(/dropNote\?: string \| null;/);
+    const concierge = readFileSync(join(__dirname, "..", "src", "views", "Concierge.tsx"), "utf8");
+    expect(concierge).toMatch(/dropNote: sf\.dropNote \?\? null/);
+    expect(concierge).toMatch(/\{block\.dropNote && <div className="sf-note drop">/);
+  });
+});

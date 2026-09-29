@@ -339,6 +339,8 @@ export function createApp() {
               wlRows: seatFilter.wlRows,
               trainsSeen: seatFilter.trainsSeen,
               source: seatFilter.source,
+              /* Round-49: jo trains destination tak nahi jaati thin, unka note client card me bhi. */
+              dropNote: seatFilter.dropNote ?? null,
             }
           : null,
         seatFilterFallback: Boolean(seatLine && aiFailed),

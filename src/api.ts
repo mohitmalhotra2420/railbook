@@ -32,6 +32,8 @@ export type AgentResponse = {
       seatFilter?: {
         classCodes: string[];
         line: string | null;
+        /** Round-49: jo trains destination tak nahi jaati thin, unka note (card me dikhta hai). */
+        dropNote?: string | null;
         rows: {
           number: string;
           name: string;
