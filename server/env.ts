@@ -22,9 +22,14 @@ const NVIDIA_DEFAULT_BASE = "https://integrate.api.nvidia.com/v1";
  * deterministic rescue se aa jaata tha (user ko laga "naya build meri wording nahi samajh raha"). Default
  * chain ab FAST se shuru hoti hai (gpt-oss-20b ~3-7s, reasoning_effort low) aur Nemotron Lightning
  * (thinking off) doosre slot me — bhaari reasoning model chain ke aakhir me. Ops chahe to env se badal sakta hai. */
-const NVIDIA_DEFAULT_MODEL = "openai/gpt-oss-20b";
-const NVIDIA_DEFAULT_FALLBACK_MODEL = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning";
-
+/* Round-61 (30 Sep 2026, user: "Muse ko primary kro and gpt ko secondary yan fallback"):
+ * PRIMARY = meta/muse-glimmer-30b (Hinglish samajh + multi-tool me behtar), FALLBACK = openai/gpt-oss-20b
+ * (fast + 3-hafte prod-proven). R52 ka darr (muse 30s+ le raha tha → turn timeout) ab lagu nahi hota:
+ * turn budget 180s hai aur primary ko kam-se-kam AI_PRIMARY_MIN_MS (20s) milta hai, isliye slow primary
+ * bhi apna mauka poora le paata hai; phir fallback chalta hai. Env NVIDIA_MODEL / NVIDIA_FALLBACK_MODEL
+ * se ops kabhi bhi badal sakta hai. */
+const NVIDIA_DEFAULT_MODEL = "meta/muse-glimmer-30b";
+const NVIDIA_DEFAULT_FALLBACK_MODEL = "openai/gpt-oss-20b";
 /** Production default. Explicit `mock` / `railkit` / `authorized` still override. */
 export const DEFAULT_RAILWAY_PROVIDER = "railcore";
 
