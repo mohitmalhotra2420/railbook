@@ -737,12 +737,15 @@ describe("provider / NVIDIA safety", () => {
     delete process.env.NVIDIA_MODEL;
     delete process.env.NVIDIA_BASE_URL;
     delete process.env.NVIDIA_FALLBACK_MODEL;
-    /* Round-52 (29 Sep 2026, user: "AI first for everything — model khud samjhe"): default chain ab FAST model se
-   * shuru hoti hai (gpt-oss-20b primary, Nemotron-3-Nano-Omni fallback, Muse chain me baad me) — prod me
-   * Muse bade agentic prompt par 30s+ le raha tha aur turn timeout ho kar jawab deterministic rescue se aa
-   * jaata tha. Intent wahi hai (NVIDIA primary, HF sirf cross-provider fallback) — sirf order badla. */
-    expect(env.nvidiaModel).toBe("openai/gpt-oss-20b");
-    expect(env.nvidiaFallbackModel).toBe("nvidia/nemotron-3-nano-omni-30b-a3b-reasoning");
+    /* Round-52 me chain fast model se shuru ki gayi thi (muse 30s+ le raha tha); Round-61 me user ne
+     * wapas Muse primary maanga — ab bade prompt ke liye alag primary timeout cap hai, isliye order
+     * badalne ki majboori nahi. */
+    /* Round-61 (30 Sep 2026, user: "Muse ko primary kro and gpt ko secondary yan fallback"): chain
+     * wapas Muse se shuru hoti hai — Muse samajh/multi-tool me behtar, gpt-oss-20b fast fallback.
+     * Turn budget 180s + AI_PRIMARY_TIMEOUT_MS (prod 90s) ki wajah se slow primary ab timeout me
+     * poora turn nahi khota. */
+    expect(env.nvidiaModel).toBe("meta/muse-glimmer-30b");
+    expect(env.nvidiaFallbackModel).toBe("openai/gpt-oss-20b");
     expect(env.nvidiaBaseUrl).toBe("https://integrate.api.nvidia.com/v1");
     if (prevFb != null) process.env.NVIDIA_FALLBACK_MODEL = prevFb;
     if (prevModel != null) process.env.NVIDIA_MODEL = prevModel;
