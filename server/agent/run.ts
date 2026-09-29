@@ -1,6 +1,6 @@
 import type { Station, TrainResult } from "../providers/types.js";
 import type { ServedProvider } from "../railway/router.js";
-import { aiPhraseGate } from "./agentic.js";
+import { aiPhraseGate, type ChoiceBlock } from "./agentic.js";
 import { runUnderstand } from "../understand/index.js";
 import { generalRailwayAnswer } from "../understand/llm.js";
 import { understand as deterministicUnderstand, type DialogSlot, type KnownSlots, type NluResult } from "../understand/legacy-nlu.js";
@@ -1429,6 +1429,44 @@ export function isPlanAsk(text: string): boolean {
   return /\b(poora|poori|pura|puri)\s+plan\b/i.test(t) || /\bplan\s+(bana|banao|banado|banade|bna)/i.test(t);
 }
 
+/** ── Round-60 (user: "ambiguous station pe ab choice nahi aati") ─────────────────────────────────────
+ * Jab model khud city ko ek station maan leta hai (jaise "Delhi" → NDLS) aur text me "kaunsa station?"
+ * bhi poochh leta hai, tab UI me dropdown nahi aata tha — kyunki choice payload sirf us waqt banta tha jab
+ * NLU city ko UNRESOLVED chhodta tha. Yahan wahi check hai, per-question rule nahi:
+ *   • slot (from/to) city-level naam ho (station ka poora naam ya code text me na ho), aur
+ *   • us city me 2+ station ho (asli provider data se — wahi source jo deterministic path use karta hai),
+ * to wahi dropdown banao. Station ka exact naam/code likha ho to kuch nahi poochhte (koi extra sawaal nahi).
+ */
+export async function cityStationAmbiguity(
+  slots: { from?: Station | null; to?: Station | null },
+  text: string,
+  search: (city: string) => Promise<{ stations: Station[] }> = routedStationSearch,
+): Promise<ChoiceBlock | null> {
+  const t = String(text ?? "");
+  const esc = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  for (const slot of ["to", "from"] as const) {
+    const st = slot === "to" ? slots.to : slots.from;
+    const code = String(st?.code ?? "").trim();
+    const city = String(st?.city ?? "").trim();
+    const name = String(st?.name ?? "").trim();
+    if (!code || !city) continue;
+    /* Station-level naam (New Delhi / Hazrat Nizamuddin / NDLS) likha ho → ambiguity nahi. */
+    if (city.toLowerCase() === name.toLowerCase()) continue;
+    if (new RegExp(`\\b${esc(code)}\\b`, "i").test(t)) continue;
+    if (name && new RegExp(esc(name), "i").test(t)) continue;
+    const res = await search(city).catch(() => null);
+    const stations = res?.stations ?? [];
+    if (stations.length < 2) continue; /* ek hi station — poochhne ka matlab nahi */
+    return {
+      kind: "station",
+      title: `${city} — kaunsa station?`,
+      options: stations.slice(0, 8).map((s) => ({ label: `${s.code} – ${s.name}`, value: s.code, sub: null })),
+      sendTemplate: "{value}",
+    };
+  }
+  return null;
+}
+
 export function answerKind45(text: string): AnswerKind45 | null {
   const t = String(text ?? "");
   if (/\b(seat|seats|berth|availab\w*|avl|rac|waitlist|wk|wl|confirmation)\b/i.test(t) && /\b\d{4,5}\b/.test(t)) return "seat";
@@ -2851,6 +2889,12 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
          * baaki har jagah chalta hai (RANK_JOURNEY_OPTIONS/JOURNEY_ANALYZE). Ye rescue hai (R45 ka usool:
          * deterministic sirf jab model na de) — logic/data wahi, sirf guarantee ki payload kabhi khaali na
          * jaaye. Model ka reply text waisa hi rehta hai (jhooth nahi, kuch chhupaya nahi). */
+        /* Round-60: city-level station ambiguity par dropdown (agar model ne choice payload na diya ho). */
+        let choicePayload = capture.choice ?? null;
+        if (!choicePayload) {
+          choicePayload = await cityStationAmbiguity({ from: det.from ?? null, to: det.to ?? null }, String(req.text ?? "")).catch(() => null);
+          if (choicePayload) console.log(JSON.stringify({ choiceRescue: choicePayload.title }));
+        }
         let planPayload = capture.plan ?? null;
         if (!planPayload && isPlanAsk(req.text) && ctx.origin?.code && ctx.destination?.code && ctx.date) {
           planPayload = await planJourney({
@@ -2883,7 +2927,7 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
           journey: planPayload,
           alternatives: capture.alternatives ?? null,
           trainPicker: capture.trainPicker ?? null,
-          choice: capture.choice ?? null,
+          choice: choicePayload,
           confirmBook: false,
           missingFields: missingOf({
             from: det.from,

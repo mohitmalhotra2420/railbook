@@ -289,6 +289,61 @@ const bookableOf = (l: AgentRouteLeg): string | null => {
   return st === "AVAILABLE" || st === "RAC" || st === "WAITLIST" || st === "WL" || st === "N/A" || st === "NOT_AVAILABLE" ? a.classCode : null;
 };
 
+/** Round-60: leg ki classes ek saaf grid me — pehli chip leg ki seat ("Best"), baaki classes same shakal,
+ *  har chip par Book (tap → usi class/segment ka passenger form). Kuch invent nahi — jo classOptions me hai. */
+export function ClassGrid({
+  leg,
+  depDay,
+  bookable,
+  onBook,
+}: {
+  leg: AgentRouteLeg;
+  depDay: number;
+  bookable: boolean;
+  onBook?: (r: NonNullable<AgentRouteLeg["classOptions"]>[number]) => void;
+}) {
+  type RowT = NonNullable<AgentRouteLeg["classOptions"]>[number];
+  const primary = leg.availability ? ([leg.availability] as unknown as RowT[]) : [];
+  const others = (leg.classOptions ?? []).filter((r) => r.classCode !== leg.availability?.classCode && !r.stale);
+  const rows = [...primary, ...others].slice(0, 6);
+  if (!rows.length) return null;
+  return (
+    <div className="jx-classgrid">
+      {rows.map((r, i) => {
+        const av = availTextOf(r);
+        const code = String(r.classCode ?? "").trim();
+        const status = av.text.replace(" ⚠ stale", "");
+        /* av.text me class code pehle se hota hai ("CC AVL 16") — dobara likhne se "CC CC AVL" ho jaata
+         * tha; isliye code sirf tab lagao jab text me na ho. */
+        const hasCode = Boolean(code) && new RegExp(`^\\s*${code}\\b`, "i").test(status);
+        const can = bookable && Boolean(r.classCode) && Boolean(onBook);
+        const inner = (
+          <>
+            {hasCode ? null : <><span className="jx-cchip-cl">{code}</span> </>}
+            {status}
+            {r.fare != null ? ` · ${inr(r.fare)}` : ""}
+            {i === 0 ? <span className="jx-cchip-star"> · Best</span> : null}
+            {can ? <span className="jx-cchip-go">Book</span> : null}
+          </>
+        );
+        return can ? (
+          <button
+            key={`${r.classCode}-${i}`}
+            type="button"
+            className={`jx-cchip jx-cchip-btn jx-cchip-${av.tone}${i === 0 ? " jx-cchip-best" : ""}`}
+            title={`${leg.trainNumber} ${r.classCode} — passenger form kholo`}
+            onClick={(e) => { e.stopPropagation(); onBook!(r); }}
+          >
+            {inner}
+          </button>
+        ) : (
+          <span key={`${r.classCode}-${i}`} className={`jx-cchip jx-cchip-${av.tone}${i === 0 ? " jx-cchip-best" : ""}`}>{inner}</span>
+        );
+      })}
+    </div>
+  );
+}
+
 function ConnCard({
   c,
   baseDate,
@@ -321,11 +376,18 @@ function ConnCard({
             >
               <span className="jx-leg-n">{i + 1}</span>
               <div className="jx-leg-body">
-                <div className="jx-lrow-train"><span className="jx-no">{l.trainNumber}</span> <span className="jx-name">{l.trainName}</span><SeatPill a={l.availability} /></div>
+                {/* Round-60 (user: "classes ka layout sahi krdo"): pehle leg ki seat upar right-aligned pill
+                    thi aur baaki classes neeche chips — do jagah bikhra hua. Ab EK saaf grid: pehli chip usi
+                    leg ki seat ("Best" nishaan ke saath), phir baaki classes — sab ek hi shakal me, har chip
+                    par Book (tap = usi class ka passenger form). */}
+                <div className="jx-lrow-train"><span className="jx-no">{l.trainNumber}</span> <span className="jx-name">{l.trainName}</span></div>
                 <div className="jx-leg-line"><strong>{l.departure}</strong> {l.fromName ?? l.from} ({l.from}){baseDate ? ` · ${legDateLabel(baseDate, depDay)}` : ""} <span className="jx-leg-arr">→</span> <strong>{l.arrival}</strong> {l.toName ?? l.to} ({l.to}){baseDate ? ` · ${legDateLabel(baseDate, arrDay)}` : ""}</div>
-                {(l.classOptions ?? []).filter((r) => r.classCode !== l.availability?.classCode).length > 0 && (
-                  <div className="jx-classes-chips">{(l.classOptions ?? []).filter((r) => r.classCode !== l.availability?.classCode).slice(0, 4).map((r) => { const av = availTextOf(r); const can = onBookLeg && r.classCode && !r.stale; return can ? <button key={r.classCode} type="button" className={`jx-cchip jx-cchip-btn jx-cchip-${av.tone}`} title={`${l.trainNumber} ${r.classCode} — passenger form kholo`} onClick={(e) => { e.stopPropagation(); onBookLeg!({ ...l, availability: r, departureDayOffset: depDay }, depDay); }}>{av.text.replace(" ⚠ stale", "")}{r.fare != null ? ` · ${inr(r.fare)}` : ""} <span className="jx-cchip-go">Book</span></button> : <span key={r.classCode} className={`jx-cchip jx-cchip-${av.tone}`}>{av.text.replace(" ⚠ stale", "")}{r.fare != null ? ` · ${inr(r.fare)}` : ""}{r.stale ? <span className="jx-cchip-tag"> · {ageLabel(r.asOf)}</span> : null}</span>; })}</div>
-                )}
+                <ClassGrid
+                  leg={l}
+                  depDay={depDay}
+                  bookable={Boolean(onBookLeg)}
+                  onBook={onBookLeg ? (r) => onBookLeg!({ ...l, availability: r, departureDayOffset: depDay }, depDay) : undefined}
+                />
                 <div className="jx-leg-hint">{onBookLeg && bookableOf(l) ? `${bookableOf(l)} — Book par tap karo, form khulega (boarding ${l.ticketFrom ?? l.from})` : "Tap = is leg ki fresh seat check"}</div>
                 {onBookLeg && bookableOf(l) && (
                   <div className="jx-lrow-book">
@@ -374,13 +436,18 @@ function LegList({ title, legs, checked, baseDate, dayOffset, onPickLeg, onBookL
           >
             <div className="jx-lrow-a">
               <div className="jx-lrow-train"><span className="jx-no">{l.trainNumber}</span> <span className="jx-name">{l.trainName}</span></div>
-              {(l.classOptions ?? []).filter((r) => r.classCode !== l.availability?.classCode && !r.stale).length > 0 && (
-                <div className="jx-classes-chips jx-lrow-chips">{(l.classOptions ?? []).filter((r) => r.classCode !== l.availability?.classCode && !r.stale).slice(0, 3).map((r) => { const av = availTextOf(r); return <span key={r.classCode} className={`jx-cchip jx-cchip-${av.tone}`}>{av.text}{r.fare != null ? ` · ${inr(r.fare)}` : ""}</span>; })}</div>
-              )}
+              {/* Round-60: classes ab usi grid me jo connecting leg card me hai — leg ki seat ("Best")
+                  pehle, phir baaki classes; har chip tappable (Book) jab booking available ho. */}
+              <ClassGrid
+                leg={l}
+                depDay={depDay}
+                bookable={Boolean(onBookLeg)}
+                onBook={onBookLeg ? (r) => onBookLeg!({ ...l, availability: r, departureDayOffset: depDay }, depDay) : undefined}
+              />
             </div>
             <div className="jx-lrow-b"><span className="jx-lrow-ic">{IC.pin}</span><span>{l.from}→{l.to}{(l.ticketFrom || l.ticketUpto) && <span className="jx-ticket-tag"> · ticket {l.ticketFrom ?? l.from}→{l.ticketUpto ?? l.to}</span>}<br /><span className="jx-sub">{l.departure} · {l.arrival}{baseDate ? ` · ${legDateLabel(baseDate, depDay)}` : ""}</span></span></div>
             <div className="jx-lrow-c"><span className="jx-lrow-ic">{IC.clock}</span><span>{l.durationMinutes != null ? layoverLabel(l.durationMinutes) : "—"}</span></div>
-            <div className="jx-lrow-d"><SeatPill a={l.availability} /></div>
+            <div className="jx-lrow-d-wrap" />
             <span className="jx-lrow-chev">{IC.chev}</span>
             {onBookLeg && bookableOf(l) && (
               <div className="jx-lrow-book">
