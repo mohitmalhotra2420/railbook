@@ -2634,3 +2634,13 @@ button.rp-crow:active { transform: translateY(1px); }
 .jx-cchip-go { font-size: 10.5px; font-weight: 900; letter-spacing: .02em; color: inherit; opacity: .85; }
 /* R57: leg card ab div hai (button ke andar button invalid HTML thi) — dikhne me waisa hi rahe. */
 .jx-leg[role="button"]:focus-visible, .jx-lrow-leg[role="button"]:focus-visible { outline: 2px solid var(--navy); outline-offset: 2px; }
+/* R58: ErrorBoundary card — render error par khaali screen ke bajaye saaf card + retry. */
+.eb-card { background: #fff8ee; border: 1px solid #f0d3a8; border-left: 4px solid #b45309; border-radius: 12px; padding: 12px 14px; margin: 8px 0; }
+.eb-card.eb-compact { padding: 10px 12px; }
+.eb-title { font-weight: 800; color: #8a3f00; font-size: 14px; margin-bottom: 4px; }
+.eb-body { font-size: 13px; color: #6b4a1f; line-height: 1.5; }
+.eb-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.eb-btn { font: inherit; font-size: 13px; font-weight: 800; padding: 7px 14px; border-radius: 999px; border: 1.5px solid #b45309; background: #fff; color: #b45309; cursor: pointer; }
+.eb-btn:hover { background: #fff3e2; }
+.eb-btn.ghost { border-color: #cbd5e1; color: #475569; }
+.eb-hint { margin-top: 8px; font-size: 11px; color: #9a7b52; word-break: break-word; }

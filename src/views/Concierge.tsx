@@ -26,6 +26,7 @@ import { VoiceSheet, type VoiceSuggestion } from "../components/VoiceSheet";
 import { AlternativesCard } from "../components/AlternativesCard";
 import { TrainPicker } from "../components/TrainPicker";
 import { ReplyText, type ReplyRow } from "../components/ReplyText";
+import { ErrorBoundary } from "../components/ErrorBoundary";
 import { AnswerCard } from "../components/AnswerCard";
 import { IconPlus, IconGrid, IconBoard, IconTicket, IconChat } from "../components/Icons";
 import { TrainClassBlock } from "../components/TrainClassBlock";
@@ -1937,6 +1938,7 @@ export function Concierge() {
             {msg.role === "assistant" && <div className="msg-kicker">RailBook</div>}
             {/* Round-18m-8 (layout): journey planner card ke saath lamba AI text "chat" jaisa
               * lagta tha — card hi result hai; text ek collapsed note mein (tap → padho). */}
+            <ErrorBoundary what="jawab" resetKey={`${msg.id}-t`} compact>
             {(() => {
               /* 24 Sep 2026 (user: "2A seat bta esne phir direct trains bta di" — seat ka jawab
                * card ke andar chhup gaya tha). Seat line (💺 …) ab card ke UPAR hamesha dikhti hai;
@@ -1973,7 +1975,9 @@ export function Concierge() {
                 </>
               );
             })()}
+            </ErrorBoundary>
             {msg.blocks?.map((b, i) => (
+              <ErrorBoundary key={`${msg.id}-${i}`} what="card" resetKey={`${msg.id}-${i}`} compact>
               <BlockView
                 key={i}
                 block={b}
@@ -2002,6 +2006,7 @@ export function Concierge() {
                 onBookSeat={(r, ctx) => openBookingFromSeatRow(r, ctx)}
                 seatFinder={seatFind}
               />
+              </ErrorBoundary>
             ))}
           </article>
         ))}
@@ -2364,6 +2369,7 @@ function BlockView({
   onWallet,
   onBookings,
   onOpenBoard,
+  onOpenPlanPage,
   onBookClass,
   onBookSeat,
   consumePlanPage,

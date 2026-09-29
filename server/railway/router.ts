@@ -1246,7 +1246,9 @@ export async function routedClassBoard(
       }
     }
     if (codes.length) {
-      addChecks(codes.length);
+      /* Round-58: yahan addChecks(codes.length) tha — par har class probe ka count ab
+       * getAvailability khud karta hai (aur wo dedupe/limit ke andar hai). Yahan bhi ginte to
+       * double ho jaata — isliye hata diya. */
       const probed = await Promise.all(
         codes.map((code) => provider.getAvailability(trainNumber, date, from, to, code, quota)),
       );
@@ -1763,9 +1765,15 @@ export class FallbackRailwayProvider implements RailwayProvider {
      * every call still goes to the provider chain, just under the global concurrency limiter. */
     const key = `avail:${trainNumber}:${date}:${from}:${to}:${classCode}:${quotaCode}`;
     return dedupe(key, () => limited(async () => {
-      const row = await this.getAvailabilityUncached(trainNumber, date, from, to, classCode, quotaCode);
-      checkDone("Seat checks");
-      return row;
+      /* Round-58: ginti ASLI provider checks ki — total check shuru hone par badhta hai aur done
+       * khatam hone par (fail ho ya pass). Isse "18/6 checks completed" jaisa ulta number kabhi
+       * nahi aata; dedupe hit dobara count nahi hota (callback ek hi baar chalta hai). */
+      addChecks(1);
+      try {
+        return await this.getAvailabilityUncached(trainNumber, date, from, to, classCode, quotaCode);
+      } finally {
+        checkDone("Seat checks");
+      }
     }));
   }
 
