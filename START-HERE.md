@@ -1,4 +1,4 @@
-# RailBook — poora project (continue karne ke liye) · 30 Sep 2026 (Round 66)
+# RailBook — poora project (continue karne ke liye) · 1 Oct 2026 (Round 67)
 
 Ye zip aapke **poore project** ka snapshot hai — web app + server + Android app + tests + previews + APKs.
 Naye workspace me bas extract karke `npm ci` chalao aur wahin se aage badho (git history bhi andar hai).
@@ -21,17 +21,49 @@ railbook-full/
 └── apks/                      ← latest release APKs (v1.4.8, v1.4.9 — r29 me naya APK nahi)
 ```
 
-## 0. Current state (30 Sep 2026 — Round 66)
+## 0. Current state (1 Oct 2026 — Round 67)
 
 
-- **ZIP ka permanent link (workspace reset-proof):** `https://github.com/mohitmalhotra2420/railbook/releases/download/r66-2026-09-30/RailBook-FULL-2026-09-30.zip`
-  (release page: `https://github.com/mohitmalhotra2420/railbook/releases/tag/r66-2026-09-30`, asset id 601403979; r62 wale release ka asset bhi latest zip se replace kiya gaya — purana stable link bhi latest deta hai). Isi workspace ka har reset ke baad bhi downloadable rehta hai.
+- **ZIP ka permanent link (workspace reset-proof):** `https://github.com/mohitmalhotra2420/railbook/releases/download/r67-2026-10-01/RailBook-FULL-2026-10-01.zip`
+  (release page: `https://github.com/mohitmalhotra2420/railbook/releases/tag/r67-2026-10-01`, asset id 601655666). Isi workspace ka har reset ke baad bhi downloadable rehta hai.
 - **Poora project GitHub par pushed:** `https://github.com/mohitmalhotra2420/railbook` (main) — server, client, 144 test files, docs, previews, android-app, tools.
-- **Prod live:** `https://railbook-gegs.onrender.com` · `/api/version` = `{"commit":"a773702","primaryModel":"meta/muse-glimmer-30b","fallbackModel":"openai/gpt-oss-20b"}` (service `srv-dae34rqd0e5s73evgjsg`, deploy `dep-daujvdg473hc73bhip2g`).
+- **Prod live:** `https://railbook-gegs.onrender.com` · `/api/version` = `{"commit":"6317ef8","primaryModel":"meta/muse-glimmer-30b","fallbackModel":"openai/gpt-oss-20b"}` (service `srv-dae34rqd0e5s73evgjsg`, deploy `dep-daum6eflk1mc73deaavg`).
 - **Round 61 ka faisla:** Muse-Glimmer primary planner, GPT-OSS-20B fallback + NLU; primary ke liye alag timeout `AI_PRIMARY_TIMEOUT_MS=90000` (warna bade prompt par 45s cap round barbaad kar deta tha).
-- **Tests:** `npx vitest run` → **150 files / 1612 pass / 0 fail** (1 skipped = gated live E2E). Client `tsc` purane baseline par hi (86) — koi naya error nahi. Server TS: `tsc -p tsconfig.server.json` clean.
+- **Tests:** `npx vitest run` → **150 files / 1619 pass / 0 fail** (1 skipped = gated live E2E). Client `tsc` purane baseline par hi (86) — koi naya error nahi. Server TS: `tsc -p tsconfig.server.json` clean.
 - **R60 ki teen reporting cheezein** (prod par pehle se live): station-choice dropdown, plan page ka touch scroll, leg classes ka naya grid.
 
+
+## 0aa. Round 67 (1 Oct 2026) — AI Booking ab AI-FIRST (chat ka brain + sabhi tools)
+
+User ke 3 screenshots + farmaan: *"kyu na hum edhr bhi AI first rakhein … AI ke pass sabhi existing tools
+ho jo pehle chat mein the, AI khud query samjhe and right tool ka use kare … AI booking fully automate kare
+… bss AI Booking wala jo banaya hai usmein yeh nayi cheezein implement karna, chat wale tools/AI
+behaviour/logic/architecture mein koi change nahi."*
+
+- **AI-first routing (`src/views/AiBooking.tsx`):** har turn par wahi maujooda chat brain
+  (`api.agentStream` → `/api/agent` + `/api/agent/stream`, **wahi tools/prompts**). Engine ne samajh liya
+  aur sawaal nahi → booking turant aage (brain quiet/background). Engine na samjhe YA sawaal/factual ho
+  (live status, timing, fare, seat, wallet, PNR, general) → brain ka jawab user ko, engine ki
+  "samajh nahi aaya" wali khali lines hat jaati hain. Brain ka slot **canonical jawab** ban kar usi purane
+  `aiBookingTurn` se guzarta hai — validation/route/class logic wahi, booking ka malik engine hi.
+- **Lamba turn:** chat jaisa live progress status me ("Searching trains… 3/5") — "jawab nahi aaya" jaisa
+  confusion nahi.
+- **Screenshot-1 bug (live status):** "12054 आज अमृतसर कितने बजे पहुंची थी" par pehle "Ye station samajh
+  nahi aaya" aa jaata tha — ab brain se asli jawab (tools: SEARCH_TRAIN_BY_NUMBER → GET_TRAIN_INFO →
+  TRACK_TRAIN) aur flow ki state waisi hi.
+- **Server TTS bharosemand (`server/voice/tts.ts`, additive):** upstream timeout (`VOICE_TTS_TIMEOUT_MS`) +
+  retry + chhote text ka retry + same-line **cache** (`X-RailBook-TTS: cache`) + `/api/voice/config` par
+  **background warm-up** — provider (edge-tts) Render par sota hai, isliye "Server voice abhi nahi aayi"
+  wala 502 aata tha. Prod: 1st 0.86s, dobara 0.23s (cache), asli MP3.
+- **Mic ka apna echo band (screenshot 3):** `VoiceBridge.kt` ab **"bolna khatam" signal** deta hai
+  (`UtteranceProgressListener.onDone` + MediaPlayer `onCompletion` → `window.__railbookTtsEnded`), saath me
+  grace aur **echo filter** (transcript me AI ki hi line ke numbers/shabd → input nahi banta).
+- **Dock layout (screenshot 2):** voice panel ek line, notice chhoti chip + ✕, aur dock khula ho to
+  `body.aib-docked` se form ke neeche jagah — aakhri field/CTA dock ke peeche nahi chhupta.
+- **APK:** `RailBook-v1.5.2-release.apk` (1.5.2-voice, versionCode 35, 4,828,815 B, sha256
+  `0ca37ee8bf226059ba143593b24eb1f5da85f5714f6eb7343b22949b8f4898ef`).
+- **Verify:** full suite **1619 pass/1 skip** (naye 11 R67 ke) · E2E prod booking **26/26** · direction
+  **10/10** · `/api/voice/tts` 200 (Hindi + Devanagari) · bundle me naye markers.
 
 ## 0a. Round 66 (30 Sep 2026) — Hindi samajhna + asli voice (architecture wahi)
 
