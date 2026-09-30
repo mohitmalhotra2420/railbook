@@ -12,13 +12,24 @@
  * Env (sab optional; Render dashboard me set karna hai):
  *   VOICE_TTS_PROVIDER = openai | elevenlabs | none        (default none)
  *   VOICE_TTS_API_KEY  = <provider key>                    (ya OPENAI_API_KEY / ELEVENLABS_API_KEY)
- *   VOICE_TTS_MODEL    = gpt-4o-mini-tts | eleven_multilingual_v2 … (optional)
- *   VOICE_TTS_VOICE    = alloy | Rachel …                 (optional)
+ *   VOICE_TTS_MODEL    = tts-1 | eleven_multilingual_v2 …  (optional; openai ka default "tts-1")
+ *   VOICE_TTS_VOICE    = hi-IN-SwaraNeural | alloy | Rachel … (optional; openai ka default Hindi
+ *                        female "hi-IN-SwaraNeural", male ke liye sirf env badlo → "hi-IN-MadhurNeural")
  *   VOICE_TTS_BASE_URL = custom base (optional, self-hosted OpenAI-compatible)
+ *
+ * Round "Voice Agent R2" (30 Sep 2026): provider ke default sirf itne badle ki openai-edge-tts
+ * (https://github.com/travisvn/openai-edge-tts — OpenAI-compatible, POST /v1/audio/speech) bina model/
+ * voice set kiye bhi sahi chale. Baaki poora adapter (validation, fallback, no-store, key server-side)
+ * waise hi hai — koi rewrite nahi, koi naya endpoint nahi, AI/railway/booking code ko haath nahi lagaya.
  */
 import type { Express, Request, Response } from "express";
 
 const MAX_TEXT = 700;
+
+/* OpenAI-compatible provider ke default (env se hamesha override ho sakte hain):
+ * openai-edge-tts ke liye yahi do value kaam karti hain — Hindi female voice + tts-1 model. */
+const OPENAI_DEFAULT_MODEL = "tts-1";
+const OPENAI_DEFAULT_VOICE = "hi-IN-SwaraNeural";
 
 type ProviderName = "openai" | "elevenlabs" | "none";
 
@@ -48,7 +59,7 @@ export function voicePublicConfig(): {
   return {
     provider: provider === "none" ? "browser" : provider,
     serverTts: keyed,
-    model: process.env.VOICE_TTS_MODEL?.trim() || (provider === "elevenlabs" ? "eleven_multilingual_v2" : provider === "openai" ? "gpt-4o-mini-tts" : null),
+    model: process.env.VOICE_TTS_MODEL?.trim() || (provider === "elevenlabs" ? "eleven_multilingual_v2" : provider === "openai" ? OPENAI_DEFAULT_MODEL : null),
     languages: ["hi-IN", "en-IN"],
   };
 }
@@ -59,8 +70,8 @@ async function synthOpenAi(text: string, lang: string, key: string): Promise<{ s
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
     body: JSON.stringify({
-      model: process.env.VOICE_TTS_MODEL?.trim() || "gpt-4o-mini-tts",
-      voice: process.env.VOICE_TTS_VOICE?.trim() || "alloy",
+      model: process.env.VOICE_TTS_MODEL?.trim() || OPENAI_DEFAULT_MODEL,
+      voice: process.env.VOICE_TTS_VOICE?.trim() || OPENAI_DEFAULT_VOICE,
       input: text,
       response_format: "mp3",
     }),
