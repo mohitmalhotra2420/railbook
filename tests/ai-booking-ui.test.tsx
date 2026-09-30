@@ -451,6 +451,16 @@ describe("R68 — crash fix + har query pehle AI + wait line", () => {
     await waitFor(() => expect(screen.getByRole("region", { name: "AI Booking" })).toBeTruthy(), { timeout: 8000 });
   }, 25000);
 
+  it("structural guard: early return ke baad koi hook nahi (React #310 dobara na aaye)", () => {
+    const src = readFileSync("src/views/AiBooking.tsx", "utf8");
+    const idx = src.indexOf("if (!open) return null;");
+    expect(idx).toBeGreaterThan(0);
+    const tail = src.slice(idx);
+    /* JSX/helpers theek hain — bas koi hook (useState/useEffect/useMemo/useCallback/useRef) nahi hona chahiye. */
+    const hooks = tail.match(/use(State|Effect|Memo|Callback|Ref|Reducer|LayoutEffect)\s*\(/g) ?? [];
+    expect(hooks).toEqual([]);
+  });
+
   it("har query pehle brain ke paas jaati hai (slot answers bhi)", async () => {
     const asked: string[] = [];
     (globalThis as unknown as { fetch: unknown }).fetch = vi.fn(async (url: string, init?: { body?: string }) => {

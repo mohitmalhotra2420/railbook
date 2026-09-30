@@ -1,4 +1,4 @@
-# RailBook — poora project (continue karne ke liye) · 1 Oct 2026 (Round 67)
+# RailBook — poora project (continue karne ke liye) · 1 Oct 2026 (Round 68)
 
 Ye zip aapke **poore project** ka snapshot hai — web app + server + Android app + tests + previews + APKs.
 Naye workspace me bas extract karke `npm ci` chalao aur wahin se aage badho (git history bhi andar hai).
@@ -21,17 +21,37 @@ railbook-full/
 └── apks/                      ← latest release APKs (v1.4.8, v1.4.9 — r29 me naya APK nahi)
 ```
 
-## 0. Current state (1 Oct 2026 — Round 67)
+## 0. Current state (1 Oct 2026 — Round 68)
 
 
 - **ZIP ka permanent link (workspace reset-proof):** `https://github.com/mohitmalhotra2420/railbook/releases/download/r67-2026-10-01/RailBook-FULL-2026-10-01.zip`
   (release page: `https://github.com/mohitmalhotra2420/railbook/releases/tag/r67-2026-10-01`, asset id 601655666). Isi workspace ka har reset ke baad bhi downloadable rehta hai.
 - **Poora project GitHub par pushed:** `https://github.com/mohitmalhotra2420/railbook` (main) — server, client, 144 test files, docs, previews, android-app, tools.
-- **Prod live:** `https://railbook-gegs.onrender.com` · `/api/version` = `{"commit":"6317ef8","primaryModel":"meta/muse-glimmer-30b","fallbackModel":"openai/gpt-oss-20b"}` (service `srv-dae34rqd0e5s73evgjsg`, deploy `dep-daum6eflk1mc73deaavg`).
+- **Prod live:** `https://railbook-gegs.onrender.com` · `/api/version` = `{"commit":"0006eb4","primaryModel":"meta/muse-glimmer-30b","fallbackModel":"openai/gpt-oss-20b"}` (service `srv-dae34rqd0e5s73evgjsg`, deploy `dep-daumkk3ncjis73fhh450`).
 - **Round 61 ka faisla:** Muse-Glimmer primary planner, GPT-OSS-20B fallback + NLU; primary ke liye alag timeout `AI_PRIMARY_TIMEOUT_MS=90000` (warna bade prompt par 45s cap round barbaad kar deta tha).
-- **Tests:** `npx vitest run` → **150 files / 1619 pass / 0 fail** (1 skipped = gated live E2E). Client `tsc` purane baseline par hi (86) — koi naya error nahi. Server TS: `tsc -p tsconfig.server.json` clean.
+- **Tests:** `npx vitest run` → **150 files / 1622 pass / 0 fail** (1 skipped = gated live E2E). Client `tsc` purane baseline par hi (86) — koi naya error nahi. Server TS: `tsc -p tsconfig.server.json` clean.
 - **R60 ki teen reporting cheezein** (prod par pehle se live): station-choice dropdown, plan page ka touch scroll, leg classes ka naya grid.
 
+
+## 0aaa. Round 68 (1 Oct 2026) — crash fix + HAR QUERY PEHLE AI + wait messages
+
+User screenshot: *"AI Booking khulte hi — chat dikha nahi paaya (React error #310)"* + farmaan: har query
+pehle AI par jaaye (sabhi tools use kare), ChatGPT jaisa conversational, aur "understanding" ki jagah
+"thoda samay lagega…" (1 minute ke baad "thoda sa aur samay lagega…").
+
+- **Crash ka asli karan (aur fix):** R67 me dock-spacing wala `useEffect` `if (!open) return null;` ke
+  **neeche** chala gaya tha → kholte hi ek **extra hook** → React #310 → Concierge ka error boundary
+  ("chat dikha nahi paaya"). Ab saare hooks early return se **upar**. Guards: (a) behaviour test band →
+  open + dock mode, (b) **structural test** — early return ke baad koi hook nahi.
+- **Har query pehle AI:** har user message sabse pehle wahi maujooda chat brain (`api.agentStream` →
+  `/api/agent` + `/api/agent/stream`, sabhi tools + web scraping, wahi prompts/logic) ke paas jaata hai;
+  brain ka slot canonical jawab ban kar usi purane booking engine se guzarta hai. Sawaal/factual turn par
+  poora jawab user ko; chhote slot answers par user 12s se zyada model ka intezaar nahi karta (late jawab
+  chup-chaap ignore).
+- **Wait messages (user ke shabd):** "⏳ Thoda samay lagega — main aapki request process kar rahi hoon…" →
+  60s ke baad "⏳ Thoda sa aur samay lagega — bas ho raha hai…"; server ke asli phase aaye to wahi
+  ("Checking availability… 3/5"). Voice panel me "Process kar rahi hoon…".
+- **APK:** `RailBook-v1.5.3-release.apk` (1.5.3-voice, versionCode 36).
 
 ## 0aa. Round 67 (1 Oct 2026) — AI Booking ab AI-FIRST (chat ka brain + sabhi tools)
 
