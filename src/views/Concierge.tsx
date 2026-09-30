@@ -23,6 +23,8 @@ import { detectSeatIntent, type SeatIntent, type SeatRow } from "../seatfinder";
 import { focusSeatRows, seatListGroups, stripSeatCardPointer, trainNumbersInText } from "../chatText";
 /* Round-31: jawab ke baad agla kadam (verified data se — kuch invent nahi). */
 import { VoiceSheet, type VoiceSuggestion } from "../components/VoiceSheet";
+/* Round-62 (ADDITIVE): alag "AI Booking" mode — text + voice wali conversational booking. */
+import { AiBooking } from "./AiBooking";
 import { AlternativesCard } from "../components/AlternativesCard";
 import { TrainPicker } from "../components/TrainPicker";
 import { ReplyText, type ReplyRow } from "../components/ReplyText";
@@ -219,6 +221,8 @@ export function Concierge() {
   /* 24 Sep 2026 (user: ConfirmTkt jaisa "bolne wala" screen): mic dabate hi sheet khulta hai —
    * jo bola wo live likha jata hai, chips se ek tap me sawaal, OK par bhejta hai. */
   const [voiceSheet, setVoiceSheet] = useState(false);
+  /* Round-62: AI Booking overlay (maujooda chat/flow ko chhua nahi jata). */
+  const [aiBookingOpen, setAiBookingOpen] = useState(false);
   const VOICE_CHIPS: VoiceSuggestion[] = [
     { id: "confirmed", label: "Get Confirmed Ticket", text: "sirf confirmed seat wali trains dikhao" },
     { id: "ac", label: "AC Trains", text: "AC trains dikhao" },
@@ -1949,6 +1953,15 @@ export function Concierge() {
         {/* Round-47 (user: "header bhi better banao naye buttons rakho yeh purane htado", aur
          * "payment ka sign hta do"): purane text-glyph buttons (✚ ▦ ₹ ☰) hata kar saaf SVG icons;
          * ₹ (wallet) header se hata — wallet booking flow ke apne buttons se khulta rehta hai. */}
+        {/* Round-62 (ADDITIVE): prominent AI Booking entry — text/voice se poori booking. */}
+        <button
+          className="ai-book-entry"
+          title="AI Booking — text ya voice se booking"
+          aria-label="AI Booking"
+          onClick={() => setAiBookingOpen(true)}
+        >
+          🎫 AI Booking
+        </button>
         <button className="icon-btn" title="Nayi chat" aria-label="Nayi chat" onClick={startNewChat}>
           <IconChat />
         </button>
@@ -2087,6 +2100,8 @@ export function Concierge() {
 
       {/* 24 Sep 2026 (user: "hum bhi esa kuch bolne wala show karein?") — ConfirmTkt jaisa sheet:
           live transcript + quick chips + bada mic + ✍️ Type + ✕. Bhejna OK par (auto-send nahi). */}
+      {/* Round-62: AI Booking overlay — band karne par wahi chat/journey wapas. */}
+      <AiBooking open={aiBookingOpen} onClose={() => setAiBookingOpen(false)} />
       <VoiceSheet
         open={voiceSheet}
         listening={voice.listening}

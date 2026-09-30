@@ -31,6 +31,16 @@ railbook-full/
 - **Tests:** `npx vitest run` → **144 files / 1484 tests, 0 fail**. Server TS: `tsc -p tsconfig.server.json` clean.
 - **R60 ki teen reporting cheezein** (prod par pehle se live): station-choice dropdown, plan page ka touch scroll, leg classes ka naya grid.
 
+
+## 0b. Round 62 (30 Sep 2026) — "AI Booking" (ADDITIVE, text + voice)
+
+- **Entry:** header me prominent **🎫 AI Booking** button → apna screen (text + voice dono). Maujooda screens (search/results/passenger/review) wahi rehti hain — AI Booking unke upar **dock** ban kar bhi chalti hai.
+- **Naye files:** `src/ai/aiBookingFlow.ts` (11-stage state machine + corrections + Hinglish parsing), `src/views/AiBooking.tsx`, `src/voice/aiBookingVoice.ts` (server TTS → device voice fallback), `server/voice/tts.ts` (`/api/voice/config`, `/api/voice/tts` — keys sirf server env me).
+- **Reuse:** search/availability/fare maujooda `searchRoute`/`selectClass`/`goReview` se; train cards maujooda `TrainClassBlock`; passenger form maujooda `Passengers`; review + IRCTC handoff maujooda `ReviewStatus` → `Continue to IRCTC`. Koi doosra booking implementation nahi, koi fake PNR/confirmation nahi.
+- **Voice:** 🎙️ Listening · ⏳ Thinking · 🔊 Speaking · ⏹ Stop · 🔇 Mute · ⌨️ Type instead · ✕ End voice (mic sirf tap par, background listening nahi).
+- **Tests:** focused group 59 (flow 33 · voice 9 · UI 9 · server route 8) + regression 62; build ✓.
+- **Voice server-side TTS chahiye ho** to Render env me: `VOICE_TTS_PROVIDER` (openai/elevenlabs), `VOICE_TTS_API_KEY` — warna device voice chalti rehti hai (booking kabhi break nahi).
+
 ## 1. Turant shuru karne ke liye
 
 ```bash

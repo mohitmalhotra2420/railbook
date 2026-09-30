@@ -177,6 +177,19 @@ export interface NvidiaAdminCatalog {
 export const api = {
   /** Round-20: pantry/catering (read-only) — passenger form ka food choice. */
   trainPantry: (trainNumber: string) => trainPantryApi(trainNumber),
+  /* Round-62 (AI Booking, ADDITIVE): voice provider config + TTS proxy.
+   * Keys sirf server par rehti hain — client sirf provider ka NAAM dekhta hai, audio blob leta hai.
+   * Provider configured na ho to config serverTts:false deta hai aur client device voice par chala jaata hai. */
+  voiceConfig: () => request<{ provider: string; serverTts: boolean; model: string | null; languages: string[] }>("/api/voice/config"),
+  voiceTts: async (text: string, lang = "hi-IN"): Promise<Blob> => {
+    const res = await fetch("/api/voice/tts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, lang }),
+    });
+    if (!res.ok) throw new Error(`voice tts failed (${res.status})`);
+    return res.blob();
+  },
   adminModels: (refresh = false) =>
     request<AdminModelCatalog>(`/api/admin/models${refresh ? "?refresh=1" : ""}`),
   refreshAdminModels: () =>

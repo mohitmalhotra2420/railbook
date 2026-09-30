@@ -48,6 +48,8 @@ import { scrapeTrainFactsWeb } from "./railway/webscrape.js";
 import { getNvidiaCatalog, publicNvidiaPayload, refreshNvidiaCatalog } from "./understand/nvidia.js";
 import { answerFromEvidence, compactScheduleEvidence, shouldGroundFact } from "./understand/ground.js";
 import { todayYmdFrom } from "./understand/legacy-dates.js";
+/* Round-62 (AI Booking, ADDITIVE): voice TTS proxy — naye /api/voice/* endpoints, keys server-side. */
+import { registerVoiceRoutes } from "./voice/tts.js";
 
 const classCode = z.enum(["1A", "2A", "3A", "3E", "SL", "CC", "EC", "2S", "EA"]);
 
@@ -1250,6 +1252,9 @@ export function createApp() {
       bodyProbe,
     });
   });
+
+  /* Round-62: AI Booking ke voice endpoints (config + TTS). Existing routes untouched. */
+  registerVoiceRoutes(app);
 
   app.get("/api/wallet", (_req, res) => {
     res.json({ wallet: getWallet() });

@@ -420,3 +420,40 @@ Commit `6bf1863` (push verified: remote main = `6bf18631d651`). Ye test-only com
 - Prod: `https://railbook-gegs.onrender.com` → `/api/version` = `meta/muse-glimmer-30b / openai/gpt-oss-20b`, `AI_PRIMARY_TIMEOUT_MS=90000`.
 
 **R60 ki teen reporting cheezein** (choice dropdown, plan-page touch scroll, leg classes grid) prod @`a424d4a` se live hain — R61 ne koi logic nahi chheda ("logic mat change Krna").
+
+## §9.55 — Round 62 (30 Sep 2026): "AI Booking" — alag conversational booking mode (text + voice), sab kuch ADDITIVE
+
+**User ki shart:** maujooda Render site par jo kuch bhi chal raha hai (train search, availability, fare, compare, live status, PNR, booking state machine, wallet/fare flow, IRCTC handoff, autofill) — usme **kuch bhi modify/rewrite/remove/regress nahi**. Sirf add karna hai; aur naya kaam maujooda APIs/tools/state hi use kare. Report pehle, commit/deploy baad me (user ki permission par).
+
+**Kya add hua (naye files):**
+- `src/ai/aiBookingFlow.ts` — pure state machine: `AI_BOOKING_START → COLLECT_JOURNEY → SEARCH_TRAINS → SHOW_TRAIN_OPTIONS → TRAIN_SELECTED → CLASS_SELECTION → PASSENGER_COLLECTION → PASSENGER_REVIEW → BOOKING_REVIEW → FINAL_CONFIRMATION → IRCTC_HANDOFF`. Slots maujooda helpers se nikalte hain (`findStationsInText`, `parseDatePhrase`, `parsePassengerSpeech`, `BERTH_BY_CLASS`/`CLASS_LABELS`) aur sirf **action descriptors** deta hai — asli kaam (search/select/review) maujooda `booking/context.tsx` karta hai. Train/class sirf usi list se match hote hain jo search ne di; warna saaf "list me nahi hai". Ek message me kai slots aayein to dobara nahi poochha jata; ek sentence me kai passenger fields aayein to sirf missing field poochhi jati hai.
+- `src/views/AiBooking.tsx` — do shakalein: (1) full-screen AI Booking (maujooda `TrainClassBlock` se asli train/class cards), (2) **dock** — jab maujooda screen (results/passengers/review) khuli ho to neeche chhoti AI bar, form upar khula rehta hai. "AI Book" button → maujooda `selectClass` (live availability check) → maujooda passenger screen (`selectTrainAndClassGo`). Summary maujooda state se banti hai; `Continue Booking` = user ka explicit click → maujooda `goReview()` → maujooda Review screen ka **Continue to IRCTC** hi use hota hai.
+- `src/voice/aiBookingVoice.ts` — voice adapter: bolna pehle **server TTS provider** se (`/api/voice/tts`), warna device `speakGuide`; provider fail/offline → chupchaap device voice, booking flow rukta nahi. Sunna maujooda `useVoiceInput` (mic permission sirf user ke tap par; background listening nahi).
+- `server/voice/tts.ts` — naye endpoints `GET /api/voice/config` (sirf provider ka naam/model, keys kabhi nahi) aur `POST /api/voice/tts` (server hi provider ko call karta hai; configured na ho to 501 → client device voice par). Env: `VOICE_TTS_PROVIDER`, `VOICE_TTS_API_KEY`, `VOICE_TTS_MODEL`, `VOICE_TTS_VOICE`.
+
+**Maujooda files me sirf wiring (5–15 lines each):** `server/app.ts` (+5: import + `registerVoiceRoutes(app)`), `src/api.ts` (+13: `voiceConfig`/`voiceTts`), `src/views/Concierge.tsx` (+15: import + state + header ka prominent "🎫 AI Booking" button + overlay render), `src/styles.css` (+72: sirf naye `.aib-*` classes).
+
+**Safety:** koi fake PNR/confirmation/availability/fare nahi — AI sirf collect/explain karti hai, final IRCTC action user ke click par (maujooda handoff card). IRCTC autofill safety layer, `server/railway/*`, `package.json`, wallet, providers/fallback chain — kisi ko chhua nahi gaya.
+
+**Verify (Round-62 ke 3 grouped checks, full suite nahi chalayi):**
+```
+CHECK 1  npm run build                                   → tsc server clean + vite build ✓ (2.6s)
+CHECK 2  naye focused group (4 files)                     → 49 passed (flow 24 · voice 9 · UI 8 · route 8)
+CHECK 3  regression (booking-state, api, irctc-handoff,
+         ai-flows, round20-passenger-form)               → 62 passed
+```
+Client TypeScript baseline bhi wahi (HEAD = 74 pre-existing errors, changes ke baad bhi 74 — 0 naye).
+
+
+### §9.55b — Round 62 refinements (same round, user ke dobara bheje gaye points)
+
+User ne wahi R62 brief detail me dobara bheja — jo cheezein usme extra/marked thi, wahi add hui:
+
+1. **Corrections (ChatGPT jaisa context):** "Actually 2 October kar do" → sirf date replace hoti hai, route/passengers preserve rehte hain aur **fresh search** chalti hai; purani train/class carry nahi hoti. Correction sirf tab jab text me ishara ho ("actually / badal do / ki jagah / kar do") — normal jawab par nahi; "CC kar do" isliye class-selection hi rehta hai. Adhoori journey par correction → sirf missing slot poochha jata hai.
+2. **Honest empty-result line (user ke shabdon me):** "Is route/date ke liye mujhe abhi verified train data nahi mila."
+3. **Voice states/controls:** 🎙️ Listening · ⏳ Thinking · 🔊 Speaking (naya, adapter ke `onState` se aata hai) · ⏹ Stop · 🔇 Mute · ⌨️ Type instead · ✕ End voice. Text screen par hamesha visible rehta hai; voice fail → text flow chalta rehta hai.
+4. **Food (existing form ka field):** "…, veg" / "non veg" / "khana nahi chahiye" → passenger form ke `foodChoice` me (VEG/NON_VEG/NO_FOOD); naam se veg/non-veg/berth shabd hata diye jaate hain (naam saaf: "Rahul Sharma").
+5. **Review line conversational:** "Booking summary ready hai 😊 Amritsar Junction se Ludhiana Junction, 2 Oct 2026, train 12014, class CC, 2 passengers. Kya sab details theek hain? …" — sirf asli values se (fare tab jab live fare aa chuka ho).
+6. **Hinglish parsing tests:** "12014 wali", "CC kar do", "Rahul Sharma, 31 male." (sirf berth poochhi jati hai), "2 passengers ki jagah 4 kar do".
+
+Tests: focused group ab **59 passed** (flow 33 · voice 9 · UI 9 · server route 8); regression **62 passed**; build ✓.
