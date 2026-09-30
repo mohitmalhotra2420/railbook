@@ -481,6 +481,41 @@ export function matchStation(raw: string): Station | undefined {
 const ALIAS_KEYS = Object.keys(ALIASES).sort((a, b) => b.length - a.length);
 
 /** Unicode-safe scan — JS word boundaries do not work on Devanagari. */
+/** R4-fix (Voice/AI Booking): station mentions **position ke saath** — Devanagari naam bhi shamil
+ *  ("लुधियाना से नई दिल्ली" ka order sahi rehta hai). Ye ek naya exported helper hai; iska logic wahi
+ *  boundary-check hai jo `findStationsInText` me hai, aur purane callers/behaviour me kuch nahi badla. */
+export function findStationMentionsInText(text: string): { station: Station; idx: number; key: string }[] {
+  const t = text.toLowerCase();
+  const hits: { idx: number; key: string; st: Station }[] = [];
+  const seen = new Set<string>();
+  for (const key of ALIAS_KEYS) {
+    let from = 0;
+    let idx = -1;
+    while (from <= t.length) {
+      const at = t.indexOf(key, from);
+      if (at < 0) break;
+      const before = t[at - 1] ?? "";
+      const after = t[at + key.length] ?? "";
+      const latin = /[a-z]/i.test(key);
+      const ok = latin
+        ? !/[a-z0-9]/i.test(before) && !/[a-z0-9]/i.test(after)
+        : !/\p{L}/u.test(before) && !/\p{L}/u.test(after);
+      if (ok) {
+        idx = at;
+        break;
+      }
+      from = at + 1;
+    }
+    if (idx < 0) continue;
+    const st = stationByCode(ALIASES[key]);
+    if (st && !seen.has(st.code)) {
+      seen.add(st.code);
+      hits.push({ idx, key, st });
+    }
+  }
+  return hits.sort((a, b) => a.idx - b.idx).map((h) => ({ station: h.st, idx: h.idx, key: h.key }));
+}
+
 export function findStationsInText(text: string): Station[] {
   const t = text.toLowerCase();
   const hits: { idx: number; st: Station }[] = [];

@@ -557,3 +557,98 @@ describe("R63 — city (cluster) + Devanagari station naam", () => {
     expect(s.state.pendingCity).toBeNull();
   });
 });
+
+/* ══ R4 (30 Sep 2026) — user ke 2 screenshots se aaye ASLI bugs ══════════════════════════════════════
+ * (a) "लुधियाना से नई दिल्ली जाना है" par AI route ULTA kar deta tha (New Delhi se Ludhiana).
+ * (b) user ne route dobara bata diya to AI purana (galat) pair dohraata rehta tha.
+ * (c) "बर्थ प्रेफरेंस में विंडो सेलेक्ट करो" na samajh me aaya aur wo poora vaakya NAAM ban gaya.
+ * Yahan sirf in tibbi cases ke permanent tests hain (round-end regression guard).
+ */
+describe("R4 — direction, route restatement, Hindi berth", () => {
+  it("Hindi me likha route sahi direction me set hota hai (from=LDH, to=NDLS — ulta nahi)", () => {
+    const t = step(aiBookingStart(NOW).state, "लुधियाना से नई दिल्ली जाना है");
+    expect(t.state.from?.code).toBe("LDH");
+    expect(t.state.to?.code).toBe("NDLS");
+    expect(t.state.pendingCity).toBeNull();
+    expect(t.say.join(" ")).toMatch(/Ludhiana Junction se New Delhi/);
+    /* date poochhi jaati hai (route confirm ho chuka) */
+    expect(t.say.join(" ")).toMatch(/date/i);
+  });
+
+  it("Devanagari me ulta route bhi sahi (नई दिल्ली से लुधियाना)", () => {
+    const t = step(aiBookingStart(NOW).state, "नई दिल्ली से लुधियाना जाना है");
+    expect(t.state.from?.code).toBe("NDLS");
+    expect(t.state.to?.code).toBe("LDH");
+  });
+
+  it("user route dobara bata de (correction) to naya pair maana jaata hai + fresh search", () => {
+    let s = step(aiBookingStart(NOW).state, "लुधियाना से नई दिल्ली जाना है").state;
+    s = step(s, "1 October, 2 log").state;
+    expect([s.from?.code, s.to?.code]).toEqual(["LDH", "NDLS"]);
+    const t = step(s, "पर मैंने तो बोला नई दिल्ली से लुधियाना जाना है ना");
+    expect([t.state.from?.code, t.state.to?.code]).toEqual(["NDLS", "LDH"]);
+    expect(t.state.date).toBe("2026-10-01");
+    expect(t.state.pax).toBe(2);
+    /* fresh search (asli provider) — maujooda SEARCH action, koi naya rasta nahi */
+    const search = t.actions.find((a) => a.type === "SEARCH") as { from?: Station; to?: Station } | undefined;
+    expect(search?.from?.code).toBe("NDLS");
+    expect(search?.to?.code).toBe("LDH");
+  });
+
+  it("route dobara wahi bata de to kuch nahi bigadta (wahi pair, koi fresh search jhooth-moot)", () => {
+    let s = step(aiBookingStart(NOW).state, "ludhiana se new delhi, 1 October, 2 passengers").state;
+    const t = step(s, "Ludhiana se New Delhi hi jaana hai");
+    expect([t.state.from?.code, t.state.to?.code]).toEqual(["LDH", "NDLS"]);
+  });
+
+  it("Hindi berth shabd samajh me aata hai (SL me 'विंडो' nahi chalti, CC me chalti hai)", () => {
+    const sl: AiBookingState = {
+      ...aiBookingStart(NOW).state,
+      stage: "PASSENGER_COLLECTION",
+      classCode: "SL",
+      pax: 1,
+      drafts: [{ name: "Rahul Sharma", age: "31", gender: "MALE" }],
+      awaiting: "paxBerth",
+    };
+    /* SL me Window berth hoti hi nahi — invent nahi, saaf line */
+    const t1 = step(sl, "बर्थ प्रेफरेंस में विंडो सेलेक्ट करो");
+    expect(t1.state.drafts[0].berthPreference ?? "").toBe("");
+    expect(t1.say.join(" ")).toMatch(/SL me “विंडो” berth nahi hoti/);
+
+    const cc: AiBookingState = { ...sl, classCode: "CC" };
+    const t2 = step(cc, "बर्थ प्रेफरेंस में विंडो सेलेक्ट करो");
+    expect(t2.state.drafts[0].berthPreference).toBe("Window");
+    expect(t2.state.drafts[0].name).toBe("Rahul Sharma");
+  });
+
+  it("Hindi berth bolne par wo vaakya NAAM nahi ban jaata (screenshot 2 ka asli bug)", () => {
+    const cc: AiBookingState = {
+      ...aiBookingStart(NOW).state,
+      stage: "PASSENGER_COLLECTION",
+      classCode: "CC",
+      pax: 1,
+      drafts: [{ age: "31", gender: "MALE" }],
+      awaiting: "paxName",
+    };
+    const t = step(cc, "बर्थ प्रेफरेंस में विंडो सेलेक्ट करो");
+    const d = t.state.drafts[0];
+    expect(d.name ?? "").toBe("");
+    expect(d.berthPreference).toBe("Window");
+    /* naam abhi bhi poochha jaata hai (naam invent nahi hota) */
+    expect(t.say.join(" ")).toMatch(/naam/i);
+  });
+
+  it("English berth (lower/upper) pehle jaisa hi chalta hai", () => {
+    const sl: AiBookingState = {
+      ...aiBookingStart(NOW).state,
+      stage: "PASSENGER_COLLECTION",
+      classCode: "SL",
+      pax: 1,
+      drafts: [{ name: "Neha Sharma", age: "29", gender: "FEMALE" }],
+      awaiting: "paxBerth",
+    };
+    const t = step(sl, "lower berth de do");
+    expect(t.state.drafts[0].berthPreference).toBe("Lower");
+    expect(t.state.drafts[0].name).toBe("Neha Sharma");
+  });
+});

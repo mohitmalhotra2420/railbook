@@ -20,7 +20,7 @@
  *   IRCTC_HANDOFF
  */
 import { parseDatePhrase } from "./dates";
-import { CITY_NAME_ALIASES, CLUSTER_CITY_CODES, clusterStations, findStationsInText } from "./stations";
+import { CITY_NAME_ALIASES, CLUSTER_CITY_CODES, clusterStations, findStationMentionsInText, findStationsInText } from "./stations";
 import { matchOfferedStation } from "./stationPick";
 import { BERTH_BY_CLASS, CLASS_LABELS, type ClassAvailability, type ClassCode, type Passenger, type Station, type TrainResult } from "../types";
 import { parsePassengerSpeech, type PaxAsk } from "../voice/passengerSpeech";
@@ -246,7 +246,9 @@ export function lastPaxNumber(text: string): number | null {
 
 /** Berth/food ke shabd naam me na reh jaayein (maujooda parsePassengerSpeech naam me "Window"/"veg" chhod
  *  deta hai — wo fields apne-apne column me jaate hain, naam me nahi). */
-const ANY_BERTH_WORD = /^(lower|upper|middle|middle-berth|side|side\s*lower|side\s*upper|window|aisle|no\s*preference|लोअर|अपर|मिडल|साइड|विंडो)$/i;
+/* R4-fix: "berth"/"seat"/"बर्थ" jaise generic shabd bhi naam me nahi ghusne chahiye — warna
+ * "lower berth de do" par naam "Berth" ban jaata tha (R4 test me pakda gaya). */
+const ANY_BERTH_WORD = /^(lower|upper|middle|middle-berth|side|side\s*lower|side\s*upper|window|aisle|berth|berths|birth|seat|seats|no\s*preference|लोअर|लोवर|अपर|मिडल|साइड|विंडो|बर्थ|सीट)$/i;
 
 function stripExtraWords(name: string, berths: string[]): string {
   let out = name;
@@ -260,7 +262,39 @@ function stripExtraWords(name: string, berths: string[]): string {
     .filter((w) => w && !ANY_BERTH_WORD.test(w.trim()))
     .join(" ");
   out = out.replace(/\b(veg|non[\s-]?veg|vegetarian|shakahari|no\s*food|meal|khana|khaana|food|वेज|नॉन|शाकाहारी|भोजन|खाना)\b/gi, " ");
+  /* R4-fix (screenshot 2): user ne Hindi me instruction bola ("बर्थ प्रेफरेंस में विंडो सेलेक्ट करो")
+   * aur wo poora vaakya **naam** ban gaya tha. Ab instruction/filler shabd naam se hat jaate hain. */
+  out = out.replace(
+    /(बर्थ|बर्थ\s*प्रेफरेंस|प्रेफरेंस|preference|सेलेक्ट|select|choose|चुनो|चुन|चाहिए|चाहिये|करो|कर\s*दो|कर\s*दीजिये|कर\s*दीजिए|भरो|भर\s*दो|लगाओ|रखो|तय|दो|दीजिये|दीजिए|wala|wali|वाला|वाली)/giu,
+    " ",
+  );
+  out = out.replace(/\b(me|mein|ma|mai|m|का|की|के|में|को|से|है|हूँ|हूं|ना|नहीं|karo|kar|do|de|de\s*do|hai|na)\b/giu, " ");
   return out.replace(/\s+/g, " ").trim();
+}
+
+/** R4-fix (screenshot 2): user ne Hindi me berth boli ("विंडो") aur AI samajh nahi paayi — sirf Latin
+ *  berth naam match hote the. Ye chhota map usi class ki valid berths par lagta hai (invent nahi —
+ *  jo berth us class me chalti hi nahi, wo yahan se bhi nahi aayegi). */
+const BERTH_WORDS: { re: RegExp; berth: string }[] = [
+  { re: /(विंडो|खिड़की|खिडकी|विंडो\s*साइड|window|khidki|khirki)/iu, berth: "Window" },
+  { re: /(लोअर|लोवर|नीचे|निचली|lower|nichla|neeche)/iu, berth: "Lower" },
+  { re: /(अपर|ऊपर|ऊपरी|upper|upar)/iu, berth: "Upper" },
+  { re: /(मिडल|मध्य|बीच|middle|middle\s*berth)/iu, berth: "Middle" },
+  { re: /(साइड\s*लोअर|साइड\s*लोवर|side\s*lower)/iu, berth: "Side Lower" },
+  { re: /(साइड\s*अपर|साइड\s*ऊपर|side\s*upper)/iu, berth: "Side Upper" },
+  { re: /(साइड|side)/iu, berth: "Side Lower" },
+  { re: /(कोई\s*नहीं|कोई\s*भी|no\s*preference|koi\s*nahi)/iu, berth: "No Preference" },
+];
+
+/** Us class ki **valid** berth jo text me boli gayi ho (Hindi/English dono) — warna null. */
+export function berthFromText(text: string, berths: string[]): string | null {
+  if (!berths.length) return null;
+  for (const { re, berth } of BERTH_WORDS) {
+    if (!re.test(text)) continue;
+    const hit = berths.find((b) => b.toLowerCase() === berth.toLowerCase());
+    if (hit) return hit;
+  }
+  return null;
 }
 
 /** Khane ka choice — maujooda passenger form ka field (kabhi majboori nahi, sirf user bole to). */
@@ -542,16 +576,19 @@ function stationForPendingCity(text: string, city: string): Station | null {
   return matchOfferedStation(text, list) ?? null;
 }
 
-/** Mention order nikalne ke liye: station ka sabse pehla zikr kahan hua. */
-function mentionIndex(text: string, st: Station): number {
-  const t = text.toLowerCase();
-  const cands = [st.code, st.city, st.name].map((x) => x.toLowerCase());
-  let best = -1;
-  for (const c of cands) {
-    const idx = indexOfWord(t, c);
-    if (idx >= 0 && (best < 0 || idx < best)) best = idx;
+/** Mention order nikalne ke liye: station ka sabse pehla zikr kahan hua.
+ *  R4-fix: pehle sirf Latin code/city/name dekhe jaate the — user Hindi me likhe ("लुधियाना से नई दिल्ली")
+ *  to kuch bhi match nahi hota tha aur ordering par city pehle aa jaati thi (route ulta dikhta tha).
+ *  Ab maujooda catalog helper (`findStationMentionsInText`) se asli position aati hai, jo
+ *  Devanagari + roman sab aliases jaanta hai. */
+function mentionsWithIdx(text: string): Map<string, number> {
+  const map = new Map<string, number>();
+  try {
+    for (const m of findStationMentionsInText(text)) map.set(m.station.code, m.idx);
+  } catch {
+    /* helper fail ho to purana behaviour (sab -1) — kuch na toote */
   }
-  return best;
+  return map;
 }
 
 /** COLLECT_JOURNEY: jo slots pehle se hain unhe dobara nahi poochhta (user ki shart). */
@@ -596,11 +633,43 @@ function collectJourney(state: AiBookingState, text: string, env: AiBookingEnv):
 
   /* (b) Naye station/city mentions — text me jin-jin ka zikr hua, usi order me slots bharte hain. */
   if (!next.pendingCity) {
+    const known = mentionsWithIdx(text);
     type Mention = { idx: number; st?: Station; city?: string };
-    const mentions: Mention[] = stations.map((st) => ({ idx: mentionIndex(text, st), st }));
-    for (const cm of findCityMentions(text)) mentions.push({ idx: cm.idx, city: cm.city });
-    /* Jo station text me saaf mila hi nahi (index -1) use aakhir me rakho, order bigde na. */
-    mentions.sort((a, b) => (a.idx < 0 ? Number.MAX_SAFE_INTEGER : a.idx) - (b.idx < 0 ? Number.MAX_SAFE_INTEGER : b.idx));
+    /* Station ka asli position (Devanagari/roman dono). Jahan pata na chale wahan catalog ka
+     * kram (findStationsInText) hi sahi hota hai — isliye us kram ko monotonic index do. */
+    let autoIdx = 0;
+    const stationMentions: Mention[] = stations.map((st) => {
+      const idx = known.has(st.code) ? (known.get(st.code) as number) : autoIdx;
+      autoIdx = idx + 1;
+      return { idx, st };
+    });
+    const matchedCodes = new Set(stations.map((x) => x.code));
+    const mentions: Mention[] = [...stationMentions];
+    for (const cm of findCityMentions(text)) {
+      /* R4-fix: agar us city ka koi ASLI station is message me mil gaya hai (jaise "नई दिल्ली"),
+       * to city ka sawaal bekaar hai — station zyada specific hai (pehle yahan route ulta ho jaata tha). */
+      const cityCodes = CLUSTER_CITY_CODES[cm.city] ?? [];
+      if (cityCodes.some((c) => matchedCodes.has(c))) continue;
+      mentions.push({ idx: cm.idx, city: cm.city });
+    }
+    mentions.sort((a, b) => a.idx - b.idx);
+
+    /* R4-fix (screenshot 30 Sep): user ne poora route dobara bata diya aur wo maujooda se alag hai
+     * ("पर मैंने तो बोला लुधियाना से नई दिल्ली जाना है ना") → purana pair pakda rakhna galat tha;
+     * ab user ki baat maani jaati hai (naya pair = jo usne ab bola). */
+    if (stations.length >= 2 && next.from && next.to) {
+      const samePair = stations[0].code === next.from.code && stations[1].code === next.to.code;
+      if (!samePair) {
+        next.from = stations[0];
+        next.to = stations[1];
+        next.trainNumber = null;
+        next.trainName = null;
+        next.classCode = null;
+        next.drafts = [];
+        next.paxIndex = 0;
+        say.push(`${stations[0].name} se ${stations[1].name} ✅`);
+      }
+    }
 
     /* Slot claim: agar "from" ki jagah koi CITY aayi ("delhi se jaipur"), to us slot ko city ne
      * claim kar liya — uske baad ka station seedha "to" me jaata hai (warna Jaipur from ban jaata). */
@@ -809,15 +878,32 @@ function passengerCollection(state: AiBookingState, text: string, env: AiBooking
   const patch: AiPaxDraft = { ...full, ...slotted };
   if (patch.name) {
     const cleaned = stripExtraWords(patch.name, berths);
-    if (!cleaned) delete patch.name;
+    /* 3 se kam letters = wo naam nahi, koi instruction/filler tha → naam mat likho. */
+    if (cleaned.replace(/[^\p{L}]/gu, "").length < 3) delete patch.name;
     else patch.name = cleaned;
   }
   /* User ne aisi berth maangi jo is class me hi nahi hoti (jaise CC me "lower") → saaf batao. */
+  /* R4-fix: Hindi me boli gayi berth (jaise CC me "विंडो" nahi chalti, SL me "विंडो" nahi chalti)
+   * bhi usi saaf line se batayi jaati hai. Generic shabd (berth/seat) is message se nahi aate. */
   const invalidBerth = berths.length
-    ? (text.match(/\b(lower|upper|middle|side|साइड|लोअर|अपर|मिडल)\b/gi) ?? []).find(
-        (w) => !berths.some((b) => b.toLowerCase() === w.toLowerCase()),
+    ? (text.match(
+        /(side\s*lower|side\s*upper|lower|upper|middle|side|window|aisle|साइड\s*लोअर|साइड\s*अपर|साइड|लोअर|लोवर|अपर|मिडल|विंडो|खिड़की)/giu,
+      ) ?? []).find(
+        (w) => !berths.some((b) => b.toLowerCase() === w.toLowerCase().replace(/\s+/g, " ")),
       )
     : undefined;
+  /* Hindi berth shabd (Latin parse se miss hote the) — sirf us class ki valid berth par lagta hai. */
+  if (!patch.berthPreference) {
+    const b = berthFromText(text, berths);
+    if (b) patch.berthPreference = b;
+  }
+  /* Berth ka sawaal pending tha aur user ne sirf berth/instruction bola → use berth maano, naam nahi. */
+  if (slot === "berth" && patch.berthPreference && !cur.name) {
+    const cleaned = stripExtraWords(patch.name ?? "", berths);
+    if (cleaned.replace(/[^\p{L}]/gu, "").length < 3) delete patch.name;
+    else patch.name = cleaned;
+  }
+
   const food = parseFoodChoice(text);
   if (food) patch.foodChoice = food;
   const merged: AiPaxDraft = { ...cur, ...patch };
@@ -837,7 +923,7 @@ function passengerCollection(state: AiBookingState, text: string, env: AiBooking
     if (patch.berthPreference) bits.push(patch.berthPreference);
     if (patch.foodChoice) bits.push(patch.foodChoice === "VEG" ? "veg meal" : patch.foodChoice === "NON_VEG" ? "non-veg meal" : "no food");
     say.push(`Passenger ${idx + 1}: ${bits.join(", ")} note kar liya ✅`);
-  } else {
+  } else if (!invalidBerth) {
     say.push("Ye detail samajh nahi aayi — dobara bata dijiye (jaise “Rahul Sharma, 31, male, window, veg”).");
     say.push(aiBookingMissingLine(merged, idx, { food: withFood }));
   }
@@ -1019,6 +1105,46 @@ export function aiBookingCorrect(state: AiBookingState, text: string, env: AiBoo
 
 /* ── main turn ───────────────────────────────────────────────────────────────────────────────────── */
 
+/** R4-fix (screenshot 30 Sep): user ne poora route dobara bata diya aur wo maujooda pair se alag hai
+ *  ("पर मैंने तो बोला लुधियाना से नई दिल्ली जाना है ना") → pehle AI purane (galat) pair ko hi dohraata
+ *  rehta tha. Ab user ki baat maani jaati hai: naya pair set hota hai; date/pax pehle se hain to
+ *  fresh search chalti hai (maujooda SEARCH action), warna next missing slot poochha jaata hai.
+ *  Sirf tab jab message me do saaf stations hon — warna purana behaviour bilkul waisa. */
+function routeRestated(state: AiBookingState, text: string, env: AiBookingEnv): AiBookingTurn | null {
+  if (state.stage === "AI_BOOKING_START") return null;
+  /* Sirf jab dono slots pehle se bhare hon — warna collectJourney hi natural raasta hai. */
+  if (!state.from || !state.to || state.from.code === state.to.code) return null;
+  const stations = findStationsInText(text);
+  if (stations.length < 2) return null;
+  if (stations[0].code === state.from.code && stations[1].code === state.to.code) return null;
+
+  const next: AiBookingState = {
+    ...state,
+    from: stations[0],
+    to: stations[1],
+    trainNumber: null,
+    trainName: null,
+    classCode: null,
+    drafts: [],
+    paxIndex: 0,
+    pendingCity: null,
+    pendingQueue: [],
+  };
+  const say = [`Theek hai — ${stations[0].name} se ${stations[1].name} ✅`];
+  if (next.date && next.pax) {
+    next.stage = "SEARCH_TRAINS";
+    next.awaiting = "train";
+    next.searching = true;
+    return withSpoken(next, [...say, `Nayi details ke saath fresh search kar rahi hoon (${formatLongDate(next.date)}).`], [
+      { type: "SEARCH", from: next.from as Station, to: next.to as Station, date: next.date, pax: next.pax },
+      { type: "SET_PASSENGER_COUNT", count: next.pax },
+    ]);
+  }
+  /* Adhoora → wahi collectJourney rasta (sirf missing slot poochhega). */
+  const collected = collectJourney({ ...next, stage: "COLLECT_JOURNEY" }, text, env);
+  return withSpoken(collected.state, [...say, ...collected.say], collected.actions);
+}
+
 export function aiBookingTurn(state: AiBookingState, rawText: string, env: AiBookingEnv = {}): AiBookingTurn {
   const text = rawText.normalize("NFKC").trim();
   if (isResetCommand(text)) {
@@ -1032,6 +1158,10 @@ export function aiBookingTurn(state: AiBookingState, rawText: string, env: AiBoo
   /* Correction pehle — "Actually 2 October kar do" jaisa. Slots replace hote hain, baaki sab preserve. */
   const corrected = aiBookingCorrect(state, text, env);
   if (corrected) return corrected;
+
+  /* User ne poora route dobara bata diya (purane pair se alag) → naya pair + aage badho. */
+  const restated = routeRestated(state, text, env);
+  if (restated) return restated;
 
   switch (state.stage) {
     case "AI_BOOKING_START": {

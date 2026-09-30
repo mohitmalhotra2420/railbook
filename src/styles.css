@@ -2746,7 +2746,12 @@ button.rp-crow:active { transform: translateY(1px); }
 .aib-class em{font-size:11px;font-style:normal;color:#7dd3fc}
 .aib-passenger-note,.aib-summary{margin:8px 0;background:#16233c;border-radius:12px;padding:10px 12px;font-size:13px}
 .aib-summary pre{margin:6px 0 0;white-space:pre-wrap;font-family:inherit;font-size:13px;line-height:1.5;color:#e2e8f0}
-.aib-voice{display:flex;align-items:center;gap:10px;padding:8px 14px;background:#0f172a;border-top:1px solid rgba(148,163,184,.18);flex-wrap:wrap}
+.aib-voice{display:flex;align-items:center;gap:8px 10px;padding:8px 14px;background:#0f172a;border-top:1px solid rgba(148,163,184,.18);flex-wrap:wrap;row-gap:8px}
+/* Dock ke andar voice panel: apni alag card-shakal, buttons neeche poori width me wrap hote hain. */
+.aib-dock .aib-voice{border-top:0;border:1px solid rgba(148,163,184,.22);border-radius:14px;padding:9px 11px;background:#131f36}
+.aib-dock .aib-voice-text{flex:1 1 100%;white-space:normal;overflow:visible;-webkit-line-clamp:2;display:-webkit-box;-webkit-box-orient:vertical}
+.aib-dock .aib-voice-actions{width:100%;display:flex;flex-wrap:wrap;gap:6px}
+.aib-dock .aib-voice-actions .aib-btn-ghost{flex:0 1 auto}
 .aib-voice-state{font-weight:800;font-size:12px;color:#fbbf24}
 .aib-voice.live .aib-voice-state{color:#ef4444}
 .aib-voice-text{flex:1;min-width:120px;font-size:13px;color:#cbd5e1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -2761,22 +2766,33 @@ button.rp-crow:active { transform: translateY(1px); }
 .aib-mic.live{background:#22c55e;color:#052e16;animation:aibPulse 1.1s infinite}
 .aib-send{width:44px;height:44px;border-radius:50%;border:0;background:#0f172a;color:#e2e8f0;font-size:18px;cursor:pointer}
 @keyframes aibPulse{0%{box-shadow:0 0 0 0 rgba(34,197,94,.55)}70%{box-shadow:0 0 0 14px rgba(34,197,94,0)}100%{box-shadow:0 0 0 0 rgba(34,197,94,0)}}
-.aib-dock{position:fixed;left:10px;right:10px;bottom:calc(10px + env(safe-area-inset-bottom));z-index:55;display:flex;align-items:center;gap:10px;
-  background:#0f172a;border:1px solid rgba(148,163,184,.25);border-radius:16px;padding:9px 12px;box-shadow:0 10px 28px rgba(2,6,23,.5);color:#e2e8f0}
+/* R4-fix (user screenshot: "mic layout sahi kro"): pehle dock ek ROW tha — log, head, voice panel
+ * aur form ek hi line me chipak jaate the (buttons overlap, input adhoora dikhta tha). Ab dock ek
+ * column stack hai aur har cheez apni line me poori width leti hai. */
+.aib-dock{position:fixed;left:10px;right:10px;bottom:calc(10px + env(safe-area-inset-bottom));z-index:55;display:flex;flex-direction:column;align-items:stretch;gap:8px;
+  max-height:min(62vh,560px);overflow-y:auto;overscroll-behavior:contain;
+  background:#0f172a;border:1px solid rgba(148,163,184,.25);border-radius:16px;padding:10px 12px;box-shadow:0 10px 28px rgba(2,6,23,.5);color:#e2e8f0}
+.aib-dock > *{width:100%;min-width:0}
 .aib-dock-line{display:flex;align-items:center;gap:8px;min-width:0;font-size:12px}
 .aib-dock-line b{white-space:nowrap;font-size:12px}
 .aib-dock-text{color:#cbd5e1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .aib-dock-actions{margin-left:auto;display:flex;gap:6px}
 .aib-mic-sm{width:36px;height:36px;border-radius:50%;border:0;background:#1d4ed8;color:#fff;font-size:16px;cursor:pointer}
 .aib-mic-sm.live{background:#22c55e;color:#052e16}
-.aib-dock-head{display:flex;align-items:center;gap:8px;font-size:12px;min-width:0}
+.aib-dock-head{display:flex;align-items:center;gap:8px;font-size:12px;min-width:0;flex-wrap:wrap}
 .aib-dock-head .aib-stage{font-size:10px;padding:2px 7px}
 .aib-dock-head .aib-dock-text{color:#cbd5e1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
-.aib-dock-row{display:flex;align-items:center;gap:8px;margin-top:8px}
+.aib-dock-row{display:flex;align-items:center;gap:8px;margin-top:2px;flex-wrap:wrap}
+/* Composer (input + mic + send) hamesha apni poori line par — pehle adhoora kat jaata tha. */
+.aib-dock .aib-dock-row .aib-form{width:100%}
+.aib-dock .aib-book-sm{width:100%}
 .aib-book-sm{flex:0 0 auto;min-width:0;padding:10px 14px;font-size:14px}
 .aib-form{display:flex;align-items:center;gap:8px;flex:1;min-width:0}
 .aib-form input{flex:1;min-width:0;height:40px;border-radius:999px;border:1px solid rgba(148,163,184,.28);background:#16233c;color:#e2e8f0;padding:0 14px;font-size:14px;outline:none}
 .aib-form input::placeholder{color:#7b8aa3}
+.aib-handoff-line{display:flex;flex-direction:column;gap:8px;font-size:12.5px;line-height:1.45;color:#cbd5e1;
+  background:rgba(29,78,216,.18);border:1px solid rgba(148,163,184,.25);border-radius:14px;padding:9px 11px}
+.aib-handoff-line .aib-btn{width:100%}
 .aib-form .aib-mic,.aib-form .aib-send{width:40px;height:40px;font-size:17px}
 .aib-composer,.aib-form{margin:0}
 .aib .aib-form{padding:10px 14px calc(12px + env(safe-area-inset-bottom))}

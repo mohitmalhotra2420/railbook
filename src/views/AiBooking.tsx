@@ -51,6 +51,61 @@ interface Msg {
   text: string;
 }
 
+/* ══ R4-fix (user: "jaise pehle chat me kuch bhi poochte the, yeh bhi btayega?") ══════════════════════
+ * AI Booking ab koi bhi sawaal bhi jawab देता hai. Design (minimal, additive):
+ *   1) Pehle wahi purana deterministic flow engine chalta hai (jaisa tha — kuch badla nahi).
+ *   2) Agar wo sawaal handle na kar paaye (wahi jawab/ask-back dohra de, koi slot aage na badhe) aur
+ *      user ne sach me kuch POOCHHA ho → MAUJOODA chat brain (`api.agent` = wahi /api/agent jo
+ *      Concierge use karta hai) se jawab aata hai. Booking flow state waisa hi rehta hai.
+ *   3) Brain fail ho to flow waisa hi chalta rehta hai + ek honest line (kuch toota nahi). */
+
+/** Sawaal jaisa lagta hai? (Hinglish + Hindi + English) */
+function looksLikeQuestion(text: string): boolean {
+  const t = text.trim();
+  if (!t) return false;
+  if (t.includes("?")) return true;
+  return /(^|\s)(kya|kyaa|kaise|kaisay|kaun|kaunsa|kaunsi|kab|kahan|kahaan|kitna|kitne|kitni|kyun|kyu|kis|batao|bata\s*do|bataiye|batai|बताओ|बताइए|क्या|कौन|कब|कहाँ|कहां|कितना|कितने|कितनी|क्यों|कैसे|है\s*क्या)(\s|$)/iu.test(t);
+}
+
+/** Booking + flow state ka compact "fingerprint" — badla ya nahi, yeh dekhne ke liye. */
+function flowKey(f: AiBookingState): string {
+  return [
+    f.stage,
+    f.awaiting ?? "",
+    f.from?.code ?? "",
+    f.to?.code ?? "",
+    f.date ?? "",
+    f.pax ?? "",
+    f.trainNumber ?? "",
+    f.classCode ?? "",
+    f.drafts?.length ?? 0,
+    f.pendingCity?.city ?? "",
+  ].join("|");
+}
+
+/** R4-fix helper: is turn ke passenger patches app-state me pahunchne tak chhota sa intezaar
+ *  (React re-render ke liye). Sirf tab tak rukta hai jab tak sab kuch match na kar jaaye (max ~1.2s). */
+async function waitForPaxPatches(
+  expectPax: Map<number, Partial<{ name: string; age: string; gender: string; berthPreference: string }>>,
+  read: () => { name: string; age: string; gender: string; berthPreference: string }[],
+): Promise<void> {
+  if (!expectPax.size) return;
+  for (let i = 0; i < 24; i += 1) {
+    const list = read();
+    const ok = [...expectPax.entries()].every(([idx, patch]) => {
+      const p = list[idx];
+      if (!p) return true;
+      const nameOk = !patch.name || p.name === patch.name;
+      const ageOk = patch.age == null || String(p.age) === String(patch.age);
+      const genderOk = !patch.gender || p.gender === patch.gender;
+      const berthOk = !patch.berthPreference || p.berthPreference === patch.berthPreference;
+      return nameOk && ageOk && genderOk && berthOk;
+    });
+    if (ok) return;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+}
+
 export function AiBooking({ open, onClose }: { open: boolean; onClose: () => void }) {
   const booking = useBooking();
   const { state, go, setFrom, setTo, setDate, setPassengerCount, updatePassenger, searchRoute, selectClass, selectTrain, selectTrainAndClassGo, goReview, resetJourney } = booking;
@@ -61,6 +116,17 @@ export function AiBooking({ open, onClose }: { open: boolean; onClose: () => voi
   cb.current = { searchRoute, selectClass, selectTrain, selectTrainAndClassGo, goReview, setFrom, setTo, setDate, setPassengerCount, updatePassenger, resetJourney, go };
 
   const [flow, setFlow] = useState<AiBookingState>(() => aiBookingBlank());
+  const bookingKey = () => {
+    const b = live.current.state as unknown as {
+      from?: { code?: string }; to?: { code?: string }; date?: string; passengerCount?: number;
+      selectedTrain?: { number?: string } | null; selectedClass?: { code?: string } | null;
+      passengers?: unknown[]; screen?: string;
+    };
+    return [
+      b.from?.code ?? "", b.to?.code ?? "", b.date ?? "", b.passengerCount ?? "",
+      b.selectedTrain?.number ?? "", b.selectedClass?.code ?? "", b.passengers?.length ?? 0, b.screen ?? "",
+    ].join("|");
+  };
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
@@ -68,6 +134,7 @@ export function AiBooking({ open, onClose }: { open: boolean; onClose: () => voi
   const [muted, setMuted] = useState(false);
   const [provider, setProvider] = useState<VoiceProviderInfo | null>(null);
   const [speaking, setSpeaking] = useState(false);
+  const inputRef = useRef<HTMLInputElement | null>(null);
   /* R63-fix: AI ki awaaz kahan se aayegi (server / app ka native TTS / device / kuch nahi). */
   const [voiceSupport, setVoiceSupport] = useState<"server" | "app" | "device" | "none">("device");
   /* R62c: us train me catering/food options hain? (maujooda pantry API — read-only). null = pata nahi → food ka sawaal nahi. */
@@ -94,12 +161,16 @@ export function AiBooking({ open, onClose }: { open: boolean; onClose: () => voi
 
   /* ── Action runner: side effects sirf maujooda booking flow ke through ───────────────────────── */
   const runActions = useCallback(async (actions: AiBookingAction[]) => {
+    /* Is turn ke passenger patches (index → patch) — review kholne se pehle inka app-state me
+     * pahunchna confirm hota hai (neeche waitForPaxPatches). */
+    const expectPax = new Map<number, Partial<{ name: string; age: string; gender: string; berthPreference: string }>>();
     for (const a of actions) {
       if (a.type === "SET_PASSENGER_COUNT") {
         cb.current.setPassengerCount(a.count);
       } else if (a.type === "PATCH_PASSENGER") {
         const pax = live.current.state.passengers[a.index];
         if (pax) cb.current.updatePassenger(pax.id, a.patch as Partial<typeof pax>);
+        expectPax.set(a.index, a.patch as Partial<{ name: string; age: string; gender: string; berthPreference: string }>);
       } else if (a.type === "SEARCH") {
         /* Correction ke baad nayi search — natija dobara handle karna hai. */
         trainsHandled.current = false;
@@ -114,10 +185,33 @@ export function AiBooking({ open, onClose }: { open: boolean; onClose: () => voi
           setBusy(false);
         }
       } else if (a.type === "REVIEW" || a.type === "OPEN_REVIEW") {
-        /* Maujooda "Continue to review" wahi rasta — goReview() (live availability + fare). */
+        /* R4-fix (asli bug — user: "review/IRCTC aage nahi badhta"): isi turn me upar ek
+         * PATCH_PASSENGER bhi aata hai (jaise aakhri passenger ki berth). React ne abhi re-render
+         * nahi kiya hota, isliye goReview purana state padh kar validatePassengers par ruk jaata tha
+         * ("Please fix the passenger details.") aur review screen khulti hi nahi thi — AI ne kaha
+         * "review khol rahi hoon" par kuch khulta nahi. Ab hum sirf ITNA intezaar karte hain ki is
+         * turn ke patches app-state me pahunch jayein; phir wahi maujooda goReview() chalta hai
+         * (koi validation bypass nahi, kuch skip nahi). */
+        await waitForPaxPatches(expectPax, () =>
+          live.current.state.passengers.map((p) => ({
+            name: p.name,
+            age: String(p.age ?? ""),
+            gender: String(p.gender ?? ""),
+            berthPreference: String(p.berthPreference ?? ""),
+          })),
+        );
         setBusy(true);
         try {
           await cb.current.goReview();
+          /* Safety net: agar phir bhi review nahi khula to saaf batao (chup-chaap nahi) — kyunki
+           * AI ne "review khol rahi hoon" kaha hota hai. */
+          const errKey = live.current.state.error;
+          if (live.current.state.screen !== "review" && errKey) {
+            push(
+              "ai",
+              "Review nahi khul paaya — passenger form me jo field reh gayi ho (jaise kisi ka berth preference) wo bhar dijiye, phir “Review journey” dabaiye.",
+            );
+          }
         } finally {
           setBusy(false);
         }
@@ -126,6 +220,9 @@ export function AiBooking({ open, onClose }: { open: boolean; onClose: () => voi
          * (Button na mile to saaf fallback line; kuch fake nahi hota.) */
         if (typeof document === "undefined") continue;
         const btn = document.getElementById("irctc-continue") as HTMLButtonElement | null;
+        /* IRCTC handoff (asli button) — user ko sach batao: autofill client hua to details bhar gayi,
+         * warna is browser me sirf site khul sakti hai. */
+        watchHandoff();
         if (btn) {
           btn.click();
         } else {
@@ -157,12 +254,14 @@ export function AiBooking({ open, onClose }: { open: boolean; onClose: () => voi
       if (!clean) return;
       push("you", clean);
       const st = live.current.state;
+      const bookingBefore = bookingKey();
       const env = {
         trains: st.trains,
         classes: st.selectedTrain?.classes ?? st.trains.find((t) => t.number === flow.trainNumber)?.classes ?? [],
         foodExpected,
       };
-      const after = await applyTurn(aiBookingTurn(flow, clean, env));
+      const turn = aiBookingTurn(flow, clean, env);
+      const after = await applyTurn(turn);
 
       /* Train chuni gayi → maujooda train-select (isliye asli ClassSelect screen khulti hai). */
       if (after.stage === "CLASS_SELECTION" && after.trainNumber) {
@@ -185,8 +284,60 @@ export function AiBooking({ open, onClose }: { open: boolean; onClose: () => voi
           }
         }
       }
+
+      /* ── R4-fix: general sawaal (chat jaisa). Flow engine ne aage kuch nahi badla aur usne wahi
+       * sawaal wapas poochha (ask-back) → matlab is sawaal ka jawab uske paas nahi tha → maujooda
+       * chat brain se jawab. Booking flow ki state bilkul waisi rehti hai. */
+      const movedFlow = flowKey(after) !== flowKey(flow);
+      const movedBooking = bookingKey() !== bookingBefore;
+      const askedBack = turn.say.some((l) => l.includes("?"));
+      /* Review/confirm/handoff stage par AI sirf apni pichhli baat dohraata hai — wahan bhi sawaal ka
+       * jawab brain se aana chahiye (warna user ko lagega "yeh jawab nahi de raha"). */
+      const reviewStage =
+        after.stage === "FINAL_CONFIRMATION" ||
+        after.stage === "PASSENGER_REVIEW" ||
+        after.stage === "BOOKING_REVIEW" ||
+        after.stage === "IRCTC_HANDOFF";
+      if (!movedFlow && !movedBooking && looksLikeQuestion(clean) && (askedBack || reviewStage)) {
+        await askBrain(clean, after);
+      }
     },
     [applyTurn, flow, push],
+  );
+
+  /** Maujooda chat brain (/api/agent — wahi jo Concierge use karta hai) se general jawab. */
+  const askBrain = useCallback(
+    async (text: string, f: AiBookingState) => {
+      setBusy(true);
+      try {
+        const res = await api.agent({
+          text,
+          known: {
+            from: f.from ?? null,
+            to: f.to ?? null,
+            date: f.date ?? null,
+            passengerCount: f.pax ?? null,
+          },
+          history: msgs.slice(-8).map((m) => ({
+            role: m.role === "ai" ? ("assistant" as const) : ("user" as const),
+            content: String(m.text ?? "").slice(0, 500),
+          })),
+          now: new Date().toISOString(),
+        });
+        const reply = String(res?.reply ?? "").trim();
+        if (reply) {
+          push("ai", reply);
+          speak([reply]);
+        } else {
+          push("ai", "Is sawaal ka jawab abhi nahi mil paaya — dobara poochhiye.");
+        }
+      } catch {
+        push("ai", "Is sawaal ka jawab lene me dikkat aayi (network) — dobara poochhiye.");
+      } finally {
+        setBusy(false);
+      }
+    },
+    [msgs, push, speak],
   );
 
   /* Voice: maujooda hook (mic permission sirf user ke tap par — background listening nahi). */
@@ -335,10 +486,57 @@ export function AiBooking({ open, onClose }: { open: boolean; onClose: () => voi
     await applyTurn({ ...aiBookingPassengerScreenOpen(flow), state: { ...flow, stage: "PASSENGER_COLLECTION", classCode: klass.code } });
   }, [applyTurn, flow, push]);
 
+  /* R4-fix: IRCTC handoff. Detect karte hain ki autofill (app bridge/extension) ne payload utha liya
+   * ya nahi — utha liya ho to IRCTC khud khul chuka hai (aur details bhar chuki hain), warna koi
+   * ASLI gadget maujood nahi (sirf browser) → jhoothi umeed nahi: saaf line + ek button jise user khud
+   * dabaye (asli user gesture — browser popup block/popup-gesture ki wajah se AI ke async turn se window
+   * khulna bharosemand nahi hota). */
+  const [handoffNotice, setHandoffNotice] = useState<string | null>(null);
+  const [handoffFallback, setHandoffFallback] = useState(false);
+  const handoffTimer = useRef<number | null>(null);
+
+  /** Handoff ke thodi der baad dekho: autofill client ne payload utha liya (asli autofill) ya nahi. */
+  const watchHandoff = useCallback(() => {
+    handoffTimer.current = window.setTimeout(() => {
+      let claimed = false;
+      try {
+        claimed = Boolean((window as unknown as { __railbookHandoffClaim?: { at?: number } }).__railbookHandoffClaim?.at);
+      } catch {
+        claimed = false;
+      }
+      if (claimed) {
+        setHandoffNotice("IRCTC khul gaya — journey + passenger details wahan khud bhar di gayi hain. Login/OTP/payment aap hi karenge.");
+        setHandoffFallback(false);
+      } else {
+        setHandoffNotice(
+          "IRCTC continue ke liye RailBook app (ya autofill client) chahiye — is browser me details khud bharne ka rasta maujood nahi. Neeche button se IRCTC khol sakte ho (summary clipboard me hai).",
+        );
+        setHandoffFallback(true);
+      }
+    }, 1600);
+  }, []);
+
+  const openReviewAndHandoff = useCallback(async () => {
+    await cb.current.goReview();
+    setHandoffNotice(null);
+    setHandoffFallback(false);
+    watchHandoff();
+  }, [watchHandoff]);
+
+  const openHandoffNow = useCallback(() => {
+    const btn = document.getElementById("irctc-continue") as HTMLButtonElement | null;
+    /* Asli user gesture → maujooda IrctcHandoff ka hi rasta (duplicate logic nahi). */
+    btn?.click();
+    if (btn) setHandoffNotice("IRCTC khol diya — login/OTP/CAPTCHA/payment aur final booking IRCTC par aap hi karenge.");
+  }, []);
+
   const continueBooking = useCallback(async () => {
     /* User ka explicit "haan" (click/voice/text) = confirmation → AI khud IRCTC continue karta hai. */
-    await applyTurn(aiBookingHandoffTurn(flow));
-  }, [applyTurn, flow]);
+    const turn = aiBookingHandoffTurn(flow);
+    /* Handoff = review (details bhare hue) → IRCTC, sirf explicit user confirmation par. */
+    if (turn.actions.some((a) => a.type === "IRCTC_HANDOFF")) await openReviewAndHandoff();
+    await applyTurn(turn);
+  }, [applyTurn, flow, openReviewAndHandoff]);
 
   const changeDetails = useCallback(() => {
     cb.current.go("passengers");
@@ -382,6 +580,7 @@ export function AiBooking({ open, onClose }: { open: boolean; onClose: () => voi
       }}
     >
       <input
+        ref={inputRef}
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
         placeholder={voice.listening ? "Listening… (✓ dabao bhejne ke liye)" : "Type kariye ya 🎙️ dabaiye"}
@@ -437,8 +636,32 @@ export function AiBooking({ open, onClose }: { open: boolean; onClose: () => voi
           <span className="aib-dock-text" data-testid="aib-dock-status">
             {statusLine}
           </span>
+          {/* R4-fix (user: "jaise pehle chat me kuch bhi poochte the — yeh bhi btayega?"): haan —
+              koi bhi sawaal model ke paas jaata hai. Chhota ishara + tap par input focus. */}
+          <button
+            type="button"
+            className="aib-btn-ghost"
+            data-testid="aib-ask-anything"
+            onClick={() => {
+              push("ai", "Haan — kuch bhi poochhiye: “Delhi se Jaipur kal ki trains”, “3A ka fare”, “wallet balance”, ya IRCTC/booking ka koi sawaal. Main jawab deti hoon.");
+              inputRef.current?.focus();
+            }}
+          >
+            💬 Kuch bhi poochho
+          </button>
           <button type="button" className="aib-btn-ghost" onClick={onClose} aria-label="AI Booking band karo">✕</button>
         </div>
+
+        {handoffNotice && (
+          <div className="aib-handoff-line" data-testid="aib-handoff-line">
+            <span>{handoffNotice}</span>
+            {handoffFallback && (
+              <button type="button" className="aib-btn" data-testid="aib-open-irctc" onClick={openHandoffNow}>
+                ➡️ Continue to IRCTC
+              </button>
+            )}
+          </div>
+        )}
 
         {voice.listening && <div className="aib-voice live" data-testid="aib-voice"><span className="aib-voice-state">Listening…</span><span className="aib-voice-text">{voice.interim || voice.status}</span>{voiceControls}</div>}
 

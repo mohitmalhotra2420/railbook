@@ -7,6 +7,7 @@
  *   • mic sirf user ke tap par (Listening…), background listening nahi.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import React from "react";
 
@@ -288,5 +289,110 @@ describe("AI Booking UI — voice mode", () => {
     await waitFor(() => expect(screen.getByRole("region", { name: "AI Booking" })).toBeTruthy());
     const calls = ((globalThis as unknown as { fetch: { mock: { calls: unknown[][] } } }).fetch.mock.calls).map((c) => String(c[0]));
     expect(calls.some((u) => u.includes("/api/trains?from=ASR&to=LDH&date=2026-10-01"))).toBe(true);
+  });
+});
+
+/* ══ R4 (30 Sep 2026) — user ke screenshots se aaye UI-level fixes ═══════════════════════════════════
+ * (a) koi bhi sawaal (chat jaisa) → maujooda chat brain se jawab, booking flow waisi hi.
+ * (b) passenger screen ka mic/voice layout: dock ab ek column stack hai (CSS guard).
+ * (c) IRCTC autofill: honest line — autofill client ho to "khud bhar di gayi", warna apna button.
+ */
+describe("R4 — general sawaal, dock layout, IRCTC autofill honesty", () => {
+  beforeEach(() => {
+    mockFetch();
+    sessionStorage.clear();
+    voiceState.listening = false;
+    voiceState.interim = "";
+    voiceState.transcript = "";
+  });
+  afterEach(() => {
+    delete (window as unknown as { __railbookHandoffClaim?: unknown }).__railbookHandoffClaim;
+    sessionStorage.clear();
+  });
+
+  it("kuch bhi poochho → chat brain se jawab, booking flow state waisi hi rehti hai", async () => {
+    const asked: { text?: string }[] = [];
+    (globalThis as unknown as { fetch: unknown }).fetch = vi.fn(async (url: string, init?: { body?: string }) => {
+      const u = String(url);
+      if (u.includes("/api/agent")) {
+        asked.push(JSON.parse(String(init?.body ?? "{}")) as { text?: string });
+        return { ok: true, json: async () => ({ ok: true, fallback: false, reply: "RailBook wallet me ₹5,000 hain.", source: "ai", grounded: true }) } as unknown as Response;
+      }
+      /* baaki sab wahi purane mock jawab */
+      const body = u.includes("/api/wallet")
+        ? { wallet: { balance: 5000, currency: "INR", transactions: [] } }
+        : u.includes("/api/meta")
+          ? { provider: { id: "test", name: "Test", mock: false }, serviceFee: 0 }
+          : u.includes("/api/voice/config")
+            ? { provider: "browser", serverTts: false, model: null, languages: ["hi-IN"] }
+            : u.includes("/pantry")
+              ? { pantry: true, providers: ["confirmtkt"], note: null, foodChoiceExpected: true }
+              : u.includes("/api/trains")
+                ? { trains: [train], recommendations: [], empty: false }
+                : { bookings: [] };
+      return { ok: true, json: async () => body } as unknown as Response;
+    });
+
+    open();
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "AI Booking" })).toBeTruthy());
+    await type("Amritsar se Ludhiana 1 October, 2 passengers");
+    await waitFor(() => expect(screen.getByTestId("aib-dock-log").textContent).toMatch(/kaunsi train leni hai/i));
+
+    /* Booking flow ka sawaal chalu hai — bee me general sawaal: jawab brain se aata hai */
+    await type("wallet me kitne paise hain?");
+    await waitFor(() => expect(screen.getByTestId("aib-dock-log").textContent).toMatch(/wallet me ₹5,000/));
+    expect(asked.length).toBe(1);
+    expect(asked[0].text).toBe("wallet me kitne paise hain?");
+    /* flow bilkul nahi badla — train ka sawaal wahi khada hai */
+    await waitFor(() => expect(screen.getByTestId("aib-dock-log").textContent).toMatch(/kaunsi train leni hai/i));
+  });
+
+  it("dock layout: voice controls aur composer alag lines me (mic overlap fix ka CSS guard)", () => {
+    const css = readFileSync("src/styles.css", "utf8");
+    const dock = css.slice(css.indexOf(".aib-dock{"), css.indexOf(".aib-dock{") + 420);
+    expect(dock).toMatch(/flex-direction:column/);
+    expect(css).toMatch(/\.aib-dock \.aib-voice-actions\{width:100%/);
+    expect(css).toMatch(/\.aib-dock \.aib-dock-row \.aib-form\{width:100%\}/);
+  });
+
+  it("IRCTC: autofill client na ho to honest line + apna button (jhoothi umeed nahi)", async () => {
+    let irctcClicked = false;
+    const dummy = document.createElement("button");
+    dummy.id = "irctc-continue";
+    dummy.addEventListener("click", () => { irctcClicked = true; });
+    document.body.appendChild(dummy);
+
+    open();
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "AI Booking" })).toBeTruthy());
+    await type("Amritsar se Ludhiana 1 October, 1 passenger");
+    await waitFor(() => expect(screen.getByTestId("aib-dock-log").textContent).toMatch(/kaunsi train leni hai/i));
+    await type("12014");
+    await waitFor(() => expect(screen.getByTestId("aib-dock-log").textContent).toMatch(/kaunsi class chahiye/i));
+    await type("CC");
+    await waitFor(() => expect(screen.getByTestId("aib-dock-log").textContent).toMatch(/Passenger 1 ka naam/i));
+    await type("Rahul Sharma, 31, male, window");
+    /* pantry me khaana hai → ek passenger par bhi khaana poochha jaata hai (asli behaviour) */
+    await waitFor(() => expect(screen.getByTestId("aib-dock-log").textContent).toMatch(/khaana/i));
+    await type("veg");
+    await waitFor(() => expect(screen.getByTestId("aib-summary")).toBeTruthy());
+
+    await type("haan");
+    /* AI khud handoff karta hai (asli button) → review khula + honest line (koi claim nahi) */
+    await waitFor(() => expect(irctcClicked).toBe(true));
+    await waitFor(() => expect(screen.getByTestId("aib-handoff-line")).toBeTruthy(), { timeout: 3000 });
+    const line = screen.getByTestId("aib-handoff-line").textContent ?? "";
+    expect(line).toMatch(/RailBook app \(ya autofill client\) chahiye/);
+    /* Is browser me autofill nahi hota — isliye apna button (asli user gesture) */
+    const fallback = screen.getByTestId("aib-open-irctc");
+    fireEvent.click(fallback);
+    expect(irctcClicked).toBe(true);
+
+    /* R4: handoff ke baad bhi koi bhi sawaal → maujooda chat brain (/api/agent) se jawab */
+    await type("wallet me kitne paise hain?");
+    await waitFor(() => {
+      const urls = ((globalThis as unknown as { fetch: { mock: { calls: unknown[][] } } }).fetch.mock.calls).map((c) => String(c[0]));
+      expect(urls.some((u) => u.includes("/api/agent"))).toBe(true);
+    });
+    document.body.removeChild(dummy);
   });
 });
