@@ -17,6 +17,12 @@ type NativeSpeakBridge = {
   speak?: (text: string, lang?: string) => void;
   stopSpeaking?: () => void;
   ttsAvailable?: () => boolean;
+  /* Round-66 (user: "tts ki voice nahi aa rahi"): server TTS ka MP3 WebView me autoplay-policy se
+   * block ho jaata tha — ab app wahi MP3 native MediaPlayer se bajaata hai (base64 me bheja jaata hai,
+   * sab memory me, koi temp file nahi). Bridge na ho to purane raste waisa hi chalte hain. */
+  playAudioBase64?: (data: string, mime?: string) => boolean;
+  stopAudio?: () => void;
+  audioAvailable?: () => boolean;
 };
 
 function bridge(): NativeSpeakBridge | null {
@@ -53,6 +59,47 @@ export function nativeStopSpeaking(): void {
   if (!b?.stopSpeaking) return;
   try {
     b.stopSpeaking();
+  } catch {
+    /* ignore */
+  }
+}
+
+/* ══ R66: server TTS ka MP3 native se bajaao (WebView autoplay policy bypass) ══════════════════════ */
+
+function bridgeAny(): NativeSpeakBridge | null {
+  if (typeof window === "undefined") return null;
+  const b = (window as unknown as { RailBookVoice?: NativeSpeakBridge }).RailBookVoice;
+  return b && typeof b === "object" ? b : null;
+}
+
+/** App (native audio playback) available? Browser me false. */
+export function hasNativeAudio(): boolean {
+  const b = bridgeAny();
+  if (!b || typeof b.playAudioBase64 !== "function") return false;
+  try {
+    if (typeof b.audioAvailable === "function" && b.audioAvailable() === false) return false;
+  } catch {
+    /* bridge error → try anyway */
+  }
+  return true;
+}
+
+/** MP3 (base64) ko app ke native player se bajaao. true = app ne le liya. */
+export function nativePlayAudioBase64(dataBase64: string, mime = "audio/mpeg"): boolean {
+  const b = bridgeAny();
+  if (!b?.playAudioBase64) return false;
+  try {
+    return b.playAudioBase64(dataBase64, mime) !== false;
+  } catch {
+    return false;
+  }
+}
+
+export function nativeStopAudio(): void {
+  const b = bridgeAny();
+  if (!b?.stopAudio) return;
+  try {
+    b.stopAudio();
   } catch {
     /* ignore */
   }

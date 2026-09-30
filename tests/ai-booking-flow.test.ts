@@ -652,3 +652,46 @@ describe("R4 — direction, route restatement, Hindi berth", () => {
     expect(t.state.drafts[0].name).toBe("Neha Sharma");
   });
 });
+
+/* ══ R66 (30 Sep 2026) — user ka screenshot: "एक पैसेंजर है" samajh me nahi aaya aur AI ne wahi
+ * route+date lines DOBARA bol di. Dono cheezein yahan permanently bandh hoti hain. ══════════════ */
+describe("R66 — Hindi passenger count + repeat-lines", () => {
+  it("'एक पैसेंजर है' se pax samajh me aata hai aur search chalu ho jaati hai", () => {
+    let st = step(aiBookingStart(NOW).state, "Ludhiana se Amritsar, 1 October").state;
+    expect(st.awaiting).toBe("pax");
+    const t = step(st, "एक पैसेंजर है");
+    expect(t.state.pax).toBe(1);
+    expect(t.state.stage).toBe("SEARCH_TRAINS");
+    expect(t.actions.some((a) => a.type === "SEARCH")).toBe(true);
+    /* purani route/date line is turn me dobara nahi (sirf naya pax note) */
+    expect(t.say.join(" ")).not.toMatch(/Ludhiana Junction se Amritsar Junction/);
+    expect(t.say.join(" ")).not.toMatch(/tarikh note kar li/);
+  });
+
+  it("Hindi shabd aur Devanagari digits — ek/do/तीन/दोनों/२", () => {
+    expect(parsePaxCount("एक पैसेंजर")).toBe(1);
+    expect(parsePaxCount("एक")).toBe(1);
+    expect(parsePaxCount("दो पैसेंजर")).toBe(2);
+    expect(parsePaxCount("दोनों")).toBe(2);
+    expect(parsePaxCount("तीन लोग हैं")).toBe(3);
+    expect(parsePaxCount("२ पैसेंजर")).toBe(2);
+    expect(parsePaxCount("एक passenger hai")).toBe(1);
+    expect(parsePaxCount("यात्री एक")).toBe(1);
+  });
+
+  it("koi cheez dobara bol kar confirm nahi ki jaati (screenshot ka asli bug)", () => {
+    let st = step(aiBookingStart(NOW).state, "Ludhiana se Amritsar, 1 October, 2 passengers").state;
+    /* ab poora slot bhar chuka — agli baar train batao, route/date lines nahi dohraani chahiye */
+    const t = step(st, "koi baat nahi, aage badho");
+    const said = t.say.join(" ");
+    expect(said).not.toMatch(/Ludhiana Junction se Amritsar Junction/);
+    expect(said).not.toMatch(/tarikh note kar li/);
+  });
+
+  it("jab sach me kuch samajh na aaye to saaf bolta hai (chup-chaap wahi sawaal nahi)", () => {
+    const st = step(aiBookingStart(NOW).state, "Ludhiana se Amritsar, 1 October").state;
+    const t = step(st, "hmm pata nahi yaar");
+    expect(t.say.join(" ")).toMatch(/samajh nahi aaya/i);
+    expect(t.say.join(" ")).toMatch(/Kitne passengers hain/i);
+  });
+});

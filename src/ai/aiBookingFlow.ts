@@ -188,31 +188,48 @@ const PAX_WORDS: Record<string, number> = {
   char: 4, chaar: 4, four: 4, "4": 4,
   paanch: 5, panch: 5, five: 5, "5": 5,
   chhe: 6, cheh: 6, six: 6, "6": 6,
+  /* R66-fix (user screenshot: "एक पैसेंजर है" samajh me nahi aaya → AI wahi sawaal dohraata raha):
+   * Hindi shabd + Devanagari digits bhi (यात्री/लोग/आदमी keywords pehle se the, par shabd nahi). */
+  "एक": 1, "दो": 2, "दोनों": 2, "तीन": 3, "चार": 4, "पाँच": 5, "पांच": 5, "छह": 6, "छः": 6,
+  "१": 1, "२": 2, "३": 3, "४": 4, "५": 5, "६": 6,
 };
 
 /** "2", "do passenger", "do logon", "hum 3 log hain" — sirf 1..6 (existing form ka cap).
  *  Dhyan: "1 October ko … 2 passengers" me date ka 1 pakad kar galti nahi karni — isliye pehle
  *  passenger-keyword se juda number dekha jata hai, phir date-jaisa number hata kar. */
-const PAX_KW = "(?:passengers?|pax|log|logon|logon ka|tickets?|bandar|admi|aadmi|यात्री|टिकट|लोग|आदमी)";
+const PAX_KW = "(?:passengers?|pax|log|logon|logon ka|tickets?|bandar|admi|aadmi|यात्री|टिकट|लोग|आदमी|पैसेंजर|पैसेंजर्स|सवारी|व्यक्ति|बंदा|जन)";
+
+/* R66-fix: JS ka \b sirf ASCII ke liye kaam karta hai — Devanagari me word-boundary match hi nahi
+ * hota tha (isliye "यात्री" jaise maujooda keywords bhi bekaar padhe the). Ab har token ka sahi boundary. */
+const isLatinToken = (word: string) => /[a-z0-9]/i.test(word);
+function tokenRe(word: string, flags = ""): RegExp {
+  return isLatinToken(word)
+    ? new RegExp(`\\b${word}\\b`, flags)
+    : new RegExp(`(?<![\\p{L}\\p{N}])${word}(?![\\p{L}\\p{N}])`, flags.includes("u") ? flags : `${flags}u`);
+}
 const MONTH_WORD = "(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|january|february|march|april|june|july|august|september|october|november|december)";
 
+/** Devanagari digits (०-९) → ASCII, taaki "२ पैसेंजर" bhi chale. */
+const DEVA_DIGITS: Record<string, string> = { "०": "0", "१": "1", "२": "2", "३": "3", "४": "4", "५": "5", "६": "6", "७": "7", "८": "8", "९": "9" };
+const asciiDigits = (t: string) => t.replace(/[०-९]/gu, (d) => DEVA_DIGITS[d] ?? d);
+
 export function parsePaxCount(text: string): number | null {
-  const t = text.normalize("NFKC").toLowerCase();
+  const t = asciiDigits(text.normalize("NFKC").toLowerCase());
   const ok = (n: number | undefined) => (n && n >= 1 && n <= MAX_PAX ? n : null);
 
   /* 1) number seedha passenger keyword ke saath: "2 passengers", "३ लोग" */
-  const glued = t.match(new RegExp(`\\b([1-9])\\s*${PAX_KW}`));
+  const glued = t.match(new RegExp(`([1-9])\\s*${PAX_KW}`));
   if (glued) return ok(Number(glued[1]));
-  /* 2) shabd + keyword: "do log", "paanch passengers" */
+  /* 2) shabd + keyword: "do log", "paanch passengers", "एक पैसेंजर है" */
   for (const [word, n] of Object.entries(PAX_WORDS)) {
     if (/^\d$/.test(word)) continue;
-    if (new RegExp(`\\b${word}\\b\\s*${PAX_KW}`).test(t)) return ok(n);
+    if (new RegExp(`${tokenRe(word).source}\\s*${PAX_KW}`, "iu").test(t)) return ok(n);
   }
-  /* 3) akela shabd: "do" / "teen" (date/train number ke saath nahi) */
+  /* 3) akela shabd: "do" / "teen" / "एक" (date/train number ke saath nahi) */
   if (!/\b\d{4,5}\b/.test(t) && !new RegExp(`\\d{1,2}\\s*${MONTH_WORD}`).test(t)) {
     for (const [word, n] of Object.entries(PAX_WORDS)) {
       if (/^\d$/.test(word)) continue;
-      if (new RegExp(`\\b${word}\\b`).test(t)) return ok(n);
+      if (tokenRe(word, "iu").test(t)) return ok(n);
     }
   }
   /* 4) akela digit (slot pax ke jawab me, jaise "2" ya "hum 2 hain") — date wale digit chhod kar */
@@ -725,11 +742,12 @@ function collectJourney(state: AiBookingState, text: string, env: AiBookingEnv):
     else {
       next.awaiting = next.pendingCity ? next.pendingCity.slot : next.awaiting;
       const doneBits: string[] = [];
-      if (next.from) doneBits.push(`${next.from.name} se`);
-      if (next.to) doneBits.push(`${next.to.name} tak`);
+      const routeNew = next.from?.code !== state.from?.code || next.to?.code !== state.to?.code;
+      if (next.from && routeNew) doneBits.push(`${next.from.name} se`);
+      if (next.to && routeNew) doneBits.push(`${next.to.name} tak`);
       if (doneBits.length) say.push(`${doneBits.join(" ")} ✅`);
-      if (next.date) say.push(`${formatLongDate(next.date)} ki tarikh note kar li.`);
-      if (next.pax) say.push(next.pax === 1 ? "1 passenger." : `${next.pax} passengers.`);
+      if (next.date && next.date !== state.date) say.push(`${formatLongDate(next.date)} ki tarikh note kar li.`);
+      if (next.pax && next.pax !== state.pax) say.push(next.pax === 1 ? "1 passenger." : `${next.pax} passengers.`);
       return withSpoken(next, [...say, cityChoiceLine(city, list)]);
     }
   }
@@ -744,11 +762,36 @@ function collectJourney(state: AiBookingState, text: string, env: AiBookingEnv):
     next.to = null; /* same station — dobara poochho, guess nahi */
   }
 
-  if (next.from && next.to) {
+  /* R66-fix (user screenshot: "एक" par AI ne wahi route+date lines DOBARA bol diya): ab "note kar li"
+   * lines sirf tab bolti hain jab wo cheez is turn me NAYI mile/changed ho — purani baat dohraai nahi jaati. */
+  const routeChanged = next.from?.code !== state.from?.code || next.to?.code !== state.to?.code;
+  const dateChanged = Boolean(next.date) && next.date !== state.date;
+  const paxChanged = Boolean(next.pax) && next.pax !== state.pax;
+  if (next.from && next.to && routeChanged) {
     say.push(`${next.from.name} se ${next.to.name} ✅`);
-    if (next.date) say.push(`${formatLongDate(next.date)} ki tarikh note kar li (yahi date search me jayegi).`);
   }
-  if (next.pax) say.push(next.pax === 1 ? "1 passenger." : `${next.pax} passengers.`);
+  if (next.from && next.to && next.date && dateChanged) {
+    say.push(`${formatLongDate(next.date)} ki tarikh note kar li (yahi date search me jayegi).`);
+  }
+  if (next.pax && paxChanged) say.push(next.pax === 1 ? "1 passenger." : `${next.pax} passengers.`);
+
+  /* R66: kuch bhi naya samajh nahi aaya aur ek slot ka jawab wait tha → saaf bolo (chup-chaap wahi
+   * sawaal dohraana nahi — user ko lagta tha "AI sun hi nahi raha"). */
+  /* Guard: kuch bhi aage nahi badha (slots waise hi) aur jis slot ka jawab wait tha wo abhi bhi khaali.
+   * (Correction ke baad date pehle se set hoti hai — wahan ye line nahi aani chahiye.) */
+  const nothingChanged =
+    next.from?.code === state.from?.code && next.to?.code === state.to?.code && next.date === state.date && next.pax === state.pax;
+  const awaited = state.awaiting === "pax" ? "pax" : state.awaiting;
+  const stillMissing = awaited === "from" || awaited === "to" || awaited === "date" || awaited === "pax" ? !next[awaited] : false;
+  const slotLabels: Record<string, string> = { from: "station", to: "station", date: "date", pax: "passenger count" };
+  if (nothingChanged && stillMissing && !next.pendingCity && state.stage === "COLLECT_JOURNEY" && state.awaiting && slotLabels[state.awaiting]) {
+    next.awaiting = state.awaiting;
+    const hint = state.awaiting === "pax" ? "2 passengers" : state.awaiting === "date" ? "1 October" : "Ludhiana";
+    return withSpoken(next, [
+      `Ye ${slotLabels[state.awaiting]} samajh nahi aaya — dobara bata dijiye (jaise “${hint}”).`,
+      aiBookingAskLine(state.awaiting as Parameters<typeof aiBookingAskLine>[0]),
+    ]);
+  }
 
   /* Sirf missing cheez poochho — jo message me aa chuki hai wo dobara nahi. */
   if (!next.from) {

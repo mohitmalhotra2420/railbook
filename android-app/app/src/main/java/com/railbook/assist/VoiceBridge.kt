@@ -9,9 +9,12 @@ import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
 import java.util.Locale
+import android.media.MediaPlayer
+import android.util.Base64
 import android.util.Log
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
+import java.io.ByteArrayInputStream
 import androidx.core.content.ContextCompat
 import org.json.JSONObject
 
@@ -45,6 +48,75 @@ class VoiceBridge(
      * Bridge na ho to page purane browser TTS par chala jaata hai — kuch tootta nahi. */
     private var tts: TextToSpeech? = null
     private var ttsReady = false
+
+    /* ══ Round-66 (user: "tts ki voice nahi aa rahi") ═════════════════════════════════════════════════
+     * Server TTS (openai-edge-tts) ka MP3 WebView ke <audio> se play hota tha — par Android WebView
+     * default me `mediaPlaybackRequiresUserGesture = true` rakhta hai, isliye AI ke async turn ka
+     * play() chup-chaap block ho jaata tha (Chrome/browser me bhi autoplay policy). Ab app apna
+     * native MediaPlayer deta hai: page MP3 ko base64 me bhejta hai, app use seedha play karta hai —
+     * koi autoplay policy beech me nahi aati:
+     *   page → app : window.RailBookVoice.playAudioBase64(b64, "audio/mpeg") · .stopAudio() · .audioAvailable()
+     * Sirf playback — koi record, koi bhejna nahi. Ye bridge na ho (purana APK) to page purane
+     * raste (WebView audio → device TTS) par gir jaata hai — kuch tootta nahi. */
+    private var player: MediaPlayer? = null
+
+    @JavascriptInterface
+    fun audioAvailable(): Boolean = true
+
+    /** Server TTS MP3 (base64) ko native MediaPlayer se bajaao — WebView ki autoplay policy beech me nahi aati. */
+    @JavascriptInterface
+    fun playAudioBase64(data: String?, mime: String?): Boolean {
+        val b64 = data?.trim().orEmpty()
+        if (b64.isEmpty()) return false
+        val bytes = try {
+            Base64.decode(b64, Base64.DEFAULT)
+        } catch (_: Exception) {
+            return false
+        }
+        if (bytes.isEmpty()) return false
+        activity.runOnUiThread {
+            try {
+                stopAudioInternal()
+                val mp = MediaPlayer()
+                mp.setAudioAttributes(
+                    android.media.AudioAttributes.Builder()
+                        .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .build()
+                )
+                mp.setDataSource(ByteArrayMediaSource(bytes))
+                mp.setOnPreparedListener { it.start() }
+                mp.setOnCompletionListener { stopAudioInternal() }
+                mp.setOnErrorListener { _, _, _ ->
+                    stopAudioInternal()
+                    true
+                }
+                mp.prepareAsync()
+                player = mp
+            } catch (e: Exception) {
+                Log.w("RailBookVoice", "playAudioBase64 fail: ${e.message}")
+                stopAudioInternal()
+            }
+        }
+        return true
+    }
+
+    @JavascriptInterface
+    fun stopAudio() {
+        activity.runOnUiThread { stopAudioInternal() }
+    }
+
+    private fun stopAudioInternal() {
+        try {
+            player?.let {
+                if (it.isPlaying) it.stop()
+                it.release()
+            }
+        } catch (_: Exception) {
+            /* ignore */
+        }
+        player = null
+    }
 
     private fun ensureTts(): TextToSpeech? {
         if (tts != null) return tts
@@ -269,4 +341,22 @@ class VoiceBridge(
     companion object {
         private const val TAG = "RailBookVoice"
     }
+}
+
+/**
+ * Round-66: base64 MP3 ko MediaPlayer ko "file jaisa" dikhane ke liye chhota MediaDataSource —
+ * koi temp file nahi likhi jaati, sab memory me.
+ */
+private class ByteArrayMediaSource(private val bytes: ByteArray) : android.media.MediaDataSource() {
+    override fun readAt(position: Long, buffer: ByteArray, offset: Int, size: Int): Int {
+        if (position >= bytes.size) return -1
+        val remaining = bytes.size - position.toInt()
+        val toRead = minOf(remaining, size)
+        System.arraycopy(bytes, position.toInt(), buffer, offset, toRead)
+        return toRead
+    }
+
+    override fun getSize(): Long = bytes.size.toLong()
+
+    override fun close() = Unit
 }

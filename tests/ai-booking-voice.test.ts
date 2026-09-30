@@ -151,3 +151,93 @@ describe("R63 — native TTS bridge + output support", () => {
     expect(() => voice.unlock()).not.toThrow();
   });
 });
+
+/* ══ R66 (30 Sep 2026) — user: "tts ki voice nahi aa rahi … jaise ChatGPT par voice conversation hoti
+ * hai" ═════════════════════════════════════════════════════════════════════════════════════════════
+ * (a) playback (autoplay policy) block hone par UI ko honest issue milta hai + device voice chalti hai,
+ *     aur app me ho to native player ka raasta maujood hai (nativeSpeak.ts helpers),
+ * (b) unlock() ab audio element bhi gesture ke andar unlock karta hai (pehla speak chup na ho).
+ */
+describe("R66 — voice output reliability", () => {
+  /* jsdom me speechSynthesis hota hi nahi — "device voice maujood hai" wala case simulate karte hain
+   * (asli phone/browser me ye hota hai). */
+  const stubDeviceVoice = () => {
+    (window as unknown as { speechSynthesis: unknown }).speechSynthesis = {
+      getVoices: () => [{ lang: "hi-IN", name: "Test Hindi" }],
+      speak: () => undefined,
+      cancel: () => undefined,
+    };
+  };
+  it("playback block (autoplay policy) → device voice + honest issue 'playback-blocked'", async () => {
+    stubDeviceVoice();
+    const issues: (string | null)[] = [];
+    const d = deps({
+      fetchConfig: vi.fn(async () => ({ provider: "openai", serverTts: true, model: "tts-1", languages: ["hi-IN"] })),
+      play: vi.fn(async () => {
+        const err = new Error("play() failed because the user didn't interact with the document first");
+        err.name = "NotAllowedError";
+        throw err;
+      }),
+    });
+    const voice = createAiBookingVoice(d!);
+    voice.onIssue((i) => issues.push(i));
+    await voice.loadProvider();
+    voice.speak("Theek hai, 1 passenger note kar liya");
+    await vi.waitFor(() => expect(d!.browserSpeak).toHaveBeenCalled());
+    await vi.waitFor(() => expect(voice.lastIssue()).toBe("playback-blocked"));
+    expect(issues).toContain("playback-blocked");
+    expect(voice.lastRoute()).toMatch(/app-tts|device/);
+  });
+
+  it("server fetch fail → 'server-failed' issue, device voice chalti hai", async () => {
+    stubDeviceVoice();
+    const d = deps({
+      fetchConfig: vi.fn(async () => ({ provider: "openai", serverTts: true, model: null, languages: [] })),
+      fetchTts: vi.fn(async () => {
+        throw new Error("provider 502");
+      }),
+    });
+    const voice = createAiBookingVoice(d!);
+    await voice.loadProvider();
+    voice.speak("Namaste");
+    await vi.waitFor(() => expect(voice.lastIssue()).toBe("server-failed"));
+    expect(d!.browserSpeak).toHaveBeenCalled();
+  });
+
+  it("server audio jo chal gaya, use issue nahi milta (saaf state)", async () => {
+    const d = deps({ fetchConfig: vi.fn(async () => ({ provider: "openai", serverTts: true, model: null, languages: [] })) });
+    const voice = createAiBookingVoice(d);
+    await voice.loadProvider();
+    voice.speak("2 passengers.");
+    await vi.waitFor(() => expect(d!.play).toHaveBeenCalled());
+    await vi.waitFor(() => expect(voice.lastIssue()).toBeNull());
+    expect(voice.lastRoute()).toBe("server-audio");
+  });
+
+  it("unlock() audio element bhi unlock karta hai (deps.unlockAudio) — browser me pehli awaaz chup na ho", () => {
+    const unlockAudio = vi.fn();
+    const d = deps({ unlockAudio });
+    const voice = createAiBookingVoice(d!);
+    expect(() => voice.unlock()).not.toThrow();
+    expect(unlockAudio).toHaveBeenCalledTimes(1);
+  });
+
+  it("native audio bridge (app) maujood ho to MP3 native player ko jaata hai (WebView policy bypass)", async () => {
+    const played: string[] = [];
+    (globalThis as unknown as { window: { RailBookVoice?: unknown } }).window.RailBookVoice = {
+      audioAvailable: () => true,
+      playAudioBase64: (b64: string) => {
+        played.push(b64);
+        return true;
+      },
+      stopAudio: () => undefined,
+    };
+    const { hasNativeAudio, nativePlayAudioBase64, nativeStopAudio } = await import("../src/voice/nativeSpeak");
+    expect(hasNativeAudio()).toBe(true);
+    expect(nativePlayAudioBase64("QUJD", "audio/mpeg")).toBe(true);
+    expect(played).toEqual(["QUJD"]);
+    expect(() => nativeStopAudio()).not.toThrow();
+    delete (globalThis as unknown as { window: { RailBookVoice?: unknown } }).window.RailBookVoice;
+    expect(hasNativeAudio()).toBe(false);
+  });
+});

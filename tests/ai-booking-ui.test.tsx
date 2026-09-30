@@ -22,6 +22,8 @@ vi.mock("../src/voice/speakGuide", () => ({
 
 /* Voice input ko controllable banate hain — asli hook SpeechRecognition maangta hai (jsdom me nahi). */
 const voiceState: { listening: boolean; interim: string; transcript: string } = { listening: false, interim: "", transcript: "" };
+/* R66: voice conversation loop test ke liye — mic kitni baar shuru hua. */
+const voiceStartCount = { value: 0 };
 vi.mock("../src/voice/useVoiceInput", () => ({
   useVoiceInput: (onTranscript: (t: string) => void) => ({
     listening: voiceState.listening,
@@ -31,6 +33,7 @@ vi.mock("../src/voice/useVoiceInput", () => ({
     level: 0.4,
     start: async () => {
       voiceState.listening = true;
+      voiceStartCount.value += 1;
       return null;
     },
     stop: () => {
@@ -395,4 +398,97 @@ describe("R4 — general sawaal, dock layout, IRCTC autofill honesty", () => {
     });
     document.body.removeChild(dummy);
   });
+});
+
+/* ══ R66 (30 Sep 2026) — "jaise mera AI chat me samajh jaata tha waise hi edhr bhi samjhe" ═════════
+ * (a) local engine samajh na paaye to wahi maujooda chat brain (/api/understand) se slot samajh aata
+ *     hai — aur wahi canonical jawab purane flow engine ko diya jaata hai (validation wahi),
+ * (b) ChatGPT jaisi voice conversation: AI bolne ke baad mic khud wapas sunta hai (sirf voice ON
+ *     hone par — background listening nahi), "Type instead"/"End voice" par band.
+ */
+describe("R66 — brain se samajhna + voice conversation loop", () => {
+  /* AI Booking do shakal me dikhta hai: home par full-screen thread, search ke baad dock bar. */
+  const log = () => {
+    const dock = document.querySelector('[data-testid="aib-dock-log"]');
+    const thread = document.querySelector(".aib-thread");
+    return (dock ?? thread)?.textContent ?? "";
+  };
+
+  beforeEach(() => {
+    mockFetch();
+    sessionStorage.clear();
+    voiceState.listening = false;
+    voiceState.interim = "";
+    voiceState.transcript = "";
+  });
+
+  it("local engine samajh na paaye to chat NLU (/api/understand) se slot samajh aata hai", async () => {
+    const uAsk: string[] = [];
+    (globalThis as unknown as { fetch: unknown }).fetch = vi.fn(async (url: string, init?: { body?: string }) => {
+      const u = String(url);
+      if (u.includes("/api/understand")) {
+        const body = JSON.parse(String(init?.body ?? "{}")) as { text?: string; lastAsked?: string };
+        uAsk.push(`${body.text}|${body.lastAsked}`);
+        /* chat ka NLU: "एक जना" ko 1 passenger samajhta hai (regex nahi samajhta) */
+        return { ok: true, json: async () => ({ nlu: { intent: "SEARCH_TRAINS", passengerCount: 1 }, source: "ai", missingFields: [] }) } as unknown as Response;
+      }
+      const body = u.includes("/api/wallet")
+        ? { wallet: { balance: 5000, currency: "INR", transactions: [] } }
+        : u.includes("/api/meta")
+          ? { provider: { id: "test", name: "Test", mock: false }, serviceFee: 0 }
+          : u.includes("/api/voice/config")
+            ? { provider: "browser", serverTts: false, model: null, languages: ["hi-IN"] }
+            : u.includes("/pantry")
+              ? { pantry: false, providers: [], note: null, foodChoiceExpected: false }
+              : u.includes("/api/trains")
+                ? { trains: [train], recommendations: [], empty: false }
+                : { bookings: [] };
+      return { ok: true, json: async () => body } as unknown as Response;
+    });
+
+    open();
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "AI Booking" })).toBeTruthy());
+    await type("Amritsar se Ludhiana, 1 October");
+    await waitFor(() => expect(log()).toMatch(/kitne passengers/i));
+
+    /* aisa shabd jo local regex nahi samajhta ("एक जना") — brain se 1 passenger aana chahiye */
+    await type("अकेला जा रहा हूँ");
+    /* brain se slot samajh aaya (lastAsked = passengers) … */
+    await waitFor(() => expect(uAsk.some((x) => x.startsWith("अकेला जा रहा हूँ|passengers"))).toBe(true), { timeout: 8000 });
+    /* flow aage badha — usi direction par asli search chali */
+    await waitFor(() => {
+      const calls = ((globalThis as unknown as { fetch: { mock: { calls: unknown[][] } } }).fetch.mock.calls).map((c) => String(c[0]));
+      expect(calls.some((u) => u.includes("/api/trains?from=ASR&to=LDH&date=2026-10-01"))).toBe(true);
+    });
+  }, 25000);
+
+  it("voice conversation: AI bolne ke baad mic khud wapas sunta hai (sirf voice ON hone par)", async () => {
+    voiceStartCount.value = 0;
+    open();
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "AI Booking" })).toBeTruthy());
+
+    /* mic tap → voice ON + sunna shuru */
+    fireEvent.click(screen.getByLabelText("🎙️ Talk to RailBook"));
+    await waitFor(() => expect(voiceStartCount.value).toBeGreaterThan(0));
+    const started = voiceStartCount.value;
+
+    /* voice se bola hua message → AI jawab → AI chup hone par mic KHUD dobara start hona chahiye.
+     * (Mock listening true karke mic dobara dabao = asli commit ka raasta.) */
+    voiceState.listening = true;
+    voiceState.transcript = "Amritsar se Ludhiana, 1 October, 1 passenger";
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText("🎙️ Talk to RailBook"));
+    });
+    await waitFor(() => expect(log()).toMatch(/kaunsi train leni hai/i), { timeout: 8000 });
+    /* Awaaz khatam hone ka andaza line ki lambai se (max 12s) — mic uske baad khud sunta hai. */
+    await waitFor(() => expect(voiceStartCount.value).toBeGreaterThan(started), { timeout: 15000 });
+
+    /* "End voice" → loop band (aur mic nahi khulta) */
+    console.log("DBG-VOICEHTML", document.querySelector('[data-testid="aib-voice"]')?.outerHTML?.slice(0, 700));
+    console.log("DBG-BODY", document.body.textContent?.slice(-300));
+    fireEvent.click(screen.getByText("✕ End voice"));
+    const after = voiceStartCount.value;
+    await new Promise((r) => setTimeout(r, 600));
+    expect(voiceStartCount.value).toBe(after);
+  }, 30000);
 });

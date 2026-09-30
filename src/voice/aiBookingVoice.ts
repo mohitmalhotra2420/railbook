@@ -16,7 +16,7 @@
 import { api } from "../api";
 import { cancelGuide, speakGuide, unlockSpeech } from "./speakGuide";
 import { hasNativeVoice } from "./nativeSpeech";
-import { hasNativeSpeak, nativeSpeak, nativeStopSpeaking } from "./nativeSpeak";
+import { hasNativeAudio, nativePlayAudioBase64, nativeSpeak, nativeStopSpeaking, nativeStopAudio, hasNativeSpeak } from "./nativeSpeak";
 import { isSpeechSupported } from "./speech";
 
 export interface VoiceProviderInfo {
@@ -35,7 +35,13 @@ export interface AiBookingVoiceDeps {
   stopPlayback: () => void;
   browserSpeak: (text: string) => void;
   browserStop: () => void;
+  /** R66: audio element ko user-gesture ke andar unlock karo (silent frame) — warna AI ke baad ka
+   *  play autoplay policy me block ho jaata hai. */
+  unlockAudio?: () => void;
 }
+
+/** R66: voice output me kya dikkat aayi (UI imandaari se bataata hai — chup nahi rehta). */
+export type VoiceIssue = "server-failed" | "playback-blocked" | "no-output" | null;
 
 export interface AiBookingVoice {
   /** Boli gayi line (muted ho ya text khaali ho to kuch nahi). */
@@ -58,27 +64,112 @@ export interface AiBookingVoice {
   unlock: () => void;
   /** UI ke liye: jab AI bol rahi ho ("speaking") / chup ho ("idle"). */
   onState: (cb: (s: "speaking" | "idle") => void) => () => void;
+  /** R66: playback/server fail hone par ek baar batao (UI line dikha sake). */
+  onIssue: (cb: (issue: VoiceIssue) => void) => () => void;
+  lastIssue: () => VoiceIssue;
+  /** R66: AI ki awaaz kis raaste se jaa rahi hai ("server-audio" | "app-audio" | "app-tts" | "device"). */
+  lastRoute: () => "server-audio" | "app-audio" | "app-tts" | "device" | null;
 }
 
 const BROWSER_INFO: VoiceProviderInfo = { kind: "browser", provider: null, model: null, languages: ["hi-IN", "en-IN"] };
 
+/** Device (browser speechSynthesis) par sach me koi voice hai? — WebView me hota hai par khaali. */
+function deviceVoiceLikelyAvailable(): boolean {
+  if (typeof window === "undefined") return false;
+  const synth = window.speechSynthesis;
+  if (!synth) return false;
+  try {
+    const voices = synth.getVoices?.() ?? [];
+    if (!voices.length) return true; /* voices list abhi load nahi hui — try karna bekaar nahi */
+    return voices.some((v) => /hi|en/i.test(v.lang ?? ""));
+  } catch {
+    return true;
+  }
+}
+
+/** Blob → base64 (native MediaPlayer ko bhejne ke liye). */
+async function blobToBase64(blob: Blob): Promise<string> {
+  const buf = new Uint8Array(await blob.arrayBuffer());
+  let bin = "";
+  for (let i = 0; i < buf.length; i += 1) bin += String.fromCharCode(buf[i]);
+  return typeof btoa === "function" ? btoa(bin) : "";
+}
+
 function defaultDeps(): AiBookingVoiceDeps {
+  /* R66-fix (user: "tts ki voice nahi aa rahi"): pehle har baar NAYA `new Audio()` banata tha —
+   * Chrome/WebView ki autoplay policy aise element ko (user gesture ke bina) block kar deti hai,
+   * aur Android WebView me `mediaPlaybackRequiresUserGesture` default true hone se play() chup-chaap
+   * fail ho jaata tha. Ab:
+   *   1) ek hi element (persistent) reuse hota hai — sticky activation ka fayda,
+   *   2) unlock() (user ke tap par) chhota silent clip baja kar us element ko "allowed" kar deta hai,
+   *   3) play() fail ho to MP3 app ke native player ko bheja jaata hai (naya APK — autoplay policy
+   *      wahan lagti hi nahi),
+   *   4) sab fail → device TTS, aur UI ko honest "issue" (neeche speak() me). */
   let current: HTMLAudioElement | null = null;
+  let unlocked = false;
+  const el = (): HTMLAudioElement | null => {
+    if (typeof window === "undefined" || typeof window.Audio === "undefined") return null;
+    if (!current) {
+      current = new Audio();
+      current.preload = "auto";
+      (current as HTMLAudioElement).setAttribute("playsinline", "");
+    }
+    return current;
+  };
+  /* 1-frame ka silent WAV — sirf gesture ke andar play hota hai (koi awaaz nahi). */
+  const SILENT_WAV =
+    "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAgD4AAAB9AAACABAAZGF0YQAAAAA=";
   return {
     fetchConfig: () => api.voiceConfig(),
     fetchTts: (text, lang) => api.voiceTts(text, lang),
     async play(blob) {
-      if (typeof window === "undefined" || typeof window.Audio === "undefined") throw new Error("audio unavailable");
+      const el0 = el();
+      if (!el0) throw new Error("audio unavailable");
       const url = URL.createObjectURL(blob);
-      const el = new Audio(url);
-      current = el;
-      el.addEventListener("ended", () => URL.revokeObjectURL(url), { once: true });
-      await el.play();
+      try {
+        el0.src = url;
+        await el0.play();
+        unlocked = true;
+        el0.addEventListener("ended", () => URL.revokeObjectURL(url), { once: true });
+        return;
+      } catch (err) {
+        URL.revokeObjectURL(url);
+        /* App me hain? → native player (WebView autoplay policy bypass). */
+        if (hasNativeAudio()) {
+          try {
+            const b64 = await blobToBase64(blob);
+            if (b64 && nativePlayAudioBase64(b64, blob.type || "audio/mpeg")) return;
+          } catch {
+            /* neeche throw */
+          }
+        }
+        throw err;
+      }
     },
     stopPlayback() {
       try {
         current?.pause();
-        current = null;
+        if (current) current.removeAttribute("src");
+      } catch {
+        /* ignore */
+      }
+      try {
+        nativeStopAudio();
+      } catch {
+        /* ignore */
+      }
+    },
+    unlockAudio() {
+      const el0 = el();
+      if (!el0) return;
+      try {
+        el0.src = SILENT_WAV;
+        void el0
+          .play()
+          .then(() => {
+            unlocked = true;
+          })
+          .catch(() => undefined);
       } catch {
         /* ignore */
       }
@@ -99,7 +190,20 @@ export function createAiBookingVoice(deps: AiBookingVoiceDeps = defaultDeps()): 
   let info: VoiceProviderInfo = { ...BROWSER_INFO };
   let usingServer = false;
   let token = 0;
+  let issue: VoiceIssue = null;
+  let route: "server-audio" | "app-audio" | "app-tts" | "device" | null = null;
   const listeners = new Set<(s: "speaking" | "idle") => void>();
+  const issueListeners = new Set<(i: VoiceIssue) => void>();
+  const emitIssue = (i: VoiceIssue) => {
+    issue = i;
+    for (const l of issueListeners) {
+      try {
+        l(i);
+      } catch {
+        /* ignore */
+      }
+    }
+  };
   const emit = (st: "speaking" | "idle") => {
     for (const l of listeners) {
       try {
@@ -121,6 +225,9 @@ export function createAiBookingVoice(deps: AiBookingVoiceDeps = defaultDeps()): 
       if (info.kind !== "server") {
         usingServer = false;
         emit("speaking");
+        /* App me native TTS hai? wo sabse bharosemand (WebView ka speechSynthesis aksar chup rehta hai). */
+        route = hasNativeSpeak() ? "app-tts" : "device";
+        if (route === "device" && !deviceVoiceLikelyAvailable()) emitIssue("no-output");
         deps.browserSpeak(line);
         window.setTimeout(() => {
           if (my === token) emit("idle");
@@ -130,17 +237,29 @@ export function createAiBookingVoice(deps: AiBookingVoiceDeps = defaultDeps()): 
       emit("speaking");
       deps
         .fetchTts(line, "hi-IN")
-        .then((blob) => (my === token && !muted ? deps.play(blob) : undefined))
-        .then(() => {
-          if (my === token) usingServer = true;
+        .then((blob) => {
+          if (my !== token || muted) return undefined;
+          route = "server-audio";
+          return deps.play(blob).then(() => {
+            if (my === token) {
+              usingServer = true;
+              emitIssue(null);
+            }
+          });
         })
         .finally(() => {
           if (my === token) emit("idle");
         })
-        .catch(() => {
-          /* provider fail → booking flow rukna nahi chahiye: device voice ya bilkul chup */
+        .catch((err: unknown) => {
+          /* Server voice play/fetch fail → booking flow rukna nahi chahiye: device/native voice chalao,
+           * aur UI ko saaf batao ki server audio block hua (chup-chaap ku6 na ho). */
           if (my !== token || muted) return;
           usingServer = false;
+          const msg = err instanceof Error ? `${err.name} ${err.message}` : String(err);
+          const blocked = /NotAllowed|blocked|gesture|interrupted/i.test(msg);
+          route = hasNativeSpeak() ? "app-tts" : "device";
+          if (route === "device" && !deviceVoiceLikelyAvailable()) emitIssue("no-output");
+          else emitIssue(blocked ? "playback-blocked" : "server-failed");
           deps.browserSpeak(line);
         });
     },
@@ -148,6 +267,7 @@ export function createAiBookingVoice(deps: AiBookingVoiceDeps = defaultDeps()): 
       token += 1;
       usingServer = false;
       emit("idle");
+      nativeStopAudio();
       try {
         deps.stopPlayback();
       } catch {
@@ -197,11 +317,28 @@ export function createAiBookingVoice(deps: AiBookingVoiceDeps = defaultDeps()): 
       const synth = typeof window !== "undefined" ? window.speechSynthesis : undefined;
       return synth ? "device" : "none";
     },
-    unlock: () => unlockSpeech(),
+    unlock: () => {
+      /* Maujooda speechSynthesis unlock (jaisa tha waisa) + R66: audio element bhi gesture ke andar
+       * ek silent frame baja kar "allowed" mark kar do (warna AI ke baad wala play block ho jaata hai). */
+      emitIssue(null);
+      unlockSpeech();
+      try {
+        deps.unlockAudio?.();
+      } catch {
+        /* ignore */
+      }
+    },
     onState(cb) {
       listeners.add(cb);
       return () => listeners.delete(cb);
     },
+    onIssue(cb) {
+      issueListeners.add(cb);
+      cb(issue);
+      return () => issueListeners.delete(cb);
+    },
+    lastIssue: () => issue,
+    lastRoute: () => route,
   };
 }
 

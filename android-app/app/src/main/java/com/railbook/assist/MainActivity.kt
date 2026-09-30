@@ -168,6 +168,10 @@ class MainActivity : AppCompatActivity() {
         s.setSupportMultipleWindows(false)
         s.allowFileAccess = false
         s.allowContentAccess = false
+        /* Round-66 (user: "tts ki voice nahi aa rahi"): WebView default me media play ke liye user
+         * gesture maangta hai — AI ke async turn ka play() isliye chup-chaap block ho jaata tha.
+         * Ab server TTS (openai-edge-tts) ka MP3 turant bajta hai (aur native bridge bhi backup hai). */
+        s.mediaPlaybackRequiresUserGesture = false
         s.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
         /* IRCTC's CDN (Akamai) blocks the stock Android WebView user agent — it carries the
          * " wv" WebView token that the edge treats as bot traffic ("Access Denied", ref edgesuite).

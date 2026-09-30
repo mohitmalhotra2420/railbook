@@ -2790,6 +2790,8 @@ button.rp-crow:active { transform: translateY(1px); }
 .aib-form{display:flex;align-items:center;gap:8px;flex:1;min-width:0}
 .aib-form input{flex:1;min-width:0;height:40px;border-radius:999px;border:1px solid rgba(148,163,184,.28);background:#16233c;color:#e2e8f0;padding:0 14px;font-size:14px;outline:none}
 .aib-form input::placeholder{color:#7b8aa3}
+.aib-voice-issue{display:block;font-size:12px;line-height:1.45;color:#fcd34d;background:rgba(180,83,9,.18);
+  border:1px solid rgba(245,158,11,.35);border-radius:12px;padding:8px 11px;margin:0 14px 8px}
 .aib-handoff-line{display:flex;flex-direction:column;gap:8px;font-size:12.5px;line-height:1.45;color:#cbd5e1;
   background:rgba(29,78,216,.18);border:1px solid rgba(148,163,184,.25);border-radius:14px;padding:9px 11px}
 .aib-handoff-line .aib-btn{width:100%}
