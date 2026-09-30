@@ -54,6 +54,30 @@ export function nativeSpeak(text: string, lang = "hi-IN"): boolean {
   }
 }
 
+/* R67 (user screenshot: mic ne AI ki apni awaaz pakad li — "20986 … 11906 … ट्रेन लेनी है" transcript
+ * me aa gaya): native TTS/player khatam hone par app JS ko batata hai, isliye mic sach me tab khulta
+ * hai jab bolna poora khatam ho chuka ho (pehle sirf text-length ka andaza tha). */
+type SpokenEndedFn = () => void;
+let spokenEndedCb: SpokenEndedFn | null = null;
+
+/** App → page: "bolna/playback poora khatam" signal (bridge na ho to kuch nahi hota). */
+export function onNativeSpokenEnded(cb: SpokenEndedFn): void {
+  spokenEndedCb = cb;
+  if (typeof window === "undefined") return;
+  (window as unknown as { __railbookTtsEnded?: SpokenEndedFn }).__railbookTtsEnded = () => {
+    try {
+      spokenEndedCb?.();
+    } catch {
+      /* ignore */
+    }
+  };
+}
+
+export function hasNativeSpokenEndedSignal(): boolean {
+  if (typeof window === "undefined") return false;
+  return typeof (window as unknown as { __railbookTtsEnded?: unknown }).__railbookTtsEnded === "function";
+}
+
 export function nativeStopSpeaking(): void {
   const b = bridge();
   if (!b?.stopSpeaking) return;

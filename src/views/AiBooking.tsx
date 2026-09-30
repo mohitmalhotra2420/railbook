@@ -12,6 +12,16 @@
  *   • Review + IRCTC handoff = maujooda ReviewStatus screen (Continue to IRCTC wahi card).
  *   • Voice = maujooda voice stack (useVoiceInput) + naya TTS adapter (server provider ya device voice).
  *
+ * ── R67 (1 Oct 2026, user) ────────────────────────────────────────────────────────────────────────
+ * "kyu na hum edhr bhi AI first rakhein … AI ke pass sabhi existing tools ho jo pehle chat mein the,
+ *  AI khud query samjhe aur right tool ka use kare … AI booking fully automate kare … bss AI booking
+ *  wala jo banaya hai usmein yeh nayi cheezein implement karna hai."
+ * Isliye ab HAR turn par pehle wahi **chat brain** (maujooda `/api/agent` — wahi tools/prompts) chalta
+ * hai: wo khud samajhta hai aur sahi tool use karta hai (live status, timings, fare, seat, general
+ * sawaal — sab usi ke paas hai). Booking ka **state/validation** waise hi maujooda flow engine ke
+ * paas hai: brain se aaya slot canonical jawab ban kar usi `aiBookingTurn` se guzarta hai. Chat wale
+ * endpoint/tools/prompts/architecture me kuch nahi chhua.
+ *
  * Do shakalein:
  *   1) Full screen (jab koi maujooda screen khuli nahi) — poori conversation + asli train/class cards.
  *   2) Dock (jab maujooda screen khuli ho — results/passengers/review) — neeche chhoti AI bar: wahi
@@ -19,7 +29,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useBooking } from "../booking/context";
-import { api } from "../api";
+import { api, type AgentContextClient } from "../api";
 import { TrainClassBlock, type ClassChipData } from "../components/TrainClassBlock";
 import { isBookable } from "../types";
 import { newId } from "../format";
@@ -67,6 +77,66 @@ function looksLikeQuestion(text: string): boolean {
   return /(^|\s)(kya|kyaa|kaise|kaisay|kaun|kaunsa|kaunsi|kab|kahan|kahaan|kitna|kitne|kitni|kyun|kyu|kis|batao|bata\s*do|bataiye|batai|बताओ|बताइए|क्या|कौन|कब|कहाँ|कहां|कितना|कितने|कितनी|क्यों|कैसे|है\s*क्या)(\s|$)/iu.test(t);
 }
 
+/* ══ R67 — mic kabhi AI ki APNI awaaz na pakde ═══════════════════════════════════════════════════════
+ * User screenshot: mic ne AI ki bola hui line hi transcript me daal di ("20986 … 11906 … ट्रेन लेनी है").
+ * Wajah: TTS khatam hone ka sahi pata nahi tha (andaza) → mic playback ke dauran khul jaata tha aur
+ * speaker→mic echo pakad leta tha. Teen parat ka hal:
+ *   1) app me native "bolna khatam" signal (aiBookingVoice.spokenAgoMs),
+ *   2) mic bolne ke turant baad nahi khulta (grace),
+ *   3) aaya hua transcript AI ki pichhli lines jaisa lage to chhod diya jaata hai (yahi function). */
+function normTokens(text: string): string[] {
+  return String(text ?? "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .split(/\s+/)
+    .filter((w) => w.length >= 2 || /^\d+$/.test(w));
+}
+
+/** Transcript AI ki hi line lagta hai? (numbers + token overlap — dono script chalti hain) */
+function looksLikeEcho(transcript: string, spoken: string[]): boolean {
+  const t = normTokens(transcript);
+  if (!t.length || !spoken.length) return false;
+  const spokenTokens = new Set(normTokens(spoken.join(" ")));
+  const spokenDigits = new Set(normTokens(spoken.join(" ")).filter((w) => /^\d{3,6}$/.test(w)));
+  const tDigits = t.filter((w) => /^\d{3,6}$/.test(w));
+  /* Train numbers: transcript me wahi numbers jo AI ne abhi bole → saaf echo. */
+  if (tDigits.length >= 1 && tDigits.filter((d) => spokenDigits.has(d)).length / tDigits.length >= 0.5) return true;
+  /* Latin/Hinglish: aadhe se zyada shabd AI ki hi line ke hain → echo. */
+  const hit = t.filter((w) => spokenTokens.has(w)).length;
+  if (hit / t.length >= 0.55) return true;
+  /* Devanagari transcript vs Latin spoken line: tokens match nahi karte — isliye lamba transcript jo
+   * bilkul hi naya hai aur AI ke bolne ke fauran baad aaya hai, use echo maan lo (slot ke jawab
+   * chhote hote hain: naam/age/pax/class/train). */
+  const deva = t.filter((w) => /[\u0900-\u097F]/.test(w)).length;
+  if (deva / t.length >= 0.6 && t.length >= 4) return true;
+  return false;
+}
+
+/** R67: aisa sawaal jo booking ka slot nahi hai — live status/timing/fare/seat/general. Aise sawaal par
+ *  jawab hamesha chat brain se aata hai (wahi tools), flow ki state waisi hi rehti hai. */
+function looksFactualQuery(text: string): boolean {
+  const t = text.trim();
+  if (!t) return false;
+  if (/\b\d{4,6}\b/.test(t)) return true; /* train number ke saath kuch poochha */
+  return /(status|kahan (hai|pahun)|pahunch|pahunche|kitne baje|kab (chale|chalegi|pahunche|reach)|timing|schedule|delay|late|platform|coach (position|kahan)|live|running|chal rahi|kitna (fare|kiraya|paisa|lag)|fare|kiraya|availability|seat (kahan|kitni|hai)|waitlist|wl\b|rac\b|pantry|khana|catering|wallet|balance|pnr|irctc|payment|paisa|रिफंड|refund|स्थिति|कहाँ|कहां|कितने बजे|कब|किराया|उपलब्ध)/iu.test(
+    t,
+  );
+}
+
+/** R67: chat brain ke context/known se us slot ka canonical jawab (agar brain ne wo slot diya ho). */
+function slotFromKnown(
+  known: { from: string | null; to: string | null; date: string | null; passengerCount: number | null },
+  slot: string,
+  nlu: NluSlots,
+): NluSlots {
+  const out: NluSlots = {};
+  if (slot === "from" && known.from) out.from = { code: known.from };
+  if (slot === "to" && known.to) out.to = { code: known.to };
+  if (slot === "date" && known.date) out.date = known.date;
+  if (slot === "pax" && known.passengerCount) out.passengerCount = known.passengerCount;
+  return { ...out, ...nlu };
+}
+
 /** R66-fix (user: "jaise mera AI chat me samajh jaata tha waise hi edhr bhi samjhe — edhr kya engine
  *  chal raha hai?"): jab local flow engine kisi chhote jawab ko samajh na paaye (jaise "एक पैैसेंजर है"),
  *  to wahi **maujooda chat brain** (`/api/understand` — chat ka apna NLU, koi naya engine nahi) se slot
@@ -96,6 +166,12 @@ function canonicalFromNlu(slot: string, nlu: NluSlots): string | null {
   if (slot === "from") return nlu.from?.code ? String(nlu.from.code) : null;
   if (slot === "to") return nlu.to?.code ? String(nlu.to.code) : null;
   if (slot === "date") return nlu.date ? String(nlu.date) : null;
+  /* R67: class/train bhi brain se aa sakte hain (wahi maujooda engine unhe verify karega). */
+  if (slot === "class") {
+    const c = Array.isArray(nlu.classCodes) ? nlu.classCodes[0] : null;
+    return c ? String(c).toUpperCase() : null;
+  }
+  if (slot === "train") return nlu.trainNumber ? String(nlu.trainNumber) : null;
   if (slot === "pax") {
     const n = Number(nlu.passengerCount);
     return Number.isFinite(n) && n >= 1 ? `${n} passengers` : null;
@@ -177,12 +253,21 @@ export function AiBooking({ open, onClose }: { open: boolean; onClose: () => voi
   const [voiceSupport, setVoiceSupport] = useState<"server" | "app" | "device" | "none">("device");
   /* R66: voice output me koi dikkat (server fail / playback block / output nahi) → UI imandaari se batata hai. */
   const [voiceIssue, setVoiceIssue] = useState<VoiceIssue>(null);
+  /* R67: chat brain ka context (chat ki tarah turn-to-turn yaad rehta hai) + live progress (lamba
+   * turn me user ko dikhta hai ki kaam ho raha hai — "answer nahi aaya" jaisa confusion na ho). */
+  const agentCtx = useRef<AgentContextClient | null>(null);
+  const [progressText, setProgressText] = useState<string | null>(null);
+  /* R67: voice-issue line user khud hata sake (screenshot: passenger form par poori jagah kha rahi thi). */
+  const [issueDismissed, setIssueDismissed] = useState(false);
   /* R66 (ChatGPT jaisi voice conversation): user ne mic se baat shuru ki → AI bolne ke baad mic khud
    * wapas sunta hai; "Type instead"/"End voice"/mute par loop band. Mic sirf user ke tap se ON hota hai
    * (background listening nahi) — loop usi ON conversation ke andar turn-taking hai. */
   const convActive = useRef(false);
   const lastWasVoice = useRef(false);
   const voiceRef = useRef<ReturnType<typeof useVoiceInput> | null>(null);
+  /* R67: aakhri spoken lines (echo filter) + echo-ignore counter (safety: 3 ke baad ignore band). */
+  const lastSpoken = useRef<{ lines: string[]; at: number }>({ lines: [], at: 0 });
+  const echoStreak = useRef(0);
   /* R62c: us train me catering/food options hain? (maujooda pantry API — read-only). null = pata nahi → food ka sawaal nahi. */
   const [foodExpected, setFoodExpected] = useState<boolean | null>(null);
   const started = useRef(false);
@@ -200,7 +285,11 @@ export function AiBooking({ open, onClose }: { open: boolean; onClose: () => voi
     (lines: string[]) => {
       if (!voiceOn || muted) return;
       const say = voiceLinesFor(lines, 2).join(" ");
-      if (say) aiBookingVoice.speak(say);
+      if (say) {
+        /* R67: jo bola gaya wo yaad rakho — mic ka transcript isse match kare to echo (chhod dena). */
+        lastSpoken.current = { lines: voiceLinesFor(lines, 3), at: Date.now() };
+        aiBookingVoice.speak(say);
+      }
     },
     [voiceOn, muted],
   );
@@ -294,6 +383,71 @@ export function AiBooking({ open, onClose }: { open: boolean; onClose: () => voi
     [push, runActions, speak],
   );
 
+  /* ══ R67 — maujooda CHAT BRAIN (wahi endpoint/tools/prompts jo chat ke hain) ═══════════════════════
+   * `api.agentStream` = chat ka apna raasta (progress ke saath). Yahan kuch bhi naya nahi banaya ja
+   * raha — sirf usi brain ko AI Booking se call kiya ja raha hai, aur uske jawab ko maujooda flow
+   * engine ke validation se guzara ja raha hai. Chat ke code/prompts/tools me koi badlaav nahi. */
+  const brainTurn = useCallback(
+    async (
+      text: string,
+      f: AiBookingState,
+      quiet = false,
+    ): Promise<{ reply: string | null; canonical: string | null }> => {
+      if (!quiet) setBusy(true);
+      const slot = f.awaiting && SLOT_TO_ASK[f.awaiting] ? SLOT_TO_ASK[f.awaiting] : null;
+      try {
+        const res = await api.agentStream(
+          {
+            text,
+            lastAsked: slot,
+            known: {
+              from: f.from ?? null,
+              to: f.to ?? null,
+              date: f.date ?? null,
+              passengerCount: f.pax ?? null,
+            },
+            context: agentCtx.current ?? undefined,
+            history: msgs.slice(-8).map((m) => ({
+              role: m.role === "ai" ? ("assistant" as const) : ("user" as const),
+              content: String(m.text ?? "").slice(0, 500),
+            })),
+            now: new Date().toISOString(),
+            bookingFlow: f.stage,
+          },
+          (e) => {
+            if (!quiet) setProgressText(e.total ? `${e.phase}… ${e.done ?? 0}/${e.total}` : `${e.phase}…`);
+          },
+        );
+        if (res?.context) agentCtx.current = res.context as AgentContextClient;
+        const reply = String(res?.reply ?? "").trim() || null;
+        /* Slot: (1) jo flow abhi maang raha hai, (2) warna brain ke context/known se next missing. */
+        const nlu = (res?.nlu ?? {}) as NluSlots;
+        const ctx = res?.context;
+        const knownFromCtx = {
+          from: ctx?.origin?.code ?? null,
+          to: ctx?.destination?.code ?? null,
+          date: ctx?.date ?? null,
+          passengerCount: ctx?.passengers ?? null,
+        };
+        let canonical: string | null = null;
+        if (slot) canonical = canonicalFromNlu(slot, { ...nlu, ...slotFromKnown(knownFromCtx, slot, nlu) } as NluSlots);
+        if (!canonical && ctx) {
+          const next = !knownFromCtx.from ? "from" : !knownFromCtx.to ? "to" : !knownFromCtx.date ? "date" : !knownFromCtx.passengerCount ? "pax" : null;
+          if (next) canonical = canonicalFromNlu(next, { ...nlu, ...slotFromKnown(knownFromCtx, next, nlu) } as NluSlots);
+        }
+        return { reply, canonical };
+      } catch {
+        return { reply: null, canonical: null }; /* brain fail → flow engine waisa hi (kuch toota nahi) */
+      } finally {
+        if (!quiet) {
+          setBusy(false);
+          setProgressText(null);
+        }
+      }
+    },
+    [msgs],
+  );
+
   const handleInput = useCallback(
     async (text: string, viaVoice = false) => {
       const clean = text.trim();
@@ -309,27 +463,49 @@ export function AiBooking({ open, onClose }: { open: boolean; onClose: () => voi
       };
       let turn = aiBookingTurn(flow, clean, env);
 
-      /* R66: local engine ne kuch samjha hi nahi (koi slot aage nahi badha) aur ye koi sawaal bhi
-       * nahi — matlab user ne jo bola wo us slot ka jawab tha par regex samajh na paaya. Aise waqt
-       * par maujooda chat brain se slot samjho, aur uska canonical jawab wahi purane engine ko do
-       * (dobara) — validation wahi, invent kuch nahi. */
+      /* ══ R67 — AI-first (user: "edhr bhi AI first rakhein … AI ke pass sabhi existing tools ho jo
+       * pehle chat mein the … AI khud query samjhe aur right tool ka use kare"). Har turn par wahi
+       * maujooda chat brain (maujooda tools/prompts) chalta hai. Do raste:
+       *   (a) flow engine ne kuch samjha (slot aage badha) aur ye sawaal nahi hai → booking turant
+       *       aage badhti hai; brain background me chalta hai (sirf is case me jawab user ko dikhta
+       *       hai jab brain ke paas flow ko aage badhane wala slot ho — warna chup rehta hai),
+       *   (b) engine kuch nahi samjha ya ye sawaal hai (status/timing/fare/general) → brain ka
+       *       jawab (asli tools se) user ko dikhta hai; aur brain ka slot mile to canonical jawab
+       *       wahi purane engine ko diya jaata hai (validation wahi). */
       const slotAsked = flow.awaiting && SLOT_TO_ASK[flow.awaiting] ? flow.awaiting : null;
-      const slotNotMoved = flowKey(turn.state) === flowKey(flow);
-      if (slotAsked && slotNotMoved && !looksLikeQuestion(clean)) {
-        /* Local engine ne slot nahi samjha (chahe wo chup raha ya imandaari se "samajh nahi aaya"
-         * bola) — dono me brain se ek baar poochho. Brain bhi na samjhe to wahi local turn chalta
-         * hai (koi naya text nahi, koi double line nahi). */
-        const canonical = await brainSlotAnswer(clean, flow, slotAsked);
-        if (canonical) {
-          const retry = aiBookingTurn(flow, canonical, env);
+      let engineMoved = flowKey(turn.state) !== flowKey(flow);
+      const ask = looksLikeQuestion(clean) || looksFactualQuery(clean);
+      let brainReply: string | null = null;
+
+      if (engineMoved && !ask) {
+        /* Booking turant aage badh gayi (engine ne samajh liya) — brain sirf background me chalta hai
+         * (uska jawab user ko dikhta nahi, warna do-ja jawab = confusion). Uske slot se turn DOBARA
+         * nahi chalate: engine pehle hi aage nikal chuka hai, dobara chalane se wo peeche chala jaata. */
+        /* Chhoti ek-token slot answers ("2", "CC", "12014") par brain ki zaroorat hi nahi — engine ne
+         * samajh liya. Lambi/mili-juli baat ho to background me brain bhi sunta hai (quiet). */
+        if (clean.split(/\s+/).length >= 3) void brainTurn(clean, flow, true);
+      } else {
+        const b = await brainTurn(clean, flow);
+        brainReply = b?.reply ?? null;
+        if (b?.canonical) {
+          const retry = aiBookingTurn(flow, b.canonical, env);
           if (flowKey(retry.state) !== flowKey(flow)) {
             turn = retry;
-          } else {
-            turn = aiBookingTurn(flow, clean, env); /* wahi purana turn */
+            engineMoved = true;
           }
         }
       }
-      const after = await applyTurn(turn);
+      let after = await applyTurn(turn);
+
+      /* R67: brain ne jawab diya par engine ne flow aage nahi badhaya → jawab user ko (chat jaisa),
+       * aur engine ki wo lines hata do jo "samajh nahi aaya / dobara bata dijiye" wali khali baatein
+       * hain (sawaal rehne dete hain — booking ka agla kadam). Engine ka state bilkul waisa hi. */
+      if (brainReply && !engineMoved) {
+        const asked = turn.say.filter((l) => l.includes("?"));
+        for (const l of asked) push("ai", l);
+        push("ai", brainReply);
+        speak([...asked, brainReply]);
+      }
 
       /* Train chuni gayi → maujooda train-select (isliye asli ClassSelect screen khulti hai). */
       if (after.stage === "CLASS_SELECTION" && after.trainNumber) {
@@ -341,8 +517,10 @@ export function AiBooking({ open, onClose }: { open: boolean; onClose: () => voi
       if (after.stage === "CLASS_SELECTION" && after.classCode) {
         const klass = env.classes.find((c) => c.code === after.classCode);
         if (klass) {
-          await cb.current.selectClass(klass);
-          const verified = live.current.state.selectedClass;
+          /* R67: selectClass apna verified class RETURN karta hai — usi ko mano (state ref par timing
+           * ka bharosa nahi; pehle wahi race thi jo yahan sirf extra await se zyada dikhi). */
+          const chosen = await cb.current.selectClass(klass);
+          const verified = chosen ?? live.current.state.selectedClass;
           if (verified && verified.code === klass.code) {
             const train = st.selectedTrain ?? st.trains.find((t) => t.number === after.trainNumber) ?? null;
             /* Automation: class select hote hi maujooda passenger form khud khulta hai. */
@@ -353,83 +531,22 @@ export function AiBooking({ open, onClose }: { open: boolean; onClose: () => voi
         }
       }
 
-      /* ── R4-fix: general sawaal (chat jaisa). Flow engine ne aage kuch nahi badla aur usne wahi
-       * sawaal wapas poochha (ask-back) → matlab is sawaal ka jawab uske paas nahi tha → maujooda
-       * chat brain se jawab. Booking flow ki state bilkul waisi rehti hai. */
-      const movedFlow = flowKey(after) !== flowKey(flow);
-      const movedBooking = bookingKey() !== bookingBefore;
-      const askedBack = turn.say.some((l) => l.includes("?"));
-      /* Review/confirm/handoff stage par AI sirf apni pichhli baat dohraata hai — wahan bhi sawaal ka
-       * jawab brain se aana chahiye (warna user ko lagega "yeh jawab nahi de raha"). */
-      const reviewStage =
-        after.stage === "FINAL_CONFIRMATION" ||
-        after.stage === "PASSENGER_REVIEW" ||
-        after.stage === "BOOKING_REVIEW" ||
-        after.stage === "IRCTC_HANDOFF";
-      if (!movedFlow && !movedBooking && looksLikeQuestion(clean) && (askedBack || reviewStage)) {
-        await askBrain(clean, after);
-      }
+      void bookingBefore;
     },
-    [applyTurn, flow, push],
-  );
-
-  /** R66: maujooda chat NLU (`/api/understand` — wahi jo chat use karta hai) se EK slot samjho.
-   *  Sirf wahi slot jo flow maang raha hai; mila to canonical jawab (jo maujooda engine verify karega). */
-  const brainSlotAnswer = useCallback(
-    async (text: string, f: AiBookingState, slot: string): Promise<string | null> => {
-      try {
-        const res = await api.understand({
-          text,
-          lastAsked: SLOT_TO_ASK[slot],
-          known: { from: f.from ?? null, to: f.to ?? null, date: f.date ?? null, passengerCount: f.pax ?? null },
-          now: new Date().toISOString(),
-        });
-        return canonicalFromNlu(slot, (res?.nlu ?? {}) as NluSlots);
-      } catch {
-        return null; /* brain fail → flow engine waisa hi (kuch toota nahi) */
-      }
-    },
-    [],
-  );
-
-  /** Maujooda chat brain (/api/agent — wahi jo Concierge use karta hai) se general jawab. */
-  const askBrain = useCallback(
-    async (text: string, f: AiBookingState) => {
-      setBusy(true);
-      try {
-        const res = await api.agent({
-          text,
-          known: {
-            from: f.from ?? null,
-            to: f.to ?? null,
-            date: f.date ?? null,
-            passengerCount: f.pax ?? null,
-          },
-          history: msgs.slice(-8).map((m) => ({
-            role: m.role === "ai" ? ("assistant" as const) : ("user" as const),
-            content: String(m.text ?? "").slice(0, 500),
-          })),
-          now: new Date().toISOString(),
-        });
-        const reply = String(res?.reply ?? "").trim();
-        if (reply) {
-          push("ai", reply);
-          speak([reply]);
-        } else {
-          push("ai", "Is sawaal ka jawab abhi nahi mil paaya — dobara poochhiye.");
-        }
-      } catch {
-        push("ai", "Is sawaal ka jawab lene me dikkat aayi (network) — dobara poochhiye.");
-      } finally {
-        setBusy(false);
-      }
-    },
-    [msgs, push, speak],
+    [applyTurn, brainTurn, flow, push, speak],
   );
 
   /* Voice: maujooda hook (mic permission sirf user ke tap par — background listening nahi). */
   const voice = useVoiceInput(
     (text) => {
+      /* R67: AI ki apni awaaz ka echo kabhi input na bane (user screenshot). Sirf bolne ke 10s ke
+       * andar lagu; 3 baar lagataar ignore ho jaye to filter chhod do (kahin asli baat na ruk jaye). */
+      const sp = lastSpoken.current;
+      if (Date.now() - sp.at < 10000 && echoStreak.current < 3 && looksLikeEcho(text, sp.lines)) {
+        echoStreak.current += 1;
+        return;
+      }
+      echoStreak.current = 0;
       void handleInput(text, true);
     },
     (msg) => push("ai", msg),
@@ -450,10 +567,14 @@ export function AiBooking({ open, onClose }: { open: boolean; onClose: () => voi
     /* "thinking" yahan inline (busy || searching) — kyunki wo variable is effect ke neeche banta hai. */
     /* Sirf "busy" (turn chal raha hai) — flow.searching (list dikhane ka flag) loop ko rokna nahi chahiye. */
     if (voice.listening || speaking || busy) return;
+    /* R67: bolna sach me khatam hone ka intezaar (app me asli signal aata hai) — warna mic apni hi
+     * awaaz ka echo pakad leta tha. */
+    const wait = Math.max(900, 1200 - aiBookingVoice.spokenAgoMs());
     const t = window.setTimeout(() => {
       if (!convActive.current || voiceRef.current?.listening) return;
+      aiBookingVoice.stop(); /* playback poora band, phir hi sunna */
       void voiceRef.current?.start();
-    }, 320);
+    }, wait);
     return () => window.clearTimeout(t);
   }, [voiceOn, muted, speaking, busy, voice.listening]);
 
@@ -658,6 +779,14 @@ export function AiBooking({ open, onClose }: { open: boolean; onClose: () => voi
   if (!open) return null;
 
   const dock = state.screen !== "home";
+
+  /* R67 (user: "passenger form pe mic layout sahi nahi hai"): dock fixed hai — isliye jab dock khula ho
+   * to screen ke neeche utni jagah chhod do ki form ka aakhri field/CTA uske peeche na chhupe. */
+  useEffect(() => {
+    if (!open || !dock) return;
+    document.body.classList.add("aib-docked");
+    return () => document.body.classList.remove("aib-docked");
+  }, [open, dock]);
   const lastAi = [...msgs].reverse().find((m) => m.role === "ai")?.text ?? "";
   const stageIndex = AI_BOOKING_STAGES.indexOf(flow.stage);
   const thinking = busy || flow.searching;
@@ -745,7 +874,7 @@ export function AiBooking({ open, onClose }: { open: boolean; onClose: () => voi
           <b>🎫 AI Booking</b>
           <span className="aib-stage now">{AI_BOOKING_STAGE_LABELS[flow.stage]}</span>
           <span className="aib-dock-text" data-testid="aib-dock-status">
-            {statusLine}
+            {progressText ?? statusLine}
           </span>
           {/* R4-fix (user: "jaise pehle chat me kuch bhi poochte the — yeh bhi btayega?"): haan —
               koi bhi sawaal model ke paas jaata hai. Chhota ishara + tap par input focus. */}
@@ -774,13 +903,18 @@ export function AiBooking({ open, onClose }: { open: boolean; onClose: () => voi
           </div>
         )}
 
-        {voiceIssue && (voice.listening || thinking || voiceOn) && (
+        {voiceIssue && !issueDismissed && (voice.listening || thinking || voiceOn) && (
           <div className="aib-voice-issue" data-testid="aib-voice-issue">
-            {voiceIssue === "playback-blocked"
-              ? "🔇 Server ki awaaz is device par play nahi ho payi (browser/WebView ka audio block) — device voice chala di. RailBook app ka naya update ise theek karta hai; ek tap 🔊 Test voice se dobara try kar sakte hain."
-              : voiceIssue === "server-failed"
-                ? "Server voice abhi nahi aayi — device voice chala di. Booking text waise hi chalti rahegi."
-                : "Is device par voice output nahi mila — main text me aage badh rahi hoon."}
+            <span>
+              {voiceIssue === "playback-blocked"
+                ? "🔇 Server ki awaaz play nahi ho payi — device voice chala di. (🔊 Test voice se dobara try)"
+                : voiceIssue === "server-failed"
+                  ? "Server voice abhi nahi aayi — device voice chala di. Booking text waise hi chalti hai."
+                  : "Is device par voice output nahi mila — text me aage badh rahi hoon."}
+            </span>
+            <button type="button" className="aib-btn-ghost" aria-label="Notice hatao" onClick={() => setIssueDismissed(true)}>
+              ✕
+            </button>
           </div>
         )}
 
@@ -915,13 +1049,18 @@ export function AiBooking({ open, onClose }: { open: boolean; onClose: () => voi
         )}
       </div>
 
-      {voiceIssue && (voice.listening || thinking || voiceOn) && (
+      {voiceIssue && !issueDismissed && (voice.listening || thinking || voiceOn) && (
         <div className="aib-voice-issue" data-testid="aib-voice-issue">
-          {voiceIssue === "playback-blocked"
-            ? "🔇 Server ki awaaz is device par play nahi ho payi (browser/WebView ka audio block) — device voice chala di. RailBook app ka naya update ise theek karta hai; ek tap 🔊 Test voice se dobara try kar sakte hain."
-            : voiceIssue === "server-failed"
-              ? "Server voice abhi nahi aayi — device voice chala di. Booking text waise hi chalti rahegi."
-              : "Is device par voice output nahi mila — main text me aage badh rahi hoon."}
+          <span>
+            {voiceIssue === "playback-blocked"
+              ? "🔇 Server ki awaaz play nahi ho payi — device voice chala di. (🔊 Test voice se dobara try)"
+              : voiceIssue === "server-failed"
+                ? "Server voice abhi nahi aayi — device voice chala di. Booking text waise hi chalti hai."
+                : "Is device par voice output nahi mila — text me aage badh rahi hoon."}
+          </span>
+          <button type="button" className="aib-btn-ghost" aria-label="Notice hatao" onClick={() => setIssueDismissed(true)}>
+            ✕
+          </button>
         </div>
       )}
 

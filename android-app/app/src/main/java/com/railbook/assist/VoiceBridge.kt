@@ -63,6 +63,18 @@ class VoiceBridge(
     @JavascriptInterface
     fun audioAvailable(): Boolean = true
 
+    /* ══ R67 (1 Oct 2026, user screenshot: mic ne AI ki apni awaaz pakad li) ══════════════════════════
+     * Page ko sach batao ki bolna/playback poora khatam ho gaya — iske bina page andaza lagata hai aur
+     * mic playback ke dauran hi khul jaata hai (speaker → mic echo). Signal: window.__railbookTtsEnded. */
+    private fun notifySpokenEnded() {
+        try {
+            /* Wahi pattern jo bridge ke baaki callbacks use karte hain (webView.post). */
+            webView.post { webView.evaluateJavascript("window.__railbookTtsEnded && window.__railbookTtsEnded()", null) }
+        } catch (_: Exception) {
+            /* page ne callback register nahi kiya — kuch nahi */
+        }
+    }
+
     /** Server TTS MP3 (base64) ko native MediaPlayer se bajaao — WebView ki autoplay policy beech me nahi aati. */
     @JavascriptInterface
     fun playAudioBase64(data: String?, mime: String?): Boolean {
@@ -86,7 +98,10 @@ class VoiceBridge(
                 )
                 mp.setDataSource(ByteArrayMediaSource(bytes))
                 mp.setOnPreparedListener { it.start() }
-                mp.setOnCompletionListener { stopAudioInternal() }
+                mp.setOnCompletionListener {
+                    notifySpokenEnded()
+                    stopAudioInternal()
+                }
                 mp.setOnErrorListener { _, _, _ ->
                     stopAudioInternal()
                     true
@@ -154,6 +169,27 @@ class VoiceBridge(
         activity.runOnUiThread {
             try {
                 val engine = ensureTts() ?: return@runOnUiThread
+                /* R67: bolna khatam hone par page ko signal (mic tabhi khule). */
+                try {
+                    engine.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
+                        override fun onStart(utteranceId: String?) {}
+
+                        override fun onDone(utteranceId: String?) {
+                            notifySpokenEnded()
+                        }
+
+                        @Deprecated("purane API ke liye")
+                        override fun onError(utteranceId: String?) {
+                            notifySpokenEnded()
+                        }
+
+                        override fun onError(utteranceId: String?, errorCode: Int) {
+                            notifySpokenEnded()
+                        }
+                    })
+                } catch (_: Exception) {
+                    /* listener set na ho to page ke estimate par chalega */
+                }
                 if (lang != null && lang.isNotEmpty()) {
                     val parts = lang.split("-")
                     if (parts.isNotEmpty() && parts[0].isNotEmpty()) {

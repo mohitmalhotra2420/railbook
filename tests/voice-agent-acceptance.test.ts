@@ -452,7 +452,12 @@ describe("Voice Agent R1 — acceptance", () => {
     expect(res.status).toBe(200);
     expect(res.headers["content-type"]).toMatch(/audio\/mpeg/);
 
-    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    /* R67: config call provider ko background me warm karta hai (chhota "hmm") — isliye asli line ka
+     * call dhoondhte hain, sirf pehla call nahi. */
+    const calls = fetchMock.mock.calls as unknown as [string, RequestInit][];
+    const hit = calls.find(([, init]) => String(JSON.parse(String(init.body)).input) === "Namaste");
+    expect(hit, "asli TTS call milna chahiye").toBeTruthy();
+    const [url, init] = hit!;
     expect(url).toBe("http://edge-tts.internal:5050/v1/audio/speech");
     expect((init.headers as Record<string, string>).Authorization).toBe("Bearer edge-secret");
     const body = JSON.parse(String(init.body)) as { voice: string; model: string; response_format: string; input: string };

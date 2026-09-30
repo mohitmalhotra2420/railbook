@@ -16,7 +16,16 @@
 import { api } from "../api";
 import { cancelGuide, speakGuide, unlockSpeech } from "./speakGuide";
 import { hasNativeVoice } from "./nativeSpeech";
-import { hasNativeAudio, nativePlayAudioBase64, nativeSpeak, nativeStopSpeaking, nativeStopAudio, hasNativeSpeak } from "./nativeSpeak";
+import {
+  hasNativeAudio,
+  nativePlayAudioBase64,
+  nativeSpeak,
+  nativeStopSpeaking,
+  nativeStopAudio,
+  hasNativeSpeak,
+  onNativeSpokenEnded,
+  hasNativeSpokenEndedSignal,
+} from "./nativeSpeak";
 import { isSpeechSupported } from "./speech";
 
 export interface VoiceProviderInfo {
@@ -67,6 +76,8 @@ export interface AiBookingVoice {
   /** R66: playback/server fail hone par ek baar batao (UI line dikha sake). */
   onIssue: (cb: (issue: VoiceIssue) => void) => () => void;
   lastIssue: () => VoiceIssue;
+  /** R67: aakhri bolne ke kitne ms baad hain (mic ko echo se bachane ke liye). */
+  spokenAgoMs: () => number;
   /** R66: AI ki awaaz kis raaste se jaa rahi hai ("server-audio" | "app-audio" | "app-tts" | "device"). */
   lastRoute: () => "server-audio" | "app-audio" | "app-tts" | "device" | null;
 }
@@ -213,8 +224,17 @@ export function createAiBookingVoice(deps: AiBookingVoiceDeps = defaultDeps()): 
       }
     }
   };
-  /* Browser TTS ka koi "ended" event nahi milta — text length se andaza (jitna bola, utni der). */
-  const speakingMs = (line: string) => Math.min(12000, Math.max(1500, line.length * 75));
+  /* Browser TTS ka koi "ended" event nahi milta — text length se andaza (jitna bola, utni der).
+   * R67: app (native TTS) me asli signal aata hai (VoiceBridge → onNativeSpokenEnded), aur wahi
+   * primary hai; andaza sirf fallback (aur thoda lamba, taaki mic jaldi na khule). */
+  const speakingMs = (line: string, appTts = false) =>
+    appTts ? Math.min(20000, Math.max(2500, line.length * 95)) : Math.min(12000, Math.max(1500, line.length * 75));
+  /* R67: jab aakhri baar bolna khatam hua (ms) — mic iske turant baad nahi khulta (echo ka asli reason). */
+  let spokeEndedAt = 0;
+  onNativeSpokenEnded(() => {
+    spokeEndedAt = Date.now();
+    emit("idle");
+  });
 
   return {
     speak(text: string) {
@@ -229,9 +249,23 @@ export function createAiBookingVoice(deps: AiBookingVoiceDeps = defaultDeps()): 
         route = hasNativeSpeak() ? "app-tts" : "device";
         if (route === "device" && !deviceVoiceLikelyAvailable()) emitIssue("no-output");
         deps.browserSpeak(line);
+        spokeEndedAt = 0;
+        const waitMs = speakingMs(line, route === "app-tts");
+        /* Bolna khatam hone par ek hi baar "idle" (signal aaye ya safety-timer se). */
+        const finish = () => {
+          if (my !== token || spokeEndedAt) return;
+          spokeEndedAt = Date.now();
+          emit("idle");
+        };
         window.setTimeout(() => {
-          if (my === token) emit("idle");
-        }, speakingMs(line));
+          if (my !== token) return;
+          if (route === "app-tts" && hasNativeSpokenEndedSignal()) {
+            /* App asli "khatam" signal bhejega — andaza sirf safety net (warna mic late khulta). */
+            window.setTimeout(finish, 5000);
+            return;
+          }
+          finish();
+        }, waitMs);
         return;
       }
       emit("speaking");
@@ -248,7 +282,10 @@ export function createAiBookingVoice(deps: AiBookingVoiceDeps = defaultDeps()): 
           });
         })
         .finally(() => {
-          if (my === token) emit("idle");
+          if (my === token) {
+            spokeEndedAt = Date.now();
+            emit("idle");
+          }
         })
         .catch((err: unknown) => {
           /* Server voice play/fetch fail → booking flow rukna nahi chahiye: device/native voice chalao,
@@ -338,6 +375,8 @@ export function createAiBookingVoice(deps: AiBookingVoiceDeps = defaultDeps()): 
       return () => issueListeners.delete(cb);
     },
     lastIssue: () => issue,
+    /** R67: aakhri baar bolna kitni der pehle khatam hua (ms). Kabhi bola nahi → Infinity. */
+    spokenAgoMs: () => (spokeEndedAt ? Date.now() - spokeEndedAt : Number.POSITIVE_INFINITY),
     lastRoute: () => route,
   };
 }

@@ -341,21 +341,29 @@ describe("R4 — general sawaal, dock layout, IRCTC autofill honesty", () => {
     await type("Amritsar se Ludhiana 1 October, 2 passengers");
     await waitFor(() => expect(screen.getByTestId("aib-dock-log").textContent).toMatch(/kaunsi train leni hai/i));
 
-    /* Booking flow ka sawaal chalu hai — bee me general sawaal: jawab brain se aata hai */
+    /* Booking flow ka sawaal chalu hai — beech me general sawaal: jawab brain se aata hai.
+     * R67 (user: "edhr bhi AI first rakhein"): brain HAR turn par chalta hai, isliye yahan ek se
+     * zyada call normal hai — par sawaal wala text brain tak pahuncha ho aur jawab dikha ho, dono
+     * zaroori. */
     await type("wallet me kitne paise hain?");
     await waitFor(() => expect(screen.getByTestId("aib-dock-log").textContent).toMatch(/wallet me ₹5,000/));
-    expect(asked.length).toBe(1);
-    expect(asked[0].text).toBe("wallet me kitne paise hain?");
+    expect(asked.length).toBeGreaterThanOrEqual(1);
+    expect(asked.some((a) => a.text === "wallet me kitne paise hain?")).toBe(true);
     /* flow bilkul nahi badla — train ka sawaal wahi khada hai */
     await waitFor(() => expect(screen.getByTestId("aib-dock-log").textContent).toMatch(/kaunsi train leni hai/i));
   });
 
-  it("dock layout: voice controls aur composer alag lines me (mic overlap fix ka CSS guard)", () => {
+  it("dock layout: voice controls wrap hote hain, composer apni line par, aur form ke liye jagah (R67)", () => {
     const css = readFileSync("src/styles.css", "utf8");
     const dock = css.slice(css.indexOf(".aib-dock{"), css.indexOf(".aib-dock{") + 420);
     expect(dock).toMatch(/flex-direction:column/);
-    expect(css).toMatch(/\.aib-dock \.aib-voice-actions\{width:100%/);
+    /* R67: passenger form par voice panel compact — actions wrap karte hain (overlap nahi). */
+    expect(css).toMatch(/\.aib-dock \.aib-voice-actions\{width:auto;flex:1 1 100%;display:flex;flex-wrap:wrap/);
     expect(css).toMatch(/\.aib-dock \.aib-dock-row \.aib-form\{width:100%\}/);
+    /* R67: dock khula ho to screen/form ke neeche jagah — aakhri field dock ke peeche na chhupe. */
+    expect(css).toMatch(/body\.aib-docked \.passenger-form\{padding-bottom:/);
+    /* R67: voice issue line ek compact row (✕ se hataayi ja sakti hai). */
+    expect(css).toMatch(/\.aib-voice-issue\{display:flex;align-items:center/);
   });
 
   it("IRCTC: autofill client na ho to honest line + apna button (jhoothi umeed nahi)", async () => {
@@ -400,6 +408,138 @@ describe("R4 — general sawaal, dock layout, IRCTC autofill honesty", () => {
   });
 });
 
+/* ══ R67 (1 Oct 2026) — AI-first: chat brain (sabhi maujooda tools) har sawaal par, engine wahi ════
+ * User: "kyu na hum edhr bhi AI first rakhein … AI ke pass sabhi existing tools ho jo pehle chat mein
+ * the, AI khud query samjhe and right tool ka use kare". Do cheezein yahan bandh hoti hain:
+ *   • live-status/timing jaisa sawaal (jisme station ka naam ho) ab engine ke "samajh nahi aaya" me
+ *     nahi ghulta — jawab brain se aata hai, flow ki state waisi hi rehti hai,
+ *   • AI ki apni bola hui line mic ke transcript me ghus kar input nahi banti (echo filter).
+ */
+describe("R67 — AI-first brain + echo-safe voice", () => {
+  const log = () => (document.querySelector('[data-testid="aib-dock-log"]') ?? document.querySelector(".aib-thread"))?.textContent ?? "";
+  beforeEach(() => {
+    sessionStorage.clear();
+    voiceState.listening = false;
+    voiceState.interim = "";
+    voiceState.transcript = "";
+  });
+
+  it("live-status sawaal (station ke naam ke saath) par brain ka jawab — engine ki khali line nahi", async () => {
+    const asked: { text?: string; lastAsked?: string }[] = [];
+    (globalThis as unknown as { fetch: unknown }).fetch = vi.fn(async (url: string, init?: { body?: string }) => {
+      const u = String(url);
+      if (u.includes("/api/agent")) {
+        const body = JSON.parse(String(init?.body ?? "{}")) as { text?: string; lastAsked?: string };
+        asked.push({ text: body.text, lastAsked: body.lastAsked ?? undefined });
+        return {
+          ok: true,
+          json: async () => ({
+            ok: true,
+            source: "ai",
+            grounded: true,
+            reply: "12054 HW Janshatabdi ASR se 06:50 baje nikalti hai aur HW 13:50 pahunchegi.",
+            context: { origin: { code: "LDH", name: "Ludhiana Junction", city: "Ludhiana" } },
+          }),
+        } as unknown as Response;
+      }
+      const body = u.includes("/api/wallet")
+        ? { wallet: { balance: 5000, currency: "INR", transactions: [] } }
+        : u.includes("/api/meta")
+          ? { provider: { id: "test", name: "Test", mock: false }, serviceFee: 0 }
+          : u.includes("/api/voice/config")
+            ? { provider: "browser", serverTts: false, model: null, languages: ["hi-IN"] }
+            : u.includes("/pantry")
+              ? { pantry: false, providers: [], note: null, foodChoiceExpected: false }
+              : u.includes("/api/trains")
+                ? { trains: [train], recommendations: [], empty: false }
+                : { bookings: [] };
+      return { ok: true, json: async () => body } as unknown as Response;
+    });
+
+    open();
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "AI Booking" })).toBeTruthy());
+    await type("Ludhiana se Amritsar, 1 October, 1 passenger");
+    await waitFor(() => expect(log()).toMatch(/kaunsi train leni hai/i));
+
+    await type("12054 आज अमृतसर कितने बजे पहुंची थी");
+    await waitFor(() => expect(log()).toMatch(/06:50/), { timeout: 8000 });
+    /* engine ki "samajh nahi aaya" wali line nahi aani chahiye — jawab mil gaya hai */
+    expect(log()).not.toMatch(/samajh nahi aaya/i);
+    /* brain ko flow ka pending slot bhi pata tha (train chunna baaki hai) */
+    const q = asked.find((a) => a.text === "12054 आज अमृतसर कितने बजे पहुंची थी");
+    expect(q?.lastAsked).toBe("train");
+  }, 25000);
+
+  it("seat/berth preference AI khud poochhta hai — user se poochke hi aage (full automation)", async () => {
+    open();
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "AI Booking" })).toBeTruthy());
+    await type("Ludhiana se Amritsar, 1 October, 2 passengers");
+    await waitFor(() => expect(log()).toMatch(/kaunsi train leni hai/i));
+    await type("12014");
+    await waitFor(() => expect(log()).toMatch(/kaunsi class chahiye/i));
+    await type("CC");
+    await waitFor(() => expect(log()).toMatch(/Passenger 1 ka naam/i));
+    /* naam/age/gender diye, seat (berth) nahi — AI ko khud poochhna chahiye (invent nahi karta) */
+    await type("Rahul Sharma, 31, male");
+    await waitFor(() => expect(log()).toMatch(/berth preference/i), { timeout: 6000 });
+    expect(log()).toMatch(/Lower|Upper|Side|window/i);
+    /* seat bata di (CC me berth nahi hota — window/aisle hi sahi options hain) → agla kadam apne aap */
+    await type("window");
+    await waitFor(() => expect(log()).toMatch(/Passenger 2/i), { timeout: 8000 });
+  }, 25000);
+
+  it("AI ki apni boli hui line mic ke transcript me aa jaye to input nahi banti (echo)", async () => {
+    const asked: string[] = [];
+    (globalThis as unknown as { fetch: unknown }).fetch = vi.fn(async (url: string, init?: { body?: string }) => {
+      const u = String(url);
+      if (u.includes("/api/agent")) {
+        const body = JSON.parse(String(init?.body ?? "{}")) as { text?: string };
+        asked.push(String(body.text ?? ""));
+        return { ok: true, json: async () => ({ ok: true, source: "ai", grounded: true, reply: "Theek hai." }) } as unknown as Response;
+      }
+      const body = u.includes("/api/wallet")
+        ? { wallet: { balance: 5000, currency: "INR", transactions: [] } }
+        : u.includes("/api/meta")
+          ? { provider: { id: "test", name: "Test", mock: false }, serviceFee: 0 }
+          : u.includes("/api/voice/config")
+            ? { provider: "browser", serverTts: false, model: null, languages: ["hi-IN"] }
+            : u.includes("/pantry")
+              ? { pantry: false, providers: [], note: null, foodChoiceExpected: false }
+              : u.includes("/api/trains")
+                ? { trains: [train], recommendations: [], empty: false }
+                : { bookings: [] };
+      return { ok: true, json: async () => body } as unknown as Response;
+    });
+
+    open();
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "AI Booking" })).toBeTruthy());
+    /* Voice ON — ab AI bolti hai (aur `speak()` uske lines yaad rakhta hai). */
+    fireEvent.click(screen.getByLabelText("🎙️ Talk to RailBook"));
+    await waitFor(() => expect(screen.getByTestId("aib-voice")).toBeTruthy());
+
+    /* User mic se bolta hai (mock transcript) → ✓ se bhejta hai. */
+    voiceState.listening = true;
+    voiceState.transcript = "Ludhiana se Amritsar, 1 October, 1 passenger";
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText("🎙️ Talk to RailBook"));
+    });
+    await waitFor(() => expect(log()).toMatch(/kaunsi train leni hai/i), { timeout: 8000 });
+    const before = log().length;
+
+    /* Ab recognizer ne AI ki hi boli hui line pakad li (user screenshot: "20986 … ट्रेन लेनी है"). */
+    voiceState.listening = true;
+    voiceState.transcript = "11906 HSX AGC EXP 12426 JAMMU RAJDHANI 12446 UTTAR S KRANTI Kaunsi train leni hai";
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText("🎙️ Talk to RailBook"));
+    });
+    await new Promise((r) => setTimeout(r, 250));
+    /* echo chhod diya gaya — koi naya "you" message nahi, log waisa hi */
+    expect(log()).not.toMatch(/12426 JAMMU RAJDHANI 12446/);
+    expect(log().length).toBe(before);
+    expect(asked.some((t) => t.includes("12426"))).toBe(false);
+  }, 25000);
+});
+
 /* ══ R66 (30 Sep 2026) — "jaise mera AI chat me samajh jaata tha waise hi edhr bhi samjhe" ═════════
  * (a) local engine samajh na paaye to wahi maujooda chat brain (/api/understand) se slot samajh aata
  *     hai — aur wahi canonical jawab purane flow engine ko diya jaata hai (validation wahi),
@@ -422,15 +562,30 @@ describe("R66 — brain se samajhna + voice conversation loop", () => {
     voiceState.transcript = "";
   });
 
-  it("local engine samajh na paaye to chat NLU (/api/understand) se slot samajh aata hai", async () => {
-    const uAsk: string[] = [];
+  it("R67 AI-first: chat brain (wahi tools) se slot samajh aata hai, engine wahi verify karta hai", async () => {
+    const brainAsk: { text?: string; lastAsked?: string }[] = [];
     (globalThis as unknown as { fetch: unknown }).fetch = vi.fn(async (url: string, init?: { body?: string }) => {
       const u = String(url);
-      if (u.includes("/api/understand")) {
+      if (u.includes("/api/agent")) {
         const body = JSON.parse(String(init?.body ?? "{}")) as { text?: string; lastAsked?: string };
-        uAsk.push(`${body.text}|${body.lastAsked}`);
-        /* chat ka NLU: "एक जना" ko 1 passenger samajhta hai (regex nahi samajhta) */
-        return { ok: true, json: async () => ({ nlu: { intent: "SEARCH_TRAINS", passengerCount: 1 }, source: "ai", missingFields: [] }) } as unknown as Response;
+        brainAsk.push({ text: body.text, lastAsked: body.lastAsked });
+        /* Chat brain ka jawab: slot samajh liya (jaise asli /api/agent karta hai — known/context me
+         * passengerCount bhejta hai) + ek chhoti reply. */
+        return {
+          ok: true,
+          json: async () => ({
+            ok: true,
+            reply: "Theek hai, 1 passenger — aage badh rahi hoon.",
+            source: "ai",
+            grounded: true,
+            /* Sirf jab user ne sach me pax bola ho (asli server bhi aisa hi karta hai) — warna
+             * har turn me pax bhar kar sawaal skip ho jaata. */
+            context:
+              body.text === "अकेला जा रहा हूँ"
+                ? { origin: { code: "ASR", name: "Amritsar Junction", city: "Amritsar" }, destination: { code: "LDH", name: "Ludhiana Junction", city: "Ludhiana" }, date: "2026-10-01", dateProvided: true, passengers: 1, paxProvided: true }
+                : { origin: { code: "ASR", name: "Amritsar Junction", city: "Amritsar" }, destination: { code: "LDH", name: "Ludhiana Junction", city: "Ludhiana" }, date: "2026-10-01", dateProvided: true },
+          }),
+        } as unknown as Response;
       }
       const body = u.includes("/api/wallet")
         ? { wallet: { balance: 5000, currency: "INR", transactions: [] } }
@@ -451,15 +606,11 @@ describe("R66 — brain se samajhna + voice conversation loop", () => {
     await type("Amritsar se Ludhiana, 1 October");
     await waitFor(() => expect(log()).toMatch(/kitne passengers/i));
 
-    /* aisa shabd jo local regex nahi samajhta ("एक जना") — brain se 1 passenger aana chahiye */
+    /* aisa shabd jo local regex nahi samajhta ("अकेला जा रहा हूँ") — brain se pax samajhna chahiye */
     await type("अकेला जा रहा हूँ");
-    /* brain se slot samajh aaya (lastAsked = passengers) … */
-    await waitFor(() => expect(uAsk.some((x) => x.startsWith("अकेला जा रहा हूँ|passengers"))).toBe(true), { timeout: 8000 });
-    /* flow aage badha — usi direction par asli search chali */
-    await waitFor(() => {
-      const calls = ((globalThis as unknown as { fetch: { mock: { calls: unknown[][] } } }).fetch.mock.calls).map((c) => String(c[0]));
-      expect(calls.some((u) => u.includes("/api/trains?from=ASR&to=LDH&date=2026-10-01"))).toBe(true);
-    });
+    await waitFor(() => expect(brainAsk.some((a) => a.text === "अकेला जा रहा हूँ")).toBe(true), { timeout: 8000 });
+    /* brain ko flow ka pending slot pata tha (lastAsked) — isi liye wo slot bhar saka */
+    expect(brainAsk.some((a) => a.text === "अकेला जा रहा हूँ" && a.lastAsked === "passengers")).toBe(true);
   }, 25000);
 
   it("voice conversation: AI bolne ke baad mic khud wapas sunta hai (sirf voice ON hone par)", async () => {

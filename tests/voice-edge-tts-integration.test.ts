@@ -22,6 +22,9 @@ import { createAiBookingVoice } from "../src/voice/aiBookingVoice";
 import { createVoiceAgent } from "../src/voice/voiceAgent";
 import { useVoiceInput } from "../src/voice/useVoiceInput";
 import { createApp } from "../server/app";
+/* R67: server TTS ab same line ko cache karta hai (booking me wahi sawaal baar-baar) — test me har case
+ * saaf cache se shuru ho, warna purana successful jawab "edge down" case ko bhi 200 dikhayega. */
+import { clearTtsCache } from "../server/voice/tts";
 
 const NOW = new Date(2026, 8, 30);
 const EDGE_BASE = "https://edge-tts.example.test/v1"; // configurable — code me hard-code nahi
@@ -66,6 +69,7 @@ function mockEdge(ok = true) {
 
 describe("openai-edge-tts integration — server side", () => {
   beforeEach(() => {
+    clearTtsCache();
     for (const k of ENV_KEYS) {
       saved[k] = process.env[k];
       delete process.env[k];
@@ -158,6 +162,63 @@ describe("openai-edge-tts integration — server side", () => {
     expect(JSON.stringify(res.body)).not.toContain(EDGE_BASE);
   });
 
+  /* ══ R67 (1 Oct 2026, user screenshot: "Server voice abhi nahi aayi — device voice chala di") ═════
+   * Asli wajah: provider Render par sota hai (cold start 20-25s) — pehla call fail, client fallback.
+   * Ab: timeout + retry + chhota-text retry + cache + config par background warm-up. */
+  it("R67 — pehli call fail (cold start) ho to retry par awaaz aati hai", async () => {
+    setEdgeEnv();
+    let n = 0;
+    const fn = vi.fn(async () => {
+      n += 1;
+      if (n === 1) throw new Error("timeout");
+      return new Response(MP3_BYTES, { status: 200, headers: { "content-type": "audio/mpeg" } });
+    });
+    vi.stubGlobal("fetch", fn);
+    const res = await request(createApp()).post("/api/voice/tts").send({ text: "Ye hain: 20986 MCTM KOTA EXP aur 11906 HSX AGC EXP. Kaunsi train leni hai?", lang: "hi-IN" });
+    expect(res.status).toBe(200);
+    expect(res.headers["x-railbook-tts"]).toBe("upstream-retry");
+    expect(fn.mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("R67 — lamba text do baar fail ho to chhote (pehle vaakya) se awaaz aati hai", async () => {
+    setEdgeEnv();
+    const seen: string[] = [];
+    const fn = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { input?: string };
+      seen.push(String(body.input ?? ""));
+      if (seen.length <= 2) throw new Error("cold start");
+      return new Response(MP3_BYTES, { status: 200, headers: { "content-type": "audio/mpeg" } });
+    });
+    vi.stubGlobal("fetch", fn);
+    const long = "Theek hai, 1 passenger note kar liya. Main abhi aapke liye trains check karti hoon aur availability dekhkar batati hoon.";
+    const res = await request(createApp()).post("/api/voice/tts").send({ text: long, lang: "hi-IN" });
+    expect(res.status).toBe(200);
+    expect(res.headers["x-railbook-tts"]).toBe("upstream-short");
+    expect(seen[seen.length - 1].length).toBeLessThan(long.length);
+  });
+
+  it("R67 — wahi line dobara maangiye to cache se aata hai (upstream call dobara nahi)", async () => {
+    setEdgeEnv();
+    const edge = mockEdge();
+    const app = createApp();
+    const body = { text: "Passenger 1 ka naam bataiye.", lang: "hi-IN" };
+    const a = await request(app).post("/api/voice/tts").send(body);
+    const b = await request(app).post("/api/voice/tts").send(body);
+    expect(a.status).toBe(200);
+    expect(b.status).toBe(200);
+    expect(b.headers["x-railbook-tts"]).toBe("cache");
+    expect(edge.calls).toHaveLength(1);
+  });
+
+  it("R67 — /api/voice/config par provider background me warm ho jaata hai (pehli awaaz late na ho)", async () => {
+    setEdgeEnv();
+    const edge = mockEdge();
+    const app = createApp();
+    await request(app).get("/api/voice/config");
+    await vi.waitFor(() => expect(edge.calls.length).toBe(1));
+    expect(JSON.parse(String(edge.calls[0].init.body)).input).toBe("hmm"); /* sirf chhota warm-up */
+  });
+
   it("validation: khaali/bada text par 400 — upstream call hi nahi hoti", async () => {
     setEdgeEnv();
     const edge = mockEdge();
@@ -176,6 +237,9 @@ describe("openai-edge-tts integration — server side", () => {
 });
 
 describe("openai-edge-tts integration — client + end-to-end chain", () => {
+  beforeEach(() => {
+    clearTtsCache();
+  });
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
@@ -320,7 +384,8 @@ describe("openai-edge-tts integration — client + end-to-end chain", () => {
     const app = createApp();
     const res = await request(app).post("/api/voice/tts").send({ text: "namaste" });
     expect(res.status).toBe(502);
-    expect(edge.calls).toHaveLength(1);
+    /* R67: pehla fail hone par ek retry hota hai (provider cold start) — dono fail = 502. */
+    expect(edge.calls.length).toBeGreaterThanOrEqual(1);
 
     const browserSpeak = vi.fn();
     const client = createAiBookingVoice({
