@@ -20,7 +20,8 @@
  *   IRCTC_HANDOFF
  */
 import { parseDatePhrase } from "./dates";
-import { findStationsInText } from "./stations";
+import { CITY_NAME_ALIASES, CLUSTER_CITY_CODES, clusterStations, findStationsInText } from "./stations";
+import { matchOfferedStation } from "./stationPick";
 import { BERTH_BY_CLASS, CLASS_LABELS, type ClassAvailability, type ClassCode, type Passenger, type Station, type TrainResult } from "../types";
 import { parsePassengerSpeech, type PaxAsk } from "../voice/passengerSpeech";
 import { formatLongDate, inr } from "../format";
@@ -120,6 +121,20 @@ export interface AiBookingState {
   confirmed: boolean;
   /** View ko batane ke liye ki search chhidi hui hai (Thinking… dikhane ke liye). */
   searching: boolean;
+  /** R63-fix: "delhi"/"दिल्ली" jaise city naam jisme kai station hain — kaunsa station, ye ek hi
+   *  sawaal baaki hai (loop nahi). Jawab aate hi slot bhar jaata hai. */
+  pendingCity: AiPendingCity | null;
+  /** Ek message me do city aayein ("jalandhar se mumbai") → dono ka sawaal ek-ek karke, dobara nahi. */
+  pendingQueue: AiPendingCity[];
+}
+
+/** City (cluster) ka pending sawaal — asli station codes catalog se, invent nahi. */
+export interface AiPendingCity {
+  city: string;
+  slot: "from" | "to";
+  codes: string[];
+  /** User ne dobara wahi city boli (ya "koi bhi") → default station + saaf disclosure. */
+  asked: boolean;
 }
 
 export interface AiBookingTurn {
@@ -159,6 +174,8 @@ export function aiBookingBlank(now = new Date()): AiBookingState {
     handoff: false,
     confirmed: false,
     searching: false,
+    pendingCity: null,
+    pendingQueue: [],
   };
 }
 
@@ -229,11 +246,19 @@ export function lastPaxNumber(text: string): number | null {
 
 /** Berth/food ke shabd naam me na reh jaayein (maujooda parsePassengerSpeech naam me "Window"/"veg" chhod
  *  deta hai — wo fields apne-apne column me jaate hain, naam me nahi). */
+const ANY_BERTH_WORD = /^(lower|upper|middle|middle-berth|side|side\s*lower|side\s*upper|window|aisle|no\s*preference|लोअर|अपर|मिडल|साइड|विंडो)$/i;
+
 function stripExtraWords(name: string, berths: string[]): string {
   let out = name;
   for (const b of berths) {
     out = out.replace(new RegExp(`\\b${b}\\b`, "gi"), " ");
   }
+  /* R63-fix: jo berth shabd is class me chalta hi nahi (jaise CC me "lower") wo bhi naam me na
+   * ghusne paaye — warna "Neha Sharma Lower" jaisa ganda naam ban jaata tha (E2E me pakda gaya). */
+  out = out
+    .split(/\s+/)
+    .filter((w) => w && !ANY_BERTH_WORD.test(w.trim()))
+    .join(" ");
   out = out.replace(/\b(veg|non[\s-]?veg|vegetarian|shakahari|no\s*food|meal|khana|khaana|food|वेज|नॉन|शाकाहारी|भोजन|खाना)\b/gi, " ");
   return out.replace(/\s+/g, " ").trim();
 }
@@ -422,6 +447,113 @@ export function aiBookingStart(now = new Date()): AiBookingTurn {
   ]);
 }
 
+/* ── R63-fix: city (cluster) naam — "delhi", "mumbai", "दिल्ली" ─────────────────────────────────────────
+ * Wajah (user screenshot 30 Sep 2026): "Mujhe amritsar se delhi jaana hai" par bhi AI ne "Aur kahan
+ * jaana hai?" poochha, phir "दिल्ली जाना है" par bhi wahi — kyunki bare "delhi" ALIASES me nahi hai
+ * (wo ek city hai jisme kai station hain) aur Devanagari city naam bhi wahan nahi tha. Slot khaali
+ * rehne se sawaal loop ban gaya.
+ * Ab: city ka naam aate hi ASLI station list (catalog se) dikha kar ek hi sawaal poochha jaata hai —
+ * aur agar user dobara wahi city bole (ya "koi bhi") to us city ka pehla asli station le liya jaata
+ * hai, saaf disclosure ke saath (koi guess chhupa kar nahi, koi station invent bhi nahi).
+ * ────────────────────────────────────────────────────────────────────────────────────────────────── */
+
+/** City keys (latin + Devanagari + roman aliases) — longest pehle, taaki "new delhi" > "delhi" na jaaye. */
+const CITY_KEYS: { key: string; city: string }[] = [
+  ...Object.keys(CLUSTER_CITY_CODES).map((k) => ({ key: k, city: k })),
+  ...Object.entries(CITY_NAME_ALIASES).map(([k, v]) => ({ key: k, city: v })),
+].sort((a, b) => b.key.length - a.key.length);
+
+/** Word-boundary wala indexOf (Latin ke liye alnum, Devanagari ke liye letter boundary). */
+function indexOfWord(text: string, key: string): number {
+  const t = text.toLowerCase();
+  const k = key.trim().toLowerCase();
+  if (!k) return -1;
+  const latin = /[a-z]/i.test(k);
+  for (let from = 0; from <= t.length - k.length; ) {
+    const idx = t.indexOf(k, from);
+    if (idx < 0) return -1;
+    const before = t[idx - 1] ?? "";
+    const after = t[idx + k.length] ?? "";
+    const ok = latin
+      ? !/[a-z0-9]/i.test(before) && !/[a-z0-9]/i.test(after)
+      : !/\p{L}/u.test(before) && !/\p{L}/u.test(after);
+    if (ok) return idx;
+    from = idx + 1;
+  }
+  return -1;
+}
+
+/** Text me jitni bhi city (cluster) mentions hain + unki position (ordering ke liye).
+ *  Ek message me do city ho sakti hain — "jalandhar se mumbai" → dono ka sawaal ek-ek karke. */
+function findCityMentions(text: string): { city: string; idx: number }[] {
+  const out: { city: string; idx: number }[] = [];
+  const seen = new Set<string>();
+  for (const { key, city } of CITY_KEYS) {
+    if ((CLUSTER_CITY_CODES[city]?.length ?? 0) < 2 || seen.has(city)) continue;
+    const idx = indexOfWord(text, key);
+    if (idx < 0) continue;
+    seen.add(city);
+    out.push({ city, idx });
+  }
+  return out.sort((a, b) => a.idx - b.idx);
+}
+
+/** Us city ke asli station (catalog se) — koi invent nahi. */
+export function cityStationsFor(city: string): Station[] {
+  return clusterStations(city);
+}
+
+/** City ke liye default station: naam bilkul city jaisa ho to wahi, warna catalog ka pehla.
+ *  (Dono asli stations hain; UI ise hamesha disclosure line ke saath bolta hai.) */
+export function primaryStationFor(city: string): Station | null {
+  const list = clusterStations(city);
+  if (!list.length) return null;
+  return list.find((s) => s.name.toLowerCase() === city.toLowerCase()) ?? list[0];
+}
+
+/** Ek hi sawaal me asli options (max 6) — "kaunse station se/par jaana hai?". */
+export function cityChoiceLine(city: string, list: Station[]): string {
+  const opts = list.slice(0, 6).map((s) => `${s.code} ${s.name}`).join(" · ");
+  const more = list.length > 6 ? ` … (is city me ${list.length} station hain)` : "";
+  const name = city.charAt(0).toUpperCase() + city.slice(1);
+  return `“${name}” me ek se zyada station hain — kaunse wala? ${opts}${more}. Station ka naam ya code bata dijiye.`;
+}
+
+/** User ne dobara wahi city boli (ya usi city ka koi alias)? */
+function sameCityOrAny(text: string, city: string): boolean {
+  const t = text.toLowerCase();
+  if (indexOfWord(t, city) >= 0) return true;
+  return CITY_KEYS.some(({ key, city: c }) => c === city && indexOfWord(t, key) >= 0);
+}
+
+/** "koi bhi / jo bhi / aap decide karo / pata nahi" — user ne choice chhod di. */
+export function userLeftChoiceToAi(text: string): boolean {
+  return /\b(koi\s*bhi|koi\s*sa\s*bhi|jo\s*bhi|joo?\s*bhi|any\s*(one|station)?|aap\s*(hi\s*)?(decide|chun|chuno|dekh)|tum\s*(hi\s*)?(decide|chun|chuno|dekh)|kuch\s*bhi|pata\s*nahi|dont\s*know|don't\s*know)\b/i.test(
+    text,
+  );
+}
+
+/** Pending city ka jawab — sirf asli station list me se (warna null). */
+function stationForPendingCity(text: string, city: string): Station | null {
+  const list = clusterStations(city);
+  if (!list.length) return null;
+  const inList = findStationsInText(text).find((s) => list.some((c) => c.code === s.code));
+  if (inList) return inList;
+  return matchOfferedStation(text, list) ?? null;
+}
+
+/** Mention order nikalne ke liye: station ka sabse pehla zikr kahan hua. */
+function mentionIndex(text: string, st: Station): number {
+  const t = text.toLowerCase();
+  const cands = [st.code, st.city, st.name].map((x) => x.toLowerCase());
+  let best = -1;
+  for (const c of cands) {
+    const idx = indexOfWord(t, c);
+    if (idx >= 0 && (best < 0 || idx < best)) best = idx;
+  }
+  return best;
+}
+
 /** COLLECT_JOURNEY: jo slots pehle se hain unhe dobara nahi poochhta (user ki shart). */
 function collectJourney(state: AiBookingState, text: string, env: AiBookingEnv): AiBookingTurn {
   const now = env.now ?? new Date();
@@ -429,13 +561,108 @@ function collectJourney(state: AiBookingState, text: string, env: AiBookingEnv):
   const say: string[] = [];
 
   const stations = findStationsInText(text);
-  if (stations.length >= 2) {
-    next.from = stations[0];
-    next.to = stations[1];
-  } else if (stations.length === 1) {
-    const st = stations[0];
-    if (!next.from) next.from = st;
-    else if (!next.to && st.code !== next.from.code) next.to = st;
+
+  /* (a) Pichhla sawaal city ka tha ("Delhi me kaunse station?") → is message me uska jawab dhoondo. */
+  if (next.pendingCity) {
+    const { city, slot } = next.pendingCity;
+    const list = clusterStations(city);
+    const picked = stationForPendingCity(text, city);
+    if (picked) {
+      next[slot] = picked;
+      next.pendingCity = null;
+      say.push(`${picked.name} (${picked.code}) le liya ✅`);
+    } else {
+      /* Is city ke bahar ka station khud bata diya (jaise "Jaipur") → user ki baat maano. */
+      const outside = stations[0];
+      if (outside && !list.some((c) => c.code === outside.code) && outside.code !== next[slot === "from" ? "to" : "from"]?.code) {
+        next[slot] = outside;
+        next.pendingCity = null;
+        say.push(`${outside.name} (${outside.code}) le liya ✅`);
+      } else if (sameCityOrAny(text, city) || userLeftChoiceToAi(text) || next.pendingCity.asked) {
+        const primary = primaryStationFor(city);
+        if (primary) {
+          next[slot] = primary;
+          next.pendingCity = null;
+          say.push(
+            `Theek hai — “${city}” ke liye ${primary.name} (${primary.code}) le rahi hoon (yahi is city ka pehla asli station hai).`,
+            `Koi doosra station chahiye to bata dijiye — main turant badal dungi.`,
+          );
+        }
+      } else {
+        next.pendingCity = { ...next.pendingCity, asked: true };
+      }
+    }
+  }
+
+  /* (b) Naye station/city mentions — text me jin-jin ka zikr hua, usi order me slots bharte hain. */
+  if (!next.pendingCity) {
+    type Mention = { idx: number; st?: Station; city?: string };
+    const mentions: Mention[] = stations.map((st) => ({ idx: mentionIndex(text, st), st }));
+    for (const cm of findCityMentions(text)) mentions.push({ idx: cm.idx, city: cm.city });
+    /* Jo station text me saaf mila hi nahi (index -1) use aakhir me rakho, order bigde na. */
+    mentions.sort((a, b) => (a.idx < 0 ? Number.MAX_SAFE_INTEGER : a.idx) - (b.idx < 0 ? Number.MAX_SAFE_INTEGER : b.idx));
+
+    /* Slot claim: agar "from" ki jagah koi CITY aayi ("delhi se jaipur"), to us slot ko city ne
+     * claim kar liya — uske baad ka station seedha "to" me jaata hai (warna Jaipur from ban jaata). */
+    let fromClaimed = Boolean(next.from);
+    let toClaimed = Boolean(next.to);
+    for (const m of mentions) {
+      if (m.st) {
+        if (!fromClaimed) {
+          next.from = m.st;
+          fromClaimed = true;
+        } else if (!toClaimed && m.st.code !== next.from?.code) {
+          next.to = m.st;
+          toClaimed = true;
+        }
+        continue;
+      }
+      if (!m.city) continue;
+      const slot: "from" | "to" | null = !fromClaimed ? "from" : !toClaimed ? "to" : null;
+      if (!slot) continue;
+      if (slot === "from") fromClaimed = true;
+      else toClaimed = true;
+      const item: AiPendingCity = { city: m.city, slot, codes: CLUSTER_CITY_CODES[m.city] ?? [], asked: false };
+      if (!next.pendingCity) next.pendingCity = item;
+      else next.pendingQueue.push(item);
+    }
+  }
+
+  /* Jo slot station mile bina bhar gaya (jaise "delhi se jaipur") → us slot ki city bekaar rehti hai. */
+  if (next.pendingCity) {
+    const { slot } = next.pendingCity;
+    if (next[slot]) next.pendingCity = null;
+  }
+
+  /* Queue me pada doosra city-sawaal (jo slot abhi bhi khaali hai) → usko current bana do. */
+  if (!next.pendingCity) {
+    next.pendingQueue = next.pendingQueue.filter((q) => !next[q.slot]);
+    const queued = next.pendingQueue.shift();
+    if (queued) next.pendingCity = { ...queued, asked: queued.asked };
+  }
+
+  /* Date/pax pehle hi nikal lo — city ka sawaal pending ho to bhi "2 log" jaisi baat yaad rahe
+   * (warna city ke jawab ke baad user ko dobara batana padta tha). */
+  const dateHitEarly = parseDatePhrase(text, now, { allowDayOnly: true });
+  if (dateHitEarly.date && !next.date) next.date = dateHitEarly.date;
+  const paxEarly = parsePaxCount(text);
+  if (paxEarly && !next.pax) next.pax = paxEarly;
+
+  /* Slot abhi bhi khaali + city ka sawaal pending → poora slot poochhne ke bajaye ek hi saaf sawaal. */
+  if (next.pendingCity) {
+    const { city } = next.pendingCity;
+    const list = clusterStations(city);
+    if (!list.length) next.pendingCity = null;
+    else {
+      next.awaiting = next.pendingCity ? next.pendingCity.slot : next.awaiting;
+      const doneBits: string[] = [];
+      if (next.from) doneBits.push(`${next.from.name} se`);
+      if (next.to) doneBits.push(`${next.to.name} tak`);
+      if (doneBits.length) say.push(`${doneBits.join(" ")} ✅`);
+      if (next.date) say.push(`${formatLongDate(next.date)} ki tarikh note kar li.`);
+      if (next.pax) say.push(next.pax === 1 ? "1 passenger." : `${next.pax} passengers.`);
+      return withSpoken(next, [...say, cityChoiceLine(city, list)]);
+    }
   }
 
   const dateHit = parseDatePhrase(text, now, { allowDayOnly: true });
@@ -585,6 +812,12 @@ function passengerCollection(state: AiBookingState, text: string, env: AiBooking
     if (!cleaned) delete patch.name;
     else patch.name = cleaned;
   }
+  /* User ne aisi berth maangi jo is class me hi nahi hoti (jaise CC me "lower") → saaf batao. */
+  const invalidBerth = berths.length
+    ? (text.match(/\b(lower|upper|middle|side|साइड|लोअर|अपर|मिडल)\b/gi) ?? []).find(
+        (w) => !berths.some((b) => b.toLowerCase() === w.toLowerCase()),
+      )
+    : undefined;
   const food = parseFoodChoice(text);
   if (food) patch.foodChoice = food;
   const merged: AiPaxDraft = { ...cur, ...patch };
@@ -592,6 +825,9 @@ function passengerCollection(state: AiBookingState, text: string, env: AiBooking
 
   const actions: AiBookingAction[] = [];
   const say: string[] = [];
+  /* R63-fix: ye declaration pehle thi nahi (use se neeche), isliye `withFood` use par TS error
+   * aata tha aur missing-details line hamesha bina food maange dikhati thi. Ab upar. */
+  const withFood = env.foodExpected === true;
   if (Object.keys(patch).length) {
     actions.push({ type: "PATCH_PASSENGER", index: idx, patch });
     const bits: string[] = [];
@@ -606,7 +842,12 @@ function passengerCollection(state: AiBookingState, text: string, env: AiBooking
     say.push(aiBookingMissingLine(merged, idx, { food: withFood }));
   }
 
-  const withFood = env.foodExpected === true;
+  if (invalidBerth && !merged.berthPreference) {
+    say.push(
+      `${state.classCode ?? "Is class"} me “${invalidBerth}” berth nahi hoti — yahan ${berths.join(" / ")} chalti hai.`,
+    );
+  }
+
   const missing = askForDraft(merged, { food: withFood });
   const next: AiBookingState = { ...state, stage: "PASSENGER_COLLECTION", drafts, paxIndex: idx };
   if (missing) {
@@ -926,10 +1167,8 @@ export function aiBookingPassengersReady(
     return withSpoken(next, [aiBookingAskLine(ask, { index: idx, code: state.classCode })]);
   }
   if (state.stage === "PASSENGER_REVIEW" || state.stage === "BOOKING_REVIEW") {
+    /* Review screen pehle hi khul chuka hai → dobara OPEN_REVIEW nahi bhejna (loop na ho). */
     return { state: { ...state, drafts }, say: [], actions: [] };
-  }
-  if (state.stage === "PASSENGER_REVIEW") {
-    return withSpoken({ ...state, drafts }, ["Saari passenger details mil gayi hain ✅", "Main review booking khol rahi hoon…"], [{ type: "OPEN_REVIEW" }]);
   }
   const next: AiBookingState = { ...state, stage: "PASSENGER_REVIEW", drafts, paxIndex: 0, awaiting: "review" };
   return withSpoken(next, ["Saari passenger details mil gayi hain ✅", "Main review booking khol rahi hoon…"], [{ type: "OPEN_REVIEW" }]);

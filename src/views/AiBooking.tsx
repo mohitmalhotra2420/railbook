@@ -68,6 +68,8 @@ export function AiBooking({ open, onClose }: { open: boolean; onClose: () => voi
   const [muted, setMuted] = useState(false);
   const [provider, setProvider] = useState<VoiceProviderInfo | null>(null);
   const [speaking, setSpeaking] = useState(false);
+  /* R63-fix: AI ki awaaz kahan se aayegi (server / app ka native TTS / device / kuch nahi). */
+  const [voiceSupport, setVoiceSupport] = useState<"server" | "app" | "device" | "none">("device");
   /* R62c: us train me catering/food options hain? (maujooda pantry API — read-only). null = pata nahi → food ka sawaal nahi. */
   const [foodExpected, setFoodExpected] = useState<boolean | null>(null);
   const started = useRef(false);
@@ -201,7 +203,14 @@ export function AiBooking({ open, onClose }: { open: boolean; onClose: () => voi
     if (!open || started.current) return;
     started.current = true;
     void applyTurn(aiBookingStart(new Date()));
-    void aiBookingVoice.loadProvider().then(setProvider);
+    void aiBookingVoice.loadProvider().then((p) => {
+      setProvider(p);
+      setVoiceSupport(aiBookingVoice.outputSupport());
+    });
+    /* Is device par output hi nahi (WebView/purana browser) → saaf batao, chup na raho. */
+    window.setTimeout(() => {
+      if (aiBookingVoice.outputSupport() === "none") setVoiceSupport("none");
+    }, 250);
   }, [applyTurn, open]);
 
   useEffect(() => {
@@ -290,7 +299,11 @@ export function AiBooking({ open, onClose }: { open: boolean; onClose: () => voi
       return;
     }
     aiBookingVoice.stop();
+    /* R63-fix: ye tap hi user gesture hai — isi mauke par device TTS unlock ho jaata hai
+     * (Chrome/Android par pehla speak gesture ke bina chup ho jaata hai). */
+    aiBookingVoice.unlock();
     setVoiceOn(true);
+    setVoiceSupport(aiBookingVoice.outputSupport());
     const err = await voice.start();
     if (err) push("ai", "Mic nahi chala — aap type bhi kar sakte hain, booking wahi flow chalega.");
   }, [push, voice]);
@@ -387,6 +400,22 @@ export function AiBooking({ open, onClose }: { open: boolean; onClose: () => voi
         {muted ? "🔇 Unmute" : "🔊 Mute"}
       </button>
       <button type="button" className="aib-btn-ghost" onClick={() => aiBookingVoice.stop()}>⏹ Stop</button>
+      {/* R63-fix: user khud check kar sake ki awaaz aa rahi hai ya nahi (screenshot: "voice nahi aati"). */}
+      <button
+        type="button"
+        className="aib-btn-ghost"
+        data-testid="aib-voice-test"
+        onClick={() => {
+          aiBookingVoice.unlock();
+          setVoiceOn(true);
+          setMuted(false);
+          aiBookingVoice.setMuted(false);
+          aiBookingVoice.speak("Namaste! Main RailBook ki AI Booking hoon. Aapki awaaz sun rahi hoon.");
+          setVoiceSupport(aiBookingVoice.outputSupport());
+        }}
+      >
+        🔊 Test voice
+      </button>
       <button type="button" className="aib-btn-ghost" onClick={() => { setVoiceOn(false); aiBookingVoice.stop(); voice.cancel(); }}>⌨️ Type instead</button>
       <button type="button" className="aib-btn-ghost" onClick={() => { setVoiceOn(false); aiBookingVoice.stop(); voice.cancel(); }}>✕ End voice</button>
     </div>
@@ -446,7 +475,13 @@ export function AiBooking({ open, onClose }: { open: boolean; onClose: () => voi
         </div>
         <div className="aib-head-right">
           <span className="aib-provider" title="Voice provider (server keys kabhi client par nahi aati)">
-            {provider?.kind === "server" ? `voice: ${provider.provider}` : "voice: device"}
+            {provider?.kind === "server"
+              ? `voice: ${provider.provider}`
+              : voiceSupport === "app"
+                ? "voice: app"
+                : voiceSupport === "none"
+                  ? "voice: output nahi"
+                  : "voice: device"}
           </span>
           <button type="button" className="aib-btn-ghost" onClick={onClose} aria-label="AI Booking band karo">✕</button>
         </div>
@@ -528,7 +563,19 @@ export function AiBooking({ open, onClose }: { open: boolean; onClose: () => voi
 
       {(voice.listening || thinking || voiceOn) && (
         <div className={`aib-voice${voice.listening ? " live" : ""}`} data-testid="aib-voice">
-          <span className="aib-voice-state">{voice.listening ? "🎙️ Listening…" : thinking ? "⏳ Thinking…" : speaking ? "🔊 Speaking…" : muted ? "🔇 Muted" : "Voice on"}</span>
+          <span className="aib-voice-state">
+            {voice.listening
+              ? "🎙️ Listening…"
+              : thinking
+                ? "⏳ Thinking…"
+                : speaking
+                  ? "🔊 Speaking…"
+                  : muted
+                    ? "🔇 Muted"
+                    : voiceSupport === "none"
+                      ? "Voice on · is device par output nahi"
+                      : "Voice on"}
+          </span>
           <span className="aib-voice-text">{voice.interim || voice.status}</span>
           {voiceControls}
         </div>

@@ -7,6 +7,8 @@ import android.os.Bundle
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
+import android.speech.tts.TextToSpeech
+import java.util.Locale
 import android.util.Log
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
@@ -34,6 +36,91 @@ class VoiceBridge(
 ) {
     private var recognizer: SpeechRecognizer? = null
     private var listening = false
+
+    /* Round-63-fix (user: "background AI voice bhi nahi aa rahi"): Android WebView me
+     * `window.speechSynthesis` aksar hota hai lekin uske paas koi voice nahi hoti — matlab AI ka
+     * jawab chup reh jaata hai. Isliye app apna native TTS deta hai (device ka apna engine,
+     * koi key/network nahi):
+     *   page → app : window.RailBookVoice.speak(text, "hi-IN") · .stopSpeaking() · .ttsAvailable()
+     * Bridge na ho to page purane browser TTS par chala jaata hai — kuch tootta nahi. */
+    private var tts: TextToSpeech? = null
+    private var ttsReady = false
+
+    private fun ensureTts(): TextToSpeech? {
+        if (tts != null) return tts
+        return try {
+            tts = TextToSpeech(activity) { status ->
+                ttsReady = status == TextToSpeech.SUCCESS
+                if (ttsReady) {
+                    try {
+                        val r = tts?.setLanguage(Locale("hi", "IN"))
+                        if (r == TextToSpeech.LANG_MISSING_DATA || r == TextToSpeech.LANG_NOT_SUPPORTED) {
+                            tts?.setLanguage(Locale("en", "IN"))
+                        }
+                    } catch (_: Exception) {
+                        /* language set fail → default voice hi chalega */
+                    }
+                }
+            }
+            tts
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    @JavascriptInterface
+    fun ttsAvailable(): Boolean = try {
+        ensureTts() != null
+    } catch (_: Exception) {
+        false
+    }
+
+    @JavascriptInterface
+    fun speak(text: String?, lang: String?) {
+        val line = text?.trim().orEmpty()
+        if (line.isEmpty()) return
+        activity.runOnUiThread {
+            try {
+                val engine = ensureTts() ?: return@runOnUiThread
+                if (lang != null && lang.isNotEmpty()) {
+                    val parts = lang.split("-")
+                    if (parts.isNotEmpty() && parts[0].isNotEmpty()) {
+                        val loc = if (parts.size > 1) Locale(parts[0], parts[1]) else Locale(parts[0])
+                        val r = engine.setLanguage(loc)
+                        if (r == TextToSpeech.LANG_MISSING_DATA || r == TextToSpeech.LANG_NOT_SUPPORTED) {
+                            engine.setLanguage(Locale("en", "IN"))
+                        }
+                    }
+                }
+                engine.speak(line, TextToSpeech.QUEUE_FLUSH, null, "railbook-ai")
+            } catch (e: Exception) {
+                Log.w(TAG, "TTS speak fail: ${e.message}")
+            }
+        }
+    }
+
+    @JavascriptInterface
+    fun stopSpeaking() {
+        activity.runOnUiThread {
+            try {
+                tts?.stop()
+            } catch (_: Exception) {
+                /* ignore */
+            }
+        }
+    }
+
+    /** Activity band ho rahi ho to engine release kar do (leak na ho). */
+    fun release() {
+        try {
+            tts?.stop()
+            tts?.shutdown()
+        } catch (_: Exception) {
+            /* ignore */
+        }
+        tts = null
+        ttsReady = false
+    }
 
     private fun granted(): Boolean =
         ContextCompat.checkSelfPermission(activity, Manifest.permission.RECORD_AUDIO) ==

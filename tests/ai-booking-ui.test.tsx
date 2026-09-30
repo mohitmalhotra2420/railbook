@@ -13,6 +13,8 @@ import React from "react";
 vi.mock("../src/voice/speakGuide", () => ({
   speakGuide: vi.fn(),
   cancelGuide: vi.fn(),
+  /* R63-fix: adapter ab user gesture par TTS unlock karta hai — mock me bhi hona chahiye. */
+  unlockSpeech: vi.fn(),
   passengerAskLine: vi.fn(() => ""),
   afterPassengerFill: vi.fn(() => ""),
 }));
@@ -124,7 +126,8 @@ describe("AI Booking UI — entry, greeting, stages", () => {
     expect(screen.getAllByText(/kahan se jaana/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText("Journey").length).toBeGreaterThan(0); // stage strip ka current step
     expect(screen.getByLabelText("🎙️ Talk to RailBook")).toBeTruthy();
-    expect(screen.getByText(/voice: device/)).toBeTruthy();
+    /* jsdom me speechSynthesis nahi hota → chip sach bolti hai ("output nahi"); browser me "device". */
+    expect(screen.getByText(/voice: (device|output nahi)/)).toBeTruthy();
   });
 
   it("text se poori journey: asli search + maujooda TrainBoard screen + dock me train ka sawaal", async () => {

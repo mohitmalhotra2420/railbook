@@ -6,6 +6,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { createAiBookingVoice, voiceLinesFor } from "../src/voice/aiBookingVoice";
+import { hasNativeSpeak, nativeSpeak, nativeStopSpeaking } from "../src/voice/nativeSpeak";
 
 function deps(over: Partial<Parameters<typeof createAiBookingVoice>[0]> = {}) {
   return {
@@ -107,5 +108,46 @@ describe("AI Booking voice — mic support + voice lines", () => {
     const lines = voiceLinesFor(["Pehla ✅", "Doosra 😊", "Teesra"], 2);
     expect(lines).toEqual(["Doosra", "Teesra"].map((l) => l.replace(/[✅😊]/gu, "").trim()));
     expect(voiceLinesFor([]).length).toBe(0);
+  });
+});
+
+/* ── R63-fix: AI ki awaaz sach me aaye (user: "background AI voice nahi aa rahi") ──────────────────
+ * App (Android WebView) me `speechSynthesis` ke paas aksar voice nahi hoti → AI chup reh jaati thi.
+ * Ab app ka native TTS bridge pehle use hota hai, warna browser TTS — aur agar dono nahi to UI sach
+ * batati hai ("voice: output nahi"), chup nahi rehti. */
+describe("R63 — native TTS bridge + output support", () => {
+  it("native bridge ho to use wahi hota hai (app me awaaz), browser par fallback", () => {
+    const calls: string[] = [];
+    (globalThis as unknown as { window: Window & typeof globalThis }).window.RailBookVoice = {
+      speak: (t: string) => calls.push(t),
+      stopSpeaking: () => calls.push("stop"),
+      ttsAvailable: () => true,
+    };
+    expect(hasNativeSpeak()).toBe(true);
+    expect(nativeSpeak("Namaste")).toBe(true);
+    expect(calls).toEqual(["Namaste"]);
+    const voice = createAiBookingVoice(deps());
+    expect(voice.outputSupport()).toBe("app");
+    delete (globalThis as unknown as { window: { RailBookVoice?: unknown } }).window.RailBookVoice;
+    expect(hasNativeSpeak()).toBe(false);
+    expect(voice.outputSupport()).toBe(window.speechSynthesis ? "device" : "none");
+  });
+
+  it("bridge na ho (browser) to nativeSpeak false deta hai — purana browser TTS hi chalta hai", () => {
+    expect(nativeSpeak("test")).toBe(false);
+    expect(() => nativeStopSpeaking()).not.toThrow();
+  });
+
+  it("server provider configured ho to outputSupport 'server' (ChatGPT jaisi awaaz ke liye ready)", async () => {
+    const voice = createAiBookingVoice(
+      deps({ fetchConfig: vi.fn(async () => ({ provider: "openai", serverTts: true, model: "tts-1", languages: ["hi-IN"] })) }),
+    );
+    await voice.loadProvider();
+    expect(voice.outputSupport()).toBe("server");
+  });
+
+  it("unlock() kabhi throw nahi karta (browser/Android dono par safe)", () => {
+    const voice = createAiBookingVoice(deps());
+    expect(() => voice.unlock()).not.toThrow();
   });
 });

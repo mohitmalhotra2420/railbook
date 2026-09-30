@@ -484,3 +484,76 @@ describe("AI Booking — full automation (R62c)", () => {
     expect(t.actions).toEqual([]);
   });
 });
+
+/* ── R63-fix (30 Sep, user ka asli screenshot) ───────────────────────────────────────────────────────
+ * User ne likha: "Mujhe amritsar se delhi jaana hai" → AI ne phir bhi "Aur kahan jaana hai?" poochha,
+ * phir "दिल्ली जाना है" par bhi wahi. Wajah: bare "delhi"/"दिल्ली" ek CITY hai (usme 3 station hain),
+ * ALIASES me station ke roop me nahi tha — slot khaali reh gaya aur sawaal loop ban gaya.
+ * Ab: city ka naam = asli station list ka ek hi saaf sawaal, aur dobara wahi city bole to default
+ * station (saaf disclosure ke saath). Koi invent nahi. */
+describe("R63 — city (cluster) + Devanagari station naam", () => {
+  it("screenshot wala case: 'amritsar se delhi' → ek hi sawaal, delhi ke asli station list ke saath", () => {
+    const s = step(aiBookingStart(NOW).state, "Mujhe amritsar se delhi jaana hai");
+    expect(s.state.from?.code).toBe("ASR");
+    expect(s.state.to).toBeNull();
+    expect(s.state.awaiting).toBe("to");
+    expect(s.state.pendingCity?.city).toBe("delhi");
+    expect(s.say.join(" ")).toMatch(/NDLS New Delhi/);
+    expect(s.say.join(" ")).toMatch(/kaunse wala/i);
+  });
+
+  it("Devanagari 'दिल्ली जाना है' par bhi aage badhta hai (loop nahi) — default + disclosure", () => {
+    const s1 = step(aiBookingStart(NOW).state, "Mujhe amritsar se delhi jaana hai");
+    const s2 = step(s1.state, "दिल्ली जाना है");
+    expect(s2.state.to?.code).toBe("NDLS");
+    expect(s2.state.pendingCity).toBeNull();
+    expect(s2.say.join(" ")).toMatch(/New Delhi/);
+    expect(s2.state.awaiting).toBe("date");
+  });
+
+  it("city ke asli station ka jawab (code/naam/Devanagari) seedha le liya jaata hai", () => {
+    const s1 = step(aiBookingStart(NOW).state, "delhi se jaipur jaana hai");
+    /* "delhi" from-slot par aaya → usi ka sawaal, jaipur (asli station) to-slot me. */
+    expect(s1.state.to?.code).toBe("JP");
+    expect(s1.state.awaiting).toBe("from");
+    const s2 = step(s1.state, "NDLS");
+    expect(s2.state.from?.code).toBe("NDLS");
+    expect(s2.state.to?.code).toBe("JP");
+  });
+
+  it("ek message me do city ('jalandhar se mumbai') → dono ka sawaal ek-ek karke", () => {
+    const s1 = step(aiBookingStart(NOW).state, "mujhe jalandhar se mumbai jaana hai, 2 log");
+    expect(s1.state.pendingCity?.city).toBe("jalandhar");
+    const s2 = step(s1.state, "koi bhi");
+    expect(s2.state.from?.code).toBe("JUC");
+    expect(s2.state.pendingCity?.city).toBe("mumbai");
+    const s3 = step(s2.state, "BCT");
+    expect(s3.state.to?.code).toBe("BCT");
+    expect(s3.state.pax).toBe(2);
+  });
+
+  it("class me na chalti berth ka shabd naam me nahi ghusa karta (E2E me pakda gaya)", () => {
+    const base: AiBookingState = {
+      ...aiBookingStart(NOW).state,
+      stage: "PASSENGER_COLLECTION",
+      classCode: "CC",
+      pax: 1,
+      drafts: [{}],
+      awaiting: "paxName",
+    };
+    const t = step(base, "Neha Sharma, 29, female, lower");
+    const d = t.state.drafts[0];
+    expect(d.name).toBe("Neha Sharma");
+    expect(d.berthPreference ?? "").toBe("");
+    expect(t.say.join(" ")).toMatch(/CC me “lower” berth nahi hoti/);
+    expect(d.foodChoice ?? "").toBe("");
+  });
+
+  it("saaf station naam pehle jaisa hi chalta hai (city logic beech me nahi aata)", () => {
+    const s = step(aiBookingStart(NOW).state, "ludhiana se new delhi, 1 October, 2 passengers");
+    expect(s.state.from?.code).toBe("LDH");
+    expect(s.state.to?.code).toBe("NDLS");
+    expect(s.state.date).toBe("2026-10-01");
+    expect(s.state.pendingCity).toBeNull();
+  });
+});

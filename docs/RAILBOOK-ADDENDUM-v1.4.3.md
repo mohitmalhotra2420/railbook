@@ -478,3 +478,37 @@ Isliye automation **sirf AI Booking ke apne do files** me hui — `src/ai/aiBook
 **Safety waisi hi:** kuch fake nahi — na PNR, na confirmation, na invented fare/availability; IRCTC action sirf user ke explicit "haan"/click ke baad, aur wo bhi maujooda button ka asli click hai (koi bypass nahi).
 
 **Tests (round ke 3 grouped checks):** CHECK 1 build ✓ · CHECK 2 focused **63 passed** (flow 37 · voice 9 · UI 9 · server route 8) · CHECK 3 regression **62 passed**.
+
+## §9.57 — Round 63-fix (30 Sep 2026): "Yeh to work nhi kar rha" — Hindi city naam + AI ki awaaz
+
+**User (screenshot ke saath):** *"Yeh to work nhi kar rha and background AI voice bhi nhi aa rhi jaise chatgpt ke voice mein aati hai ek baar tum automation complete booking flow test kro na"*
+
+Screenshot me asli flow: `Mujhe amritsar se delhi jaana hai` → AI: *"Aur kahan jaana hai?"* → `दिल्ली जाना है` → AI: **wahi sawaal dobara**. Do bug the:
+
+### 1) City (cluster) naam + Devanagari station — sawaal ka loop
+Wajah: bare `delhi` / `दिल्ली` ek **city** hai jisme kai station hain (NDLS · DLI · NZM) — `ALIASES` me wo station ke roop me nahi tha, isliye `to` slot khaali reh gaya aur AI wahi "Aur kahan jaana hai?" poochhta raha. Fix (sirf AI Booking ke andar):
+- `findCityMentions()` — text me city naam (Latin + **Devanagari** + roman alias, `CITY_NAME_ALIASES` ab exported) dhoondta hai, position ke saath.
+- Slot bharne ka order asli mentions ke hisaab se (`delhi se jaipur` me Jaipur from nahi banta).
+- City mile to **ek hi saaf sawaal** asli station list ke saath: *"“Delhi” me ek se zyada station hain — kaunse wala? NDLS New Delhi · DLI Delhi Junction · NZM Hazrat Nizamuddin."* → jawab code/naam/Devanagari kisi bhi roop me chalta hai (`stationForPendingCity`).
+- Dobara wahi city (ya *"koi bhi"*) bole → us city ka pehla asli station, **saaf disclosure** ke saath (kuch invent nahi): *"Theek hai — “delhi” ke liye New Delhi (NDLS) le rahi hoon … koi doosra station chahiye to bata dijiye."*
+- Ek message me do city (`jalandhar se mumbai`) → dono ka sawaal **ek-ek karke** (`pendingQueue`), dobara batane ki zaroorat nahi.
+- Date/pax ab us turn me bhi note hote hain (pehle city ke sawaal me "2 log" kho jaata tha).
+
+### 2) AI ki awaaz ("background AI voice bhi nahi aa rahi")
+Wajah: Android WebView me `window.speechSynthesis` hota hai par uske paas **voice nahi** hoti → `speak()` chup-chaap kuch nahi bolta. Teen tarah se fix (additive, koi key nahi chahiye):
+- **Native TTS bridge (app):** `VoiceBridge.kt` me `speak(text, lang)` / `stopSpeaking()` / `ttsAvailable()` (Android ka apna TextToSpeech, hi-IN) + `MainActivity.onDestroy` me `release()`. JS taraf `src/voice/nativeSpeak.ts` — bridge mile to wahi pehle chalta hai, warna browser TTS.
+- **Browser TTS theek kiya** (`speakGuide.ts`): user ke tap par `unlockSpeech()` (silent utterance — autoplay policy), voices ka intewaar, lamba jawab sentence/120-char **tukdon** me, `resume()` guard, aur 600ms par ek **retry** (voices late aane par bhi bolta hai).
+- **UI sach batati hai:** header chip `voice: server|app|device|output nahi`, aur voice bar me **🔊 Test voice** button (user khud check kar sake). Output bilkul hi na ho to bar saaf likhti hai *"Voice on · is device par output nahi"* — chup nahi rehti.
+
+**Server voice (ChatGPT jaisi):** provider (`VOICE_TTS_PROVIDER=openai|elevenlabs` + key Render env me) set hote hi `/api/voice/tts` asli audio deta hai aur client use karta hai — code pehle se ready hai, sirf key chahiye.
+
+### 3) E2E automation test (user ne maanga: "ek baar tum automation complete booking flow test kro na")
+`tools/e2e-ai-booking-prod.mts` (`npx tsx tools/e2e-ai-booking-prod.mts`) — poora flow **live production data** ke saath: journey → city sawaal → `/api/trains` (asli 6 trains) → train select → class select (AVL 413) → pantry API se food → passengers → **auto OPEN_REVIEW** → final confirm → **auto IRCTC handoff** → "nahi" par handoff nahi. Natija: **26/26 checks PASS**.
+
+### 4) E2E me pakde gaye do chhote bug (fix ho gaye)
+- `Neha Sharma, 29, female, lower` me **"lower" naam me ghus gaya** tha (CC me lower hoti hi nahi) → ab berth-shabd naam se hamesha hatta hai, aur AI saaf bolti hai: *"CC me “lower” berth nahi hoti — yahan Window / Aisle chalti hai."*
+- `withFood` declaration use ke **neeche** thi (TS error) + ek dead duplicate branch (`PASSENGER_REVIEW`) → dono theek.
+
+**Files (sirf jahan chahiye tha):** `src/ai/aiBookingFlow.ts`, `src/views/AiBooking.tsx`, `src/voice/speakGuide.ts`, `src/voice/aiBookingVoice.ts`, `src/voice/nativeSpeak.ts` (naya), `src/ai/stations.ts` (sirf `CITY_NAME_ALIASES` export), `android-app` ke 2 Kotlin files, tests + `tools/e2e-ai-booking-prod.mts` (naya). Server/AI/provider/booking-state/IRCTC-layer me koi behaviour change nahi.
+
+**Checks:** CHECK 1 build ✓ (2.30s) · CHECK 2 focused **73 passed** (flow 43 · voice 13 · UI 9 · server route 8) · CHECK 3 regression **62 passed** · E2E prod **26/26**.

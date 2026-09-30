@@ -783,6 +783,11 @@ class MainActivity : AppCompatActivity() {
             voice?.destroy()
         } catch (_: Exception) {
         }
+        /* Round-63-fix: native TTS engine release (warna leak reh jaata hai). */
+        try {
+            voice?.release()
+        } catch (_: Exception) {
+        }
         super.onDestroy()
     }
 

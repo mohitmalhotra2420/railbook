@@ -14,8 +14,9 @@
  *     throw nahi karta.
  */
 import { api } from "../api";
-import { cancelGuide, speakGuide } from "./speakGuide";
+import { cancelGuide, speakGuide, unlockSpeech } from "./speakGuide";
 import { hasNativeVoice } from "./nativeSpeech";
+import { hasNativeSpeak, nativeSpeak, nativeStopSpeaking } from "./nativeSpeak";
 import { isSpeechSupported } from "./speech";
 
 export interface VoiceProviderInfo {
@@ -50,6 +51,11 @@ export interface AiBookingVoice {
   speaking: () => boolean;
   /** Mic support: "native" | "browser" | "none" — sirf jsonp-free capability check. */
   micSupport: () => "native" | "browser" | "none";
+  /** R63-fix: AI ki awaaz kahan se aayegi — "server" (provider) | "app" (native TTS) | "device"
+   *  (browser speechSynthesis) | "none" (is device par output hi nahi — text chalta rahega). */
+  outputSupport: () => "server" | "app" | "device" | "none";
+  /** User ke tap par ek baar chalao (Chrome/Android me pehla speak chup na ho jaaye). */
+  unlock: () => void;
   /** UI ke liye: jab AI bol rahi ho ("speaking") / chup ho ("idle"). */
   onState: (cb: (s: "speaking" | "idle") => void) => () => void;
 }
@@ -77,8 +83,14 @@ function defaultDeps(): AiBookingVoiceDeps {
         /* ignore */
       }
     },
-    browserSpeak: (text) => speakGuide(text),
-    browserStop: () => cancelGuide(),
+    /* R63-fix: native TTS pehle (app me WebView ka speechSynthesis chup rehta hai), warna browser. */
+    browserSpeak: (text) => {
+      if (!nativeSpeak(text)) speakGuide(text);
+    },
+    browserStop: () => {
+      nativeStopSpeaking();
+      cancelGuide();
+    },
   };
 }
 
@@ -179,6 +191,13 @@ export function createAiBookingVoice(deps: AiBookingVoiceDeps = defaultDeps()): 
     provider: () => info,
     speaking: () => usingServer,
     micSupport: () => (hasNativeVoice() ? "native" : isSpeechSupported() ? "browser" : "none"),
+    outputSupport: () => {
+      if (info.kind === "server") return "server";
+      if (hasNativeSpeak()) return "app";
+      const synth = typeof window !== "undefined" ? window.speechSynthesis : undefined;
+      return synth ? "device" : "none";
+    },
+    unlock: () => unlockSpeech(),
     onState(cb) {
       listeners.add(cb);
       return () => listeners.delete(cb);
