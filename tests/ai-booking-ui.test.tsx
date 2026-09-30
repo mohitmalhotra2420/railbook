@@ -415,6 +415,122 @@ describe("R4 — general sawaal, dock layout, IRCTC autofill honesty", () => {
  *     nahi ghulta — jawab brain se aata hai, flow ki state waisi hi rehti hai,
  *   • AI ki apni bola hui line mic ke transcript me ghus kar input nahi banti (echo filter).
  */
+/* ══ R68 (1 Oct 2026) — crash fix + har query pehle AI + apne-aap wait messages ═══════════════════════
+ * User screenshot: "AI Booking khulte hi — chat dikha nahi paaya / React error #310". Wajah: R67 me ek
+ * effect `if (!open) return null` ke NEECHE chala gaya tha → open hote hi ek extra hook (hooks ka kram
+ * badla) → crash. Yahan wahi case pin kiya gaya hai, aur saath me naye behaviour ke saath:
+ *   • har user message pehle chat brain ke paas jaata hai (slot answers bhi),
+ *   • lamba turn me user ki bhasha wali honest line dikhti hai (jargon "Thinking…" nahi).
+ */
+describe("R68 — crash fix + har query pehle AI + wait line", () => {
+  const log = () => (document.querySelector('[data-testid="aib-dock-log"]') ?? document.querySelector(".aib-thread"))?.textContent ?? "";
+  const status = () => document.querySelector('[data-testid="aib-dock-status"]')?.textContent ?? "";
+
+  beforeEach(() => {
+    sessionStorage.clear();
+    voiceState.listening = false;
+    voiceState.interim = "";
+    voiceState.transcript = "";
+  });
+
+  it("AI Booking band se khulta hai — crash nahi (React #310 regression)", async () => {
+    const { rerender } = render(
+      <BookingProvider>
+        <AiBooking open={false} onClose={() => undefined} />
+      </BookingProvider>,
+    );
+    /* Band tha → ab kholte hain (asli app me yahi crash hota tha). */
+    rerender(
+      <BookingProvider>
+        <AiBooking open onClose={() => undefined} />
+      </BookingProvider>,
+    );
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "AI Booking" })).toBeTruthy());
+    /* aur dock mode (screen != home) me jaane par bhi hook ka kram same rehna chahiye */
+    await type("Ludhiana se Amritsar, 1 October, 1 passenger");
+    await waitFor(() => expect(screen.getByRole("region", { name: "AI Booking" })).toBeTruthy(), { timeout: 8000 });
+  }, 25000);
+
+  it("har query pehle brain ke paas jaati hai (slot answers bhi)", async () => {
+    const asked: string[] = [];
+    (globalThis as unknown as { fetch: unknown }).fetch = vi.fn(async (url: string, init?: { body?: string }) => {
+      const u = String(url);
+      if (u.includes("/api/agent")) {
+        const body = JSON.parse(String(init?.body ?? "{}")) as { text?: string };
+        asked.push(String(body.text ?? ""));
+        return { ok: true, json: async () => ({ ok: true, source: "ai", grounded: true, reply: "" }) } as unknown as Response;
+      }
+      const body = u.includes("/api/wallet")
+        ? { wallet: { balance: 5000, currency: "INR", transactions: [] } }
+        : u.includes("/api/meta")
+          ? { provider: { id: "test", name: "Test", mock: false }, serviceFee: 0 }
+          : u.includes("/api/voice/config")
+            ? { provider: "browser", serverTts: false, model: null, languages: ["hi-IN"] }
+            : u.includes("/pantry")
+              ? { pantry: false, providers: [], note: null, foodChoiceExpected: false }
+              : u.includes("/api/trains")
+                ? { trains: [train], recommendations: [], empty: false }
+                : { bookings: [] };
+      return { ok: true, json: async () => body } as unknown as Response;
+    });
+
+    open();
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "AI Booking" })).toBeTruthy());
+    await type("Ludhiana se Amritsar, 1 October, 1 passenger");
+    await waitFor(() => expect(log()).toMatch(/kaunsi train leni hai/i), { timeout: 8000 });
+    await type("12014");
+    await waitFor(() => expect(log()).toMatch(/kaunsi class chahiye/i), { timeout: 8000 });
+
+    /* dono messages brain tak pahunche — slot answer "12014" bhi */
+    expect(asked).toContain("Ludhiana se Amritsar, 1 October, 1 passenger");
+    expect(asked).toContain("12014");
+  }, 25000);
+
+  it("lamba turn me user ki bhasha wali wait line dikhti hai (jargon nahi)", async () => {
+    let release: (() => void) | null = null;
+    let delayed = false; /* sirf PEHLI call late karte hain (stream → plain fallback dobara maangta hai) */
+    (globalThis as unknown as { fetch: unknown }).fetch = vi.fn(async (url: string, init?: { body?: string }) => {
+      const u = String(url);
+      if (u.includes("/api/agent")) {
+        const body = JSON.parse(String(init?.body ?? "{}")) as { text?: string };
+        if (!delayed && String(body.text ?? "").includes("kitne baje")) {
+          delayed = true;
+          /* ye call jaan-bujh kar late karte hain — tab tak UI me wait line honi chahiye */
+          await new Promise<void>((r) => {
+            release = r;
+          });
+        }
+        return { ok: true, json: async () => ({ ok: true, source: "ai", grounded: true, reply: "12054 ASR se 06:50 par nikalti hai." }) } as unknown as Response;
+      }
+      const body = u.includes("/api/wallet")
+        ? { wallet: { balance: 5000, currency: "INR", transactions: [] } }
+        : u.includes("/api/meta")
+          ? { provider: { id: "test", name: "Test", mock: false }, serviceFee: 0 }
+          : u.includes("/api/voice/config")
+            ? { provider: "browser", serverTts: false, model: null, languages: ["hi-IN"] }
+            : u.includes("/pantry")
+              ? { pantry: false, providers: [], note: null, foodChoiceExpected: false }
+              : u.includes("/api/trains")
+                ? { trains: [train], recommendations: [], empty: false }
+                : { bookings: [] };
+      return { ok: true, json: async () => body } as unknown as Response;
+    });
+
+    open();
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "AI Booking" })).toBeTruthy());
+    await type("Ludhiana se Amritsar, 1 October, 1 passenger");
+    await waitFor(() => expect(log()).toMatch(/kaunsi train leni hai/i), { timeout: 8000 });
+
+    await type("12054 ke bare me kitne baje chalegi wo batao");
+    await waitFor(() => expect(status()).toMatch(/Thoda samay lagega|process kar rahi hoon/i), { timeout: 4000 });
+    expect(document.body.textContent ?? "").not.toMatch(/⏳\s*Thinking…/);
+    await act(async () => {
+      release?.();
+    });
+    await waitFor(() => expect(log()).toMatch(/06:50/), { timeout: 8000 });
+  }, 25000);
+});
+
 describe("R67 — AI-first brain + echo-safe voice", () => {
   const log = () => (document.querySelector('[data-testid="aib-dock-log"]') ?? document.querySelector(".aib-thread"))?.textContent ?? "";
   beforeEach(() => {

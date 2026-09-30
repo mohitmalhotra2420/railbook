@@ -112,6 +112,32 @@ function looksLikeEcho(transcript: string, spoken: string[]): boolean {
   return false;
 }
 
+/** R68: brain ke jawab ka intezaar — max `ms`. Timeout par null (call chalti rehti hai, chup-chaap). */
+async function raceBrain<T>(p: Promise<T>, ms: number): Promise<T | null> {
+  return new Promise<T | null>((resolve) => {
+    const t = setTimeout(() => resolve(null), ms);
+    p.then(
+      (v) => {
+        clearTimeout(t);
+        resolve(v);
+      },
+      () => {
+        clearTimeout(t);
+        resolve(null);
+      },
+    );
+  });
+}
+
+/** R68: server ke asli phase ko user ki bhasha me (koi jargon nahi, koi fake % nahi). */
+function friendlyProgress(phase: string, done?: number, total?: number): string {
+  if (/understanding/i.test(phase)) return "⏳ Thoda samay lagega — main aapki request process kar rahi hoon…";
+  const p = String(phase ?? "").trim();
+  return total ? `⏳ ${p}… ${done ?? 0}/${total}` : `⏳ ${p}…`;
+}
+const WAIT_LINE = "⏳ Thoda samay lagega — main aapki request process kar rahi hoon…";
+const WAIT_LONG_LINE = "⏳ Thoda sa aur samay lagega — bas ho raha hai…";
+
 /** R67: aisa sawaal jo booking ka slot nahi hai — live status/timing/fare/seat/general. Aise sawaal par
  *  jawab hamesha chat brain se aata hai (wahi tools), flow ki state waisi hi rehti hai. */
 function looksFactualQuery(text: string): boolean {
@@ -415,7 +441,9 @@ export function AiBooking({ open, onClose }: { open: boolean; onClose: () => voi
             bookingFlow: f.stage,
           },
           (e) => {
-            if (!quiet) setProgressText(e.total ? `${e.phase}… ${e.done ?? 0}/${e.total}` : `${e.phase}…`);
+            /* R68 (user: "jabh AI bole ki understanding to uski jagah likhdo — thoda samay lagega,
+             * aapki request process kar raha hoon"): server ka phase text user ki bhasha me. */
+            if (!quiet) setProgressText(friendlyProgress(e.phase, e.done, e.total));
           },
         );
         if (res?.context) agentCtx.current = res.context as AgentContextClient;
@@ -461,46 +489,47 @@ export function AiBooking({ open, onClose }: { open: boolean; onClose: () => voi
         classes: st.selectedTrain?.classes ?? st.trains.find((t) => t.number === flow.trainNumber)?.classes ?? [],
         foodExpected,
       };
+      /* ══ R68 — "har query AI par jaani chahiye PEHLE" (user, 1 Oct) ═══════════════════════════════
+       * Ab har user message pehle wahi maujooda chat brain (/api/agent — sabhi tools + web scraping,
+       * wahi prompts/logic) ke paas jaata hai. Brain jo samjhe wo **canonical jawab** ban kar usi purane
+       * booking engine ko diya jaata hai (validation/route/class/state — sab wahi). Brain ke paas koi
+       * slot na ho to engine apne aap user ka text bhi padhta hai (fallback wahi purana).
+       * Chat ke tools/prompts/architecture ko haath nahi lagaya gaya. */
+      /* Pehla kadam: brain ko turant bhej do (har query AI ke paas pehle jaati hai). Engine ka apna
+       * reading saath-saath compute hota hai (synch, muft). */
+      const brainPromise = brainTurn(clean, flow);
       let turn = aiBookingTurn(flow, clean, env);
-
-      /* ══ R67 — AI-first (user: "edhr bhi AI first rakhein … AI ke pass sabhi existing tools ho jo
-       * pehle chat mein the … AI khud query samjhe aur right tool ka use kare"). Har turn par wahi
-       * maujooda chat brain (maujooda tools/prompts) chalta hai. Do raste:
-       *   (a) flow engine ne kuch samjha (slot aage badha) aur ye sawaal nahi hai → booking turant
-       *       aage badhti hai; brain background me chalta hai (sirf is case me jawab user ko dikhta
-       *       hai jab brain ke paas flow ko aage badhane wala slot ho — warna chup rehta hai),
-       *   (b) engine kuch nahi samjha ya ye sawaal hai (status/timing/fare/general) → brain ka
-       *       jawab (asli tools se) user ko dikhta hai; aur brain ka slot mile to canonical jawab
-       *       wahi purane engine ko diya jaata hai (validation wahi). */
-      const slotAsked = flow.awaiting && SLOT_TO_ASK[flow.awaiting] ? flow.awaiting : null;
       let engineMoved = flowKey(turn.state) !== flowKey(flow);
       const ask = looksLikeQuestion(clean) || looksFactualQuery(clean);
-      let brainReply: string | null = null;
 
+      let b: { reply: string | null; canonical: string | null } | null = null;
       if (engineMoved && !ask) {
-        /* Booking turant aage badh gayi (engine ne samajh liya) — brain sirf background me chalta hai
-         * (uska jawab user ko dikhta nahi, warna do-ja jawab = confusion). Uske slot se turn DOBARA
-         * nahi chalate: engine pehle hi aage nikal chuka hai, dobara chalane se wo peeche chala jaata. */
-        /* Chhoti ek-token slot answers ("2", "CC", "12014") par brain ki zaroorat hi nahi — engine ne
-         * samajh liya. Lambi/mili-juli baat ho to background me brain bhi sunta hai (quiet). */
-        if (clean.split(/\s+/).length >= 3) void brainTurn(clean, flow, true);
+        /* Engine ne turant samajh liya (chhote slot answers) — AI ka jawab bhi lete hain, par user ko
+         * model ke liye 12s se zyada intezaar nahi karwate. Late jawab chup-chaap ignore (dobara turn
+         * nahi chalega — warna booking peeche chali jaati). */
+        b = await raceBrain(brainPromise, 12000);
+        if (!b) void brainPromise.catch(() => null);
       } else {
-        const b = await brainTurn(clean, flow);
-        brainReply = b?.reply ?? null;
-        if (b?.canonical) {
-          const retry = aiBookingTurn(flow, b.canonical, env);
-          if (flowKey(retry.state) !== flowKey(flow)) {
-            turn = retry;
-            engineMoved = true;
-          }
+        /* Sawaal ya engine ki samajh ke bahar — poora intezaar AI ka (progress line UI me dikhti hai). */
+        b = await brainPromise;
+      }
+      const brainReply: string | null = b?.reply ?? null;
+      if (brainReply && !engineMoved && b?.canonical) {
+        const retry = aiBookingTurn(flow, b.canonical, env);
+        if (flowKey(retry.state) !== flowKey(flow)) {
+          turn = retry;
+          engineMoved = true;
         }
       }
       let after = await applyTurn(turn);
 
-      /* R67: brain ne jawab diya par engine ne flow aage nahi badhaya → jawab user ko (chat jaisa),
-       * aur engine ki wo lines hata do jo "samajh nahi aaya / dobara bata dijiye" wali khali baatein
-       * hain (sawaal rehne dete hain — booking ka agla kadam). Engine ka state bilkul waisa hi. */
-      if (brainReply && !engineMoved) {
+      /* Brain ne jawab diya par engine ne flow aage nahi badhaya → jawab user ko (chat jaisa), aur
+       * engine ki "samajh nahi aaya / dobara bata dijiye" wali khali lines hata do (sawaal rehta hai,
+       * wo booking ka agla kadam hai). Flow ki state bilkul waisi hi. */
+      if (brainReply && (!engineMoved || ask)) {
+        /* Sawaal/factual query ka jawab hamesha dikhta hai (chahe engine ne usi text se kuch aur bhi
+         * kiya ho) — user ne poochha hai, jawab milna chahiye. Warna engine ki khali lines hata kar
+         * sirf sawaal + jawab. Flow ki state waisi hi rehti hai. */
         const asked = turn.say.filter((l) => l.includes("?"));
         for (const l of asked) push("ai", l);
         push("ai", brainReply);
@@ -776,17 +805,36 @@ export function AiBooking({ open, onClose }: { open: boolean; onClose: () => voi
     void applyTurn(aiBookingTurn(flow, "nahi"));
   }, [applyTurn, flow]);
 
+  /* R68-FIX (user screenshot: AI Booking khulte hi crash — React #310): R67 me ye effect `if (!open)
+   * return null` ke NEECHE chala gaya tha, isliye open=false par hook call hota hi nahi tha aur open=true
+   * par ek extra hook aata tha → "Rendered more hooks than during the previous render". Ab poore hooks
+   * (jo hamesha chalne chahiye) early return se UPAR hain.
+   * Kaam wahi: dock khula ho to screen ke neeche jagah (form ka aakhri field/CTA dock ke peeche na chhupe). */
+  useEffect(() => {
+    if (!open || state.screen === "home") return;
+    document.body.classList.add("aib-docked");
+    return () => document.body.classList.remove("aib-docked");
+  }, [open, state.screen]);
+
+  /* ══ R68 — "har query AI par jaani chahiye pehle" ═════════════════════════════════════════════════
+   * Jab brain apna kaam kar raha hota hai (kabhi-kabhi model slow hota hai) to UI me user ki bhasha me
+   * honest line dikhni chahiye — "understanding" jaisa jargon nahi:
+   *   • shuru me: "Thoda samay lagega — main aapki request process kar rahi hoon…"
+   *   • 1 minute se zyada: "Thoda sa aur samay lagega…" (aur server ka asli phase bhi saath). */
+  const [waitedLong, setWaitedLong] = useState(false);
+  useEffect(() => {
+    if (!busy) {
+      setWaitedLong(false);
+      return;
+    }
+    const t = window.setTimeout(() => setWaitedLong(true), 60000);
+    return () => window.clearTimeout(t);
+  }, [busy]);
+
   if (!open) return null;
 
   const dock = state.screen !== "home";
 
-  /* R67 (user: "passenger form pe mic layout sahi nahi hai"): dock fixed hai — isliye jab dock khula ho
-   * to screen ke neeche utni jagah chhod do ki form ka aakhri field/CTA uske peeche na chhupe. */
-  useEffect(() => {
-    if (!open || !dock) return;
-    document.body.classList.add("aib-docked");
-    return () => document.body.classList.remove("aib-docked");
-  }, [open, dock]);
   const lastAi = [...msgs].reverse().find((m) => m.role === "ai")?.text ?? "";
   const stageIndex = AI_BOOKING_STAGES.indexOf(flow.stage);
   const thinking = busy || flow.searching;
@@ -804,7 +852,15 @@ export function AiBooking({ open, onClose }: { open: boolean; onClose: () => voi
   const showBook = Boolean(flow.classCode) && !formOpen && state.screen !== "review";
   const reviewStages = ["PASSENGER_REVIEW", "BOOKING_REVIEW", "FINAL_CONFIRMATION"];
   const showReviewCta = reviewStages.includes(flow.stage) && state.screen === "review";
-  const statusLine = voice.listening ? "🎙️ Listening…" : thinking ? "⏳ Thinking…" : speaking ? "🔊 Speaking…" : lastAi;
+  /* R68: jargon ("Thinking…") ki jagah asli kaam + user ki bhasha wali wait line. */
+  const busyLine = progressText ?? (waitedLong ? WAIT_LONG_LINE : WAIT_LINE);
+  const statusLine = voice.listening
+    ? "🎙️ Listening…"
+    : thinking
+      ? busyLine
+      : speaking
+        ? "🔊 Speaking…"
+        : lastAi;
   const vform = (
     <form
       className="aib-form"
@@ -874,7 +930,7 @@ export function AiBooking({ open, onClose }: { open: boolean; onClose: () => voi
           <b>🎫 AI Booking</b>
           <span className="aib-stage now">{AI_BOOKING_STAGE_LABELS[flow.stage]}</span>
           <span className="aib-dock-text" data-testid="aib-dock-status">
-            {progressText ?? statusLine}
+            {busy ? (progressText ?? (waitedLong ? WAIT_LONG_LINE : WAIT_LINE)) : statusLine}
           </span>
           {/* R4-fix (user: "jaise pehle chat me kuch bhi poochte the — yeh bhi btayega?"): haan —
               koi bhi sawaal model ke paas jaata hai. Chhota ishara + tap par input focus. */}
@@ -925,7 +981,7 @@ export function AiBooking({ open, onClose }: { open: boolean; onClose: () => voi
             <span className="aib-voice-state">
               {voice.listening ? "🎙️ Listening…" : speaking ? "🔊 Speaking…" : muted ? "🔇 Muted" : "Voice on"}
             </span>
-            <span className="aib-voice-text">{voice.interim || voice.status}</span>
+            <span className="aib-voice-text">{voice.interim || (thinking ? busyLine : voice.status)}</span>
             {voiceControls}
           </div>
         )}
@@ -1070,7 +1126,7 @@ export function AiBooking({ open, onClose }: { open: boolean; onClose: () => voi
             {voice.listening
               ? "🎙️ Listening…"
               : thinking
-                ? "⏳ Thinking…"
+                ? "⏳ Process kar rahi hoon…"
                 : speaking
                   ? "🔊 Speaking…"
                   : muted
@@ -1079,7 +1135,7 @@ export function AiBooking({ open, onClose }: { open: boolean; onClose: () => voi
                       ? "Voice on · is device par output nahi"
                       : "Voice on"}
           </span>
-          <span className="aib-voice-text">{voice.interim || voice.status}</span>
+          <span className="aib-voice-text">{voice.interim || (thinking ? busyLine : voice.status)}</span>
           {voiceControls}
         </div>
       )}
