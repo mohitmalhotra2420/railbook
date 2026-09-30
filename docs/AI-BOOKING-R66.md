@@ -44,7 +44,7 @@ sawaal dohraana band.
 Local engine ko samajh na aaye (chup rahe **ya** imandaari se "samajh nahi aaya" bole) to wahi
 **maujooda chat NLU** — `POST /api/understand` (jo Concierge/chat use karta hai) — se **sirf wohi ek
 slot** samjha jaata hai jo flow maang raha hai. Uska jawab `canonicalFromNlu()` se canonical shabd
-banता hai aur **wapas usi purane `aiBookingTurn`** ko diya jaata hai:
+banta hai aur **wapas usi purane `aiBookingTurn`** ko diya jaata hai:
 
 ```
 user text ─► aiBookingTurn (wahi purana engine)

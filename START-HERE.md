@@ -1,4 +1,4 @@
-# RailBook — poora project (continue karne ke liye) · 30 Sep 2026 (Round 61)
+# RailBook — poora project (continue karne ke liye) · 30 Sep 2026 (Round 66)
 
 Ye zip aapke **poore project** ka snapshot hai — web app + server + Android app + tests + previews + APKs.
 Naye workspace me bas extract karke `npm ci` chalao aur wahin se aage badho (git history bhi andar hai).
@@ -21,16 +21,49 @@ railbook-full/
 └── apks/                      ← latest release APKs (v1.4.8, v1.4.9 — r29 me naya APK nahi)
 ```
 
-## 0. Current state (30 Sep 2026 — Round 61)
+## 0. Current state (30 Sep 2026 — Round 66)
 
-- **ZIP ka permanent link (workspace reset-proof):** `https://github.com/mohitmalhotra2420/railbook/releases/download/r61-2026-09-30/RailBook-FULL-2026-09-30.zip`
-  (release page: `https://github.com/mohitmalhotra2420/railbook/releases/tag/r61-2026-09-30`). Isi workspace ka har reset ke baad bhi downloadable rehta hai.
+
+- **ZIP ka permanent link (workspace reset-proof):** `https://github.com/mohitmalhotra2420/railbook/releases/download/r66-2026-09-30/RailBook-FULL-2026-09-30.zip`
+  (release page: `https://github.com/mohitmalhotra2420/railbook/releases/tag/r66-2026-09-30`, asset id 601403979; r62 wale release ka asset bhi latest zip se replace kiya gaya — purana stable link bhi latest deta hai). Isi workspace ka har reset ke baad bhi downloadable rehta hai.
 - **Poora project GitHub par pushed:** `https://github.com/mohitmalhotra2420/railbook` (main) — server, client, 144 test files, docs, previews, android-app, tools.
-- **Prod live:** `https://railbook-gegs.onrender.com` · `/api/version` = `{"commit":"9ae3741","primaryModel":"meta/muse-glimmer-30b","fallbackModel":"openai/gpt-oss-20b"}` (service `srv-dae34rqd0e5s73evgjsg`).
+- **Prod live:** `https://railbook-gegs.onrender.com` · `/api/version` = `{"commit":"a773702","primaryModel":"meta/muse-glimmer-30b","fallbackModel":"openai/gpt-oss-20b"}` (service `srv-dae34rqd0e5s73evgjsg`, deploy `dep-daujvdg473hc73bhip2g`).
 - **Round 61 ka faisla:** Muse-Glimmer primary planner, GPT-OSS-20B fallback + NLU; primary ke liye alag timeout `AI_PRIMARY_TIMEOUT_MS=90000` (warna bade prompt par 45s cap round barbaad kar deta tha).
-- **Tests:** `npx vitest run` → **144 files / 1484 tests, 0 fail**. Server TS: `tsc -p tsconfig.server.json` clean.
+- **Tests:** `npx vitest run` → **150 files / 1612 pass / 0 fail** (1 skipped = gated live E2E). Client `tsc` purane baseline par hi (86) — koi naya error nahi. Server TS: `tsc -p tsconfig.server.json` clean.
 - **R60 ki teen reporting cheezein** (prod par pehle se live): station-choice dropdown, plan page ka touch scroll, leg classes ka naya grid.
 
+
+## 0a. Round 66 (30 Sep 2026) — Hindi samajhna + asli voice (architecture wahi)
+
+User ke screenshots: (1) "एक पैसेंजर है" par AI samajh hi nahi paaya aur **wahi route/date lines dobara** bol
+di; (2) TTS ki awaaz nahi aa rahi. Chahte the: "jaise mera AI chat me samajh jaata tha waise hi edhr bhi
+samjhe" + TTS "jaise ChatGPT par voice conversation hoti hai" — **par architecture/AI behaviour/tools/AI
+logic change na hon**.
+
+- **Root cause (pax):** JS ka `\b` **ASCII-only** hai → Devanagari par kabhi match nahi karta. Isliye
+  "यात्री"/"पैसेंजर" jaise maujooda Hindi keywords bhi bekaar pade the. Fix: `tokenRe()` (Unicode
+  lookbehind/lookahead) + `PAX_WORDS`/`PAX_KW` me Devanagari shabd aur १–६ digits (`src/ai/aiBookingFlow.ts`).
+  "एक पैसेंजर है" → 1 · "तीन लोग हैं" → 3 · "२ पैसेंजर" → 2 · "दोनों" → 2 · "do log" → 2.
+- **Repeat-lines bug:** route/date/pax confirmation ab sirf usi turn ke **naye** badlaav par
+  (`routeChanged`/`dateChanged`/`paxChanged`, city block me `routeNew`). Josh me kuch samajh na aaye to
+  imandaari se: "Ye passenger count samajh nahi aaya — dobara bata dijiye" (`nothingChanged && stillMissing`).
+- **Chat jaisa samajhna (engine wahi):** local engine na samjhe to maujooda chat NLU
+  `POST /api/understand` (wahi jo Concierge use karta hai) se **sirf wohi ek slot**, aur uska canonical
+  jawab wapas **usi purane `aiBookingTurn`** ko (validation wahi). Brain fail → wahi local turn.
+  Wiring: `src/views/AiBooking.tsx` (`SLOT_TO_ASK`/`canonicalFromNlu`/`brainSlotAnswer`).
+- **Voice (asli cause):** WebView ki default `mediaPlaybackRequiresUserGesture=true` + har turn naya
+  `new Audio()` → async play **block** = silence. Fix: persistent audio element + silent-WAV **unlock**
+  (naya dep `unlockAudio`), **native MediaPlayer bridge** (`audioAvailable`/`playAudioBase64`/`stopAudio`
+  — `VoiceBridge.kt` + `MainActivity.kt`, dono copies synced), fail par device voice + UI me saaf reason
+  (`server-failed`/`playback-blocked`/`no-output`).
+- **ChatGPT jaisi conversation:** jawab khatam hote hi **mic khud wapas sunta hai** (320 ms), sirf jab
+  user ne khud voice ON kiya ho (background listening nahi); "⌨️ Type instead"/"✕ End voice"/Mute par loop
+  band; AI bolte waqt mic tap = barge-in. Dock me bhi poora voice panel rehta hai.
+- **APK:** `RailBook-v1.5.1-release.apk` (version `1.5.1-voice`, versionCode 34, 4,828,015 B,
+  sha256 `4e3ec112b3796e56093a28141d0a6abf617d63b237094f2e2ad25797398303e3`) — andar naye native audio
+  methods verify kiye gaye. Source zip: `RailBook-Android-v1.5.1-Source.zip`.
+- **Verify:** full suite **1612 pass/1 skip** (naye 11 R66 ke) · prod booking-flow E2E **26/26** ·
+  direction **10/10** · `/api/understand` (lastAsked=passengers) "अकेला जा रहा हूँ" → **pax 1**.
 
 ## 0b. Round 62 (30 Sep 2026) — "AI Booking" (ADDITIVE, text + voice)
 
