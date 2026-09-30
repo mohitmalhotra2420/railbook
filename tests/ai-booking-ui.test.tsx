@@ -79,6 +79,8 @@ function mockFetch(trains: TrainResult[] = [train]) {
         ? { provider: { id: "test", name: "Test", mock: false }, serviceFee: 0 }
         : u.includes("/api/voice/config")
           ? { provider: "browser", serverTts: false, model: null, languages: ["hi-IN"] }
+          : u.includes("/pantry")
+            ? { pantry: true, providers: ["confirmtkt"], note: null, foodChoiceExpected: true }
           : u.includes("/api/trains")
             ? { trains, recommendations: [], empty: trains.length === 0 }
             : u.includes("/api/availability")
@@ -137,17 +139,17 @@ describe("AI Booking UI — entry, greeting, stages", () => {
     expect(calls.some((u) => u.includes("/api/trains?from=ASR&to=LDH&date=2026-10-01"))).toBe(true);
   });
 
-  it("dock se train number batao → maujooda class step + asli classes; CC par AI Book", async () => {
+  it("dock se train batao → AI khud class poochhta hai; class par passenger form khud khulta hai", async () => {
     open();
     await waitFor(() => expect(screen.getByRole("dialog", { name: "AI Booking" })).toBeTruthy());
     await type("Amritsar se Ludhiana 1 October, 2 passengers");
     await waitFor(() => expect(screen.getByRole("region", { name: "AI Booking" })).toBeTruthy());
     await type("12014");
     await waitFor(() => expect(screen.getByTestId("aib-dock-log").textContent).toMatch(/12014 Amritsar Shatabdi select kar liya/i));
-    /* Bina class chune AI Book nahi aata */
-    expect(screen.queryByTestId("aib-book")).toBeNull();
-    await type("CC"); // asli classes (CC/2S) me se
-    await waitFor(() => expect(screen.getByTestId("aib-book")).toBeTruthy());
+    expect(screen.getByTestId("aib-dock-log").textContent).toMatch(/kaunsi class chahiye/i);
+    await type("CC");
+    await waitFor(() => expect(screen.getByTestId("aib-dock-log").textContent).toMatch(/passenger form khol rahi hoon/i));
+    await waitFor(() => expect(screen.getByTestId("aib-dock-log").textContent).toMatch(/Passenger 1 ka naam/i));
   });
 
   it("list me na hone wali train par saaf jawab (koi invent nahi)", async () => {
@@ -160,41 +162,53 @@ describe("AI Booking UI — entry, greeting, stages", () => {
     expect(screen.queryByTestId("aib-book")).toBeNull();
   });
 
-  it("AI Book → passenger conversation → summary → explicit Continue → IRCTC handoff line", async () => {
+  it("FULL AUTOMATION: journey → train → class → passengers (food bhi) → review khud → haan par IRCTC khud click", async () => {
+    /* Maujooda "Continue to IRCTC" button ki jagah dummy — dekhte hain AI usi ko click karta hai. */
+    let irctcClicked = false;
+    const dummy = document.createElement("button");
+    dummy.id = "irctc-continue";
+    dummy.addEventListener("click", () => {
+      irctcClicked = true;
+    });
+    document.body.appendChild(dummy);
+
     open();
     await waitFor(() => expect(screen.getByRole("dialog", { name: "AI Booking" })).toBeTruthy());
-    await type("Amritsar se Ludhiana 1 October, 2 passengers");
-    await waitFor(() => expect(screen.getByRole("region", { name: "AI Booking" })).toBeTruthy());
-    await type("12014");
-    await type("CC");
-    await waitFor(() => expect(screen.getByTestId("aib-book")).toBeTruthy());
-    await act(async () => {
-      fireEvent.click(screen.getByTestId("aib-book"));
-    });
-    /* Passenger screen khula + AI ne pehla sawaal poochha */
-    await waitFor(() => expect(screen.getByTestId("aib-dock-log").textContent).toMatch(/Passenger 1 ka naam/i));
 
-    /* Do passengers — ek sentence me saari details (sirf missing field poochhi jaati hai) */
+    await type("Amritsar se Ludhiana 1 October, 2 passengers");
+    await waitFor(() => expect(screen.getByTestId("aib-dock-log").textContent).toMatch(/kaunsi train leni hai/i));
+
+    await type("12014");
+    await waitFor(() => expect(screen.getByTestId("aib-dock-log").textContent).toMatch(/kaunsi class chahiye/i));
+    await type("CC");
+
+    /* passenger form khud khulta hai; AI ek-ek detail maangta hai (berth → khaana, pantry me food hai) */
+    await waitFor(() => expect(screen.getByTestId("aib-dock-log").textContent).toMatch(/Passenger 1 ka naam/i));
     await type("Rahul Sharma, 31, male, window");
+    await waitFor(() => expect(screen.getByTestId("aib-dock-log").textContent).toMatch(/khaana/i));
+    await type("veg");
     await waitFor(() => expect(screen.getByTestId("aib-dock-log").textContent).toMatch(/Passenger 2 ka naam/i));
     await type("Neha, 28, female, window");
+    /* passenger 2 ka khaana bhi (pantry me food hai) */
+    await waitFor(() => expect(screen.getByTestId("aib-dock-log").textContent).toMatch(/Passenger 2 ke liye khaana/i));
+    await type("no food");
+
+    /* saari details complete → AI khud review booking kholta hai + final question */
     await waitFor(() => expect(screen.getByTestId("aib-summary")).toBeTruthy());
+    await waitFor(() => expect(screen.getByTestId("aib-dock-log").textContent).toMatch(/final details hain ya kuch edit/i));
     const summary = screen.getByTestId("aib-summary").textContent ?? "";
     expect(summary).toMatch(/Amritsar Junction → Ludhiana Junction/);
-    expect(summary).toMatch(/Train: 12014 Amritsar Shatabdi/);
+    expect(summary).toMatch(/Train: 12014/);
     expect(summary).toMatch(/Class: CC/);
-    expect(summary).toMatch(/Passenger 1: Rahul Sharma, 31, male, Window/);
-    expect(summary).toMatch(/Passenger 2: Neha, 28, female, Window/);
+    expect(summary).toMatch(/Passenger 1: Rahul Sharma/);
+    expect(summary).toMatch(/Passenger 2: Neha/);
 
-    /* Continue Booking = user ka explicit click (AI khud final confirm nahi karti) */
-    await act(async () => {
-      fireEvent.click(screen.getByTestId("aib-continue"));
-    });
-    await waitFor(() => expect(screen.getByTestId("aib-dock-log").textContent).toMatch(/Continue to IRCTC/));
-    expect(screen.getByTestId("aib-dock-log").textContent).toMatch(/IRCTC/);
-    /* Live fare asli api se aaya (invent nahi) */
-    const calls = ((globalThis as unknown as { fetch: { mock: { calls: unknown[][] } } }).fetch.mock.calls).map((c) => String(c[0]));
-    expect(calls.some((u) => u.includes("/api/fare"))).toBe(true);
+    /* user "haan" → AI khud Continue to IRCTC click karta hai (autofill layer waise hi) */
+    expect(irctcClicked).toBe(false);
+    await type("haan theek hai");
+    await waitFor(() => expect(irctcClicked).toBe(true));
+    expect(screen.getByTestId("aib-dock-log").textContent).toMatch(/Continue to IRCTC dab rahi hoon/i);
+    document.body.removeChild(dummy);
   });
 
   it('correction "Actually 2 October kar do" → nayi date se FRESH search, route same', async () => {

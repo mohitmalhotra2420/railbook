@@ -38,7 +38,8 @@ railbook-full/
 - **Naye files:** `src/ai/aiBookingFlow.ts` (11-stage state machine + corrections + Hinglish parsing), `src/views/AiBooking.tsx`, `src/voice/aiBookingVoice.ts` (server TTS → device voice fallback), `server/voice/tts.ts` (`/api/voice/config`, `/api/voice/tts` — keys sirf server env me).
 - **Reuse:** search/availability/fare maujooda `searchRoute`/`selectClass`/`goReview` se; train cards maujooda `TrainClassBlock`; passenger form maujooda `Passengers`; review + IRCTC handoff maujooda `ReviewStatus` → `Continue to IRCTC`. Koi doosra booking implementation nahi, koi fake PNR/confirmation nahi.
 - **Voice:** 🎙️ Listening · ⏳ Thinking · 🔊 Speaking · ⏹ Stop · 🔇 Mute · ⌨️ Type instead · ✕ End voice (mic sirf tap par, background listening nahi).
-- **Tests:** focused group 59 (flow 33 · voice 9 · UI 9 · server route 8) + regression 62; build ✓.
+- **Tests:** focused group 63 (flow 37 · voice 9 · UI 9 · server route 8) + regression 62; build ✓.
+- **R62c (poora automated):** AI khud train/class select karta hai, passenger form khud kholta hai, naam→age→gender→berth→khaana (sirf jab pantry me food ho) one-by-one 1..6 passengers ke liye poochhta hai, missing details khud batata hai, phir **khud review booking kholta hai** aur user ke "haan" par **khud Continue to IRCTC click** karta hai (autofill waise hi). Automation sirf AI Booking ke apne files me — existing kuch nahi chhua.
 - **Voice server-side TTS chahiye ho** to Render env me: `VOICE_TTS_PROVIDER` (openai/elevenlabs), `VOICE_TTS_API_KEY` — warna device voice chalti rehti hai (booking kabhi break nahi).
 
 ## 1. Turant shuru karne ke liye

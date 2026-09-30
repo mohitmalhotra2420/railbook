@@ -68,6 +68,8 @@ export type AiBookingAsk =
   | "paxAge"
   | "paxGender"
   | "paxBerth"
+  /** Sirf tab poochha jata hai jab us train me catering/food options hon (maujooda pantry API). */
+  | "paxFood"
   | "review"
   | "confirm"
   | null;
@@ -88,6 +90,11 @@ export type AiBookingAction =
   | { type: "OPEN_PASSENGERS" }
   | { type: "PATCH_PASSENGER"; index: number; patch: AiPaxDraft }
   | { type: "REVIEW" }
+  /* R62c (user: "sab kuch automate ho — AI khud review booking khole aur IRCTC bhi khud continue kare"):
+   * OPEN_REVIEW → maujooda Review journey screen kholna; IRCTC_HANDOFF → usi screen ka maujooda
+   * "Continue to IRCTC" button khud click karna (autofill layer waise hi chalti hai). */
+  | { type: "OPEN_REVIEW" }
+  | { type: "IRCTC_HANDOFF" }
   | { type: "RESET" };
 
 export interface AiBookingState {
@@ -127,6 +134,9 @@ export interface AiBookingEnv {
   trains?: TrainResult[];
   /** Chuni hui train ki asli classes. */
   classes?: ClassAvailability[];
+  /** Us train me catering/food options hain? (maujooda pantry API se, read-only).
+   *  false/null = food ka sawaal poochha hi nahi jaata — guess nahi. */
+  foodExpected?: boolean | null;
 }
 
 const MAX_PAX = 6;
@@ -331,19 +341,36 @@ export function berthsForClass(code: string | null): string[] {
   return BERTH_BY_CLASS[code as ClassCode] ?? [];
 }
 
-const ASK_SLOT: Record<string, PaxAsk> = {
+const ASK_SLOT: Record<string, PaxAsk | null> = {
   paxName: "name",
   paxAge: "age",
   paxGender: "gender",
   paxBerth: "berth",
+  paxFood: null,
 };
 
-function askForDraft(d: AiPaxDraft | undefined): Exclude<AiBookingAsk, "from" | "to" | "date" | "pax" | "train" | "class" | "review" | "confirm"> {
+type PaxAskName = Exclude<AiBookingAsk, "from" | "to" | "date" | "pax" | "train" | "class" | "review" | "confirm">;
+
+/** Agla missing field. Food sirf tab jab us train me options hon (`opts.food`). */
+export function askForDraft(d: AiPaxDraft | undefined, opts: { food?: boolean } = {}): PaxAskName {
   if (!d?.name || d.name.trim().length < 3) return "paxName";
   if (!d.age || !/^\d{1,3}$/.test(String(d.age))) return "paxAge";
   if (!d.gender) return "paxGender";
   if (!d.berthPreference) return "paxBerth";
+  if (opts.food && !d.foodChoice) return "paxFood";
   return null;
+}
+
+/** Missing details ki saaf list — user ko batane ke liye ("yeh details missing hai"). */
+export function aiBookingMissingLine(d: AiPaxDraft | undefined, index: number, opts: { food?: boolean } = {}): string {
+  const miss: string[] = [];
+  if (!d?.name || d.name.trim().length < 3) miss.push("naam");
+  if (!d?.age || !/^\d{1,3}$/.test(String(d.age))) miss.push("age");
+  if (!d?.gender) miss.push("gender");
+  if (!d?.berthPreference) miss.push("berth preference");
+  if (opts.food && !d?.foodChoice) miss.push("khaana (veg / non-veg / no food)");
+  if (!miss.length) return `Passenger ${index + 1} ki saari details mil gayi hain ✅`;
+  return `Passenger ${index + 1} ki ye details missing hai: ${miss.join(", ")}.`;
 }
 
 export function aiBookingAskLine(ask: AiBookingAsk, opts: { index?: number; code?: string | null } = {}): string {
@@ -369,6 +396,8 @@ export function aiBookingAskLine(ask: AiBookingAsk, opts: { index?: number; code
       return `Passenger ${n} ka gender? (male / female / other)`;
     case "paxBerth":
       return `Passenger ${n} ki berth preference? ${berthsForClass(opts.code ?? null).join(" / ")}`;
+    case "paxFood":
+      return `Passenger ${n} ke liye khaana? Veg / Non-veg / “No food” (is train me catering hai).`;
     case "review":
       return "Kya sab details theek hain? Kuch change karna hai ya booking continue karun?";
     case "confirm":
@@ -502,7 +531,12 @@ function trainSelected(state: AiBookingState, train: TrainResult, env: AiBooking
 }
 
 /** Class chun li (view ne live availability verify karne ke baad bhi yahi bulata hai). */
-export function aiBookingClassSelected(state: AiBookingState, klass: ClassAvailability, live?: { status: string; seats?: number; rac?: number; waitlist?: number }): AiBookingTurn {
+export function aiBookingClassSelected(
+  state: AiBookingState,
+  klass: ClassAvailability,
+  live?: { status: string; seats?: number; rac?: number; waitlist?: number },
+  opts: { food?: boolean } = {},
+): AiBookingTurn {
   const st = (live?.status ?? klass.status ?? "").toUpperCase();
   const detail =
     st === "AVAILABLE" && live?.seats != null
@@ -522,13 +556,17 @@ export function aiBookingClassSelected(state: AiBookingState, klass: ClassAvaila
     classCode: klass.code,
     paxIndex: 0,
     drafts,
-    awaiting: askForDraft(drafts[0]) ?? "paxName",
+    awaiting: askForDraft(drafts[0], opts) ?? "paxName",
   };
-  return withSpoken(next, [
-    `${klass.code} (${CLASS_LABELS[klass.code] ?? klass.code}) select kar diya${detail} — ye asli board ka status hai.`,
-    "Ab “AI Book” dabaiye — aapka passenger form khul jayega, aur main wahin details poochti rahungi.",
-    aiBookingAskLine("paxName", { index: 0 }),
-  ]);
+  return withSpoken(
+    next,
+    [
+      `${klass.code} (${CLASS_LABELS[klass.code] ?? klass.code}) select kar diya${detail} — ye asli board ka status hai.`,
+      `Ab main aapka passenger form khol rahi hoon aur ${size === 1 ? "passenger" : `saare ${size} passengers`} ki details ek-ek karke poochh rahi hoon.`,
+      aiBookingAskLine(next.awaiting, { index: 0, code: klass.code }),
+    ],
+    [{ type: "SET_PASSENGER_COUNT", count: size }],
+  );
 }
 
 function passengerCollection(state: AiBookingState, text: string, env: AiBookingEnv): AiBookingTurn {
@@ -564,10 +602,12 @@ function passengerCollection(state: AiBookingState, text: string, env: AiBooking
     if (patch.foodChoice) bits.push(patch.foodChoice === "VEG" ? "veg meal" : patch.foodChoice === "NON_VEG" ? "non-veg meal" : "no food");
     say.push(`Passenger ${idx + 1}: ${bits.join(", ")} note kar liya ✅`);
   } else {
-    say.push("Ye detail samajh nahi aayi — dobara bata dijiye (jaise “Rahul Sharma, 31, male, window”).");
+    say.push("Ye detail samajh nahi aayi — dobara bata dijiye (jaise “Rahul Sharma, 31, male, window, veg”).");
+    say.push(aiBookingMissingLine(merged, idx, { food: withFood }));
   }
 
-  const missing = askForDraft(merged);
+  const withFood = env.foodExpected === true;
+  const missing = askForDraft(merged, { food: withFood });
   const next: AiBookingState = { ...state, stage: "PASSENGER_COLLECTION", drafts, paxIndex: idx };
   if (missing) {
     next.awaiting = missing;
@@ -576,18 +616,28 @@ function passengerCollection(state: AiBookingState, text: string, env: AiBooking
 
   say.push(`Passenger ${idx + 1} complete hai.`);
   const total = Math.max(state.pax ?? drafts.length, drafts.length);
-  const nextIdx = drafts.findIndex((d) => askForDraft(d) !== null);
+  void total;
+  const nextIdx = drafts.findIndex((d) => askForDraft(d, { food: withFood }) !== null);
   if (nextIdx >= 0) {
     next.paxIndex = nextIdx;
-    next.awaiting = askForDraft(drafts[nextIdx]);
-    return withSpoken(next, [...say, aiBookingAskLine(next.awaiting, { index: nextIdx, code: state.classCode })], actions);
+    next.awaiting = askForDraft(drafts[nextIdx], { food: withFood });
+    return withSpoken(
+      next,
+      [...say, `Ab passenger ${nextIdx + 1} ki details.`, aiBookingAskLine(next.awaiting, { index: nextIdx, code: state.classCode })],
+      actions,
+    );
   }
 
+  /* Saari details mil gayi → AI khud review booking kholta hai (user ka explicit "AI Book" click
+   * ki zaroorat nahi — automation, lekin final IRCTC action user ke confirmation par). */
   next.stage = "PASSENGER_REVIEW";
   next.paxIndex = 0;
   next.awaiting = "review";
-  void total;
-  return withSpoken(next, [...say, "Saare passenger details bhar gaye hain.", aiBookingReviewLine(next)], actions);
+  return withSpoken(
+    next,
+    [...say, "Saari passenger details mil gayi hain ✅", "Main review booking khol rahi hoon…"],
+    [...actions, { type: "OPEN_REVIEW" }],
+  );
 }
 
 /** Booking review ka saaf summary — jo diya gaya wahi likha jata hai (koi number invent nahi). */
@@ -598,7 +648,7 @@ export function aiBookingSummaryLines(args: {
   trainNumber: string | null;
   trainName?: string | null;
   classCode: string | null;
-  passengers: { name?: string; age?: string; gender?: string; berthPreference?: string }[];
+  passengers: { name?: string; age?: string; gender?: string; berthPreference?: string; foodChoice?: string }[];
   fareTotal?: number | null;
 }): string[] {
   const paxNo = (p: { gender?: string }, i: number) => `Passenger ${i + 1}`;
@@ -609,7 +659,8 @@ export function aiBookingSummaryLines(args: {
   if (args.classCode) lines.push(`Class: ${args.classCode} (${classLabel(args.classCode)})`);
   lines.push(`Passengers: ${args.passengers.length}`);
   args.passengers.forEach((p, i) => {
-    const bits = [p.name?.trim(), p.age ? `${p.age}` : "", p.gender ? p.gender.toLowerCase() : "", p.berthPreference ?? ""].filter(Boolean);
+    const food = p.foodChoice === "VEG" ? "veg" : p.foodChoice === "NON_VEG" ? "non-veg" : p.foodChoice === "NO_FOOD" ? "no food" : "";
+    const bits = [p.name?.trim(), p.age ? `${p.age}` : "", p.gender ? p.gender.toLowerCase() : "", p.berthPreference ?? "", food].filter(Boolean);
     lines.push(`${paxNo(p, i)}: ${bits.join(", ") || "—"}`);
   });
   lines.push(args.fareTotal != null ? `Fare: ${inr(args.fareTotal)}` : "Fare: review screen par live fare dikh raha hai (invent nahi karti).");
@@ -627,6 +678,29 @@ export function aiBookingReviewLine(state: AiBookingState, fareTotal?: number | 
   const head = bits.length ? bits.join(", ") : "Aapki journey";
   const fare = fareTotal != null ? ` Fare ${inr(fareTotal)}.` : "";
   return `Booking summary ready hai 😊 ${head}.${fare} Kya sab details theek hain? Kuch change karna hai ya booking continue karun?`;
+}
+
+/** Review screen khul gaya — ab AI final confirmation maangti hai (khud kuch submit nahi karti). */
+export function aiBookingFinalPrompt(state: AiBookingState, fareTotal?: number | null): AiBookingTurn {
+  const next: AiBookingState = { ...state, stage: "FINAL_CONFIRMATION", awaiting: "confirm" };
+  return withSpoken(next, [
+    aiBookingReviewLine(next, fareTotal),
+    "Kya ye final details hain ya kuch edit karna hai?",
+    "Agar sab theek hai to “Haan” boliye ya Continue Booking dabaiye — main Continue to IRCTC khud dabakar aapki details autofill kar dungi. Kuch badalna ho to bata dijiye.",
+  ]);
+}
+
+/** User ne final confirmation di → maujooda Continue to IRCTC khud click hoga (autofill waise hi). */
+export function aiBookingHandoffTurn(state: AiBookingState): AiBookingTurn {
+  const next: AiBookingState = { ...state, stage: "IRCTC_HANDOFF", awaiting: null, confirmed: true };
+  return withSpoken(
+    next,
+    [
+      "Theek hai 👍 Details confirm hain — main Continue to IRCTC dab rahi hoon.",
+      "IRCTC khulte hi aapki journey + passenger details usi tarah autofill hongi (app/extension me). Login / OTP / payment aap hi karenge.",
+    ],
+    [{ type: "IRCTC_HANDOFF" }],
+  );
 }
 
 export function aiBookingHandoffLine(): string {
@@ -767,28 +841,27 @@ export function aiBookingTurn(state: AiBookingState, rawText: string, env: AiBoo
     case "PASSENGER_COLLECTION":
       return passengerCollection(state, text, env);
 
-    case "PASSENGER_REVIEW":
-    case "BOOKING_REVIEW": {
-      if (isYes(text)) {
-        const next: AiBookingState = { ...state, stage: "FINAL_CONFIRMATION", awaiting: "confirm" };
-        return withSpoken(next, ["Theek hai 👍 “Continue Booking” dabaiye — main aapko review screen par le chalti hoon, wahan live fare aur Continue to IRCTC hoga."], []);
-      }
-      if (isNo(text)) {
-        const firstMissing = state.drafts.findIndex((d) => askForDraft(d) !== null);
-        const idx = firstMissing >= 0 ? firstMissing : 0;
-        const missing = askForDraft(state.drafts[idx]);
-        const next: AiBookingState = { ...state, stage: "PASSENGER_COLLECTION", paxIndex: idx, awaiting: missing ?? "paxName" };
-        return withSpoken(next, ["Koi baat nahi — bataiye kya badalna hai.", aiBookingAskLine(next.awaiting, { index: idx, code: state.classCode })]);
-      }
-      return withSpoken(state, [aiBookingAskLine("review")]);
+    case "PASSENGER_REVIEW": {
+      /* Review screen khul raha hai (ya khul chuka) — ab final question. */
+      return aiBookingFinalPrompt(state);
     }
 
+    case "BOOKING_REVIEW":
     case "FINAL_CONFIRMATION": {
-      if (isYes(text)) {
-        const next: AiBookingState = { ...state, stage: "BOOKING_REVIEW", awaiting: "review" };
-        return withSpoken(next, ["Confirmed ✅ — review screen khol rahi hoon (fare live API se aata hai)."]);
+      if (isYes(text)) return aiBookingHandoffTurn(state);
+      if (isNo(text)) {
+        const firstMissing = state.drafts.findIndex((d) => askForDraft(d, { food: env.foodExpected === true }) !== null);
+        const idx = firstMissing >= 0 ? firstMissing : 0;
+        const missing = askForDraft(state.drafts[idx], { food: env.foodExpected === true });
+        const next: AiBookingState = { ...state, stage: "PASSENGER_COLLECTION", paxIndex: idx, awaiting: missing ?? "paxName" };
+        return withSpoken(next, [
+          "Koi baat nahi — bataiye kya badalna hai (naam / age / gender / berth / khaana).",
+          aiBookingAskLine(next.awaiting, { index: idx, code: state.classCode }),
+        ]);
       }
-      return withSpoken(state, [aiBookingAskLine("confirm")]);
+      return withSpoken(state, [
+        "Bataiye — sab theek hai to “Haan” boliye (main Continue to IRCTC dabkar details autofill kar dungi), warna jo badalna hai bata dijiye.",
+      ]);
     }
 
     case "IRCTC_HANDOFF":
@@ -800,8 +873,12 @@ export function aiBookingTurn(state: AiBookingState, rawText: string, env: AiBoo
 }
 
 /** View: “AI Book” click ke baad — passenger form khul gaya. */
-export function aiBookingPassengerScreenOpen(state: AiBookingState): AiBookingTurn {
-  const next: AiBookingState = { ...state, stage: "PASSENGER_COLLECTION", awaiting: askForDraft(state.drafts[state.paxIndex] ?? {}) ?? "paxName" };
+export function aiBookingPassengerScreenOpen(state: AiBookingState, opts: { food?: boolean } = {}): AiBookingTurn {
+  const next: AiBookingState = {
+    ...state,
+    stage: "PASSENGER_COLLECTION",
+    awaiting: askForDraft(state.drafts[state.paxIndex] ?? {}, opts) ?? "paxName",
+  };
   return withSpoken(next, [
     `Passenger form khul gaya hai — main wahin details bhar deti hoon (${state.pax ?? 1} passenger).`,
     aiBookingAskLine(next.awaiting, { index: next.paxIndex, code: state.classCode }),
@@ -819,7 +896,11 @@ export function aiBookingClassUnavailable(state: AiBookingState, code: string): 
 
 /** View: real passenger form ka state badla (AI fields bharta hai, form hi source of truth hai).
  *  Sirf missing field poochhta hai aur same sawaal dobara nahi dohrata (idempotent). */
-export function aiBookingPassengersReady(state: AiBookingState, passengers: { name?: string; age?: string; gender?: string; berthPreference?: string; id?: string }[]): AiBookingTurn {
+export function aiBookingPassengersReady(
+  state: AiBookingState,
+  passengers: { name?: string; age?: string; gender?: string; berthPreference?: string; foodChoice?: string; id?: string }[],
+  food = false,
+): AiBookingTurn {
   if (!passengers.length) return { state, say: [], actions: [] };
   const size = Math.max(state.pax ?? 1, passengers.length);
   const drafts: AiPaxDraft[] = Array.from({ length: size }, (_, i) => {
@@ -834,9 +915,9 @@ export function aiBookingPassengersReady(state: AiBookingState, passengers: { na
         }
       : { ...(state.drafts[i] ?? {}) };
   });
-  const idx = drafts.findIndex((d) => askForDraft(d) !== null);
+  const idx = drafts.findIndex((d) => askForDraft(d, { food }) !== null);
   if (idx >= 0) {
-    const ask = askForDraft(drafts[idx]);
+    const ask = askForDraft(drafts[idx], { food });
     /* Same sawaal dobara nahi (warna "Passenger 1 ka naam bataiye" loop ban jaata hai). */
     if (state.stage === "PASSENGER_COLLECTION" && state.awaiting === ask && state.paxIndex === idx) {
       return { state, say: [], actions: [] };
@@ -847,8 +928,11 @@ export function aiBookingPassengersReady(state: AiBookingState, passengers: { na
   if (state.stage === "PASSENGER_REVIEW" || state.stage === "BOOKING_REVIEW") {
     return { state: { ...state, drafts }, say: [], actions: [] };
   }
+  if (state.stage === "PASSENGER_REVIEW") {
+    return withSpoken({ ...state, drafts }, ["Saari passenger details mil gayi hain ✅", "Main review booking khol rahi hoon…"], [{ type: "OPEN_REVIEW" }]);
+  }
   const next: AiBookingState = { ...state, stage: "PASSENGER_REVIEW", drafts, paxIndex: 0, awaiting: "review" };
-  return withSpoken(next, ["Saare passenger details bhar gaye hain.", aiBookingReviewLine(next)]);
+  return withSpoken(next, ["Saari passenger details mil gayi hain ✅", "Main review booking khol rahi hoon…"], [{ type: "OPEN_REVIEW" }]);
 }
 
 /** View: existing review screen khul gaya (user ne explicit confirmation diya). */

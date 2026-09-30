@@ -457,3 +457,24 @@ User ne wahi R62 brief detail me dobara bheja — jo cheezein usme extra/marked 
 6. **Hinglish parsing tests:** "12014 wali", "CC kar do", "Rahul Sharma, 31 male." (sirf berth poochhi jati hai), "2 passengers ki jagah 4 kar do".
 
 Tests: focused group ab **59 passed** (flow 33 · voice 9 · UI 9 · server route 8); regression **62 passed**; build ✓.
+
+## §9.56 — Round 62c (30 Sep 2026): AI Booking ab **poora automated** — AI khud sab kuch karwata hai
+
+**User:** *"jo new AI booking option banaya hai usko completely automate krdo … AI khud usko samjhe aur samne se pooche … then aap poocho enmein se kon si book krun … u automatically select that train and then move next to passenger details … details koi missing ho to AI khud se bole … 1 se 6 passenger tak sabka details one by one … uske baad continue to review booking option pe AI click kre … review page par sabh details … agar user positive reply kre to continue to redirect to irctc pe click krna aur khud se autofill krna … esmein existing architecture mein change mat karna."*
+
+Isliye automation **sirf AI Booking ke apne do files** me hui — `src/ai/aiBookingFlow.ts` + `src/views/AiBooking.tsx` (+ uske tests). Verified: deployed commit `79c7385` ke against `server/app.ts`, `src/api.ts`, `Concierge.tsx`, `styles.css`, `server/voice/tts.ts`, `aiBookingVoice.ts`, docs — sab **byte-identical** (grep/sha check), yaani koi API/tool/logic/state/IRCTC-layer touch nahi hui.
+
+**Ab ka pura auto-flow:**
+1. User: "1 October ko Amritsar se Ludhiana, 2 passengers hain" → AI sab samajh leta hai, sirf jo missing ho wo poochhta hai → **khud search** (maujooda `searchRoute`).
+2. Asli trains/classes/fare dikhte hain → AI: "Kaunsi train leni hai?"
+3. User: "12014 wali" / "12014" / card tap → AI **khud train select** karta hai aur usi train ki asli classes poochhta hai.
+4. User: "CC" → maujooda `selectClass` se **live availability verify** → AI **khud passenger form kholta hai** aur details maangna shuru karta hai (naam → age → gender → berth → khaana, agar us train me catering ho — maujooda pantry API se).
+5. Missing details par AI khud bolti hai: *"Passenger 2 ki ye details missing hai: age, gender, berth preference."*
+6. 1 se 6 passengers tak **ek-ek karke** poori details (form me live bharte hue).
+7. Saari details complete → AI **khud "Continue to Review Booking"** chalata hai (maujooda `goReview` — live availability + fare).
+8. Review page par AI summary (route · date · train · class · passengers + berth/food · fare) dikhata hai aur poochhta hai: *"Kya ye final details hain ya kuch edit karna hai?"*
+9. User "haan" (voice/text) ya **Continue Booking** button → AI **khud "Continue to IRCTC" button click** karta hai → wahi maujooda handoff + autofill layer chalti hai (extension/app me details khud bhar jaati hain). Login/OTP/payment hamesha user.
+
+**Safety waisi hi:** kuch fake nahi — na PNR, na confirmation, na invented fare/availability; IRCTC action sirf user ke explicit "haan"/click ke baad, aur wo bhi maujooda button ka asli click hai (koi bypass nahi).
+
+**Tests (round ke 3 grouped checks):** CHECK 1 build ✓ · CHECK 2 focused **63 passed** (flow 37 · voice 9 · UI 9 · server route 8) · CHECK 3 regression **62 passed**.

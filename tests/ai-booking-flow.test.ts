@@ -11,7 +11,10 @@ import {
   AI_BOOKING_STAGES,
   aiBookingAskLine,
   aiBookingClassSelected,
+  aiBookingFinalPrompt,
   aiBookingHandoffLine,
+  aiBookingHandoffTurn,
+  aiBookingMissingLine,
   aiBookingPassengersReady,
   aiBookingReviewScreenOpen,
   aiBookingStart,
@@ -194,7 +197,7 @@ describe("AI Booking — train/class sirf asli data se", () => {
     expect(selected.state.classCode).toBe("CC");
     const confirmed = aiBookingClassSelected(selected.state, klass("CC"), { status: "AVAILABLE", seats: 42 });
     expect(confirmed.state.stage).toBe("PASSENGER_COLLECTION");
-    expect(confirmed.say.join(" ")).toMatch(/AI Book/);
+    expect(confirmed.say.join(" ")).toMatch(/passenger form khol rahi hoon/i);
     expect(confirmed.say.join(" ")).toMatch(/AVL 42/);
   });
 });
@@ -237,7 +240,9 @@ describe("AI Booking — passenger conversation (form fields ke hisaab se)", () 
     s = step(s, "Rahul Sharma, 31, male, window").state;
     const done = step(s, "Neha, 28, female, window");
     expect(done.state.stage).toBe("PASSENGER_REVIEW");
-    expect(done.say.join(" ")).toMatch(/theek hain/i);
+    expect(done.say.join(" ")).toMatch(/review booking khol rahi hoon/i);
+    /* Automation: AI khud review booking kholta hai (maujooda goReview) */
+    expect(done.actions.some((a) => a.type === "OPEN_REVIEW")).toBe(true);
   });
 
   it("form ke asli state se sync (idempotent — same sawaal dobara nahi)", () => {
@@ -279,12 +284,14 @@ describe("AI Booking — review, explicit confirmation, IRCTC", () => {
     expect(noFare).not.toMatch(/₹/);
   });
 
-  it("BOOKING_REVIEW par 'haan' → FINAL_CONFIRMATION (abhi koi booking nahi hoti)", () => {
-    const s: AiBookingState = { ...aiBookingStart(NOW).state, stage: "BOOKING_REVIEW", awaiting: "review" };
+  it("'haan' par AI khud Continue to IRCTC karta hai (maujooda handoff) — lekin koi fake booking nahi", () => {
+    const s: AiBookingState = { ...aiBookingStart(NOW).state, stage: "FINAL_CONFIRMATION", awaiting: "confirm" };
     const t = step(s, "haan theek hai");
-    expect(t.state.stage).toBe("FINAL_CONFIRMATION");
-    expect(t.actions).toEqual([]); // koi auto-book nahi
-    expect(t.say.join(" ")).toMatch(/Continue Booking/);
+    expect(t.state.stage).toBe("IRCTC_HANDOFF");
+    expect(t.state.confirmed).toBe(true);
+    /* Sirf maujooda IRCTC handoff action — PNR/confirmation kuch nahi banata */
+    expect(t.actions).toEqual([{ type: "IRCTC_HANDOFF" }]);
+    expect(t.say.join(" ")).toMatch(/Continue to IRCTC dab rahi hoon/i);
   });
 
   it("'nahi' par wapas passenger details par (change path)", () => {
@@ -294,13 +301,24 @@ describe("AI Booking — review, explicit confirmation, IRCTC", () => {
     expect(t.state.awaiting).toBe("paxBerth");
   });
 
-  it("review screen khulne par IRCTC handoff line + stage IRCTC_HANDOFF", () => {
-    const s: AiBookingState = { ...aiBookingStart(NOW).state, stage: "FINAL_CONFIRMATION" };
-    const t = aiBookingReviewScreenOpen(s);
-    expect(t.state.stage).toBe("IRCTC_HANDOFF");
-    expect(t.state.confirmed).toBe(true);
-    expect(t.say[0]).toBe(aiBookingHandoffLine());
-    expect(t.say.join(" ")).toMatch(/Continue to IRCTC/);
+  it("review screen khulte hi AI final question poochhti hai (aur kuch submit nahi karti)", () => {
+    const s: AiBookingState = {
+      ...aiBookingStart(NOW).state,
+      from: ASR,
+      to: LDH,
+      date: "2026-10-01",
+      trainNumber: "12014",
+      classCode: "CC",
+      pax: 2,
+    };
+    const t = aiBookingFinalPrompt(s, 850);
+    expect(t.state.stage).toBe("FINAL_CONFIRMATION");
+    expect(t.state.awaiting).toBe("confirm");
+    expect(t.actions).toEqual([]); // khud se kuch submit/click nahi
+    expect(t.say.join(" ")).toMatch(/Booking summary ready hai/);
+    expect(t.say.join(" ")).toMatch(/final details hain ya kuch edit/i);
+    expect(t.say.join(" ")).toMatch(/Continue to IRCTC khud dabakar .* autofill/i);
+    expect(aiBookingHandoffTurn(s).actions).toEqual([{ type: "IRCTC_HANDOFF" }]);
   });
 
   it("nayi booking command par poora context reset (purani journey carry nahi hoti)", () => {
@@ -412,5 +430,57 @@ describe("AI Booking — Hinglish + food + partial sentences", () => {
     expect(line).toMatch(/continue karun/i);
     const noFare = aiBookingReviewLine({ ...st, trainNumber: null, classCode: null }, null);
     expect(noFare).not.toMatch(/₹/);
+  });
+});
+
+describe("AI Booking — full automation (R62c)", () => {
+  const full = (): AiBookingState => {
+    const t = step(aiBookingStart(NOW).state, "1 October ko Amritsar se Ludhiana, 2 passengers");
+    const withTrain = step(t.state, "12014", { trains: TRAINS }).state;
+    const withClass = step(withTrain, "CC", { classes: TRAINS[0].classes }).state;
+    return aiBookingClassSelected(withClass, klass("CC"), { status: "AVAILABLE", seats: 42 }).state;
+  };
+
+  it("food ka sawaal sirf tab jab train me options hon (pantry API)", () => {
+    const s = full();
+    /* pantry true → berth ke baad khaana poochha jata hai */
+    let withFood = step(s, "Rahul Sharma, 31, male, window", { foodExpected: true }).state;
+    expect(withFood.awaiting).toBe("paxFood");
+    const answered = step(withFood, "veg", { foodExpected: true });
+    expect(answered.state.drafts[0].foodChoice).toBe("VEG");
+    /* pantry false/unknown → khaana ka sawaal hi nahi */
+    const noFood = step(s, "Rahul Sharma, 31, male, window", { foodExpected: false }).state;
+    expect(noFood.awaiting).not.toBe("paxFood");
+    const unknown = step(s, "Rahul Sharma, 31, male, window", {}).state;
+    expect(unknown.awaiting).not.toBe("paxFood");
+  });
+
+  it("1 se 6 passengers tak ek-ek karke details — sab complete hone par review khulta hai", () => {
+    const base: AiBookingState = { ...aiBookingStart(NOW).state, stage: "PASSENGER_COLLECTION", classCode: "CC", pax: 3, drafts: [{}, {}, {}], awaiting: "paxName" };
+    let s = base;
+    let turn = step(s, "Rahul Sharma, 31, male, window");
+    s = turn.state;
+    expect(turn.say.join(" ")).toMatch(/Ab passenger 2 ki details/);
+    turn = step(s, "Neha, 28, female, window");
+    s = turn.state;
+    expect(turn.say.join(" ")).toMatch(/Ab passenger 3 ki details/);
+    turn = step(s, "Aman, 45, male, window");
+    expect(turn.state.stage).toBe("PASSENGER_REVIEW");
+    expect(turn.actions.some((a) => a.type === "OPEN_REVIEW")).toBe(true);
+    expect(turn.actions.filter((a) => a.type === "PATCH_PASSENGER")).toHaveLength(1);
+  });
+
+  it("missing details ki saaf line (food ke saath/siva)", () => {
+    expect(aiBookingMissingLine({ name: "Rahul Sharma" }, 0)).toMatch(/age, gender, berth preference/);
+    expect(aiBookingMissingLine({ name: "Rahul Sharma", age: "31", gender: "MALE", berthPreference: "Window" }, 1, { food: true })).toMatch(/khaana/);
+    expect(aiBookingMissingLine({ name: "Rahul Sharma", age: "31", gender: "MALE", berthPreference: "Window" }, 1)).toMatch(/saari details mil gayi/i);
+  });
+
+  it("review par 'nahi' → wapas passenger details par (edit raasta)", () => {
+    const s: AiBookingState = { ...aiBookingStart(NOW).state, stage: "FINAL_CONFIRMATION", awaiting: "confirm", drafts: [{ name: "Rahul Sharma", age: "31", gender: "MALE", berthPreference: "" }], pax: 1 };
+    const t = step(s, "nahi, berth badalni hai");
+    expect(t.state.stage).toBe("PASSENGER_COLLECTION");
+    expect(t.state.awaiting).toBe("paxBerth");
+    expect(t.actions).toEqual([]);
   });
 });

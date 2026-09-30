@@ -19,6 +19,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useBooking } from "../booking/context";
+import { api } from "../api";
 import { TrainClassBlock, type ClassChipData } from "../components/TrainClassBlock";
 import { isBookable } from "../types";
 import { newId } from "../format";
@@ -31,9 +32,10 @@ import {
   aiBookingBlank,
   aiBookingClassSelected,
   aiBookingClassUnavailable,
+  aiBookingFinalPrompt,
+  aiBookingHandoffTurn,
   aiBookingPassengerScreenOpen,
   aiBookingPassengersReady,
-  aiBookingReviewScreenOpen,
   aiBookingStart,
   aiBookingSummaryLines,
   aiBookingTrainsReady,
@@ -66,6 +68,8 @@ export function AiBooking({ open, onClose }: { open: boolean; onClose: () => voi
   const [muted, setMuted] = useState(false);
   const [provider, setProvider] = useState<VoiceProviderInfo | null>(null);
   const [speaking, setSpeaking] = useState(false);
+  /* R62c: us train me catering/food options hain? (maujooda pantry API — read-only). null = pata nahi → food ka sawaal nahi. */
+  const [foodExpected, setFoodExpected] = useState<boolean | null>(null);
   const started = useRef(false);
   const trainsHandled = useRef(false);
   const reviewHandled = useRef(false);
@@ -107,12 +111,23 @@ export function AiBooking({ open, onClose }: { open: boolean; onClose: () => voi
         } finally {
           setBusy(false);
         }
-      } else if (a.type === "REVIEW") {
+      } else if (a.type === "REVIEW" || a.type === "OPEN_REVIEW") {
+        /* Maujooda "Continue to review" wahi rasta — goReview() (live availability + fare). */
         setBusy(true);
         try {
           await cb.current.goReview();
         } finally {
           setBusy(false);
+        }
+      } else if (a.type === "IRCTC_HANDOFF") {
+        /* Maujooda "Continue to IRCTC" button khud click — usi ka handoff + autofill layer chalta hai.
+         * (Button na mile to saaf fallback line; kuch fake nahi hota.) */
+        if (typeof document === "undefined") continue;
+        const btn = document.getElementById("irctc-continue") as HTMLButtonElement | null;
+        if (btn) {
+          btn.click();
+        } else {
+          push("ai", "IRCTC button abhi screen par nahi hai — Review journey screen par “Continue to IRCTC” dabaiye, details wahin autofill hongi.");
         }
       } else if (a.type === "RESET") {
         cb.current.resetJourney();
@@ -143,6 +158,7 @@ export function AiBooking({ open, onClose }: { open: boolean; onClose: () => voi
       const env = {
         trains: st.trains,
         classes: st.selectedTrain?.classes ?? st.trains.find((t) => t.number === flow.trainNumber)?.classes ?? [],
+        foodExpected,
       };
       const after = await applyTurn(aiBookingTurn(flow, clean, env));
 
@@ -158,7 +174,13 @@ export function AiBooking({ open, onClose }: { open: boolean; onClose: () => voi
         if (klass) {
           await cb.current.selectClass(klass);
           const verified = live.current.state.selectedClass;
-          if (verified && verified.code === klass.code) await applyTurn(aiBookingClassSelected(after, klass, verified));
+          if (verified && verified.code === klass.code) {
+            const train = st.selectedTrain ?? st.trains.find((t) => t.number === after.trainNumber) ?? null;
+            /* Automation: class select hote hi maujooda passenger form khud khulta hai. */
+            if (train) cb.current.selectTrainAndClassGo(train, verified);
+            const t2 = await applyTurn(aiBookingClassSelected(after, klass, verified, { food: foodExpected === true }));
+            void t2;
+          }
         }
       }
     },
@@ -187,6 +209,28 @@ export function AiBooking({ open, onClose }: { open: boolean; onClose: () => voi
     return aiBookingVoice.onState((st) => setSpeaking(st === "speaking"));
   }, [open]);
 
+  /* Food ka sawaal sirf tab jab us train me options hon (maujooda pantry API se — koi guess nahi). */
+  useEffect(() => {
+    if (!open) return;
+    const n = state.selectedTrain?.number ?? flow.trainNumber;
+    if (!n) {
+      setFoodExpected(null);
+      return;
+    }
+    let alive = true;
+    api
+      .trainPantry(n)
+      .then((p) => {
+        if (alive) setFoodExpected(p?.foodChoiceExpected === true);
+      })
+      .catch(() => {
+        if (alive) setFoodExpected(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [open, flow.trainNumber, state.selectedTrain?.number]);
+
   useEffect(() => {
     if (!open) return;
     /* Purane WebView/jsdom me scrollTo na ho to bhi na toote. */
@@ -208,8 +252,8 @@ export function AiBooking({ open, onClose }: { open: boolean; onClose: () => voi
   useEffect(() => {
     if (!open || flow.stage !== "PASSENGER_COLLECTION" || busy) return;
     if (!state.passengers.length) return;
-    void applyTurn(aiBookingPassengersReady(flow, state.passengers));
-  }, [applyTurn, busy, flow, open, state.passengers]);
+    void applyTurn(aiBookingPassengersReady(flow, state.passengers, foodExpected === true));
+  }, [applyTurn, busy, flow, open, state.passengers, foodExpected]);
 
   /* User ne maujooda ClassSelect screen par khud class tap ki → flow usi ko follow kare. */
   useEffect(() => {
@@ -226,16 +270,18 @@ export function AiBooking({ open, onClose }: { open: boolean; onClose: () => voi
       trainName: flow.trainName ?? state.selectedTrain?.name ?? null,
       awaiting: "paxName",
     };
-    void applyTurn(aiBookingClassSelected(next, klass, klass));
+    /* Maujooda flow: class chip tap (ClassSelect screen) → passenger form khud khul jaata hai. */
+    if (state.selectedTrain) cb.current.selectTrainAndClassGo(state.selectedTrain, klass);
+    void applyTurn(aiBookingClassSelected(next, klass, klass, { food: foodExpected === true }));
   }, [applyTurn, flow, open, state.selectedClass, state.selectedTrain]);
 
   /* Review screen khul gaya → IRCTC handoff line (Continue to IRCTC wahi purana card hai). */
   useEffect(() => {
     if (!open || state.screen !== "review" || reviewHandled.current) return;
-    if (flow.stage !== "FINAL_CONFIRMATION" && flow.stage !== "BOOKING_REVIEW") return;
+    if (flow.stage !== "PASSENGER_REVIEW" && flow.stage !== "BOOKING_REVIEW" && flow.stage !== "FINAL_CONFIRMATION") return;
     reviewHandled.current = true;
-    void applyTurn(aiBookingReviewScreenOpen(flow));
-  }, [applyTurn, flow, open, state.screen]);
+    void applyTurn(aiBookingFinalPrompt(flow, state.previewFare?.total ?? null));
+  }, [applyTurn, flow, open, state.screen, state.previewFare]);
 
   /* Voice: mic dabane par pehle bolna band, phir sunna (Android Chrome me dono ek saath nahi chalte). */
   const micTap = useCallback(async () => {
@@ -277,14 +323,8 @@ export function AiBooking({ open, onClose }: { open: boolean; onClose: () => voi
   }, [applyTurn, flow, push]);
 
   const continueBooking = useCallback(async () => {
-    /* Explicit user click = confirmation (AI khud confirm nahi karti). */
-    await applyTurn(aiBookingTurn(flow, "haan"));
-    setBusy(true);
-    try {
-      await cb.current.goReview();
-    } finally {
-      setBusy(false);
-    }
+    /* User ka explicit "haan" (click/voice/text) = confirmation → AI khud IRCTC continue karta hai. */
+    await applyTurn(aiBookingHandoffTurn(flow));
   }, [applyTurn, flow]);
 
   const changeDetails = useCallback(() => {
@@ -307,11 +347,12 @@ export function AiBooking({ open, onClose }: { open: boolean; onClose: () => voi
     trainNumber: state.selectedTrain?.number ?? flow.trainNumber,
     trainName: state.selectedTrain?.name ?? flow.trainName,
     classCode: state.selectedClass?.code ?? flow.classCode,
-    passengers: state.passengers,
+    passengers: state.passengers.map((p) => ({ name: p.name, age: p.age, gender: p.gender, berthPreference: p.berthPreference, foodChoice: (p as { foodChoice?: string }).foodChoice })),
     fareTotal: state.previewFare?.total ?? null,
   });
   const showBook = Boolean(flow.classCode) && !formOpen && state.screen !== "review";
-  const showReviewCta = flow.stage === "BOOKING_REVIEW" || flow.stage === "PASSENGER_REVIEW";
+  const reviewStages = ["PASSENGER_REVIEW", "BOOKING_REVIEW", "FINAL_CONFIRMATION"];
+  const showReviewCta = reviewStages.includes(flow.stage) && state.screen === "review";
   const statusLine = voice.listening ? "🎙️ Listening…" : thinking ? "⏳ Thinking…" : speaking ? "🔊 Speaking…" : lastAi;
   const vform = (
     <form
@@ -504,9 +545,6 @@ export function AiBooking({ open, onClose }: { open: boolean; onClose: () => voi
             <button type="button" className="aib-btn" data-testid="aib-change" onClick={changeDetails}>Change Details</button>
             <button type="button" className="aib-primary" data-testid="aib-continue" onClick={() => void continueBooking()}>Continue Booking</button>
           </>
-        )}
-        {flow.awaiting === "confirm" && (
-          <button type="button" className="aib-primary" data-testid="aib-continue2" onClick={() => void continueBooking()}>Continue Booking</button>
         )}
       </div>
 
