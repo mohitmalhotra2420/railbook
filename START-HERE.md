@@ -1,4 +1,4 @@
-# RailBook — poora project (continue karne ke liye) · 1 Oct 2026 (Round 68)
+# RailBook — poora project (continue karne ke liye) · 1 Oct 2026 (Round 69)
 
 Ye zip aapke **poore project** ka snapshot hai — web app + server + Android app + tests + previews + APKs.
 Naye workspace me bas extract karke `npm ci` chalao aur wahin se aage badho (git history bhi andar hai).
@@ -21,17 +21,33 @@ railbook-full/
 └── apks/                      ← latest release APKs (v1.4.8, v1.4.9 — r29 me naya APK nahi)
 ```
 
-## 0. Current state (1 Oct 2026 — Round 68)
+## 0. Current state (1 Oct 2026 — Round 69)
 
 
 - **ZIP ka permanent link (workspace reset-proof):** `https://github.com/mohitmalhotra2420/railbook/releases/download/r67-2026-10-01/RailBook-FULL-2026-10-01.zip`
   (release page: `https://github.com/mohitmalhotra2420/railbook/releases/tag/r67-2026-10-01`, asset id 601655666). Isi workspace ka har reset ke baad bhi downloadable rehta hai.
 - **Poora project GitHub par pushed:** `https://github.com/mohitmalhotra2420/railbook` (main) — server, client, 144 test files, docs, previews, android-app, tools.
-- **Prod live:** `https://railbook-gegs.onrender.com` · `/api/version` = `{"commit":"0006eb4","primaryModel":"meta/muse-glimmer-30b","fallbackModel":"openai/gpt-oss-20b"}` (service `srv-dae34rqd0e5s73evgjsg`, deploy `dep-daumkk3ncjis73fhh450`).
+- **Prod live:** `https://railbook-gegs.onrender.com` · `/api/version` = `{"commit":"7da8f67","primaryModel":"meta/muse-glimmer-30b","fallbackModel":"openai/gpt-oss-20b"}` (service `srv-dae34rqd0e5s73evgjsg`, deploy `dep-dautqjs1nsns73fmn1cg`).
 - **Round 61 ka faisla:** Muse-Glimmer primary planner, GPT-OSS-20B fallback + NLU; primary ke liye alag timeout `AI_PRIMARY_TIMEOUT_MS=90000` (warna bade prompt par 45s cap round barbaad kar deta tha).
-- **Tests:** `npx vitest run` → **150 files / 1622 pass / 0 fail** (1 skipped = gated live E2E). Client `tsc` purane baseline par hi (86) — koi naya error nahi. Server TS: `tsc -p tsconfig.server.json` clean.
+- **Tests:** `npx vitest run` → **152 files / 1629 pass / 0 fail** (1 skipped = gated live E2E). Client `tsc` purane baseline par hi (86) — koi naya error nahi. Server TS: `tsc -p tsconfig.server.json` clean.
 - **R60 ki teen reporting cheezein** (prod par pehle se live): station-choice dropdown, plan page ka touch scroll, leg classes ka naya grid.
 
+
+## 0aaaa. Round 69 (1 Oct 2026) — "AI Booking khulta hi nahi" ka pakka ilaaj
+
+User (dobara): *"AI booking open nhi ho rha"* + poori R68 list dobara. Live prod par asli browser se
+naapa: **panel khulta hai** (koi error nahi) — matlab asli wajah thi **purana bundle zinda reh jaana**
+(Android WebView page ko memory me rakhta hai; deploy ke baad bhi purana JS chalta rehta hai → naya fix
+dikhta hi nahi). Isliye teen taale:
+
+- **Crash-guard (AiBooking.tsx):** panel apne ErrorBoundary ke andar — kuch bhi toote to sirf panel ki
+  jagah chhota "Dobara try" card, **poora chat zinda**. Concierge/chat file untouched.
+- **Purana bundle self-heal (AiBooking.tsx):** panel khulte waqt build tag vs `/api/version`; alag ho to
+  "🔄 Naya version aa gaya hai — taaza kar raha hoon…" + khud reload (session me ek baar, 6s timeout).
+- **App shell (v1.5.4):** resume par wahi jaanch — stale page → reload; AI Booking panel khula ho to sirf
+  line "upar ⟳ dabaiye" (conversation na toote).
+
+APK **v1.5.4** (`1.5.4-voice`, vc 37) — sha256 `48b9f6f8920e86b7eae2e0a2a8f57cfbcc02b9b9faa1161882f04ede4021e35a`.
 
 ## 0aaa. Round 68 (1 Oct 2026) — crash fix + HAR QUERY PEHLE AI + wait messages
 
