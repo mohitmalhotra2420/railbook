@@ -29,6 +29,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useBooking } from "../booking/context";
+import { ErrorBoundary } from "../components/ErrorBoundary";
 import { api, type AgentContextClient } from "../api";
 import { TrainClassBlock, type ClassChipData } from "../components/TrainClassBlock";
 import { isBookable } from "../types";
@@ -246,7 +247,7 @@ async function waitForPaxPatches(
   }
 }
 
-export function AiBooking({ open, onClose }: { open: boolean; onClose: () => void }) {
+function AiBookingPanel({ open, onClose, freshNote }: { open: boolean; onClose: () => void; freshNote?: string | null }) {
   const booking = useBooking();
   const { state, go, setFrom, setTo, setDate, setPassengerCount, updatePassenger, searchRoute, selectClass, selectTrain, selectTrainAndClassGo, goReview, resetJourney } = booking;
   const live = useRef(booking);
@@ -920,6 +921,9 @@ export function AiBooking({ open, onClose }: { open: boolean; onClose: () => voi
   if (dock) {
     return (
       <div className="aib-dock" role="region" aria-label="AI Booking">
+        {freshNote && (
+          <div className="aib-fresh-note" data-testid="aib-fresh-note">{freshNote}</div>
+        )}
         {/* Dock me bhi aakhri 2-3 lines dikhti hain — user ko context milta rehta hai. */}
         <div className="aib-dock-log" data-testid="aib-dock-log">
           {msgs.slice(-3).map((m) => (
@@ -1030,6 +1034,10 @@ export function AiBooking({ open, onClose }: { open: boolean; onClose: () => voi
           <button type="button" className="aib-btn-ghost" onClick={onClose} aria-label="AI Booking band karo">✕</button>
         </div>
       </header>
+
+      {freshNote && (
+        <div className="aib-fresh-note" data-testid="aib-fresh-note">{freshNote}</div>
+      )}
 
       <div className="aib-stages" aria-label="Booking steps">
         {AI_BOOKING_STAGES.map((s, i) => (
@@ -1156,5 +1164,83 @@ export function AiBooking({ open, onClose }: { open: boolean; onClose: () => voi
 
       {vform}
     </div>
+  );
+}
+
+/* ══ R69 — "AI Booking khulta hi nahi" ka pakka ilaaj (sab kuch isi file me) ═══════════════════════
+ * User (1 Oct 2026, screenshots): "AI booking open nhi ho rha" / "chat dikha nahi paaya".
+ * Do alag-alag wajahein thi, dono ka ilaaj yahan:
+ *
+ *  1) RENDER CRASH — panel ke andar kuch bhi tuta (jaise React #310, ek missing field, koi bhi
+ *     render error) to pehle POORA chat gir jaata tha (App-level boundary "chat dikha nahi paaya").
+ *     Ab panel apne hi boundary ke andar hai: kuch bhi toote to sirf panel ki jagah chhota
+ *     "Dobara try" card dikhta hai, baaki chat/journey jaisi thi waisi chalti rehti hai. Ye wrapper
+ *     chat ki file ko chhue bina (Concierge waisa hi) — sirf yahan, AI Booking me.
+ *
+ *  2) PURANA BUNDLE — app/browser me agar purana build khula hua hai (Android WebView page ko
+ *     background me zinda rakhta hai; deploy ke baad bhi purana JS chalta rehta hai) to naya fix
+ *     dikhta hi nahi. Isliye panel khulte waqt apna build tag server ke /api/version se milaata hai;
+ *     alag nikla to saaf bolkar ek baar khud ko taaza karta hai. Koi jhooth nahi — jo hota hai wahi
+ *     likhta hai. (Safeguards: sirf commit-jaise tag par, session me ek baar, 6s timeout,
+ *     network fail par kuch nahi.)
+ */
+const BUILD_ONCE_KEY = "rb_build_refresh_once";
+
+/** Dono taraf asli commit jaise short-hash hain aur alag hain → taaza karna chahiye? (dev/test par kabhi nahi.) */
+export function needsFreshReload(mine: string, remote: string): boolean {
+  const ok = (v: string) => /^[0-9a-f]{7,40}$/i.test(v.trim());
+  const a = mine.trim().split(" ")[0] ?? "";
+  const b = remote.trim();
+  if (!ok(a) || !ok(b)) return false;
+  return a.slice(0, 7).toLowerCase() !== b.slice(0, 7).toLowerCase();
+}
+
+/** Khulte waqt: mera build server ke build se purana hai? (haan to note dikhao, phir taaza karo.) */
+function useBuildFreshness(open: boolean): string | null {
+  const [note, setNote] = useState<string | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    const mine = typeof __BUILD_TAG__ === "string" ? __BUILD_TAG__ : "";
+    const isCommit = /^[0-9a-f]{7,40}$/i.test(mine.trim().split(" ")[0] ?? "");
+    if (!isCommit) return;
+    try {
+      if (sessionStorage.getItem(BUILD_ONCE_KEY)) return;
+    } catch {
+      return; /* storage band ho to chup-chaap aage (koi crash nahi) */
+    }
+    let alive = true;
+    const ctl = new AbortController();
+    const t = window.setTimeout(() => ctl.abort(), 6000);
+    fetch("/api/version", { signal: ctl.signal, cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((v: unknown) => {
+        const remote = String((v as { commit?: string } | null)?.commit ?? "");
+        if (!alive || !needsFreshReload(mine, remote)) return;
+        try {
+          sessionStorage.setItem(BUILD_ONCE_KEY, "1");
+        } catch {
+          /* ignore */
+        }
+        setNote("🔄 Naya version aa gaya hai — taaza kar raha hoon…");
+        window.setTimeout(() => window.location.reload(), 900);
+      })
+      .catch(() => undefined)
+      .finally(() => window.clearTimeout(t));
+    return () => {
+      alive = false;
+      ctl.abort();
+      window.clearTimeout(t);
+    };
+  }, [open]);
+  return note;
+}
+
+/** Concierge yahi import karta hai (waisa hi naam/props) — andar crash-guard + freshness wrap. */
+export function AiBooking({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const freshNote = useBuildFreshness(open);
+  return (
+    <ErrorBoundary what="AI Booking" resetKey={open ? 1 : 0} compact>
+      <AiBookingPanel open={open} onClose={onClose} freshNote={freshNote} />
+    </ErrorBoundary>
   );
 }

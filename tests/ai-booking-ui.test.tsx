@@ -451,11 +451,18 @@ describe("R68 — crash fix + har query pehle AI + wait line", () => {
     await waitFor(() => expect(screen.getByRole("region", { name: "AI Booking" })).toBeTruthy(), { timeout: 8000 });
   }, 25000);
 
-  it("structural guard: early return ke baad koi hook nahi (React #310 dobara na aaye)", () => {
+  it("structural guard: panel ke early-return ke baad koi hook nahi (React #310 dobara na aaye)", () => {
     const src = readFileSync("src/views/AiBooking.tsx", "utf8");
-    const idx = src.indexOf("if (!open) return null;");
+    /* R69: guard ab panel ke apne component body par lagta hai (file me aage wrapper + hooks
+     * hain — wo apne alag component me hain, jaisa hona chahiye). */
+    const start = src.indexOf("function AiBookingPanel(");
+    expect(start).toBeGreaterThan(0);
+    const end = src.indexOf("\n}\n", src.indexOf("if (!open) return null;", start));
+    expect(end).toBeGreaterThan(start);
+    const body = src.slice(start, end);
+    const idx = body.indexOf("if (!open) return null;");
     expect(idx).toBeGreaterThan(0);
-    const tail = src.slice(idx);
+    const tail = body.slice(idx);
     /* JSX/helpers theek hain — bas koi hook (useState/useEffect/useMemo/useCallback/useRef) nahi hona chahiye. */
     const hooks = tail.match(/use(State|Effect|Memo|Callback|Ref|Reducer|LayoutEffect)\s*\(/g) ?? [];
     expect(hooks).toEqual([]);

@@ -168,10 +168,6 @@ class MainActivity : AppCompatActivity() {
         s.setSupportMultipleWindows(false)
         s.allowFileAccess = false
         s.allowContentAccess = false
-        /* Round-66 (user: "tts ki voice nahi aa rahi"): WebView default me media play ke liye user
-         * gesture maangta hai — AI ke async turn ka play() isliye chup-chaap block ho jaata tha.
-         * Ab server TTS (openai-edge-tts) ka MP3 turant bajta hai (aur native bridge bhi backup hai). */
-        s.mediaPlaybackRequiresUserGesture = false
         s.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
         /* IRCTC's CDN (Akamai) blocks the stock Android WebView user agent — it carries the
          * " wv" WebView token that the edge treats as bot traffic ("Access Denied", ref edgesuite).
@@ -787,11 +783,6 @@ class MainActivity : AppCompatActivity() {
             voice?.destroy()
         } catch (_: Exception) {
         }
-        /* Round-63-fix: native TTS engine release (warna leak reh jaata hai). */
-        try {
-            voice?.release()
-        } catch (_: Exception) {
-        }
         super.onDestroy()
     }
 
@@ -804,6 +795,69 @@ class MainActivity : AppCompatActivity() {
      *   3) history khatam aur RailBook par hain → "dobara dabao to exit" (galti se band na ho),
      *   4) kisi aur host par → RailBook home.
      */
+    /* ══ R69 ═══════════════════════════════════════════════════════════════════════════════════════
+     * User (1 Oct 2026): "AI booking open nhi ho rha" — jabki server par fix live tha.
+     * Wajah: WebView page ko memory me zinda rakhta hai; deploy ke baad bhi PURANA JS bundle chalta
+     * rehta hai, isliye naya fix dikhta hi nahi. Ab resume par page ka build tag (jo header me dikhta
+     * hai) server ke /api/version commit se milta hai:
+     *   • alag   → page taaza (reload). Chat/journey state web app khud wapas le aata hai.
+     *   • AI Booking panel khula ho → reload nahi (user ki conversation beech me na tootei); saaf
+     *     line dikhti hai ki ⟳ dabaiye.
+     *   • same / network fail / 60s ke andar dobara → kuch nahi (koi chhed-chhad nahi).
+     * Ye sirf app shell ka kaam hai — web ka chat/AI code jaisa tha waisa hi hai. */
+    private var versionCheckedAt = 0L
+
+    private fun checkStaleBundle() {
+        val now = System.currentTimeMillis()
+        if (now - versionCheckedAt < 60_000L) return
+        versionCheckedAt = now
+        if (prewarmActive) return
+        val wv = binding.webView
+        if (!isRailbookUrl(wv.url)) return
+        wv.evaluateJavascript(
+            "(function(){var t=(document.querySelector('.build-tag')||{}).textContent||'';" +
+                "var p=document.querySelector('.aib-dock,[aria-label=\"AI Booking\"][role=\"dialog\"]');" +
+                "return t.trim().split(' ')[0]+'|'+(p?'1':'0');})()"
+        ) { raw ->
+            val out = (raw ?: "").trim().trim('"')
+            val mine = out.substringBefore('|').trim()
+            val panelOpen = out.endsWith("|1")
+            if (!Regex("^[0-9a-f]{7,40}$", RegexOption.IGNORE_CASE).matches(mine)) return@evaluateJavascript
+            Thread {
+                val remote = fetchServerCommit()
+                if (remote == null) return@Thread
+                if (remote.take(7).equals(mine.take(7), ignoreCase = true)) return@Thread
+                runOnUiThread {
+                    if (prewarmActive) return@runOnUiThread
+                    if (panelOpen) {
+                        setStatus(
+                            "Naya version aa gaya hai — upar ⟳ dabaiye, phir AI Booking taaza chalega.",
+                            toast = true
+                        )
+                    } else {
+                        setStatus("Naya version aa gaya — page taaza kar diya.", toast = true)
+                        binding.webView.reload()
+                    }
+                }
+            }.start()
+        }
+    }
+
+    /** Server ka build commit (/api/version) — 4s timeout, fail par null (kuch nahi karte). */
+    private fun fetchServerCommit(): String? = try {
+        val conn = (java.net.URL("https://railbook-gegs.onrender.com/api/version").openConnection()
+            as java.net.HttpURLConnection)
+        conn.connectTimeout = 4000
+        conn.readTimeout = 4000
+        conn.requestMethod = "GET"
+        val body = conn.inputStream.bufferedReader().use { it.readText() }
+        conn.disconnect()
+        Regex("\"commit\"\\s*:\\s*\"([0-9a-fA-F]{7,40})\"").find(body)?.groupValues?.get(1)
+    } catch (e: Exception) {
+        Log.i(TAG, "version check skip: ${e.message}")
+        null
+    }
+
     private fun isRailbookUrl(url: String?): Boolean {
         val h = hostOf(url ?: return false)
         return h == "railbook-gegs.onrender.com" || h.endsWith(".onrender.com")
@@ -869,6 +923,9 @@ class MainActivity : AppCompatActivity() {
                 }
             }, 250)
         }
+        /* R69: page background me zinda rehta hai — deploy ke baad bhi purana JS chalta reh sakta hai
+         * (user ko naya fix dikhta hi nahi). Resume par chupke se check. */
+        checkStaleBundle()
     }
 
     /* Nav bar me kaun sa page khula hai — chhota sa label (IRCTC par hon to saaf dikhe). */

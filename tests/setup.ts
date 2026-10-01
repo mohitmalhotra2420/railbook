@@ -25,3 +25,12 @@ _setWikipediaFetchForTests(_offline);
 // jo test scrape chahta hai wo setScrapeFetch se apna mock lagata hai.
 import { setScrapeFetch } from "../server/railway/webscrape";
 setScrapeFetch(async () => new Response("", { status: 404 }));
+
+/* R69 (test-harness only): jsdom me Element.scrollTo/scrollBy nahi hote, browser/WebView me hote hain.
+ * App render par Concierge/Panel scroll karte hain — warna test me hi jhoothi crash dikhti hai
+ * (asli device par ye hota hi nahi). Sirf harness me shim, prod code me kuch nahi badla. */
+if (typeof Element !== "undefined") {
+  const proto = Element.prototype as unknown as { scrollTo?: unknown; scrollBy?: unknown };
+  if (typeof proto.scrollTo !== "function") proto.scrollTo = () => undefined;
+  if (typeof proto.scrollBy !== "function") proto.scrollBy = () => undefined;
+}
