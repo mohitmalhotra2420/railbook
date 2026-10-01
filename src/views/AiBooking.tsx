@@ -963,14 +963,12 @@ function AiBookingPanel({ open, onClose, freshNote }: { open: boolean; onClose: 
           </div>
         )}
 
-        {voiceIssue && !issueDismissed && (voice.listening || thinking || voiceOn) && (
+        {voiceIssue && voiceIssue !== "server-failed" && !issueDismissed && (voice.listening || thinking || voiceOn) && (
           <div className="aib-voice-issue" data-testid="aib-voice-issue">
             <span>
               {voiceIssue === "playback-blocked"
                 ? "🔇 Server ki awaaz play nahi ho payi — device voice chala di. (🔊 Test voice se dobara try)"
-                : voiceIssue === "server-failed"
-                  ? "Server voice abhi nahi aayi — device voice chala di. Booking text waise hi chalti hai."
-                  : "Is device par voice output nahi mila — text me aage badh rahi hoon."}
+                : "Is device par voice output nahi mila — text me aage badh rahi hoon."}
             </span>
             <button type="button" className="aib-btn-ghost" aria-label="Notice hatao" onClick={() => setIssueDismissed(true)}>
               ✕
@@ -1113,14 +1111,12 @@ function AiBookingPanel({ open, onClose, freshNote }: { open: boolean; onClose: 
         )}
       </div>
 
-      {voiceIssue && !issueDismissed && (voice.listening || thinking || voiceOn) && (
+      {voiceIssue && voiceIssue !== "server-failed" && !issueDismissed && (voice.listening || thinking || voiceOn) && (
         <div className="aib-voice-issue" data-testid="aib-voice-issue">
           <span>
             {voiceIssue === "playback-blocked"
               ? "🔇 Server ki awaaz play nahi ho payi — device voice chala di. (🔊 Test voice se dobara try)"
-              : voiceIssue === "server-failed"
-                ? "Server voice abhi nahi aayi — device voice chala di. Booking text waise hi chalti hai."
-                : "Is device par voice output nahi mila — text me aage badh rahi hoon."}
+              : "Is device par voice output nahi mila — text me aage badh rahi hoon."}
           </span>
           <button type="button" className="aib-btn-ghost" aria-label="Notice hatao" onClick={() => setIssueDismissed(true)}>
             ✕

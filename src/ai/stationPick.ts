@@ -76,6 +76,16 @@ function compact(s: string): string {
 /** Pick one of the stations already shown as chips. Never invents a new station. */
 export function matchOfferedStation(text: string, offered: Station[]): Station | undefined {
   if (!offered.length) return undefined;
+  // R70 (screenshot: user ne "1" dabaya par passenger ban gaya) — number se choice
+  const trimmed = text.normalize("NFKC").trim().toLowerCase();
+  const numMatch = trimmed.match(/^(?:option\s*)?([1-6])\s*[.)\-]?\s*$/);
+  if (numMatch) {
+    const idx = Number(numMatch[1]) - 1;
+    if (offered[idx]) return offered[idx];
+  }
+  const hindiOrdinal: Record<string, number> = { pehla: 0, dusra: 1, doosra: 1, teesra: 2, chautha: 3, paanchva: 4, chhatha: 5 };
+  const ord = fold(text).trim();
+  if (ord in hindiOrdinal && offered[hindiOrdinal[ord]]) return offered[hindiOrdinal[ord]];
   const q = fold(text);
   if (!q) return undefined;
   const qc = compact(text);

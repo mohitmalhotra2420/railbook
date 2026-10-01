@@ -613,6 +613,7 @@ function collectJourney(state: AiBookingState, text: string, env: AiBookingEnv):
   const now = env.now ?? new Date();
   const next: AiBookingState = { ...state, stage: "COLLECT_JOURNEY" };
   const say: string[] = [];
+  let pendingWasResolved = false;
 
   const stations = findStationsInText(text);
 
@@ -624,19 +625,28 @@ function collectJourney(state: AiBookingState, text: string, env: AiBookingEnv):
     if (picked) {
       next[slot] = picked;
       next.pendingCity = null;
+      pendingWasResolved = true;
       say.push(`${picked.name} (${picked.code}) le liya ✅`);
     } else {
-      /* Is city ke bahar ka station khud bata diya (jaise "Jaipur") → user ki baat maano. */
+      /* Is city ke bahar ka station khud bata diya (jaise "Jaipur" jab Delhi pending ho) → user ki baat maano.
+       * R70: agar pending TO hai (Mathura) aur user ne "LUDHIANA se" (FROM) bola to FROM bharo, pending ko haath mat lagao. */
       const outside = stations[0];
-      if (outside && !list.some((c) => c.code === outside.code) && outside.code !== next[slot === "from" ? "to" : "from"]?.code) {
+      const otherSlot = slot === "from" ? "to" : "from";
+      if (outside && !list.some((c) => c.code === outside.code) && !next[otherSlot] && outside.code !== next[slot]?.code) {
+        next[otherSlot] = outside;
+        say.push(`${outside.name} (${outside.code}) le liya ✅`);
+        // pending waise hi rahega — agla sawal wahi city ka hi rahega
+      } else if (outside && !list.some((c) => c.code === outside.code) && !next[slot] && outside.code !== next[otherSlot]?.code) {
         next[slot] = outside;
         next.pendingCity = null;
+        pendingWasResolved = true;
         say.push(`${outside.name} (${outside.code}) le liya ✅`);
       } else if (sameCityOrAny(text, city) || userLeftChoiceToAi(text) || next.pendingCity.asked) {
         const primary = primaryStationFor(city);
         if (primary) {
           next[slot] = primary;
           next.pendingCity = null;
+          pendingWasResolved = true;
           say.push(
             `Theek hai — “${city}” ke liye ${primary.name} (${primary.code}) le rahi hoon (yahi is city ka pehla asli station hai).`,
             `Koi doosra station chahiye to bata dijiye — main turant badal dungi.`,
@@ -688,27 +698,71 @@ function collectJourney(state: AiBookingState, text: string, env: AiBookingEnv):
       }
     }
 
-    /* Slot claim: agar "from" ki jagah koi CITY aayi ("delhi se jaipur"), to us slot ko city ne
-     * claim kar liya — uske baad ka station seedha "to" me jaata hai (warna Jaipur from ban jaata). */
+    /* R70 fix: "mujhe mathura jaana hai" me mathura TO hai, FROM nahi — "se"/"jaana" particles se slot infer karo */
     let fromClaimed = Boolean(next.from);
     let toClaimed = Boolean(next.to);
-    for (const m of mentions) {
-      if (m.st) {
-        if (!fromClaimed) {
-          next.from = m.st;
+    const lower = text.toLowerCase();
+    const inferSlotForMention = (ment: { idx: number; st?: Station; city?: string }): "from" | "to" | null => {
+      const snippet = lower.slice(Math.max(0, ment.idx - 14), ment.idx + 18);
+      if (ment.st) {
+        if (/\bse\b/.test(snippet) || /से\b/.test(snippet)) return "from";
+        if (/\b(ko|tak|jaana|jana)\b/.test(snippet) || /जाना/.test(snippet)) return "to";
+        return null;
+      }
+      if (ment.city) {
+        if (/\bse\b/.test(snippet) || /से/.test(snippet)) return "from";
+        if (/\b(ko|tak|jaana|jana)\b/.test(snippet) || /जाना/.test(snippet) || (mentions.length === 1 && /(jaana|jana|जाना)\s*है/.test(lower))) return "to";
+        return null;
+      }
+      return null;
+    };
+    // mentions ko inferred slot ke hisaab se sort: from wale pehle, to wale baad me
+    const mentionsWithInferred = mentions.map((m) => ({ ...m, inferred: inferSlotForMention(m) }));
+    mentionsWithInferred.sort((a: any, b: any) => {
+      if (a.inferred === "from" && b.inferred !== "from") return -1;
+      if (b.inferred === "from" && a.inferred !== "from") return 1;
+      if (a.inferred === "to" && b.inferred !== "to") return 1;
+      if (b.inferred === "to" && a.inferred !== "to") return -1;
+      return a.idx - b.idx;
+    });
+    for (const m of mentionsWithInferred) {
+      if ((m as any).st) {
+        const want = (m as any).inferred as "from" | "to" | null;
+        if (want === "from" && !fromClaimed) {
+          next.from = (m as any).st;
           fromClaimed = true;
-        } else if (!toClaimed && m.st.code !== next.from?.code) {
-          next.to = m.st;
+        } else if (want === "to" && !toClaimed && (m as any).st.code !== next.from?.code) {
+          next.to = (m as any).st;
           toClaimed = true;
+        } else if (!want) {
+          if (!fromClaimed) {
+            next.from = (m as any).st;
+            fromClaimed = true;
+          } else if (!toClaimed && (m as any).st.code !== next.from?.code) {
+            next.to = (m as any).st;
+            toClaimed = true;
+          }
+        } else {
+          if (want === "from" && !toClaimed && (m as any).st.code !== next.from?.code) {
+            next.to = (m as any).st;
+            toClaimed = true;
+          } else if (want === "to" && !fromClaimed) {
+            next.from = (m as any).st;
+            fromClaimed = true;
+          }
         }
         continue;
       }
-      if (!m.city) continue;
-      const slot: "from" | "to" | null = !fromClaimed ? "from" : !toClaimed ? "to" : null;
+      if (!(m as any).city) continue;
+      let slot: "from" | "to" | null = (m as any).inferred;
+      if (!slot) slot = !fromClaimed ? "from" : !toClaimed ? "to" : null;
+      if (!slot) continue;
+      if (slot === "from" && fromClaimed) slot = !toClaimed ? "to" : null;
+      if (slot === "to" && toClaimed) slot = !fromClaimed ? "from" : null;
       if (!slot) continue;
       if (slot === "from") fromClaimed = true;
       else toClaimed = true;
-      const item: AiPendingCity = { city: m.city, slot, codes: CLUSTER_CITY_CODES[m.city] ?? [], asked: false };
+      const item: AiPendingCity = { city: (m as any).city, slot, codes: CLUSTER_CITY_CODES[(m as any).city] ?? [], asked: false };
       if (!next.pendingCity) next.pendingCity = item;
       else next.pendingQueue.push(item);
     }
@@ -727,14 +781,8 @@ function collectJourney(state: AiBookingState, text: string, env: AiBookingEnv):
     if (queued) next.pendingCity = { ...queued, asked: queued.asked };
   }
 
-  /* Date/pax pehle hi nikal lo — city ka sawaal pending ho to bhi "2 log" jaisi baat yaad rahe
-   * (warna city ke jawab ke baad user ko dobara batana padta tha). */
-  const dateHitEarly = parseDatePhrase(text, now, { allowDayOnly: true });
-  if (dateHitEarly.date && !next.date) next.date = dateHitEarly.date;
-  const paxEarly = parsePaxCount(text);
-  if (paxEarly && !next.pax) next.pax = paxEarly;
-
-  /* Slot abhi bhi khaali + city ka sawaal pending → poora slot poochhne ke bajaye ek hi saaf sawaal. */
+  /* R70: pendingCity ke jawab me "1" ka matlab station choice hai, passenger nahi — isliye pending rehte hue pax/date na nikalo */
+  const isPureNumericChoice = /^\s*(?:option\s*)?[1-6]\s*[.)\-]?\s*$/.test(text.trim().toLowerCase());
   if (next.pendingCity) {
     const { city } = next.pendingCity;
     const list = clusterStations(city);
@@ -746,16 +794,34 @@ function collectJourney(state: AiBookingState, text: string, env: AiBookingEnv):
       if (next.from && routeNew) doneBits.push(`${next.from.name} se`);
       if (next.to && routeNew) doneBits.push(`${next.to.name} tak`);
       if (doneBits.length) say.push(`${doneBits.join(" ")} ✅`);
-      if (next.date && next.date !== state.date) say.push(`${formatLongDate(next.date)} ki tarikh note kar li.`);
-      if (next.pax && next.pax !== state.pax) say.push(next.pax === 1 ? "1 passenger." : `${next.pax} passengers.`);
+      // pending rehte hue bhi date/pax yaad rakho, par "1" jaise pure numeric ko date/pax mat banao
+      if (!isPureNumericChoice) {
+        const dateHitTmp = parseDatePhrase(text, now, { allowDayOnly: true });
+        if (dateHitTmp.date && !next.date) next.date = dateHitTmp.date;
+        if (next.date && next.date !== state.date) say.push(`${formatLongDate(next.date)} ki tarikh note kar li.`);
+        const paxTmp = parsePaxCount(text);
+        if (paxTmp && !next.pax) next.pax = paxTmp;
+        if (next.pax && next.pax !== state.pax) say.push(next.pax === 1 ? "1 passenger." : `${next.pax} passengers.`);
+      }
       return withSpoken(next, [...say, cityChoiceLine(city, list)]);
     }
   }
+  // R70: \"1\" jaise pure numeric se station chuna hai → is turn me date/pax mat banao (warna \"1\" = 1 Oct ya 1 passenger)
+  if (!next.pendingCity && pendingWasResolved && isPureNumericChoice) {
+    // skip date/pax for this turn — station choice hi tha
+  } else if (!next.pendingCity) {
+    const dateHitEarly = parseDatePhrase(text, now, { allowDayOnly: true });
+    if (dateHitEarly.date && !next.date) next.date = dateHitEarly.date;
+    const paxEarly = parsePaxCount(text);
+    if (paxEarly && !next.pax) next.pax = paxEarly;
+  }
 
-  const dateHit = parseDatePhrase(text, now, { allowDayOnly: true });
-  if (dateHit.date && !next.date) next.date = dateHit.date;
+  if (!(pendingWasResolved && isPureNumericChoice)) {
+    const dateHit = parseDatePhrase(text, now, { allowDayOnly: true });
+    if (dateHit.date && !next.date) next.date = dateHit.date;
+  }
 
-  const pax = parsePaxCount(text);
+  const pax = pendingWasResolved && isPureNumericChoice ? null : parsePaxCount(text);
   if (pax && !next.pax) next.pax = pax;
 
   if (next.from && next.to && next.from.code === next.to.code) {

@@ -55,6 +55,11 @@ export const CLIENT_STATIONS: Station[] = [
   { code: "PTKC", name: "Pathankot Cantt", city: "Pathankot" },
   { code: "ERS", name: "Ernakulam Junction", city: "Kochi" },
   { code: "ERN", name: "Ernakulam Town", city: "Kochi" },
+  // R70 (1 Oct, screenshot: Mathura ke liye IB-OD list galat, MTJ-MRT sahi hona chahiye) — Mathura cluster
+  { code: "MTJ", name: "Mathura Junction", city: "Mathura" },
+  { code: "MRT", name: "Mathura Cantt", city: "Mathura" },
+  { code: "MUW", name: "Mathurapur", city: "Mathura" },
+  { code: "MPRD", name: "Mathurapur Road", city: "Mathura" },
 ];
 
 const ALIASES: Record<string, string> = {
@@ -231,6 +236,12 @@ const ALIASES: Record<string, string> = {
   फिरोजपुर: "FZR",
   pathankot: "PTK",
   पठानकोट: "PTK",
+  // R70 — Mathura specific station aliases (generic "mathura"/"मथुरा" is CITY, handled via CITY_NAME_ALIASES)
+  "mathura junction": "MTJ",
+  "mathura jn": "MTJ",
+  "mathura cantt": "MRT",
+  "mathura cant": "MRT",
+  मथुरापुर: "MUW",
 };
 
 export const NEARBY: Record<string, string[]> = {
@@ -255,6 +266,13 @@ export function stationByCode(code: string): Station | undefined {
 /* R63-fix: AI Booking ko isi map ki zaroorat padi ("delhi"/"दिल्ली" jaise city naam ke liye asli
  * station list dikhane ke liye) — sirf export hua hai, koi value/behaviour nahi badla. */
 export const CITY_NAME_ALIASES: Record<string, string> = {
+  // R70 — Mathura cluster ke liye Devanagari + latin (AI Booking ke city-choice ke liye)
+  mathura: "mathura",
+  "mathura junction": "mathura",
+  "mathura jn": "mathura",
+  मथुरा: "mathura",
+  "मथुरा जंक्शन": "mathura",
+  मथुरापुर: "mathura",
   dilli: "delhi",
   दिल्ली: "delhi",
   दिल्ही: "delhi",
