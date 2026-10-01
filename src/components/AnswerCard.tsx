@@ -116,6 +116,81 @@ function sentences(text: string): string[] {
   return out;
 }
 
+/** ── Pipe-table helpers (screenshot fix 2 Oct): “| Train | Status | …” wali lines table me ─────
+ * Model alternative trains ka jawab kabhi markdown pipe-table ke roop me bhej deta hai:
+ *   **Alternative trains (3A) for 5Oct, LDH → JP** | Train | 3A Status | …
+ *   • | 12414 | WL4 | – | 4 | 1020 | 22:55 | 09:30 |
+ * Ye plain text me pipe ke saath padhna mushkil hai — isliye yahan hi table me badal dete hain.
+ * Sirf presentation — text waisa hi rehta hai, kuch invent nahi. */
+function isTableLine(s: string): boolean {
+  const t = s.trim();
+  return t.includes("|") && (t.match(/\|/g)?.length ?? 0) >= 2 && /Train|Status|Fare|Departure|Arrival|3A|SL| Seats/i.test(t);
+}
+function parsePipeCells(line: string): string[] {
+  return line
+    .split("|")
+    .map((c) => c.replace(/^\s*[\*•\-]+\s*/, "").replace(/\*\*/g, "").trim())
+    .filter((c) => c.length > 0);
+}
+function extractPipeTables(body: string): { head: string[]; tables: string[][][]; rest: string } {
+  const lines = String(body ?? "")
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const tables: string[][][] = [];
+  let cur: string[][] = [];
+  const restLines: string[] = [];
+  let head: string[] = [];
+  let tableStarted = false;
+  for (const ln of lines) {
+    const cells = parsePipeCells(ln);
+    const looksTable = isTableLine(ln) && cells.length >= 3;
+    if (looksTable) {
+      tableStarted = true;
+      if (cells.every((c) => /^[\-:\s]+$/.test(c))) continue;
+      cur.push(cells);
+    } else {
+      if (tableStarted && cur.length) {
+        if (ln.startsWith("•") && ln.includes("|")) {
+          const c2 = parsePipeCells(ln);
+          if (c2.length >= 3) { cur.push(c2); continue; }
+        }
+        if (cur.length >= 2) tables.push(cur);
+        else restLines.push(cur.flat().join(" | "));
+        cur = [];
+        tableStarted = false;
+      }
+      if (!tableStarted && /\*\*.*Alternative trains.*\*\*/i.test(ln)) {
+        head.push(ln.replace(/\*\*/g, "").trim());
+      } else {
+        restLines.push(ln);
+      }
+    }
+  }
+  if (cur.length >= 2) tables.push(cur);
+  else if (cur.length) restLines.push(cur.flat().join(" | "));
+  return { head, tables, rest: restLines.join("\n") };
+}
+function PipeTable({ rows }: { rows: string[][] }): JSX.Element {
+  if (!rows.length) return <></>;
+  const header = rows[0];
+  const body = rows.slice(1);
+  return (
+    <div className="ac-tablewrap">
+      <table className="ac-table">
+        <thead>
+          <tr>{header.map((h, i) => <th key={i}>{h}</th>)}</tr>
+        </thead>
+        <tbody>
+          {body.map((r, i) => (
+            <tr key={i}>{r.map((c, j) => <td key={j}>{c}</td>)}</tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 /** Body me numbers/waqt highlight — padhne me aankh ruk jaaye. Text waisa hi rehta hai. */
 function highlight(text: string): ReactNode[] {
   /* Model kabhi **bold** likh deta hai — wo asterisk user ko dikhne nahi chahiye (R47: usko
@@ -139,12 +214,15 @@ function highlight(text: string): ReactNode[] {
 
 export function AnswerCard({ text }: { text: string }): JSX.Element {
   const { steps, source, body } = splitMeta(text);
-  const chips = answerChips(body);
-  const times = answerTimes(body);
-  const station = answerStation(body);
-  const sents = sentences(body);
+  // Pipe-table wale hisse ko pehle alag karo — baaki body se headline/bullets
+  const { head: pipeHead, tables, rest: pipeRest } = extractPipeTables(body);
+  const effectiveBody = tables.length ? pipeRest : body;
+  const chips = answerChips(effectiveBody);
+  const times = answerTimes(effectiveBody);
+  const station = answerStation(effectiveBody);
+  const sents = sentences(effectiveBody);
   /* Pehla jumla headline — bas wahi, kuch chhupta nahi (baaki sentences body me). */
-  const head = sents[0] ?? body;
+  const head = sents[0] ?? effectiveBody;
   const rest = sents.slice(1);
   const stationInHead = station ? new RegExp(`\\b${station.code}\\b`).test(head) : false;
 
@@ -170,6 +248,17 @@ export function AnswerCard({ text }: { text: string }): JSX.Element {
         </div>
       )}
       <p className="ac-head">{highlight(head)}</p>
+      {/* Pipe-table title (jaise “Alternative trains (3A) for 5Oct…”) */}
+      {pipeHead.length > 0 && (
+        <div className="ac-pipehead">
+          {pipeHead.map((h, i) => (
+            <div key={i} className="ac-pipehead-item">{highlight(h)}</div>
+          ))}
+        </div>
+      )}
+      {tables.map((rows, idx) => (
+        <PipeTable key={idx} rows={rows} />
+      ))}
       {times.length > 0 && (
         <div className="ac-board">
           {station && (

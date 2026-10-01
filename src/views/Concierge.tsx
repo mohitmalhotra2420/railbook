@@ -781,12 +781,13 @@ export function Concierge() {
    * hai wo SEEDHA usi page par khulta hai (connect ya alt). Page ka data usi AI/server plan se — kuch
    * banaya hua nahi. ── */
   const pendingPlanPageRef = useRef<"connect" | "alt" | null>(null);
+  const planLoadIdRef = useRef(0);
   /** Chat wala rasta (R57) — ab sirf fallback ke liye: "Chat me poochho" dabane par. */
   function openPlanPage(page: "connect" | "alt", from: string, to: string, date: string) {
     if (!from || !to) return;
     pendingPlanPageRef.current = page;
     const pax = state.paxProvided && state.passengerCount ? state.passengerCount : 1;
-    void handleText(planPageAsk(page, from, to, date, pax));
+    void handleText(planPageAsk(page, from, to, date, pax, state.selectedTrain?.number ?? agentCtxRef.current?.selectedTrainNumber ?? lastFactTrainRef.current ?? null));
   }
 
   /* ── Round-59 (user: "connecting trains next chat page pe open ho, same chat page par nhi") ────────
@@ -799,6 +800,7 @@ export function Concierge() {
 
   async function loadPlanPage(page: "connect" | "alt", from: string, to: string, date: string, attempt = 1) {
     if (!from || !to) return;
+    const myLoadId = ++planLoadIdRef.current;
     setPlanPage((prev) =>
       prev && prev.from === from && prev.to === to && prev.page === page && prev.date === date
         ? { ...prev, loading: true, progress: null, error: null, tries: attempt }
@@ -808,7 +810,7 @@ export function Concierge() {
     try {
       const agentRes = await api.agentStream(
         {
-          text: planPageAsk(page, from, to, date, pax),
+          text: planPageAsk(page, from, to, date, pax, state.selectedTrain?.number ?? agentCtxRef.current?.selectedTrainNumber ?? lastFactTrainRef.current ?? null),
           lastAsked,
           known: {
             from: state.from,
@@ -823,11 +825,12 @@ export function Concierge() {
           now: new Date().toISOString(),
           bookingFlow: state.flow ?? undefined,
         },
-        (e) => setPlanPage((p) => (p ? { ...p, progress: e.total ? `${e.phase}… ${e.done ?? 0}/${e.total} checks` : e.phase } : p)),
+        (e) => { if (planLoadIdRef.current !== myLoadId) return; const label = page === "alt" ? "Alternative" : page === "connect" ? "Connecting" : e.phase; setPlanPage((p) => (p ? { ...p, progress: e.total ? `${label}… ${e.done ?? 0}/${e.total} checks` : label } : p)); },
       );
       if (agentRes.context) agentCtxRef.current = agentRes.context;
       const plan = agentRes.journey ?? null;
       if (planIsShowable(plan)) {
+        if (planLoadIdRef.current !== myLoadId) return;
         setPlanPage((p) => (p ? { ...p, loading: false, progress: null, plan, reply: agentRes.reply ?? null } : p));
         return;
       }
@@ -835,6 +838,7 @@ export function Concierge() {
         await loadPlanPage(page, from, to, date, attempt + 1);
         return;
       }
+      if (planLoadIdRef.current !== myLoadId) return;
       setPlanPage((p) =>
         p ? { ...p, loading: false, progress: null, error: String(agentRes.reply ?? "").trim() || "Plan taiyar nahi hua." } : p,
       );
@@ -844,6 +848,7 @@ export function Concierge() {
         await loadPlanPage(page, from, to, date, attempt + 1);
         return;
       }
+      if (planLoadIdRef.current !== myLoadId) return;
       setPlanPage((p) => (p ? { ...p, loading: false, progress: null, error: `Plan nahi aa paya (${msg}).` } : p));
     }
   }
@@ -2236,11 +2241,13 @@ export function Concierge() {
  */
 
 /** Plan maangne wala text — R57 me set hui phrasing (logic same rehna chahiye, isliye ek hi jagah). */
-export function planPageAsk(page: "connect" | "alt", from: string, to: string, date: string, pax = 1): string {
+export function planPageAsk(page: "connect" | "alt", from: string, to: string, date: string, pax = 1, trainNumber?: string | null): string {
   const want =
     page === "connect"
       ? `poora plan banao — connecting trains aur leg-wise seat bhi dikhao`
-      : `poora plan banao — alternative trains aur doosri dates bhi dikhao`;
+      : trainNumber
+        ? `poora plan banao — ${trainNumber} train ki same train alternative (usi train ki doosri classes) aur alternative trains bhi dikhao`
+        : `poora plan banao — alternative trains aur doosri dates bhi dikhao`;
   return `${from} se ${to} ${date} ka ${want} (${pax} passenger ke liye)`;
 }
 
