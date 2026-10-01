@@ -1,4 +1,4 @@
-# RailBook — poora project (continue karne ke liye) · 1 Oct 2026 (Round 69)
+# RailBook — poora project (continue karne ke liye) · 1 Oct 2026 (Round 70)
 
 Ye zip aapke **poore project** ka snapshot hai — web app + server + Android app + tests + previews + APKs.
 Naye workspace me bas extract karke `npm ci` chalao aur wahin se aage badho (git history bhi andar hai).
@@ -21,17 +21,25 @@ railbook-full/
 └── apks/                      ← latest release APKs (v1.4.8, v1.4.9 — r29 me naya APK nahi)
 ```
 
-## 0. Current state (1 Oct 2026 — Round 69)
+## 0. Current state (1 Oct 2026 — Round 70)
 
 
 - **ZIP ka permanent link (workspace reset-proof):** `https://github.com/mohitmalhotra2420/railbook/releases/download/r67-2026-10-01/RailBook-FULL-2026-10-01.zip`
   (release page: `https://github.com/mohitmalhotra2420/railbook/releases/tag/r67-2026-10-01`, asset id 601655666). Isi workspace ka har reset ke baad bhi downloadable rehta hai.
 - **Poora project GitHub par pushed:** `https://github.com/mohitmalhotra2420/railbook` (main) — server, client, 144 test files, docs, previews, android-app, tools.
-- **Prod live:** `https://railbook-gegs.onrender.com` · `/api/version` = `{"commit":"7da8f67","primaryModel":"meta/muse-glimmer-30b","fallbackModel":"openai/gpt-oss-20b"}` (service `srv-dae34rqd0e5s73evgjsg`, deploy `dep-dautqjs1nsns73fmn1cg`).
+- **Prod live:** `https://railbook-gegs.onrender.com` · `/api/version` = `{"commit":"ff97d15","primaryModel":"meta/muse-glimmer-30b","fallbackModel":"openai/gpt-oss-20b"}` (service `srv-dae34rqd0e5s73evgjsg`, deploy `dep-dauu9ns1nsns73foh8mg`).
 - **Round 61 ka faisla:** Muse-Glimmer primary planner, GPT-OSS-20B fallback + NLU; primary ke liye alag timeout `AI_PRIMARY_TIMEOUT_MS=90000` (warna bade prompt par 45s cap round barbaad kar deta tha).
 - **Tests:** `npx vitest run` → **152 files / 1629 pass / 0 fail** (1 skipped = gated live E2E). Client `tsc` purane baseline par hi (86) — koi naya error nahi. Server TS: `tsc -p tsconfig.server.json` clean.
 - **R60 ki teen reporting cheezein** (prod par pehle se live): station-choice dropdown, plan page ka touch scroll, leg classes ka naya grid.
 
+
+## 0aaaaa. Round 70 (1 Oct 2026) — Mathura + "1"=station, "LUDHIANA se"=source, mic ChatGPT-like
+
+Screenshots 09:07/09:10: `1` → `1 passenger` (station nahi), `LUDHIANA se` ke baad bhi `Aur kahan jaana hai?`, `मुझे मथुरा जाना है` → `IB-Od` galat list, `Server voice` banner noisy.
+
+Fix sirf AI Booking me (chat untouched): `stations.ts` me Mathura cluster (MTJ/MRT/MUW/MPRD) + `CITY_NAME_ALIASES` (`mathura/मथुरा`), `stationPick.ts` me numeric `1`..`6` → `offered[idx]`, `aiBookingFlow.ts` me `isPureNumericChoice` (pure `1` par date/pax bilkul nahi), `inferSlotForMention` (`से`→FROM, `जाना`→TO, Devanagari support), `outside` logic me `LUDHIANA se` → FROM bharo, Mathura pending rehne do, `AiBooking.tsx` me server-failed banner silent (device fallback chup).
+
+Manual trace: `मथुरा जाना है` → pending `mathura:to` (MTJ list sahi), `1` → `MTJ le liya ✅` (pax null), `LUDHIANA se` → `LDH se MTJ ✅` → `kal` → date → `2 log` → `SEARCH_TRAINS`. Tests 54/54 pass.
 
 ## 0aaaa. Round 69 (1 Oct 2026) — "AI Booking khulta hi nahi" ka pakka ilaaj
 
