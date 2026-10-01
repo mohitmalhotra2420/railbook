@@ -13,7 +13,8 @@
  *   • "SEAT (15 rows): A | B | C"                                          → teen rows
  *   • bullet na ho to pehle jaisa paragraph (kuch chhupta nahi, kuch invent nahi).
  */
-import type { JSX } from "react";
+import { useState, type JSX } from "react";
+import { AnswerCard } from "./AnswerCard";
 
 export type Row = {
   train: string;
@@ -53,15 +54,18 @@ export function groupReplyRowsByTrain(rows: Row[]): TrainRowGroup[] {
     }
     const g = groups[i];
     if (!g.name && r.name) g.name = r.name;
-    const dup = g.rows.some(
-      (x) =>
-        x.cls === r.cls &&
-        x.status === r.status &&
-        x.count === r.count &&
-        (x.fare ?? "") === (r.fare ?? "") &&
-        (x.dep ?? "") === (r.dep ?? ""),
+    /* Round-48: ek hi train+class+status+count+fare agar DO jagah likha ho (jaise AI ki per-train
+     * lines AUR neeche ki compact seat line dono me — 29 Sep ka live case), to card me wahi class do
+     * baar dikhti thi. Ab ek hi baar — aur dono jagah se jo bhi info thi wo bachi rehti hai (dep
+     * kisi ek me ho to wo bhar diya jaata hai). Alag status/count/fare wala record chhupta nahi. */
+    const sameIdx = g.rows.findIndex(
+      (x) => x.cls === r.cls && x.status === r.status && x.count === r.count && (x.fare ?? "") === (r.fare ?? ""),
     );
-    if (dup) continue;
+    if (sameIdx >= 0) {
+      const prev = g.rows[sameIdx];
+      if (!prev.dep && r.dep) g.rows[sameIdx] = { ...prev, dep: r.dep }; /* input rows mutate nahi hoti */
+      continue;
+    }
     g.rows.push(r);
   }
   return groups;
@@ -75,14 +79,30 @@ const CLASSES = "1A|2A|3A|3E|SL|CC|2S|EC|EA|FC|2A\\+|GN";
  * aur time ke baad "departure" shabd bhi. Dono add kiye (purane –/-/| formats waise hi chalte hain). */
 const SEP = "[–\\-—|•:·]"; /* en-dash, hyphen, EM-DASH, pipe, bullet, colon, middle-dot */
 const ROW_RE = new RegExp(
-  "^(?:\\*|•|\\d+[.)])?\\s*(?<number>\\d{4,5})\\s+(?<name>[^–\\-—|•*·]{2,60}?)\\s*" + SEP + "?\\s*(?<cls>" +
+  "^(?:\\*|•|\\d+[.)])?\\s*(?<number>\\d{4,5})\\s+(?<name>[^–\\-—|•*·\\d]{2,60}?)\\s*" + SEP + "?\\s*(?<cls>" +
     CLASSES +
-    ")(?<clslabel>\\b(?!\\d))\\s*(?:" + SEP + "\\s*)?(?<status>AVAILABLE|AVAIL|AVL|RAC|WAITLIST|WL|NOT[ _]?AVAILABLE|N\\/A|REGRET|DEPARTED|CANCELLED)?\\s*(?<count>\\d{1,4})?\\s*(?<scale>seats?)?\\s*(?:" + SEP + "\\s*)?(?<fare>₹\\s?[\\d,]+)?\\s*,?\\s*(?:" + SEP + "\\s*)?(?<dep>(?:dep(?:arture)?\\.?\\s*:?)?\\s*\\d{1,2}:\\d{2}(?:\\s*(?:departure|dep\\.?))?)?",
+    ")(?<clslabel>\\b(?!\\d))\\s*(?:" + SEP + "\\s*)?(?<status>AVAILABLE|AVAIL|AVL|RAC|WAITLIST|WL|NOT[ _]?AVAILABLE|N\\/A|REGRET|DEPARTED|CANCELLED)?\\s*(?<count>\\d{1,4})?\\s*(?<scale>seats?)?\\s*(?:" + SEP + "\\s*)?(?<fare>₹\\s?\\d(?:[\\d,]*\\d)?)?\\s*,?\\s*(?:" + SEP + "\\s*)?(?<dep>(?:dep(?:arture)?\\.?\\s*:?)?\\s*\\d{1,2}:\\d{2}(?:\\s*(?:departure|dep\\.?))?)?",
   "i",
 );
+/* Round-48 (29 Sep, user screenshot: "green wale portion mein sabhi classes sahi bta rha lekin neeche card
+ * mein sabhi classes show nhi ho rhi"): server ki compact seat line me train ka NAAM nahi hota —
+ * "💺 sab class me seat wali 19 trains — 12054 2S AVL 660 ₹150 · CC AVL 17 ₹480 | …". Purane ROW_RE ko
+ * naam chahiye tha, isliye wo "2S AVL 660 ₹150" ko NAME maan leta tha aur agla class chip (CC) hi asli
+ * row ban jaata tha — baaki classes gayab. Ab: number ke turant baad class code ho to compact row
+ * (naam khaali) — jaisa text me hai waisa hi, kuch invent nahi. */
+const ROW_COMPACT_RE = new RegExp(
+  "^(?:\\*|•|\\d+[.)])?\\s*(?<number>\\d{4,5})\\s+(?<cls>" +
+    CLASSES +
+    ")(?<clslabel>\\b(?!\\d))\\s*(?:" + SEP + "\\s*)?(?<status>AVAILABLE|AVAIL|AVL|RAC|WAITLIST|WL|NOT[ _]?AVAILABLE|N\\/A|REGRET|DEPARTED|CANCELLED)?\\s*(?<count>\\d{1,4})?\\s*(?<scale>seats?)?\\s*(?:" + SEP + "\\s*)?(?<fare>₹\\s?\\d(?:[\\d,]*\\d)?)?\\s*,?\\s*(?:" + SEP + "\\s*)?(?<dep>(?:dep(?:arture)?\\.?\\s*:?)?\\s*\\d{1,2}:\\d{2}(?:\\s*(?:departure|dep\\.?))?)?",
+  "i",
+);
+const COMPACT_HEAD_RE = new RegExp("^\\s*(?:\\*|•)?\\s*\\d{4,5}\\s+(?:" + CLASSES + ")(?:\\b(?!\\d))", "i");
+
 
 function rowOf(seg: string): { row: Row; tail: string } | null {
-  const m = ROW_RE.exec(seg.trim());
+  const src = seg.trim();
+  /* Round-48: compact (naam-rahit) row pehle — tabhi jab number ke turant baad class code ho. */
+  const m = (COMPACT_HEAD_RE.test(src) ? ROW_COMPACT_RE.exec(src) : null) ?? ROW_RE.exec(src);
   if (!m?.groups) return null;
   const g = m.groups as Record<string, string | undefined>;
   const consumed = m[0].length;
@@ -128,7 +148,7 @@ const CLASS_CHIP_RE = new RegExp(
     SEP +
     "\\s*)?(?<status>AVAILABLE|AVAIL|AVL|RAC|WAITLIST|WL|NOT[ _]?AVAILABLE|N\\/A|REGRET|DEPARTED|CANCELLED)\\b\\s*(?<count>\\d{1,4})?\\s*(?<scale>seats?)?\\s*(?:" +
     SEP +
-    "\\s*)?(?<fare>₹\\s?[\\d,]+)?\\s*(?:[·•|,]|—|–|-)?\\s*",
+    "\\s*)?(?<fare>₹\\s?\\d(?:[\\d,]*\\d)?)?\\s*(?:[·•|,]|—|–|-)?\\s*",
   "i",
 );
 const DEP_RE = /^(?:dep(?:arture)?\.?\s*:?\s*)?(\d{1,2}:\d{2})(?:\s*(?:departure|dep\.?))?/i;
@@ -186,7 +206,7 @@ function segmentsOf(line: string): string[] {
   return [t];
 }
 
-function parseReply(text: string): Parsed {
+export function parseReply(text: string): Parsed {
   const out: Parsed = { head: [], rows: [], rest: [] };
   const lines = String(text ?? "").split("\n");
   for (const line of lines) {
@@ -197,7 +217,7 @@ function parseReply(text: string): Parsed {
        * 174 seats — ₹150"). Pehle label 40 akshar tak hi match hota tha, isliye wo row head me chali
        * jaati thi aur summary usse ginnti nahi thi (10 trains par "9 me seat"). Ab label 140 tak —
        * row alag ho jaati hai aur count match karta hai. */
-      const lab = /^([^:]{2,140}):\s*(?=\d{4,5}\s)/.exec(seg);
+      const lab = /^(?!\s*\d{4,5}\s)([^:—]{2,140})[:—]\s*(?=\d{4,5}\s)/.exec(seg);
       if (lab) {
         if (!out.rows.length && out.head.length < 3) out.head.push(lab[1].trim());
         seg = seg.slice(lab[0].length);
@@ -243,9 +263,9 @@ const statusTone = (s: string) =>
   s === "AVAILABLE" ? "ok" : s === "RAC" ? "rac" : s === "WAITLIST" ? "wl" : "bad";
 
 function statusText(r: Row): string {
-  if (r.status === "AVAILABLE") return `AVL ${r.count ?? "—"}`;
-  if (r.status === "RAC") return `RAC ${r.count ?? "—"}`;
-  if (r.status === "WAITLIST") return `WL ${r.count ?? "—"}`;
+  if (r.status === "AVAILABLE") return r.count != null ? `AVL ${r.count}` : "AVL";
+  if (r.status === "RAC") return r.count != null ? `RAC ${r.count}` : "RAC";
+  if (r.status === "WAITLIST") return r.count != null ? `WL ${r.count}` : "WL";
   if (r.status === "NOT_AVAILABLE" || r.status === "UNKNOWN") return r.status === "UNKNOWN" ? "status nahi mila" : "N/A";
   if (r.status === "REGRET") return "Regret";
   return r.count ? String(r.count) : r.status;
@@ -261,18 +281,96 @@ function groupTone(rows: Row[]): ReturnType<typeof statusTone> {
 /** Tappable = booking ka rasta khulta hai (available/RAC/WL ya status pata nahi). N/A par jhootha button nahi. */
 const isTappable = (status: string) => status === "AVAILABLE" || status === "RAC" || status === "WAITLIST" || status === "UNKNOWN";
 
+/* ── Round-57 (29 Sep 2026, user screenshot: ChatGPT ne "esmein se best kon si rahegi" ka jawab
+ * TABLE me diya — "LDH departure | ASR arrival | Journey" columns) ────────────────────────────────
+ * User: "automatically UI table form mein yan bullet form mein aaye". Isliye jab jawab me 2+ trains ki
+ * rows hon to wahi rows ek saaf comparison TABLE me dikhti hain (Train · Class · Status · Fare · Dep).
+ * Ye SIRF presentation hai — rows wahi hain jo server/AI ke text se parse hui (kuch invent nahi), aur
+ * table/cards ka data ek hi source se aata hai (R48 ka usool: text aur card kabhi mismatch na ho). */
+function rowToneOf(r: Row): string {
+  return r.status === "AVAILABLE" ? "ok" : r.status === "RAC" ? "rac" : r.status === "WAITLIST" ? "wl" : "bad";
+}
+
+function SeatCompareTable({ rows, onBook, groupOf }: { rows: Row[]; onBook?: (r: Row, g: TrainRowGroup) => void; groupOf: (r: Row) => TrainRowGroup }) {
+  const showDep = rows.some((r) => r.dep);
+  return (
+    <div className="rp-tablewrap">
+      <table className="rp-table">
+        <thead>
+          <tr>
+            <th>Train</th>
+            <th>Class</th>
+            <th>Status</th>
+            <th>Fare</th>
+            {showDep && <th>Dep</th>}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r, i) => {
+            const t = rowToneOf(r);
+            const tap = Boolean(onBook) && isTappable(r.status);
+            const cells = (
+              <>
+                <td className="rp-td-train">
+                  <span className="rp-tno">{r.train}</span>
+                  {r.name && <span className="rp-tname">{r.name}</span>}
+                </td>
+                <td>{r.cls}</td>
+                <td className={`rp-td-st ${t}`}>{statusText(r)}</td>
+                <td>{r.fare ?? "—"}</td>
+                {showDep && <td>{r.dep ?? "—"}</td>}
+              </>
+            );
+            return tap ? (
+              <tr
+                key={`${r.train}-${r.cls}-${i}`}
+                className={`rp-tr tappable ${t}`}
+                tabIndex={0}
+                role="button"
+                aria-label={`${r.train} ${r.cls} ${statusText(r)} — passenger form kholo`}
+                title={`${r.train} ${r.cls} — passenger form kholo`}
+                onClick={() => onBook!(r, groupOf(r))}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") onBook!(r, groupOf(r));
+                }}
+              >
+                {cells}
+              </tr>
+            ) : (
+              <tr key={`${r.train}-${r.cls}-${i}`} className={`rp-tr ${t}`}>
+                {cells}
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      <div className="rp-tablefoot">Row par tap karo → usi train/class ka passenger form (IRCTC)</div>
+    </div>
+  );
+}
+
 export function ReplyText({
   text,
   onBook,
+  initialView,
 }: {
   text: string;
+  /** Sirf preview/demo ke liye — app flow me hamesha auto (2+ rows → table). */
+  initialView?: "table" | "cards";
   /** Round-29: class par tap → usi train+class ka passenger form (Concierge deta hai). */
   onBook?: (row: Row, group: TrainRowGroup) => void;
 }): JSX.Element {
   const parsed = parseReply(text);
-  if (parsed.rows.length === 0) return <p className="msg-text">{text}</p>;
+  /* Round-47: seat rows nahi mile (matlab ye prose jawab hai — jaise "12013 … timetable ke hisaab se
+   * LDH arrival 20:16") → ab seedha paragraph nahi, sections me (headline + status chips + timetable +
+   * body + source). Text waisa hi rehta hai, sirf padhne-layak baant diya jaata hai. */
+  if (parsed.rows.length === 0) return <AnswerCard text={text} />;
   /* Round-29: display-level grouping — server ka text/rows waisa hi rehta hai, sirf card ek per train. */
   const groups = groupReplyRowsByTrain(parsed.rows);
+  /* Round-57: default view — 2+ rows ho to TABLE (ChatGPT jaisa comparison), 1 row ho to card.
+   * User toggle bhi kar sakta hai; data dono me ek hi hai. */
+  const [view, setView] = useState<"table" | "cards">(initialView ?? (parsed.rows.length >= 2 ? "table" : "cards"));
+  const groupOf = (r: Row): TrainRowGroup => groups.find((g) => g.number === r.train) ?? { number: r.train, name: r.name, rows: [r] };
   return (
     <div className="rp">
       {headChips(parsed.head).length > 0 && (
@@ -301,7 +399,15 @@ export function ReplyText({
           </div>
         );
       })()}
-      <div className="rp-rows">
+      {parsed.rows.length >= 2 && (
+        <div className="rp-view">
+          <span className="rp-view-l">Dekho:</span>
+          <button type="button" className={`rp-viewb${view === "table" ? " on" : ""}`} onClick={() => setView("table")}>Table</button>
+          <button type="button" className={`rp-viewb${view === "cards" ? " on" : ""}`} onClick={() => setView("cards")}>Cards</button>
+        </div>
+      )}
+      {view === "table" && parsed.rows.length >= 2 && <SeatCompareTable rows={parsed.rows} onBook={onBook} groupOf={groupOf} />}
+      <div className="rp-rows" style={view === "table" && parsed.rows.length >= 2 ? { display: "none" } : undefined}>
         {groups.map((g) => {
           const tone = groupTone(g.rows);
           return (

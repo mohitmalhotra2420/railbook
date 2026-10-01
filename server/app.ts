@@ -38,6 +38,7 @@ import { runAutonomousAgent } from "./agent/autonomous.js";
  * hain — AI ka search/tools/API/planner ko chhua nahi gaya. */
 import { parseSeatIntent } from "./understand/seatIntent.js";
 import { missingSeatLines, seatFilterFor, seatSummaryLine, type SeatFilterResult } from "./agent/seatFilter.js";
+import { filterTrainsServingSegment, routeDropNote } from "./agent/routeSegment.js";
 import { reconcileNextActions } from "./agent/agentic.js";
 import { JOURNEY_CONFIG, findAlternativeTrains, findConnections, findPartialRouteSeats, findVacantSeats, planJourney } from "./journey/engine.js";
 import { pickTrains } from "./journey/trainpicker.js";
@@ -260,7 +261,32 @@ export function createApp() {
       let seatClassCodes: string[] = [];
       /* Round-26: "sirf available" maanga gaya hai ya nahi — default false (saari trains, WL bhi). */
       let seatOnlyAvailable = false;
-      if (env.seatFilterServer) {
+      /* ── Round-53 (user screenshot 29 Sep: "Green portion wali trains card mein nahi dikh rahi") ──────
+       * Jab model ne KHUD FIND_SEATS chalaya, usi ka poora live data yahan aa jaata hai — cards isi se
+       * bante hain. Pehle cards ke liye dobara board fetch hota tha (do alag snapshots → text me 17
+       * trains aur cards me kuch aur). Ab text, cards aur payload — teeno EK hi snapshot ke. */
+      const cap = result.seatCapture ?? null;
+      if (env.seatFilterServer && cap && (cap.rows.length || cap.wlRows.length) && /^\d{4}-\d{2}-\d{2}$/.test(String(cap.date ?? ""))) {
+        seatFilter = {
+          line: "",
+          rows: cap.rows,
+          wlRows: cap.wlRows,
+          trainsSeen: cap.trainsSeen,
+          source: cap.source,
+          dropNote: cap.dropNote ?? null,
+          nearbyNote: cap.nearbyNote ?? null,
+        };
+        /* Round-53b (prod probe 0bd2aee): model tool me `only_available` bhejna bhool jaata hai (ya false
+         * bhejta hai) par user ne khud confirm/available maanga hota hai — tab bhi cards me sirf seat-wali
+         * trains dikhni chahiye (text me wahi hota hai). Isliye user ki wording ka seat-intent bhi dekhte
+         * hain: `cap.onlyAvailable || slots.onlyAvailable`. */
+        const capSlots = parseSeatIntent(String(body?.text ?? ""));
+        seatClassCodes = cap.classCodes?.length ? cap.classCodes : capSlots.classCodes;
+        /* Sirf saaf "confirm/confirmed" wording (confirmedOnly) — "seat availability batao" jaisa sawaal
+         * available-only nahi hai (wahan user ko saari trains chahiye, WL bhi). */
+        seatOnlyAvailable = Boolean(cap.onlyAvailable) || capSlots.confirmedOnly;
+      }
+      if (env.seatFilterServer && !seatFilter) {
         const slots = parseSeatIntent(String(body?.text ?? ""));
         seatClassCodes = slots.classCodes;
         seatOnlyAvailable = slots.onlyAvailable;
@@ -298,7 +324,54 @@ export function createApp() {
        * (wahi live board rows) usi jawab me jod di jaati hain — koi card, koi andaza nahi. */
       /* Sirf tab jab AI ka apna jawab hai — AI fail hone par wahi compact seat line (💺 …) dikhti hai,
        * usme saari trains pehle se hain, isliye rows dobara nahi jodte. */
-      const aiReplyText = String(result.reply ?? "").trim();
+      /* ── Round-53d guard: "kuch bhi fake mat karo" ───────────────────────────────────────────────
+       * Prod probe me dikha ki seat ke jawab me model kabhi apni yaad se train numbers add kar deta hai
+       * (jaise 7 trains likhi, jinme 4 kisi tool ke data me hi nahi thin). Cards sirf asli data dikhate
+       * hain — isliye jawab aur cards ka mismatch ban jaata tha. Guard: agar seat payload maujood hai to
+       * jawab ki wahi lines rakhi jaati hain jinke train numbers ASLI data me hain (payload + journey/
+       * alternatives/picker + user ka maanga train number). Sirf bandar-haath wali lines hatti hain —
+       * jawab ka baaki sab, aur jawab ka wording, model ka hi rehta hai. */
+      const allowedTrains = (() => {
+        if (!seatFilter) return null;
+        const set = new Set<string>([...seatFilter.rows, ...seatFilter.wlRows].map((r) => r.number));
+        const extra = JSON.stringify({
+          j: result.journey ?? null,
+          a: result.alternatives ?? null,
+          p: result.trainPicker ?? null,
+          t: result.trains ?? null,
+        });
+        for (const m of extra.match(/\b\d{5}\b/g) ?? []) set.add(m);
+        const asked = result.nlu?.trainNumber ?? null;
+        if (asked) set.add(asked);
+        return set;
+      })();
+      const rawReply = String(result.reply ?? "").trim();
+      const scrubFabricated = (text: string): string => {
+        if (!allowedTrains || !text) return text;
+        /* Segment-level: ek line me kai trains " · " ya " | " se judi hoti hain. Sirf WAHI segment
+         * hatta hai jisme aisa 5-digit number ho jo asli data me nahi (fabricated train); baaki jawab
+         * jaisa hai waisa rehta hai — poora jawab kabhi nahi girta. */
+        const cleanSegment = (seg: string): string | null => {
+          const nums = seg.match(/\b\d{5}\b/g) ?? [];
+          const isTrainSeg = /^\s*[-*•]?\s*\*{0,2}\s*\d{5}\b/.test(seg) || (nums.length > 0 && /(AVL|WL|RAC|N\/A|₹|AVAILABLE|WAITLIST)/.test(seg));
+          if (isTrainSeg && nums.some((n) => !allowedTrains.has(n))) return null;
+          return seg;
+        };
+        return text
+          .split("\n")
+          .map((line) =>
+            line
+              .split(/(\s+[|·]\s+)/)
+              .map((part) => (/\s*[|·]\s*/.test(part) ? part : cleanSegment(part) ?? ""))
+              .join("")
+              .replace(/\s{2,}/g, " ")
+              .trim(),
+          )
+          .filter((l) => l.length > 0)
+          .join("\n")
+          .trim();
+      };
+      const aiReplyText = scrubFabricated(rawReply);
       /* Sirf wahi rows jo query ne maangi thi (seatFilter.rows) — WL/N-A rows alag se nahi thopte,
        * warna "seat wali trains" ke jawab me 18 lines aa jaati hain (live check me dikha). Agar user
        * ne WL bhi poochha ho (only_available=false) to rows me WL pehle se hote hain. */
@@ -310,14 +383,27 @@ export function createApp() {
               seatOnlyAvailable ? seatFilter.rows : [...seatFilter.rows, ...seatFilter.wlRows],
             )
           : [];
+      /* Round-53: jab cards me SAARI trains hain (model ke apne FIND_SEATS data se — capRows hata diya),
+       * to jawab me 15 lines ki wall jodne ki zaroorat nahi. Sirf EK saaf line: kaunsi trains neeche
+       * cards me hain (live board se). Ye ab sach hai — cards me wahi rows dikhti hain. */
+      const seatCardPointer =
+        cap && !hasPlanCard && aiReplyText && seatExtra.length > 0
+          ? `➕ ${seatExtra.length} trains ke rows neeche cards me hain (live board se) — jaise ${seatExtra
+              .slice(0, 4)
+              .map((l) => l.replace(/^\*\s*(\S+).*$/, "$1"))
+              .join(", ")}${seatExtra.length > 4 ? " …" : ""}`
+          : null;
+      if (seatCardPointer) seatExtra.length = 0;
       const replyWithSeats =
         seatExtra.length > 0
-          ? `${String(result.reply ?? "").trim()}\n${seatExtra.join("\n")}`.trim()
-          : result.reply;
+          ? `${aiReplyText}\n${seatExtra.join("\n")}`.trim()
+          : seatCardPointer
+            ? `${aiReplyText}\n${seatCardPointer}`.trim()
+            : aiReplyText || result.reply;
       /* AI ne jawab nahi diya (ya generic "provider se nahi mil" line di) → seat line akele bhi kaafi hai. */
       const aiFailed =
         !result.reply ||
-        /jawab nahi aa paya|jawaab nahi aa paya|gadh ke nahi bataunga|provider se nahi mil/i.test(String(result.reply ?? ""));
+        /jawab nahi aa paya|jawaab nahi aa paya|andaza nahi lagaunga|provider se nahi mil/i.test(String(result.reply ?? ""));
       return {
         nlu: result.nlu,
         source: result.source,
@@ -330,16 +416,45 @@ export function createApp() {
             ? `${replyWithSeats}\n\n${seatLine}`
             : seatLine
           : replyWithSeats,
-        seatFilter: seatFilter
-          ? {
-              classCodes: seatClassCodes,
-              line: seatLine,
-              rows: seatFilter.rows,
-              wlRows: seatFilter.wlRows,
-              trainsSeen: seatFilter.trainsSeen,
-              source: seatFilter.source,
-            }
-          : null,
+        seatFilter: (() => {
+          if (!seatFilter) return null;
+          /* ── Round-53c (prod probe 50b23b6): text aur cards ka train-set BILKUL wahi ho ──────────────
+           * "confirm seat" par model 4 trains likhta hai → cards me wahi 4. Par "saari trains … availability
+           * batao" par model 12 trains (WL wali bhi) likhta hai → cards me bhi wahi 12 (pehle wahan sirf
+           * 4 reh jaati thin — ulta mismatch). Isliye cards ke trains = model ke jawab me likhi trains ∩
+           * payload ke trains. Jawab me koi train number na ho (capability/PNR jaise sawaal) to poora
+           * payload waisa hi rehta hai — kuch chhupta nahi. Class-level details payload se hi aati hain
+           * (text me sirf 1 class likhi ho to bhi us train ki baaki classes card me dikhti hain). */
+          const seatWinnerSet = new Set(seatFilter.rows.map((x) => x.number));
+          /* Cards me WO SAARI trains rehti hain jo tool ne is turn me di (text ke saath ek hi snapshot).
+           * Model ne kisi train ki line chhoti kar di ho to bhi card me poori class-detail rehti hai, aur
+           * jawab me us train ka zikr pointer/tail line se hota hai — yaani text aur cards kabhi alag
+           * snapshots ke nahi hote (R53 ka asli maqsad). */
+          const rows = seatFilter.rows;
+          const wlBase = seatFilter.wlRows;
+          return {
+            classCodes: seatClassCodes,
+            line: seatLine,
+            rows,
+            /* Round-53 (user: *"Agar confirm bola to confirm dikhao na sirf"*): jab user ne confirm
+             * maanga ho, cards me WL rows SIRF unhi trains ki dikhti hain jinme seat mili hai (Round-51
+             * ka usool — usi train ki baaki classes chhupao mat), warna jaisa Round-25 me tay hua tha. */
+            /* Round-53e: agar is waqt kisi train me CONFIRMED seat hi nahi hai (rows khaali), to cards me
+             * WL rows dikhti hain — kyunki jawab me bhi wahi WL trains honest taur par likhi jaati hain
+             * ("abhi koi confirmed seat nahi, ye trains WL me hain"). Warna text me trains hote aur
+             * neeche koi card na hota — bilkul wahi complaint jo user ne bheji thi. */
+            wlRows:
+              seatOnlyAvailable && rows.length > 0
+                ? wlBase.filter((r) => seatWinnerSet.has(r.number))
+                : wlBase,
+            trainsSeen: seatFilter.trainsSeen,
+            source: seatFilter.source,
+            /* Round-49: jo trains destination tak nahi jaati thin, unka note client card me bhi. */
+            dropNote: seatFilter.dropNote ?? null,
+            /* Round-50: unme se seat-detih trains ka alag section (jaise JAT tak). */
+            nearbyNote: seatFilter.nearbyNote ?? null,
+          };
+        })(),
         seatFilterFallback: Boolean(seatLine && aiFailed),
         interrupt: result.interrupt,
         resumeAsk: result.resumeAsk,
@@ -789,11 +904,21 @@ export function createApp() {
           .map((t) => t.trim())
           .filter(Boolean);
         const board = await routedRouteBoard(from, to, date, extraTrains);
-        res.json(
-          board
-            ? { trains: board.trains, source: board.provider, at: new Date(board.at).toISOString() }
-            : { trains: [], source: "none" },
-        );
+        if (!board) {
+          res.json({ trains: [], source: "none" });
+          return;
+        }
+        /* Round-49: sirf wo trains jo `to` tak sach me jaati hain (ConfirmTkt board paas ke bade
+         * station wali trains bhi deta hai — jaise LDH→SVDK me JAT tak wali). */
+        const seg = await filterTrainsServingSegment(
+          board.trains.map((t) => ({ trainNumber: String(t.trainNumber ?? "").trim(), trainName: String(t.trainName ?? "") })),
+          from,
+          to,
+        ).catch(() => null);
+        const keptNums = new Set((seg?.trains ?? board.trains.map((t) => ({ trainNumber: String(t.trainNumber ?? "").trim() }))).map((t) => t.trainNumber));
+        const trains = board.trains.filter((t) => keptNums.has(String(t.trainNumber ?? "").trim()));
+        const routeNote = seg ? routeDropNote(seg.dropped, to) : null;
+        res.json({ trains, source: board.provider, at: new Date(board.at).toISOString(), ...(routeNote ? { routeNote } : {}) });
         return;
       }
       if (!rawClass) {

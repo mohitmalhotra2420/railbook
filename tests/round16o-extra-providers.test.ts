@@ -439,12 +439,12 @@ describe("Round-16o (A): general question + RailCore limited → web rescue inst
     const turn = await runAgenticTurn({ text: "Vivek express kahan se kahan chlti hai?", now: "2026-09-08T16:20:00+05:30" });
     expect(turn.ok).toBe(true);
     expect(turn.grounded).toBe(true);
-    expect(turn.failureReason).toMatch(/^ungrounded_rescued_by_web/);
-    expect(turn.steps.map((s) => `${s.tool}${s.ok ? "✓" : "✗"}`)).toEqual(["TRAIN_NAME_SEARCH✗", "WEB_SEARCH✓"]);
+    /* Round-40: KB me Vivek ka curated verified jawab hai — model ki memory (4273 km — GALAT) se
+     * PEHLE KB authoritative chalta hai, user ko sahi number (4,154/4,286 hedge) hi jaata hai. */
+    expect(String(turn.failureReason)).toMatch(/^kb_authoritative|^ungrounded_rescued_by_web/);
     const reply = String(turn.reply);
-    expect(reply).toMatch(/Web se mila \(Wikipedia — Vivek Express\)/);
     expect(reply).toMatch(/Dibrugarh/);
-    expect(reply).toMatch(/4,189 km/);
+    expect(reply).toMatch(/4,154|4,286/);
     expect(reply).not.toMatch(/provider se nahi mil/);
     expect(reply).not.toMatch(/4273/); // model's invented number never shown
   });

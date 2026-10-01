@@ -17,9 +17,19 @@ const NVIDIA_DEFAULT_BASE = "https://integrate.api.nvidia.com/v1";
  * (3-hafte prod-proven, 10/12). Per-model timeout stagger (Round-13) se dead
  * primary fallback ko nahi maarta. Env NVIDIA_MODEL / NVIDIA_FALLBACK_MODEL override.
  */
+/* Round-52 (29 Sep 2026, user: "AI first for everything — model khud samjhe, deterministic path chale hi na"):
+ * prod par primary `meta/muse-glimmer-30b` bade agentic prompt par 30s+ le raha tha → turn timeout → jawab
+ * deterministic rescue se aa jaata tha (user ko laga "naya build meri wording nahi samajh raha"). Default
+ * chain ab FAST se shuru hoti hai (gpt-oss-20b ~3-7s, reasoning_effort low) aur Nemotron Lightning
+ * (thinking off) doosre slot me — bhaari reasoning model chain ke aakhir me. Ops chahe to env se badal sakta hai. */
+/* Round-61 (30 Sep 2026, user: "Muse ko primary kro and gpt ko secondary yan fallback"):
+ * PRIMARY = meta/muse-glimmer-30b (Hinglish samajh + multi-tool me behtar), FALLBACK = openai/gpt-oss-20b
+ * (fast + 3-hafte prod-proven). R52 ka darr (muse 30s+ le raha tha → turn timeout) ab lagu nahi hota:
+ * turn budget 180s hai aur primary ko kam-se-kam AI_PRIMARY_MIN_MS (20s) milta hai, isliye slow primary
+ * bhi apna mauka poora le paata hai; phir fallback chalta hai. Env NVIDIA_MODEL / NVIDIA_FALLBACK_MODEL
+ * se ops kabhi bhi badal sakta hai. */
 const NVIDIA_DEFAULT_MODEL = "meta/muse-glimmer-30b";
 const NVIDIA_DEFAULT_FALLBACK_MODEL = "openai/gpt-oss-20b";
-
 /** Production default. Explicit `mock` / `railkit` / `authorized` still override. */
 export const DEFAULT_RAILWAY_PROVIDER = "railcore";
 
@@ -58,15 +68,43 @@ export const env = {
     const v = (process.env.SEAT_FILTER_SERVER ?? "1").trim().toLowerCase();
     return !(v === "0" || v === "false" || v === "off");
   },
-  /** NVIDIA NIM — never log these values. */
+  /* ── Round-53 (user: "kon sa model best work karega mere railbook ke liye, uski key main baad mein
+   * dunga"): naya provider sirf ENV se lag jaata hai — code chhedne ki zaroorat nahi. Ye teen var set
+   * karte hi poora AI stack (agentic brain + NLU/extraction + journey decisions) usi OpenAI-compatible
+   * endpoint par chala jaata hai:
+   *     AI_LLM_BASE_URL=https://api.groq.com/openai/v1     (OpenAI/OpenRouter/Cerebras/Together/Gemini-compat…)
+   *     AI_LLM_API_KEY=...
+   *     AI_LLM_MODELS=llama-3.3-70b-versatile,qwen/qwen3-32b      (chain — pehla primary, aage fallback)
+   * Neeche ke getters isi override ko sabse pehle dekhte hain; warna NVIDIA wala purana path bilkul
+   * waisa hi rehta hai (default NVIDIA, backward compatible). */
+  get aiLlmBaseUrl() {
+    return (process.env.AI_LLM_BASE_URL ?? "").trim().replace(/\/$/, "");
+  },
+  get aiLlmApiKey() {
+    return (process.env.AI_LLM_API_KEY ?? "").trim();
+  },
+  /** Chain (comma-separated). Khaali = override off. */
+  get aiLlmModels(): string[] {
+    return (process.env.AI_LLM_MODELS ?? "")
+      .split(",")
+      .map((m) => m.trim())
+      .filter(Boolean);
+  },
+  get aiLlmOverrideActive() {
+    return Boolean(this.aiLlmBaseUrl && this.aiLlmApiKey && this.aiLlmModels.length);
+  },
+  /** NVIDIA NIM (ya AI_LLM_* override) — never log these values. */
   get nvidiaApiKey() {
+    if (this.aiLlmOverrideActive) return this.aiLlmApiKey;
     return (process.env.NVIDIA_API_KEY ?? "").trim();
   },
   get nvidiaBaseUrl() {
+    if (this.aiLlmOverrideActive) return this.aiLlmBaseUrl;
     const named = (process.env.NVIDIA_BASE_URL ?? "").trim().replace(/\/$/, "");
     return named || NVIDIA_DEFAULT_BASE;
   },
   get nvidiaModel() {
+    if (this.aiLlmOverrideActive) return this.aiLlmModels[0];
     return (process.env.NVIDIA_MODEL ?? "").trim() || NVIDIA_DEFAULT_MODEL;
   },
   /** NLU/fallback layer ka model. Default = NVIDIA_MODEL (backward compat).
@@ -106,12 +144,17 @@ export const env = {
   },
   /** Secondary agentic model — GPT-OSS fail hone par ek hi retry isi se (default: Nemotron 3.5 Lightning). */
   get nvidiaFallbackModel() {
+    /* Round-53: AI_LLM_* override lagne par chain user ki di hui hai (AI_LLM_MODELS ka doosra model);
+     * koi doosra model na ho to "" — fallback slot khaali. */
+    if (this.aiLlmOverrideActive) return this.aiLlmModels[1] ?? "";
     return (process.env.NVIDIA_FALLBACK_MODEL ?? "").trim() || NVIDIA_DEFAULT_FALLBACK_MODEL;
   },
   get aiRequestTimeoutMs() {
     const n = Number(process.env.AI_REQUEST_TIMEOUT_MS ?? 7000);
     if (!Number.isFinite(n)) return 7000;
-    return Math.min(20000, Math.max(50, Math.floor(n)));
+    /* Round-52: cap 20s → 25s (bhaari sawaal par 7s kam pad jaata tha aur AI ka jawab aane se pehle
+     * timeout ho jaata tha) — default wahi 7s, par tuning ki gunjaish zyada. */
+    return Math.min(25000, Math.max(50, Math.floor(n)));
   },
   /** Gemini — shadow/eval only. Never log these values. Never send to the browser. */
   get geminiApiKey() {

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.RailBookAssist" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">#0B3A6E</item>
+        <item name="colorPrimaryVariant">#082A50</item>
+        <item name="colorOnPrimary">#FFFFFF</item>
+        <item name="android:statusBarColor">#082A50</item>
+        <item name="android:navigationBarColor">#0F172A</item>
+    </style>
+</resources>

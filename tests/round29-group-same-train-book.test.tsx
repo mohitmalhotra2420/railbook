@@ -121,11 +121,11 @@ describe("Round-29 · ek train = ek card (display-only grouping)", () => {
     expect(groups[0].rows.map((r) => r.status)).toEqual(["AVAILABLE", "WAITLIST"]);
   });
 
-  it("row parse na ho to poora text waisa hi (kuch adhoora/naya nahi banta)", () => {
+  it("row parse na ho to poora text waisa hi (kuch adhoora/naya nahi banta) — Round-47 me sections", () => {
     const text = "Is train mein 3A AVL 4 hai lekin fare nahi mila. Kal subah confirm karein.";
     const { container } = render(<ReplyText text={text} />);
     expect(container.querySelectorAll(".rp-row").length).toBe(0);
-    expect(container.textContent).toBe(text);
+    expect(String(container.textContent).replace(/\s+/g, "")).toContain(text.replace(/\s+/g, ""));
   });
 
   it("adhoora match safety: aadhe shabd par ruk kar text nahi kaatta (screenshot 2 wala 'ability check…')", () => {

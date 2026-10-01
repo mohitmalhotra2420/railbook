@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">RailBook</string>
+    <string name="app_version">RailBook</string>
+    <string name="railbook_url">https://railbook-gegs.onrender.com/</string>
+    <string name="irctc_url">https://www.irctc.co.in/nget/train-search</string>
+    <string name="status_idle">RailBook me journey select karein, phir Continue to IRCTC.</string>
+    <string name="status_irctc">IRCTC open · From/To/Date/Class + passengers auto-fill · Search khud chalega · class chip pehle refresh (⟳) phir select · Book Now khud tap → passenger form · Login/OTP/Pay aap karenge.</string>
+    <string name="status_irctc_blocked">IRCTC ki security (Akamai) ne app ka in-app browser block kar diya. Details clipboard par copy ho gayi — official IRCTC app/browser khul raha hai, wahan sirf paste karein.</string>
+    <string name="status_irctc_app">Official IRCTC app khula · wahan auto-fill nahi hota (OS rule) — summary clipboard me copy hai, paste/type karo.</string>
+    <string name="status_no_irctc_app">IRCTC app install nahi hai · normal tap se auto-fill wala website khulega.</string>
+    <string name="hint_safety">App sirf class chip ka Refresh (⟳), Search aur Book Now (passenger form tak) khud dabati hai — Login, OTP, CAPTCHA aur Payment kabhi auto nahi.</string>
+    <string name="btn_railbook">RailBook</string>
+    <string name="btn_irctc">IRCTC</string>
+    <string name="btn_clear">Clear handoff</string>
+    <string name="btn_lang_default">Bhasha: Hinglish</string>
+    <string name="prewarm_title">Redirecting to IRCTC…</string>
+    <string name="prewarm_note">Aapki details IRCTC par khud bhar jaayengi — jo yahan bhara hai wo dobara daalne ki zaroorat nahi. Sirf login/OTP/payment aap karenge.</string>
+    <string name="nav_back">Back</string>
+    <string name="nav_home">RailBook home</string>
+    <string name="nav_reload">Reload</string>
+    <string name="nav_where_railbook">RailBook</string>
+    <string name="nav_where_irctc">IRCTC (autofill)</string>
+</resources>

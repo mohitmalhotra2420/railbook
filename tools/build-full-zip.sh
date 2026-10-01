@@ -22,10 +22,19 @@ tar -C "$REPO" \
   -cf - . | tar -C "$DEST/railbook" -xf -
 
 cp -a "$ANDROID" "$DEST/android-app"
-cp -a "$RBDIR/APKs" "$DEST/apks"
+# Round-58 (user: "zip workspace mein nhi load ho rha ... workspace bhi overload hai"):
+# pehle SAARE purane APKs (v1.4.3 … v1.5.0 = 8 × ~4.8 MB) zip me jaate the — 60 MB ka zip.
+# Ab sirf LATEST APK + v1.4.9 (bridge recovery ke liye, recover.sh isi ko padhta hai) — baaki
+# purane APKs disk par RailBook/APKs me waise hi rakhe hain. Isse zip ~36 MB ka ho jaata hai.
+mkdir -p "$DEST/apks"
+LATEST_APK=$(ls -1 "$RBDIR/APKs"/RailBook-v*-release.apk 2>/dev/null | sort -V | tail -1)
+cp "$LATEST_APK" "$DEST/apks/"
+[ -f "$RBDIR/APKs/RailBook-v1.4.9-release.apk" ] && cp "$RBDIR/APKs/RailBook-v1.4.9-release.apk" "$DEST/apks/" || true
+echo "apks in zip: $(ls -1 "$DEST/apks" | tr '\n' ' ')"
 cp -a "$RBDIR/previews" "$DEST/previews"
 cp -a "$RBDIR/docs/." "$DEST/docs/"
 cp "$REPO/START-HERE.md" "$DEST/START-HERE.md"
+cp "$REPO/HANDOFF.md" "$DEST/HANDOFF.md"
 cp /home/user/apk-build-v1*.sh "$DEST/host-scripts/" 2>/dev/null || true
 
 rm -f "$OUT"

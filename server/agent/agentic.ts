@@ -13,11 +13,13 @@
  *  - Grounded answers only: the final reply's numbers must exist in tool
  *    results, otherwise the reply is replaced with deterministic summaries.
  */
+import { STATION_CODES } from "../data/station-codes.js";
 import { z } from "zod";
 import { env } from "../env.js";
 /* 24 Sep 2026 (user: "AI sabh handle kare — do not specific to 2A"): AI khud seat sawaal ka
  * poora jawab deta hai is tool se (live board + per-train rows). */
 import { FIND_SEATS_DESCRIPTION, FIND_SEATS_PARAMETERS, runFindSeatsTool } from "./seatFinderTool.js";
+import { dropUnaskedWindow, isPickFollowup, previousListTrains } from "./seatPick.js";
 import { parseSeatIntent } from "../understand/seatIntent.js";
 import { getProvider } from "../providers/index.js";
 import { todayYmd } from "../util.js";
@@ -36,6 +38,7 @@ import {
 } from "../railway/router.js";
 import { scrapeTrainFactsWeb, webSourceLabel } from "../railway/webscrape.js";
 import { parseDatePhrase, parseStatusDate } from "../understand/legacy-dates.js";
+import { candidateStationTokens, checkStationsOnRoute, citySiblingOnRoute, normalizeRouteSegment, routeMismatchMessage } from "./routeCheck.js";
 import { STATION_QUALIFIER_CANON } from "../understand/legacy-nlu.js";
 import { RailKitProvider } from "../railway/railkit.js";
 import type { ClassCode } from "../providers/types.js";
@@ -56,8 +59,10 @@ import { cleanQueryEn, findTopicAnswer, HINGLISH_TOPIC_WORDS, significantWords }
 import { ATTRIBUTE_Q_RE, COUNT_LIST_RE, trainFamilyPage, wikiLargestTable } from "./wikitable.js";
 import { railKbAnswer } from "./railkb.js";
 import { answerCoversSubject, answerMatchesRailMode, subjectHitCount } from "./subject.js";
+import { asksSingleTrainAvailability, asksStationCode, isComparisonQuery, liveClaimCheck, liveDataQuestion, normalizeRailText, scrubInternalNotes } from "./answerMode.js";
+export { asksSingleTrainAvailability } from "./answerMode.js";
 /* Round-18i: rules/procedure topics → KB before Wikipedia (see WEB_SEARCH). */
-const RULES_TOPIC_RE = /\b(tatkal|premium tatkal|rac|waiting list|waitlist|wl|gnwl|pqwl|rlwl|chart|pnr|refund|cancel(?:lation)?|luggage|saman|samaan|blanket|bedroll|pantry|catering|id proof|photo id|concession|senior citizen|quota|break journey|child (?:ticket|fare)|bachcha|tte|ticket checker|arp|advance reservation|kitne din pehle|khana|khaana|food|meal|chai|berth|berths|platform|platforms|coach me kitne|top speed|maximum speed|max speed|kitni tez|divyangjan|divyang|wheelchair|handicapped|accessible|kutta|pet|dog|smoking|sigret|cigarette|charging|charger|ac fail|ac kharab|bachch|child fare|2a 3a|3a 2a|doori|distance|kitne km|kitna door|sabse bada|bada station|largest|biggest|sabse lambi|sabse lamba|longest|konkan)\b/i;
+const RULES_TOPIC_RE = /\b(tatkal|premium tatkal|rac|waiting list|waitlist|wl|gnwl|pqwl|rlwl|chart|pnr|refund|cancel(?:lation)?|luggage|saman|samaan|blanket|bedroll|pantry|catering|id proof|photo id|concession|senior citizen|quota|break journey|child (?:ticket|fare)|bachcha|tte|ticket checker|arp|advance reservation|kitne din pehle|khana|khaana|food|meal|chai|berth|berths|platform|platforms|coach me kitne|top speed|maximum speed|max speed|kitni tez|divyangjan|divyang|wheelchair|handicapped|accessible|kutta|pet|dog|smoking|sigret|cigarette|charging|charger|ac fail|ac kharab|bachch|child fare|2a 3a|3a 2a|doori|distance|kitne km|kitna door|sabse bada|bada station|largest|biggest|sabse lambi|sabse lamba|longest|konkan|kitne zone|zones|pehli train|first train|sabse puran[a-z]*|kitne railway station|kitne station|sabse tez train|fastest train)\b/i;
 import { stationBoard, trainHistory } from "../railway/railkit.js";
 
 export type AgenticToolName =
@@ -182,6 +187,23 @@ export type SearchCapture = {
   /** Round-33: model ne pax khud samjha (jaise "Kal,1" → 1) aur gate ne accept kiya — ye
    * client ko wapas jaata hai taaki agle turn me AI dobara "kitne passengers?" na poochhe. */
   passengers?: number | null;
+  /** Round-53 (user screenshot 29 Sep: "Green portion wali trains card mein nahi dikh rahi"):
+   * jab model ne KHUD FIND_SEATS chalaya, uska poora live data yahan capture hota hai. App isi data
+   * se cards banata hai (pehle cards ke liye dobara board fetch hota tha — do alag snapshots bante the,
+   * isliye text me 17 trains aur cards me kuch aur). Ab jawab ka text aur cards EK hi data se. */
+  seat?: {
+    from: string;
+    to: string;
+    date: string;
+    rows: import("./seatFilter.js").SeatFilterRow[];
+    wlRows: import("./seatFilter.js").SeatFilterRow[];
+    source: string | null;
+    dropNote: string | null;
+    nearbyNote: string | null;
+    trainsSeen: number;
+    onlyAvailable: boolean;
+    classCodes: string[];
+  } | null;
 };
 
 /* ── Injectable NVIDIA fetch (tests) ─────────────────────────────── */
@@ -227,15 +249,22 @@ const ArgSchemas = {
     date: Ymd,
   }),
   FIND_SEATS: z.object({
-    from: z.string().trim().min(2).max(40),
-    to: z.string().trim().min(2).max(40),
+    /* R55c: from/to optional — sirf train number wale sawaal ("12094 me 3A kitni seat khali hai") par
+     * server khud train ka poora route timetable se le leta hai (pehle schema hi reject kar deta tha).
+     * Khaali string bhi chalti hai (model "" bhejta hai) — usse server "station nahi bataya" maan leta hai. */
+    from: z.string().trim().max(40).nullish(),
+    to: z.string().trim().max(40).nullish(),
     date: Ymd,
     class_code: z.string().trim().max(30).nullish(),
     only_available: z.coerce.boolean().nullish(),
     depart_after: z.union([z.string().trim().max(30), z.number()]).nullish(),
     depart_before: z.union([z.string().trim().max(30), z.number()]).nullish(),
-    sort_by: z.enum(["cheapest", "fastest"]).nullish(),
-    train_numbers: z.union([z.string().trim().max(60), z.array(z.string().trim().max(10)).max(12)]).nullish(),
+    /* R55e: model kabhi 'availability' / 'seats' jaise shabd bhej deta hai — schema poora call reject na kare,
+     * unknown value server khud ignore karta hai (seatFinderTool me sortBy null ho jaata hai). */
+    sort_by: z.string().trim().max(20).nullish(),
+    /* R55b: pick follow-up me 12 candidates ka comma-string 71 chars ka hota tha → purani max(60) par
+     * model ka call schema-fail hota tha (probe me step-1 fail dikha). 20 numbers (120 chars) tak allow. */
+    train_numbers: z.union([z.string().trim().max(200), z.array(z.string().trim().max(10)).max(20)]).nullish(),
     quota: z.string().regex(/^[A-Za-z]{2}$/).nullish(),
     passengers: z.coerce.number().int().min(1).max(6).nullish(),
   }),
@@ -571,7 +600,7 @@ export const AGENTIC_TOOLS = [
     function: {
       name: "JOURNEY_ANALYZE",
       description:
-        "Atlas engine: fastest/cheapest/earliest/best_value train rank + optional alternative dates aur connecting routes. Filters: max_fare_inr (budget cap), preferred_class (jaise CC/3A), depart_after/depart_before (HH:MM window). Comparison/optimisation sawaalon ke liye yeh use karo. Origin/destination mein city NAAM (Delhi) ya known rail code (NDLS) do — airport codes mat bhejo (DEL DENDULURU hai, Delhi nahi).",
+        "Atlas engine: fastest/cheapest/earliest/best_value train rank + optional alternative dates aur connecting routes. Filters: max_fare_inr (budget cap), preferred_class (jaise CC/3A), depart_after/depart_before (HH:MM window). Comparison/optimisation sawaalon ke liye yeh use karo. Origin/destination mein city NAAM (Delhi) ya known rail code (NDLS) do — airport codes mat bhejo (DEL DENDULURU hai, Delhi nahi). Seat/berth/availability ka sawaal ho (jaise \"confirm seat find out karo\", \"2A me seat hai kya\") to JOURNEY_ANALYZE ke bajaye FIND_SEATS chalao — wo passenger count ke bina bhi poora seat board deta hai; aise sawaal par user ko pax ke liye roko mat.",
       parameters: {
         type: "object",
         properties: {
@@ -759,7 +788,16 @@ type ResolvedStn = { code: string } | { candidates: { code: string; name: string
 async function resolveStationRef(raw: string): Promise<ResolvedStn> {
   const s = raw.trim();
   if (!s) return { error: "Station khaali hai." };
-  if (/^[A-Z0-9]{2,5}$/.test(s)) return { code: s.toUpperCase() };
+  /* Round-52: ye "code" check sirf ASLI codes par (local dataset) — warna "delhi"/"katra" jaise
+   * naam bhi code ban kar lookup fail kar dete the. */
+  if (/^[A-Z0-9]{2,5}$/.test(s) && STATION_CODES[s.toUpperCase()]) return { code: s.toUpperCase() };
+  /* Round-52 (user: "model apne aap meri wording samjhe"): model tool ko user ki wording jaisa station
+   * bhej sakta hai ("Yaar Ldh", "bhai ldh", "kal katra") — pehle local knowledge (alias/code/city +
+   * phrase ke andar ka station word) dekho, tab provider. Ambiguous city (Delhi/Mumbai…) local me nahi
+   * milti, isliye wahan purana choice-flow waise hi chalega. */
+  const { matchStationStrict } = await import("../understand/legacy-stations.js");
+  const local = matchStationStrict(s);
+  if (local) return { code: local.code.toUpperCase() };
   const res = await routedStationSearch(s);
   if (res.needChoice && res.stations.length > 1) {
     return {
@@ -798,6 +836,41 @@ function okResult(source: string | null, summary: string, data: unknown): Approv
 
 function failResult(source: string | null, summary: string, data: unknown = null): ApprovedToolResult {
   return { ok: false, source, summary, data };
+}
+
+/* ── Round-54: tool fail hone par model ko AGLA SAHI TOOL khud suggest karo ────────────────────────────
+ * User ka sawaal: "ChatGPT har cheez perfectly samajh kar sahi tool kaise chunta hai?" — us system ka ek
+ * hissa ye hai ki tool ke fail hone par assistant ko pata ho ki usi kaam ka doosra raasta kya hai. Yahan
+ * har tool ke liye "same intent, doosra tool" ka ladder hai; failResult ke saath ye hint model ko jaata
+ * hai (usko rule yaad rakhne ki zaroorat nahi — hint data ke saath aata hai). */
+const TOOL_FALLBACKS: Record<string, string[]> = {
+  TRACK_TRAIN: ["GET_STATION_BOARD", "GET_TIMETABLE", "WEB_SEARCH"],
+  GET_TIMETABLE: ["GET_TRAIN_INFO", "SEARCH_TRAIN_BY_NUMBER", "WEB_SEARCH"],
+  GET_TRAIN_INFO: ["SEARCH_TRAIN_BY_NUMBER", "GET_TIMETABLE", "WEB_SEARCH"],
+  SEARCH_TRAIN_BY_NUMBER: ["GET_TRAIN_INFO", "GET_TIMETABLE", "SEARCH_TRAINS"],
+  CHECK_AVAILABILITY: ["FIND_SEATS", "GET_FARE", "WEB_SEARCH"],
+  FIND_SEATS: ["CHECK_AVAILABILITY", "SEARCH_TRAINS", "WEB_SEARCH"],
+  GET_FARE: ["CHECK_AVAILABILITY", "JOURNEY_ANALYZE"],
+  CHECK_PNR: ["WEB_SEARCH"],
+  GET_CANCELLED_TRAINS: ["WEB_SEARCH", "GET_STATION_BOARD"],
+  GET_STATION_BOARD: ["TRACK_TRAIN", "WEB_SEARCH"],
+  GET_COACH_POSITION: ["GET_TRAIN_INFO", "WEB_SEARCH"],
+  GET_TRAIN_HISTORY: ["TRACK_TRAIN", "GET_TIMETABLE"],
+  SEARCH_TRAINS: ["JOURNEY_ANALYZE", "FIND_SEATS", "WEB_SEARCH"],
+  JOURNEY_ANALYZE: ["SEARCH_TRAINS", "RANK_JOURNEY_OPTIONS"],
+  FIND_ALTERNATIVE_TRAINS: ["SEARCH_TRAINS", "FIND_CONNECTIONS"],
+  SEARCH_STATIONS: ["WEB_SEARCH"],
+  GET_ACTIVE_TRAINS: ["SEARCH_TRAINS", "WEB_SEARCH"],
+  WEB_SEARCH: ["FIND_SEATS", "SEARCH_TRAINS"],
+};
+
+/** Fail hone par result ke saath model ko diya jaane wala hint (asli tool kaam karta ho to kuch nahi). */
+export function toolRecoveryHint(tool: string): string {
+  const alts = TOOL_FALLBACKS[tool] ?? [];
+  return (
+    ` HINT: ye tool is waqt nahi chala. Agar ye sawaal ke liye zaroori tha to abhi in tools me se koi try karo: ` +
+    `${alts.join(", ")} — ya jo pata chala wo user ko sach-sach batao. User ko tool ke andar ki baat (error text) mat dikhao.`
+  );
 }
 
 /** Compile-checked hub list for connection itineraries (Atlas route optimisation). */
@@ -1146,6 +1219,8 @@ export type ToolExecContext = {
   /** User ka original message — WEB_SEARCH isse Hinglish sawaal ka topic
    * (speed/history/coach) samajh kar Wikipedia se focused jawab nikalta hai. */
   userText?: string;
+  /** Round-55: "in me se best" follow-up me candidates (pichhle jawab ki trains) — list na badle. */
+  pickCandidates?: string[];
   /** Round-18m-9: passengers from known context — seat filters use it. */
   passengers?: number | null;
   /** Round-18m-29: agentic loop → planner ka decision final-answer call mein merge (AI 3→2). */
@@ -1176,7 +1251,29 @@ export async function executeApprovedTool(
   }
 
   const schema = ArgSchemas[name as AgenticToolName];
-  const parsed = schema.safeParse(rawArgs);
+  let parsed = schema.safeParse(rawArgs);
+  /* ── R55f: SOFT-FIELD SAFETY NET ────────────────────────────────────────────────────────────────
+   * 29 Sep ke live probes me baar-baar dekha: model ka poora call sirf ek soft field ki wajah se
+   * marta tha (jaise passengers: 0 → ">=1 chahiye", sort_by: "availability" → enum galat, train_numbers
+   * ka comma-string lamba). Us se live seat sawaal bekaar ho jaata tha. Ab: zod ke bataye hue galat
+   * fields HATA kar dobara try karte hain (baaki call chalti hai, server default/auto behaviour lagata
+   * hai) aur result ke summary me model ko saaf batate hain ki kya gira. Sirf tab fail karte hain jab
+   * hataane ke baad bhi call valid na ho. */
+  let droppedArgsNote: string | null = null;
+  if (!parsed.success) {
+    const bad = new Set(parsed.error.issues.map((i) => String(i.path[0] ?? "")).filter(Boolean));
+    if (bad.size && bad.size < Object.keys(rawArgs).length + 1) {
+      const loose: Record<string, unknown> = { ...rawArgs };
+      for (const k of bad) delete loose[k];
+      const retry = schema.safeParse(loose);
+      if (retry.success) {
+        droppedArgsNote =
+          `ℹ In args ko chhod diya gaya (valid nahi the): ${Array.from(bad).join(", ")}. ` +
+          `Inke bina hi sahi jawab dena hai (user se in fields ke liye alag se mat poochho jab tak zaroori na ho).`;
+        parsed = retry;
+      }
+    }
+  }
   if (!parsed.success) {
     return {
       ok: false,
@@ -1194,6 +1291,8 @@ export async function executeApprovedTool(
   }
 
   try {
+    /* R55f: switch ke result par soft-field note chipkaane ke liye wrapper (niche). */
+    const toolResult = await (async (): Promise<ApprovedToolResult> => {
     switch (name as AgenticToolName) {
       case "WEB_SEARCH": {
         const q = String(a.query ?? "").trim();
@@ -1629,11 +1728,19 @@ export async function executeApprovedTool(
         if (fromCode && toCode) seg = segmentOfStops(stops, fromCode, toCode);
         else if (!fromCode && toCode && stops.length) seg = segmentOfStops(stops, stops[0].code, toCode);
         else if (fromCode && !toCode && stops.length) seg = segmentOfStops(stops, fromCode, stops[stops.length - 1].code);
+        /* Round-43k: off-route station ke liye same-shehar ka route-station bhi batao (Ludhiana → DDL) —
+         * tab model/fallback dono ka jawab exact hota hai, "nahi jaati" ke bajaye asli station milta hai. */
+        const siblingLines = await Promise.all(
+          stationChecks.filter((c) => !c.onRoute && c.code).map(async (c) => {
+            const sib = await citySiblingOnRoute(String(a.train_number), String(c.code)).catch(() => null);
+            return sib ? ` Isi shehar ka ${sib.code}${sib.name ? ` (${sib.name})` : ""} route par hai${sib.departure ? ` — dep ${sib.departure}` : ""}.` : "";
+          }),
+        );
         const checkLine = stationChecks
-          .map((c) =>
+          .map((c, i) =>
             c.onRoute
               ? ` ${c.code} par RUKTI HAI (stop #${c.index}/${stops.length}${c.arrival ? `, arr ${c.arrival}` : ""}${c.departure ? `, dep ${c.departure}` : ""}).`
-              : ` ${c.code ?? c.ref} is train ke route par NAHI hai — ${c.ref} ke liye ye train use nahi hoti.`,
+              : ` ${c.code ?? c.ref} is train ke route par NAHI hai — ${c.ref} ke liye ye train use nahi hoti.${siblingLines.filter((_, j) => stationChecks.filter((x) => !x.onRoute && x.code)[j] === c).join("")}`,
           )
           .join("");
         const segLine = seg ? `, ${seg.from}→${seg.to} ${seg.departure}→${seg.arrival} (${seg.durationLabel})` : "";
@@ -1668,8 +1775,14 @@ export async function executeApprovedTool(
             const fresh = new Set(options.slice(0, 2).map((o) => o.date));
             const running = options.filter((o) => o.runState === "running" && fresh.has(o.date));
             const wantsNow = /\b(abhi|live|kahan|kaha|status|running|chal rahi|kitna late|late hai)\b/i.test(String(ctx.userText ?? "")) && !/\b(kal|yesterday|parso|pichhl|pehle|wali run|\d{1,2}\s*(sep|sept|oct|nov|dec|jan|feb|mar|apr|may|jun|jul|aug))/i.test(String(ctx.userText ?? ""));
+            /* Round-43d: "abhi/late/status" sawaal par aaj ka run options me hai to wahi lo — chahe
+             * RUNNING na ho (cancelled/not-started bhi aaj ka SAHI jawab hai). Warna model ghair-zaroori
+             * "kis din ka chahiye?" poochh leta tha (battery: late-simple ❌). */
+            const istTodayIso = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
             if (running.length === 1 && wantsNow) {
               liveDateOverride = running[0].date;
+            } else if (wantsNow && options.some((o) => o.date === istTodayIso)) {
+              liveDateOverride = istTodayIso;
             } else if (options.length > 1) {
               const lines = options.map((o, i) => `${i + 1}. ${o.label ?? o.date} — ${o.date}${o.runState && o.runState !== "unknown" ? ` (${o.runState.replace("_", " ")})` : ""}`).join("\n");
               return failResult(null, `${a.train_number} ki ${options.length} runs ka live data hai — kis din wali chahiye? User se poochho (options EXACTLY ye do, numbered):\n${lines}\nUser chune to TRACK_TRAIN dobara us date ke saath call karo. Khud koi run mat chuno.`, { needs_choice: true, kind: "run_date", options });
@@ -1694,7 +1807,9 @@ export async function executeApprovedTool(
         const nextBit = live.nextStation && runState !== "completed" ? `, next ${live.nextStation}` : "";
         /* Round-18 §14: freshness envelope — stale live data is never presented as current. */
         const provenance = makeProvenance({ source: res.provider, kind: "live_status", requestDate: todayYmd(), travelDate: (live as { journeyDate?: string | null }).journeyDate ?? null, providerUpdatedAt: live.lastUpdatedAt ?? null });
-        const staleNote = provenance.freshness === "stale" && runState !== "completed" ? ` ⚠ STALE: provider ka last update ${live.lastUpdatedAt} — ye position abhi ki nahi, user ko saaf bolo "purana update hai, dobara try karein".` : provenance.freshness === "unknown" && live.lastUpdatedAt ? ` (provider update: ${live.lastUpdatedAt})` : "";
+        /* Round-44: yahan pehle model-instruction thi ("user ko saaf bolo …") — wo user tak pahunch jaati thi.
+         * Ab seedha user-facing sach likha hai. */
+        const staleNote = provenance.freshness === "stale" && runState !== "completed" ? ` ⚠ STALE: provider ka last update ${live.lastUpdatedAt} — ye position abhi ki nahi (purana update hai, dobara try karein).` : provenance.freshness === "unknown" && live.lastUpdatedAt ? ` (provider update: ${live.lastUpdatedAt})` : "";
         return okResult(
           res.provider,
           `${live.trainNumber ?? a.train_number}${runLabel ? ` [${runLabel}]` : ""} — ${live.status ?? "unknown"}${livePositionLabel(live) ? `, ${livePositionLabel(live)}` : ""}${nextBit}${!/\d+\s*min/i.test(String(live.status ?? "")) && live.delayMinutes != null ? `, delay ${live.delayMinutes}m` : ""}.${runLabel ? ` (Ye ${runLabel} ka status hai — user ko run-date saaf batao.)` : ""}${staleNote}${webSourceLabel(res.provider)}`,
@@ -1703,36 +1818,81 @@ export async function executeApprovedTool(
       }
       case "FIND_SEATS": {
         /* 24 Sep 2026: AI khud seat sawaal ka jawab deta hai — server sirf live rows laata hai. */
+        /* Round-53f (prod probe): user "confirm seat…" maangta hai par model tool me `only_available:
+         * false` bhej deta hai → tool WL trains ka data bhi deta hai, model unhe jawab me likh deta hai,
+         * aur cards (confirm ke hisaab se) sirf seat-wali trains dikhate hain → mismatch. User ka niyam:
+         * "agar confirm bola to confirm dikhao na sirf". Isliye user ki wording pakki ho (confirmedOnly)
+         * to flag force hota hai — model ke paas WL-only trains likhne ko hoti hi nahi. */
+        const forcedOnlySeats = parseSeatIntent(String(ctx.userText ?? "")).confirmedOnly;
+        /* ── Round-55b: chupke se lagaye gaye filters band (user ka asli case) ──────────────────────────
+         * Screenshot: "ASR se LDH 3A me seat batao" par list badal gayi aur ek train (Sachkhand) gayab
+         * ho gayi. Wajah: model ne khud se `depart_after: subah` jaisa waqt ka filter laga diya (user ne
+         * waqt bola hi nahi tha) — us window se bahar wali trains chhup gayi. Ab: user ke shabdon me waqt
+         * ka zikr na ho to window filter HATA diya jaata hai (data chhupane ka koi bahana nahi). */
+        const userAskText = String(ctx.userText ?? "");
+        /* Watch: user ne waqt nahi bataya to chupke lagaya window filter yahin hat jaata hai (seatPick.ts). */
+        const { args: seatArgs, dropped: windowDropped } = dropUnaskedWindow(userAskText, a as Record<string, unknown>);
+        /* Follow-up chunav ("in me se best") me candidates WAHI rehne chahiye jo pichhle jawab me the —
+         * model aadhi list bhej de to bhi server poori candidates par check karta hai (list na badle). */
+        const pickCands = ctx?.pickCandidates?.length ? ctx.pickCandidates : [];
+        if (pickCands.length >= 2) seatArgs.train_numbers = pickCands.slice(0, 20).join(",");
+        /* R55e: user ne khud train number bola ho ("12094 me 3A kitni seat khali hai") par model ne usse
+         * args me na bheja ho aur station bhi nahi diya — to number sawaal se hi le lo, taaki server route
+         * khud nikaal kar seat bata sake (warna tool "station batao" bol kar ruk jaata tha). */
+        const seatSayTrainNums = [...new Set(String(ctx.userText ?? "").match(/\b\d{5}\b/g) ?? [])];
+        const hasStationArgs = Boolean(String(seatArgs.from ?? "").trim() || String(seatArgs.to ?? "").trim());
+        const hasTrainArgs = Boolean(String(seatArgs.train_numbers ?? "").trim());
+        if (!hasStationArgs && !hasTrainArgs && seatSayTrainNums.length) {
+          seatArgs.train_numbers = seatSayTrainNums.slice(0, 12).join(",");
+        }
         const res = await runFindSeatsTool({
           from: String(a.from ?? ""),
           to: String(a.to ?? ""),
           date: String(a.date ?? ""),
           class_code: (a.class_code as string | undefined) ?? null,
-          only_available: (a.only_available as boolean | undefined) ?? null,
-          depart_after: (a.depart_after as string | number | undefined) ?? null,
-          depart_before: (a.depart_before as string | number | undefined) ?? null,
-          sort_by: (a.sort_by as "cheapest" | "fastest" | undefined) ?? null,
-          train_numbers: (a.train_numbers as string | string[] | undefined) ?? null,
+          only_available: forcedOnlySeats ? true : (seatArgs.only_available as boolean | undefined) ?? null,
+          depart_after: (seatArgs.depart_after as string | number | undefined) ?? null,
+          depart_before: (seatArgs.depart_before as string | number | undefined) ?? null,
+          sort_by: (seatArgs.sort_by as "cheapest" | "fastest" | undefined) ?? null,
+          train_numbers: (seatArgs.train_numbers as string | string[] | undefined) ?? null,
           quota: (a.quota as string | undefined) ?? null,
           passengers: (a.passengers as number | undefined) ?? null,
         });
-        return res.ok ? okResult(res.source, res.summary, res.data) : failResult(res.source, res.summary, res.data);
+        /* Round-55b: agar model ne khud se window lagayi thi aur server ne hata di, to model ko sach batao
+         * — warna wo apne jawab me wahi (na-lagi) window likh deta hai aur user confuse hota hai. */
+        const seatSummary = windowDropped
+          ? `ℹ Server ne tumhara time-window filter hata diya (user ne waqt nahi bataya) — neeche POORE din ka board hai; jawab me bhi koi window (subah/shaam/04:00-12:00) mat likho. ${res.summary}`
+          : res.summary;
+        return res.ok ? okResult(res.source, seatSummary, res.data) : failResult(res.source, seatSummary, res.data);
       }
       case "CHECK_AVAILABILITY": {
-        const ctx = await resolveTrainRouteDate(a as unknown as { train_number: string; date?: string; origin?: string; destination?: string });
-        if (!ctx.origin || !ctx.destination) {
+        /* Round-43k: station train ke route me hai ya nahi — shared checker (routeCheck.ts) verify karta
+         * hai, isliye model/tool ise bypass nahi kar sakta (jhootha N/A board kabhi nahi). */
+        const routeChk = await checkStationsOnRoute(
+          a.train_number as string,
+          { origin: (a.origin as string | undefined) ?? null, destination: (a.destination as string | undefined) ?? null },
+          ctx.userText ?? null,
+        );
+        if (routeChk.bad) return failResult(null, routeMismatchMessage(a.train_number as string, routeChk.bad, true), { route_mismatch: true, ...routeChk.bad });
+        const segCHECK_AVAILABILITY = normalizeRouteSegment(routeChk.stops, { origin: routeChk.origin, destination: routeChk.destination });
+        const rctx = await resolveTrainRouteDate({
+          ...(a as unknown as { train_number: string; date?: string }),
+          origin: segCHECK_AVAILABILITY.origin,
+          destination: segCHECK_AVAILABILITY.destination,
+        });
+        if (!rctx.origin || !rctx.destination) {
           return failResult(null, `Availability ke liye route chahiye (origin/destination) aur timetable se route resolve nahi hua — user se poochho.`);
         }
         const code = (a.class_code as string | undefined)?.toUpperCase() as ClassCode | undefined;
         if (!code) {
           const board = await routedClassBoard(
             a.train_number as string,
-            ctx.date,
-            ctx.origin,
-            ctx.destination,
+            rctx.date,
+            rctx.origin,
+            rctx.destination,
             (a.quota as string | undefined) ?? "GN",
           );
-          if (!board.classes.length) return failResult(board.provider, `Availability unavailable (${ctx.origin}→${ctx.destination}, ${ctx.date}).`);
+          if (!board.classes.length) return failResult(board.provider, `Availability unavailable (${rctx.origin}→${rctx.destination}, ${rctx.date}).`);
           const boardWeb = board.classes.find((c) => c.source === "web_railyatri" && c.status !== "UNKNOWN");
           const boardExtra = board.classes.find((c) => (c.source === "railradar" || c.source === "indianrailapi") && c.status !== "UNKNOWN");
           /* Round-18m-23 (user: "Fare reference 2A ₹3000…" — seat UNKNOWN tha aur fare poore route ka):
@@ -1742,54 +1902,66 @@ export async function executeApprovedTool(
             const segFares = board.classes.filter((c) => c.fare > 0 && (c.source === "web_erail" || c.fareSource === "web_erail")).map((c) => `${c.code} ₹${c.fare}`);
             return failResult(
               providerOf(),
-              `Availability unavailable (${a.train_number} ${ctx.origin}→${ctx.destination}, ${ctx.date}) — kisi bhi class ka seat status provider se nahi aaya; invent nahi karunga.${segFares.length ? ` (Sirf ${ctx.origin}→${ctx.destination} segment ka ticket fare web se mila: ${segFares.join(", ")} — erail.in; ye seat status NAHI hai.)` : " Fare bhi verified nahi mila — koi fare mat batao."}`,
-              { train_number: a.train_number, date: ctx.date, resolvedRoute: { origin: ctx.origin, destination: ctx.destination, autoDate: ctx.autoDate }, classes: board.classes.map((c) => ({ ...c, fare: segFares.length ? c.fare : 0 })) },
+              `Availability unavailable (${a.train_number} ${rctx.origin}→${rctx.destination}, ${rctx.date}) — kisi bhi class ka seat status provider se nahi aaya; invent nahi karunga.${segFares.length ? ` (Sirf ${rctx.origin}→${rctx.destination} segment ka ticket fare web se mila: ${segFares.join(", ")} — erail.in; ye seat status NAHI hai.)` : " Fare bhi verified nahi mila — koi fare mat batao."}`,
+              { train_number: a.train_number, date: rctx.date, resolvedRoute: { origin: rctx.origin, destination: rctx.destination, autoDate: rctx.autoDate }, classes: board.classes.map((c) => ({ ...c, fare: segFares.length ? c.fare : 0 })) },
             );
           }
           return okResult(
             board.provider,
-            `${a.train_number} ${ctx.origin}→${ctx.destination} (${ctx.date}${ctx.autoDate ? ", aaj ke liye" : ""}): ${board.classes.map((c) => `${c.code} ${c.status}${c.seats != null ? ` ${c.seats}` : ""}${c.waitlist != null ? ` WL${c.waitlist}` : ""}${c.rac != null ? ` RAC${c.rac}` : ""}`).join(", ")}.${boardWeb ? ` (Source: railyatri.in — IRCTC data, railway API down tha${boardWeb.webNote && /as of/i.test(boardWeb.webNote) ? `, ${boardWeb.webNote.match(/as of[^)]*/i)?.[0]}` : ""}.)` : boardExtra ? webSourceLabel(String(boardExtra.source)) : ""}`,
-            { train_number: a.train_number, date: ctx.date, resolvedRoute: { origin: ctx.origin, destination: ctx.destination, autoDate: ctx.autoDate }, classes: board.classes },
+            `${a.train_number} ${rctx.origin}→${rctx.destination} (${rctx.date}${rctx.autoDate ? ", aaj ke liye" : ""}): ${board.classes.map((c) => `${c.code} ${c.status}${c.seats != null ? ` ${c.seats}` : ""}${c.waitlist != null ? ` WL${c.waitlist}` : ""}${c.rac != null ? ` RAC${c.rac}` : ""}`).join(", ")}.${boardWeb ? ` (Source: railyatri.in — IRCTC data, railway API down tha${boardWeb.webNote && /as of/i.test(boardWeb.webNote) ? `, ${boardWeb.webNote.match(/as of[^)]*/i)?.[0]}` : ""}.)` : boardExtra ? webSourceLabel(String(boardExtra.source)) : ""}`,
+            { train_number: a.train_number, date: rctx.date, resolvedRoute: { origin: rctx.origin, destination: rctx.destination, autoDate: rctx.autoDate }, classes: board.classes },
           );
         }
         const row = await getProvider().getAvailability(
           a.train_number as string,
-          ctx.date,
-          ctx.origin,
-          ctx.destination,
+          rctx.date,
+          rctx.origin,
+          rctx.destination,
           code,
           (a.quota as string | undefined) ?? "GN",
         );
-        if (row.status === "UNKNOWN") return failResult(providerOf(), `Availability unavailable (${ctx.origin}→${ctx.destination}, ${ctx.date}) — invent nahi karunga.`, row);
+        if (row.status === "UNKNOWN") return failResult(providerOf(), `Availability unavailable (${rctx.origin}→${rctx.destination}, ${rctx.date}) — invent nahi karunga.`, row);
         return okResult(
           row.source === "web_railyatri" ? "web_railyatri" : row.source === "railradar" || row.source === "indianrailapi" ? row.source : providerOf(),
-          `${a.train_number} ${code} ${ctx.origin}→${ctx.destination} (${ctx.date}${ctx.autoDate ? ", aaj ke liye" : ""}): ${row.status}${row.seats != null ? `, ${row.seats} seats` : ""}${row.waitlist != null ? `, WL ${row.waitlist}` : ""}${row.rac != null ? `, RAC ${row.rac}` : ""}${row.fare > 0 ? `, ₹${row.fare}` : ""}.${row.source === "web_railyatri" ? ` (Source: railyatri.in — IRCTC data, railway API down tha${row.webNote && /as of/i.test(row.webNote) ? `, ${row.webNote.match(/as of[^)]*/i)?.[0]}` : ""}; booking se pehle IRCTC par confirm karein.)` : row.source === "railradar" || row.source === "indianrailapi" ? webSourceLabel(row.source) : ""}`,
-          { ...row, resolvedRoute: { origin: ctx.origin, destination: ctx.destination, date: ctx.date, autoDate: ctx.autoDate } },
+          `${a.train_number} ${code} ${rctx.origin}→${rctx.destination} (${rctx.date}${rctx.autoDate ? ", aaj ke liye" : ""}): ${row.status}${row.seats != null ? `, ${row.seats} seats` : ""}${row.waitlist != null ? `, WL ${row.waitlist}` : ""}${row.rac != null ? `, RAC ${row.rac}` : ""}${row.fare > 0 ? `, ₹${row.fare}` : ""}.${row.source === "web_railyatri" ? ` (Source: railyatri.in — IRCTC data, railway API down tha${row.webNote && /as of/i.test(row.webNote) ? `, ${row.webNote.match(/as of[^)]*/i)?.[0]}` : ""}; booking se pehle IRCTC par confirm karein.)` : row.source === "railradar" || row.source === "indianrailapi" ? webSourceLabel(row.source) : ""}`,
+          { ...row, resolvedRoute: { origin: rctx.origin, destination: rctx.destination, date: rctx.date, autoDate: rctx.autoDate } },
         );
       }
       case "GET_FARE": {
-        const ctx = await resolveTrainRouteDate(a as unknown as { train_number: string; date?: string; origin?: string; destination?: string });
-        if (!ctx.origin || !ctx.destination) {
+        /* Round-43k: fare bhi usi train ke route wale station ka — warna jhootha "reference fare". */
+        const fareChk = await checkStationsOnRoute(
+          a.train_number as string,
+          { origin: (a.origin as string | undefined) ?? null, destination: (a.destination as string | undefined) ?? null },
+          ctx.userText ?? null,
+        );
+        if (fareChk.bad) return failResult(null, routeMismatchMessage(a.train_number as string, fareChk.bad, true), { route_mismatch: true, ...fareChk.bad });
+        const segFare = normalizeRouteSegment(fareChk.stops, { origin: fareChk.origin, destination: fareChk.destination });
+        const rctx = await resolveTrainRouteDate({
+          ...(a as unknown as { train_number: string; date?: string }),
+          origin: segFare.origin,
+          destination: segFare.destination,
+        });
+        if (!rctx.origin || !rctx.destination) {
           return failResult(null, `Fare ke liye route chahiye (origin/destination) aur timetable se route resolve nahi hua — user se poochho. Train ${a.train_number} ki timetable bhi unavailable thi.`);
         }
         const fare = await getProvider().getFare(
           a.train_number as string,
-          ctx.date,
-          ctx.origin,
-          ctx.destination,
+          rctx.date,
+          rctx.origin,
+          rctx.destination,
           (a.class_code as string).toUpperCase() as ClassCode,
           (a.passengers as number | undefined) ?? 1,
         );
         if (!fare.railwayAvailable && fare.baseFare <= 0)
           return failResult(
             providerOf(),
-            `Fare unavailable (${ctx.origin}→${ctx.destination}, ${ctx.date})${fare.unavailableReason ? ` — ${fare.unavailableReason}` : ""} — andaza nahi lagaunga.`,
+            `Fare unavailable (${rctx.origin}→${rctx.destination}, ${rctx.date})${fare.unavailableReason ? ` — ${fare.unavailableReason}` : ""} — andaza nahi lagaunga.`,
             fare,
           );
         return okResult(
           providerOf(),
-          `${a.train_number} ${(a.class_code as string).toUpperCase()} ${ctx.origin}→${ctx.destination} (${ctx.date}${ctx.autoRoute ? ", poora route" : ""}${ctx.autoDate ? ", aaj ke liye" : ""}): ticket ₹${fare.baseFare}, service ₹${fare.serviceFee}, total ₹${fare.total}${(a.passengers as number | undefined) ? ` (${a.passengers} pax)` : ""}.${fare.source === "web_railyatri" ? " (Source: railyatri.in — IRCTC fare, railway API down tha; exact booking fare thoda alag ho sakta hai.)" : fare.source === "web_erail" ? ` (Source: erail.in — ${ctx.origin}→${ctx.destination} segment ka fare, railway API down tha; exact booking fare thoda alag ho sakta hai.)` : fare.source === "railradar" || fare.source === "indianrailapi" ? webSourceLabel(fare.source) : ""}`,
-          { ...fare, resolvedRoute: { origin: ctx.origin, destination: ctx.destination, date: ctx.date, autoRoute: ctx.autoRoute, autoDate: ctx.autoDate } },
+          `${a.train_number} ${(a.class_code as string).toUpperCase()} ${rctx.origin}→${rctx.destination} (${rctx.date}${rctx.autoRoute ? ", poora route" : ""}${rctx.autoDate ? ", aaj ke liye" : ""}): ticket ₹${fare.baseFare}, service ₹${fare.serviceFee}, total ₹${fare.total}${(a.passengers as number | undefined) ? ` (${a.passengers} pax)` : ""}.${fare.source === "web_railyatri" ? " (Source: railyatri.in — IRCTC fare, railway API down tha; exact booking fare thoda alag ho sakta hai.)" : fare.source === "web_erail" ? ` (Source: erail.in — ${rctx.origin}→${rctx.destination} segment ka fare, railway API down tha; exact booking fare thoda alag ho sakta hai.)` : fare.source === "railradar" || fare.source === "indianrailapi" ? webSourceLabel(fare.source) : ""}`,
+          { ...fare, resolvedRoute: { origin: rctx.origin, destination: rctx.destination, date: rctx.date, autoRoute: rctx.autoRoute, autoDate: rctx.autoDate } },
         );
       }
       case "CHECK_PNR": {
@@ -1864,7 +2036,7 @@ export async function executeApprovedTool(
         if (!v.rows.length) return failResult(v.source, `${a.train_number} ${st.from}→${st.to} ${a.date}: seat data provider se nahi aaya — kuch invent nahi karunga.`, v);
         return okResult(
           v.source,
-          `${a.train_number} ${st.from}→${st.to} (${a.date}) vacant seats: ${v.rows.map((r) => `${r.classCode} ${r.status}${r.seats != null ? ` ${r.seats}` : ""}${r.waitlist != null ? ` WL${r.waitlist}` : ""}${r.fare != null ? ` ₹${r.fare}` : ""}`).join(", ")}. Berth-level (coach/berth no.) data provider nahi deta — user ko saaf bolo.${webSourceLabel(v.source)}`,
+          `${a.train_number} ${st.from}→${st.to} (${a.date}) vacant seats: ${v.rows.map((r) => `${r.classCode} ${r.status}${r.seats != null ? ` ${r.seats}` : ""}${r.waitlist != null ? ` WL${r.waitlist}` : ""}${r.fare != null ? ` ₹${r.fare}` : ""}`).join(", ")}. Berth-level (coach/berth no.) data provider nahi deta.${webSourceLabel(v.source)}`,
           v,
         );
       }
@@ -1895,8 +2067,11 @@ export async function executeApprovedTool(
         const pk = await pickTrains(String(a.train_number), { limit: 3 });
         if (!pk.matches.length) return failResult(pk.source, `${a.train_number} kisi provider (RailCore/RailKit/RailRadar/web) mein nahi mili — number galat ho sakta hai; user se confirm karo. Invent mat karo.`, pk);
         const m = pk.matches[0];
-        /* Round-18m-34: instruction text summary se hataya (Muse time-out par user ko "App SELECT TRAIN card dikhata hai — 1 line mein confirm karo" dikh gaya) → data.note mein. */
-        return okResult(m.source, `${m.number} · ${m.name}${m.from && m.to ? ` (${m.from} → ${m.to}${m.departure ? `, ${m.departure} → ${m.arrival ?? "?"}` : ""})` : " (route provider se nahi mila)"}.${webSourceLabel(m.source)}`, { ...(pk as object), note: "Train resolve ho gayi. User ne jo poochha (status/time/seat/fare) uska tool AB call karo — sirf confirm karke mat ruko. Kuch na poochha ho to 1 line mein poochho kya chahiye." });
+        /* Round-44 (user screenshot 28 Sep): data.note me likhi MODEL-INSTRUCTION user ko dikh gayi
+         * (train-resolve ke baad "ab uska tool call karo… mat ruko" jaisi model-instruction) — TrainPicker
+         * note ko UI me render karta hai. Ab data me koi internal instruction nahi
+         * jaati; ye guidance system prompt me general rule hai (neeche "resolve-only" line). */
+        return okResult(m.source, `${m.number} · ${m.name}${m.from && m.to ? ` (${m.from} → ${m.to}${m.departure ? `, ${m.departure} → ${m.arrival ?? "?"}` : ""})` : " (route provider se nahi mila)"}.${webSourceLabel(m.source)}`, { ...(pk as object) });
       }
       case "SEARCH_TRAIN_BY_NAME": {
         const pk = await pickTrains(String(a.query), { context: { from: (a.origin as string | undefined) ?? null, to: (a.destination as string | undefined) ?? null }, limit: 6 });
@@ -1923,6 +2098,11 @@ export async function executeApprovedTool(
       default:
         return { ok: false, source: null, summary: "Unknown tool.", data: null, rejected: "not_in_allowlist" };
     }
+    })();
+    if (droppedArgsNote && toolResult.summary) {
+      return { ...toolResult, summary: `${droppedArgsNote}\n${toolResult.summary}` };
+    }
+    return toolResult;
   } catch (err) {
     return failResult(null, `Tool execution fail hua: ${err instanceof Error ? err.message : "error"}`);
   }
@@ -2005,6 +2185,47 @@ export function stationQueryWithUserQualifier(query: string, userText: string): 
   }
 }
 
+/* ── Round-43k: GROUNDED ROUTE FACT (general) ─────────────────────────────────────────────────────────
+ * User ne khaas train + station(s) bola ho (jaise "12054 ludhiana se haridwar tak chalti hai?") to model
+ * ko route ka SACHCH diya jaata hai — timetable se, guess nahi. Isse koi bhi train × station ka sawaal
+ * ("wahaan se chalti hai?", "X par rukti hai?", "Y tak jaati hai?") verified jawab paata hai, aur
+ * "origin X nahi hai" jaisa galat tark nahi hota (stop hone ka matlab hai wahan se travel ho sakti hai).
+ * Route me NA ho to wo bhi fact hai — us station ka seat/board data nahi dena.
+ */
+async function routeFactLine(userText: string): Promise<string | null> {
+  const t = String(userText ?? "");
+  const tn = (/\b(\d{4,5})\b/.exec(t) ?? [])[1];
+  if (!tn) return null;
+  const toks = candidateStationTokens(t, tn);
+  if (!toks.length) return null;
+  const chk = await checkStationsOnRoute(tn, {}, t).catch(() => null);
+  if (!chk) return null;
+  if (chk.bad) {
+    const sib = chk.bad.nearby
+      ? ` ISKE BADLE isi shehar ka ${chk.bad.nearby.code}${chk.bad.nearby.name ? ` (${chk.bad.nearby.name})` : ""} us route me hai${chk.bad.nearby.departure ? ` — departure ${chk.bad.nearby.departure}` : ""}; user ko yahi exact baat batao (us station se travel ho sakti hai, aur uska data chahiye to poochho).`
+      : "";
+    return `VERIFIED ROUTE FACT (timetable se, FINAL — guess nahi): ${tn} ke route (${chk.bad.first} → ${chk.bad.last}) me ${chk.bad.code} NAHI hai — train wahaan nahi rukti; is station ka seat/board rows ya koi fare MAT do, aur sahi station poochho.${sib}`;
+  }
+  if (!chk.stops.length) return null;
+  const hits: string[] = [];
+  for (const tok of toks) {
+    const st = chk.stops.find((x) => String(x.name ?? "").toLowerCase().split(/[^a-z]+/)[0] === tok) ?? chk.stops.find((x) => String(x.code ?? "").toLowerCase() === tok);
+    if (!st) continue;
+    const idx = chk.stops.findIndex((x) => x === st);
+    const arr = (st as { arrival?: string | null }).arrival ?? "-";
+    const dep = (st as { departure?: string | null }).departure ?? "-";
+    const role = idx === 0 ? "origin (pehla stop)" : idx === chk.stops.length - 1 ? "aakhri stop (destination)" : `stop #${idx + 1} of ${chk.stops.length}`;
+    hits.push(`${String(st.code).toUpperCase()} (${String(st.name ?? "")}) = ${role}, arr ${arr} / dep ${dep}`);
+  }
+  if (!hits.length) return null;
+  return (
+    `VERIFIED ROUTE FACT (timetable se, FINAL — guess nahi): ${tn} ke route (${chk.first} → ${chk.last}) ke stops — ` +
+    `${hits.join(" · ")}. In stops par train RUKTI hai, isliye in station se us tak travel ho sakti hai (origin na hone ka ` +
+    `matlab "wahan se nahi chalti" NAHI hota — aisa galat tark mat karo). Jawab me yahi timings likho, apni yaad se koi ` +
+    `timing/stop mat jodo.`
+  );
+}
+
 function systemPrompt(
   now: string | undefined,
   known: {
@@ -2054,6 +2275,51 @@ function systemPrompt(
   const statusDateLine = statusDate
     ? `Status-date resolver (IST, sirf TRACK_TRAIN/GET_TRAIN_HISTORY ke liye): user PICHHLE run ki baat kar raha hai — run START date=${statusDate}. TRACK_TRAIN/GET_TRAIN_HISTORY mein date=${statusDate} do (booking wali 'kal=tomorrow' yahan LAGU NAHI). Jawab mein saaf bolo ki ye ${statusDate} se chali wali run hai.`
     : "Status-date resolver: live/history sawaal mein 'kal/parson/yesterday/<date> wali' = PICHHLA run (aaj se peeche), aane wali train nahi. Multi-day train ke liye TRACK_TRAIN bina date ke bhi call kar sakte ho — server khud chalta hua run dhoondhta hai.";
+  /* Round-41b: deterministic TOOL-ROUTING HINT — model apne aap sahi tool chune; hint sirf raasta
+   * dikhata hai (koi naya tool/nahi, koi data injection nahi). */
+  const routingHints = (() => {
+    const t = String(userText ?? "");
+    const lines: string[] = [];
+    if (/\b(time par|punctual|on time|late chalti|late hoti|mostly late|hamesha late|train history|history batao)\b/i.test(t) && /\b\d{4,5}\b/.test(t)) {
+      const tn = (/\b(\d{4,5})\b/.exec(t) ?? [])[1];
+      lines.push(`TOOL HINT: ye train ki punctuality/history ka sawaal hai — pehla tool call GET_TRAIN_HISTORY (train_number=${tn}) ho; timetable/seat/FIND_SEATS/date ka sawaal NAHI.`);
+    }
+    if (asksStationCode(t)) {
+      lines.push(`TOOL HINT: user ko ek khaas station ka CODE chahiye — SEARCH_STATIONS chalao (station ka naam query me) aur uska code do; generic definition nahi.`);
+    }
+    if (/\bcancel/i.test(t)) {
+      lines.push(`TOOL HINT: cancelled trains ka sawaal — GET_CANCELLED_TRAINS chalao. Agar wo ✗/khaali aaye to "koi train cancel nahi hui" MAT kaho (fail = list nahi mili); saaf bolo list abhi nahi mil rahi aur agar kisi train ka cancellation alert ho to wo do.`);
+    }
+    /* Round-43j: "aadhi yatra / partial / beech se" — partial-route seat sawaal ka sahi tool
+     * (FIND_PARTIAL_ROUTE_SEATS). Slot (date/train/class) missing ho to tool ke saath hi poochho. */
+    if (/\b(aadhi|aadha|aadhe|partial|half\s*(?:journey|trip|yatra)|beech\s*se|बीच से|आधी)\b/i.test(t) && /\b(seat|seats|berth|milegi|milega|milegi\?|ticket|book)\b/i.test(t)) {
+      lines.push(`TOOL HINT: "aadhi yatra / partial route" ka seat sawaal hai — FIND_PARTIAL_ROUTE_SEATS call karo (origin/destination/date jo user ne diye ho; jo missing ho wo usi reply me poochho — seedha "date chahiye/train chahiye" list mat banao jab tak tool try na kar lo).`);
+    }
+    /* Round-43j: station ambiguous ho (Delhi/Mumbai jaise) to options EK hi baar — search repeat mat karo. */
+    if (/\b(delhi|mumbai|kolkata|chennai|bengaluru|bangalore|hyderabad|pune|agra|mathura)\b/i.test(t) && !/\b(ndls|nzm|dli|anvt|cstm|csmt|bct|bvi|hwh|shm|mas|sbc|ypr|hyb|sc|pune\b|pune jn|agc|af\b|mtj)\b/i.test(t)) {
+      lines.push(`TOOL HINT: station city ambiguous ho sakti hai — SEARCH_STATIONS EK BAAR chalao aur "N. CODE – Station Name" format me options do; usi turn me baar-baar search repeat mat karo (ek list kaafi hai), aur baaki sawaal (date/seat/tool) us reply me poora karo.`);
+    }
+    if (isComparisonQuery(t)) {
+      lines.push(`TOOL HINT: comparison sawaal hai — DONO cheezon ka data laao (KB/WEB_SEARCH) aur bullet-wise compare karo; ek taraf ka jawab adhoora hai.`);
+    }
+    /* Round-43d: khaas train ka live sawaal (kahan hai / late hai / running status) + koi date nahi →
+     * TRACK_TRAIN aaj ke run ke saath chalao; "kis date ka chahiye?" ka ghair-zaroori sawaal NAHI (aaj ka
+     * run hi asli jawab hai — cancelled/shimla ho to wahi sach). Date boli ho to wahi date. */
+    if (/\b\d{4,5}\b/.test(t) && /\b(kahan hai|kahaan hai|kaha hai|abhi kahan|abhi kaha|kahan tak|kahan pahunchi|live status|running status|live hai|late hai|late h\b|late chal|delayed|delay hai|kitni der|der se chal)\b/i.test(t)) {
+      const hasDate = /\b(aaj|kal|parso|parson|tomorrow|today|yesterday|\d{1,2}\s*(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*|20\d\d-\d\d-\d\d|\d{1,2}\/\d{1,2})\b/i.test(t);
+      const tn = (/\b(\d{4,5})\b/.exec(t) ?? [])[1];
+      lines.push(
+        hasDate
+          ? `TOOL HINT: train ka live/track sawaal hai — TRACK_TRAIN (train_number=${tn}, date=user ki boli hui date) chalao; date dobara mat poochho.`
+          : `TOOL HINT: train ka live/track sawaal hai aur user ne koi date nahi boli — TRACK_TRAIN (train_number=${tn}) AAS-IS chalao (date ke bina); server aaj/pichhle chalti hui run ka data laayega. "Kis date ka chahiye?" ka sawaal NAHI poochhna — aaj ka run hi jawab hai (cancelled ho to wahi sach bolo).`,
+      );
+    }
+    if (/\b(ke\s*(?:a)?la[wo]a|ke\s*ilawa|ilawa|alaava|other than|besides|alternatives?|aur\s*(?:koi|options?|trains?\s*batao)|doosri\s*(?:gaadi|train))\b/i.test(t)) {
+      const tn = (/\b(\d{4,5})\b/.exec(t) ?? [])[1];
+      lines.push(`TOOL HINT: ye "us train ke alawa aur options" ka sawaal hai — pehla tool call FIND_ALTERNATIVE_TRAINS${tn ? ` (train_number=${tn})` : ""} ho (purani list dobara nahi, usi route ke aage-peeche wali trains). Station ka naam/code dobara MAT poochho — jo user ne diya hai wahi final hai.`);
+    }
+    return lines.length ? lines.join("\n") : null;
+  })();
   const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"] as const;
   const baseMs = (now && Date.parse(now) ? Date.parse(now) : Date.now()) + 5.5 * 3600 * 1000;
   const today = new Date(baseMs);
@@ -2064,7 +2330,7 @@ function systemPrompt(
     "Tumhara kaam: user ke sawaal samajhkar APPROVED TOOLS se sachchi railway data laana. Tum khud decide karte ho kaunsa tool chahiye — multi-step allowed hai.",
     /* 24 Sep 2026 (user: "maine mathura jn likha, phir bhi 4 options kyun aaye?"): */
     /* 24 Sep 2026 (user: "AI sabh handle kare, do not specific to 2A — user kuch bhi pooch sakta hai") */
-    "SEAT RULE: seat/berth/class/availability ka sawaal SAARE trains par (\"2A me kaunsi train me seat hai\", \"AC trains dikhao\", \"sabse sasti seat wali\", \"raat 9 ke baad sleeper me seat\", \"sirf confirmed wali\", \"12029 me seat hai kya\") → PEHLE FIND_SEATS call karo (class_code, depart_after, sort_by khud set karo; only_available=true SIRF jab user ne khud \"available/khali/sirf available/confirmed seat\" maanga ho — warna false bhejo taaki WL/N-A trains bhi aayein) aur uske result se hi jawab do. Seat ke number/status kabhi memory se mat likho. WL ka confirm% kabhi mat batao — sirf WL number. Jawab me SAARI seat wali trains ki lines likho (jo tool ke SEAT rows me hain — top 3-5 nahi, sab) — number, naam, class, status+count, fare. Kabhi mat likho ki \"baaki trains kisi card/Seat Finder me hain\" — chat me aisa koi card nahi dikhta, isliye wo baat galat hai; jo trains hain wo isi jawab me aa jaati hain.",
+    "SEAT RULE: seat/berth/class/availability ka sawaal SAARE trains par (\"2A me kaunsi train me seat hai\", \"AC trains dikhao\", \"sabse sasti seat wali\", \"raat 9 ke baad sleeper me seat\", \"sirf confirmed wali\", \"12029 me seat hai kya\") → PEHLE FIND_SEATS call karo (class_code, depart_after, sort_by khud set karo; only_available=true SIRF jab user ne khud \"available/khali/sirf available/confirmed seat\" maanga ho — warna false bhejo taaki WL/N-A trains bhi aayein) aur uske result se hi jawab do. Seat ke number/status kabhi memory se mat likho. WL ka confirm% kabhi mat batao — sirf WL number. Jawab me SAARI lines likho — tool result ke `summary` me har train ki har class ki entry hai (rows + wlRows dono): wahi SAARI entries apne jawab me likho (top 3-5 nahi, sab; ek train ki saari classes bhi, jaise 1A AVL · 2A WL · 3A WL · 3E WL · SL N/A). Sirf AVAILABLE rows likhna ADHOORA jawab hai (user ki shikayat R51: 'saari class kyu nhi show hoti') — jab tak user ne khud 'sirf available/khali dikhao' na maanga ho — number, naam, class, status+count, fare. Kabhi mat likho ki \"baaki trains kisi card/Seat Finder me hain\" — chat me aisa koi card nahi dikhta, isliye wo baat galat hai; jo trains hain wo isi jawab me aa jaati hain.",
     "TIME-WINDOW RULE: user ne waqt bataya ho (subah/subha/morning, dopahar/afternoon, shaam/evening, raat/night, \"9 baje ke baad\", \"12 baje se pehle\") aur trains/seat poochhe ho (\"kal subha ki trains batao\", \"shaam ko kaunsi gaadi\") → FIND_SEATS me wahi window bhejo (depart_after = 'subah'/'shaam'/..., depart_before = '12:00' jaisa) aur jawab me SIRF usi window ki trains batao. Poora din ki list ya \"22 trains\" jaisa jawab us sawaal ka jawab NAHI hai — aur ye kabhi mat maan lo ki subah ka matlab sab trains hain. Window ka label bhi likho (jaise \"subah 04:00–12:00\").",
     "STATION QUERY RULE: user ne station ke saath qualifier likha ho (Jn/Junction/Cantt/Cant/City/Road/Terminal/Central/Halt) to SEARCH_STATIONS me POORA phrase bhejo — \"Mathura Jn\", \"Mathura Cantt\", \"Agra City\". Sirf city (\"Mathura\") mat bhejo — warna bina zaroorat multiple-choice options dikhte hain. Exact station naam mile to options MAT poochho, seedha wahi station use karo.",
     `Aaj ki date (IST): ${todayLabel}.`,
@@ -2072,6 +2338,7 @@ function systemPrompt(
     hintLine,
     ...(seatWindowHint ? [seatWindowHint] : []),
     statusDateLine,
+    ...(routingHints ? [routingHints] : []),
     known.origin || known.destination || known.date || known.trainNumber || known.classCode || known.passengers
       ? `Known context (inhi par continue karo, dobara mat poochho): origin=${known.origin ?? "-"}, destination=${known.destination ?? "-"}, date=${known.date ?? "-"}, train=${known.trainNumber ?? "-"}, class=${known.classCode ?? "-"}, passengers=${known.passengers ?? "-"}.${
           known.stationPicked
@@ -2119,8 +2386,28 @@ function systemPrompt(
       "24. UNIVERSAL WEB FALLBACK (user request 2026-09-06: 'ChatGPT jaisa — koi bhi railway sawaal, API se jawab na mile to khud web se dhoondh lo'): koi bhi railway ka sawaal (catering/pantry/rules/facilities/history/facts/general knowledge) jiska jawab railway data tools (timetable/live/fare/seats) se NAHI aata — WEB_SEARCH se dhoondo aur 'web se mila' + source label ke saath do. Railway-irrelevant web results (cars/automobiles jaise) skip karo, railway-relevant hi do. Na mile to honest 'nahi mil paya' bolo — guess kabhi nahi. Live status/fare/seats/availability/PNR ke liye web search kabhi use mat karna — wahan sirf railway tools.",
       "27. SAARE TOOLS KHULE HAIN (user rule 2026-09-26: 'AI ko jitne bhi tools available hai wo sabh provide kro, no restriction on using any tool'): jo bhi tool jawab ke liye chahiye, jitni baar chahiye, use karo — SEARCH_TRAINS, JOURNEY_ANALYZE, RANK_JOURNEY_OPTIONS, FIND_SEATS, CHECK_AVAILABILITY, GET_FARE, GET_TIMETABLE, TRACK_TRAIN, GET_TRAIN_INFO, FIND_ALTERNATIVE_TRAINS, FIND_CONNECTIONS, WEB_SEARCH… koi rok nahi, koi count-limit nahi. SIRF DO CHEEZEIN TUM KABHI NAHI KAROGE: (i) 'Continue to IRCTC' par click (RailBook app ka handoff button user khud dabayega), (ii) passenger details/passenger form khud se bharna ya booking confirm karna — wo user ka kaam hai. Baaki sab tumhare haath me hai.",
     "28. SAWAAL KA MATLAB PEHLE (user 2026-09-26: 'kya AI meri baat samajh nahi paaya?'): 'plan banao / journey plan / kya best rahega' = RANK_JOURNEY_OPTIONS ya JOURNEY_ANALYZE (timings + fare + best option) — seat board ki list NAHI. 'alternative trains / doosri trains / koi aur option / iske alawa' = FIND_ALTERNATIVE_TRAINS (us train ke aage/peeche wali trains, timing+fare ke saath) — wahi purani list dobara NAHI. 'trains batao / kaunsi trains chalti hain' = SEARCH_TRAINS. 'seat/berth/AVL/kitni seat khali' = FIND_SEATS ya CHECK_AVAILABILITY. Har TRAIN LIST jawab me timing (departure → arrival + duration) aur fare (jo tool ne diya ho) ZAROOR likho — 'sirf train ke naam' wali list adhoori hai (user ki shikayat: 'trains list krdi without fare and timings'). CLASS AMBIGUOUS HO TO PEHLE POOCHHO (user 2026-09-26: '19028 mein book krdo' par AI ne class nahi poochhi, seedha ek class ka form khol diya, jabki us train me kai classes khuli thi — 'AI khud kyu nhi soch rha, har cheez thodi btani padegi'): agar user booking maange ('book krdo', '<train> mein book') aur usne class NA boli ho aur us train me EK SE ZYADA class khuli ho, to pehle SAAF poochho 'kaunsi class me book karun?' aur [NEXT] me wahi classes chips ke roop me do (jaise '[NEXT] 19028 · 3A (AVL 26 ₹565) => 19028 mein 3A book krdo') — uski class ke bina aage mat badho; ek hi class khuli ho to seedha wahi class bata do (poochhne ki zaroorat nahi).",
+    "33. RESOLVE-ONLY RESULT (user 2026-09-28: 'AI kyu nahi sahi answer de rha jo poocho usse'): agar kisi tool ka result sirf itna ho ki train/station resolve ho gaya (jaise SEARCH_TRAIN_BY_NUMBER ka number+naam) aur user ne asli sawaal kuch AUR poochha hai (status/time/seat/fare/route), to AB usi sawaal ka tool call karo — sirf confirm karke mat ruko, aur user ko tool ka data/instruction text mat dikhao. Jo poochha gaya wahi jawab do.",
+    "32. SAHI TOOL CHUNO (user 2026-09-27: 'jaise chatgpt/gemini/manus sahi tools use karte hain sahi as per user query — mera AI bhi ek dum perfectly sahi tools use kare, user query samajhke'): pehle sawaal ka IRADA pehchano, phir usi ka tool lagao (galat tool = galat jawab; tool fail ho to agla sahi tool, ya sach batao — dump nahi):\n   • 'kahan hai / abhi kahan / kitni late / late hai kya' → TRACK_TRAIN\n   • 'stops / route / timetable / kitne baje kahan' (train number ke saath) → GET_TIMETABLE\n   • 'train ki jankari / naam / number / type' → GET_TRAIN_INFO ya SEARCH_TRAIN_BY_NUMBER\n   • 'time par chalti hai / punctual / mostly late' → GET_TRAIN_HISTORY (date poochhne ki zaroorat nahi)\n   • 'seat / berth / AVL / kitni seat khali / RAC / WL' (train+date+class) → CHECK_AVAILABILITY (khaali berth chahiye to FIND_VACANT_SEATS; aadhi yatra ho to FIND_PARTIAL_ROUTE_SEATS)\n   • route-level seat sawaal (do station ke beech 'confirm seat / seat batao / seat find karo / seat hai kya', koi ek train+class fix nahi, PASSENGERS bhi nahi bataye) → **FIND_SEATS** — ye tool pax count maangta NAHI (board pura deta hai). Aise sawaal par JOURNEY_ANALYZE/RANK_JOURNEY_OPTIONS MAT chalao (wo pax maangte hain aur turn wahin atak jaata hai).\n   • 'fare / kiraya / kitne ka' → GET_FARE\n   • 'trains batao / kaunsi trains' → SEARCH_TRAINS · 'plan/best/timings' → JOURNEY_ANALYZE · 'rank/preference' → RANK_JOURNEY_OPTIONS · 'aur options / alternative' → FIND_ALTERNATIVE_TRAINS · 'connecting / ho kar' → FIND_CONNECTIONS\n   • 'PNR' → CHECK_PNR · 'cancelled trains' → GET_CANCELLED_TRAINS · 'station code / kaunsa station' → SEARCH_STATIONS · 'station board / aa rahi trains' → GET_STATION_BOARD · 'coach position' → GET_COACH_POSITION (na mile to sach batao: departure se ~1–2 ghante pehle station board/app par milta hai)\n   • comparison ('X aur Y me fark', 'vs', 'behtar kaun') → DONO ke bare me WEB_SEARCH/KB se laao, phir bullet-wise compare karo (sirf ek cheez ka jawab adhoora hai)\n   • history/records/rules/counts ('sabse lambi', 'kitne zones', 'kab shuru', 'kya rule') → WEB_SEARCH + KB (Wikipedia) — live tools se MAT maango\n   • booking hukm ('book krdo') → pehle class ambiguity clear, phir CHECK_AVAILABILITY/GET_FARE se real data, phir form. (a) agar upar ka koi tool fail ho (provider down) to usi kaam ka doosra tool try karo; dono fail hon to user ko saaf batao kab/kaise milega (app, station board, ya thodi der baad) — 'data nahi mila' dump kabhi nahi; (c) kisi tool ka ✗ (fail) ye matlab NAHI ki list khaali hai — fail par us cheez ka koi claim mat karo (jaise 'koi train cancel nahi hui') — saaf bolo 'list abhi nahi mili' aur (agar ho) kisi train ka alert data do; (b) jo sawaal user ne poochha, uska tool hi pehla — doosre sawaal ka data laa kar jawab mat badlo.",
+    "36. WAQT KA ZIKR (user 2026-09-29): user ne khud waqt na bataya ho (subah/shaam/raat/\d baje/am-pm/HH:MM) to na koi time-window filter lagao aur na apne jawab me 'subah 04:00-12:00' jaisi window likho — poore din ka board do ('poore din' likho). Window sirf tab jab user ne khud waqt maanga ho; tab bhi window ke bahar wali trains alag line me batao, chhupao mat.",
+    "35. PICHHLE JAWAB KA REFERENCE (user 2026-09-29: 'esmein se best kon si rahegi' — ChatGPT samajh gaya, hum nahi): jab naya sawaal pichhli list ko point kare (in me se/inme/isme/inse/among these/2nd wala/in dono/jo bheja tha/usme se) — to ye NAYA sawaal nahi, USI list ka sawaal hai: naya board mat maango, poori list dobara mat likho, sirf poocha gaya jawab do (best → EK best + ek line kyun + runner-up; sasti → sabse sasta; timing → wahi trains ke timings). Fresh board sirf tab jab user naya route/date/train/class de ya 'abhi/live status' maange.",
+    "34. SIRF TOOL KA DATA (user 2026-09-29: 'kuch bhi fake mat karo; sabh data real ho'): jawab me koi bhi train number YA train ka naam SIRF usi tool ke result se likho jo tumne is turn me chalaya. Apni memory/general knowledge se koi train number, naam ya uski availability kabhi mat likho — chahe tumhe yaad ho ki wo train us route par chalti hai. Tool result me jitni trains hain, utni hi likhni hain (kam bhi nahi, zyada bhi nahi). Agar lagta hai koi train reh gayi, to koi doosra tool/params try karo — andaza se list nahi lambi karni.",
+    "31. KHUD KA DIMAAG (user 2026-09-27: 'jaise chatgpt/gemini/manus khud ka brain use karte hain… unko pehle batana nahi padta, wo khud se samajhte hain ki kya missing hai, user se kya poochhna chahiye, kaunsa tool lagana hai — waise hi mera AI bhi khud se samjhe'): har turn tum YE 4 kadam khud karo, koi tumhe batayega nahi — (1) SAMJHO: user ki baat apne shabdon me (typo/adhoora bhi ho to matlab nikaalo, jaise 'statsu'=status, 'gaadi'=train, 'ldh'=Ludhiana, 'asr'=Amritsar; haan/na/thanks jaise jawaab pichhle sawaal ka jawab maano). (2) CHECK KARO — kya missing hai?: jawab/kaam ke liye koi cheez zaroori hai jo user ne nahi boli (route? date? passengers? class kaunsi? train kaunsa? seat ya live?) to wo khud pehchano aur BAS wahi ek zaroori sawaal poochho (jab tak ek se zyada sach me na atke hon), saath me [NEXT] chips se options do (dates: aaj/kal/parso; classes; trains). Jo user bata chuka hai (route/date/class/pax) wo FINAL maano — dobara MAT poochho. Jo sawaal tu poochhega wahi user ke liye agla kadam hai — usme wo choices do jo sach me aage badhaayein. (3) TOOLS KHUD CHUNO: jawab ke liye jo tool chahiye wo tumhare paas hai — lagao, jitne chahiye. Live/seat/fare/status/PNR → CHECK_AVAILABILITY/GET_FARE/TRACK_TRAIN/CHECK_PNR (ConfirmTkt → RailYatri → eRail order tools ke andar hi hai); train jankari → GET_TRAIN_INFO/GET_TIMETABLE/SEARCH_TRAIN_BY_NUMBER; route/train list → SEARCH_TRAINS/JOURNEY_ANALYZE; general knowledge (history/speed/rules/counts/records) → WEB_SEARCH (Wikipedia) + KB. Tool ne kuch reject kiya (date/passengers missing) to wo tumhe batata hai — us par apne shabdon me user se wahi ek sawaal poochho. (4) JAWAB + AAGE: seedha, poora, confident jawab (numbers sahi), phir [NEXT] se agla kadam. KABHI mat likho 'mujhe batao kya karna hai' / 'aap bataayein kya chahiye' — ye tumhara kaam hai. KABHI 'provider se data nahi mila' bol kar mat ruko jab sawaal general knowledge ka hai. (f) Agar system ne date/route resolve kar di (hint line me 'FINAL' likha ho) to use FINAL maano — jo cheez user keh chuka ya system resolve kar chuka hai uska sawaal DOBARA mat poochho; sirf wo poochho jo SACH ME missing hai (jaise passengers).",
+    "30. DO MODES (user 2026-09-27: 'jaise chatgpt/gemini/claude/manus — koi bhi sawaal par ek dum accurate answer'): (a) LIVE mode = kisi khaas train ka seat/availability/fare/live status/PNR/coach/platform, ya aaj/kal ki booking ya journey-timing — inme SIRF tools ka verified data use karo, koi number khud se mat likho. (b) KNOWLEDGE mode = baaki sab (general railway knowledge, rules, history, comparison, station info, 'kitne platform', 'kaunsi sabse tez train', 'bachche ka ticket', 'kya tum ye kar sakte ho') — inme tum duniya ka sabse acha assistant ho: apne knowledge se seedha, poora, confident jawab do, aur zaroorat pade to WEB_SEARCH se verify karo. (c) KNOWLEDGE sawaal par 'data nahi mila' bolna MANA hai jab jawab tumhe pata hai — ChatGPT jaisa seedha batao (numbers/dates sahi hone chahiye; shak ho to web se confirm karo). (d) Spelling galat/adhoori ho sakti hai (statsu=status, gaadi=train, 'ldh se asr') — SAMJH kar jawab do, spelling ke bahane sawaal dobara mat poochho. (e) User ne JO poochha uska JAWAB do — uske sawaal ki jagah apna naya sawaal sirf tab jab sach me aage badhne ke liye zaroori ho.",
     "29. JAWAB EK DAMM SEEDHA (user 2026-09-26: 'jaise chatgpt/gemini/claude/manus ek dum se accurate answer dete hai … user ke questions ko samjhe aur ek dum perfect answer ya outcome de'): (a) pehle seedha jawab/outcome, phir chhota context — lecture ya purani baatein dohraana nahi; (b) agar user ne kisi turn me class/date/passengers/train/route bata diya ho to wo FINAL hai — wahi cheez dobara MAT poochho, usi ke hisaab se aage badho; (c) apna pichhla sawaal dobara mat likho (loop mat banao) — user ka naya message us sawaal ka jawab maano; (d) knowledge/general sawaal (railway, trains, rules, history, stations, booking process) ho to duniya ka sabse acha assistant ki tarah confident, sahi aur poora jawab do — zaroorat ho to WEB_SEARCH chala kar verify karo, apni memory se aise fact MAT likho jo verify na ho; (e) kuch pata na ho to SAFAI se bolo (jhoothi certainty kabhi nahi), aur ek chhota aage ka kadam suggest karo.",
-    "26. AGLA KADAM (user requirement 2026-09-26: 'answer ke baad AI ko next step pe leke jaana chahiye'): jawab ke EKDUM aakhir me 1-2 line likho — bilkul is format me, kuch aur nahi: [NEXT] <chhota label> => <wahi baat jo user bhej sakta hai>. Jaise: '[NEXT] Book 12013 · CC (AVL 354 ₹675) => 12013 mein CC book krdo'. Rules: (a) sirf ISI turn ke tool data se banao — koi naya train number/naam/fare/count nahi; (b) label me wahi number jo data me hai; (c) max 2 lines, sabse zaroori pehle; (d) user requirement 26 Sep (round 34 + 36): jab bhi is turn me koi KAAM KA data aaya ho (train/seat/fare/timing/status/plan/route), [NEXT] ZAROOR likho — agla kadam TUM socho aur suggest karo (jaise us train ka booking, doosri class, doosri date, seat availability, timings, live status, ya zaroorat ho to sawaal). Ab koi data-derived fallback nahi hai: [NEXT] nahi diya to user ko agla kadam dikhega hi nahi — isliye sirf tab chhodo jab sach me koi agla kaam ka step na banta ho; (e) reply ke andar [NEXT] ke alawa agla kadam dobara mat likho (UI khud dikhata hai); (f) user requirement 26 Sep (round 36): 'Agla kadam' card SIRF tumhare [NEXT] se banta hai — data se banaya hua koi fallback chip nahi hota, isliye tumne [NEXT] NAHI diya to user ko agla kadam dikhega hi nahi. Isliye apna dimaag lagao jaise ChatGPT/Gemini lagate hain: socho ki user ke liye agla sabse kaam ka kadam kya hai — booking, doosri class/date, seat availability, timings, live status, ya koi saaf sawaal ('kaunsi class me book karun?') — aur wahi [NEXT] me do.",
+        /* Round-52 (29 Sep 2026 — live probe me gpt-oss-20b ne likha: "Mujhe live seat availability ya PNR
+     * status check karne ka access nahi hai… IRCTC par dekh lo" — jabki uske paas FIND_SEATS/CHECK_*
+     * tools maujood the): live data ke liye pehla aur pakka kadam TOOL CALL hai. Aksar chhote model
+     * prompt ko dekh kar "access nahi hai" likh dete hain — user ke liye wo sabse bura jawab hai. */
+    "25b. LIVE DATA TUMHARE PAAS HAI (29 Sep 2026): seat availability, fare, timetable, live running status, PNR, station lookup — ye SAB tumhare tools se aati hain (ConfirmTkt · RailYatri · eRail · RailCore). Isliye KABHI mat likho ki 'mere paas live data ka access nahi hai', 'IRCTC par dekh lo', 'main live check nahi kar sakta' — pehle TOOL call karo, aur tool ka data use karke seedha jawab do. Tool fail ho jaye tab hi saaf batao ki data abhi nahi mila (aur dobara try karne ko kaho).",
+"26. AGLA KADAM (user requirement 2026-09-26: 'answer ke baad AI ko next step pe leke jaana chahiye'): jawab ke EKDUM aakhir me 1-2 line likho — bilkul is format me, kuch aur nahi: [NEXT] <chhota label> => <wahi baat jo user bhej sakta hai>. Jaise: '[NEXT] Book 12013 · CC (AVL 354 ₹675) => 12013 mein CC book krdo'. Rules: (a) sirf ISI turn ke tool data se banao — koi naya train number/naam/fare/count nahi; (b) label me wahi number jo data me hai; (c) max 2 lines, sabse zaroori pehle; (d) user requirement 26 Sep (round 34 + 36): jab bhi is turn me koi KAAM KA data aaya ho (train/seat/fare/timing/status/plan/route), [NEXT] ZAROOR likho — agla kadam TUM socho aur suggest karo (jaise us train ka booking, doosri class, doosri date, seat availability, timings, live status, ya zaroorat ho to sawaal). Ab koi data-derived fallback nahi hai: [NEXT] nahi diya to user ko agla kadam dikhega hi nahi — isliye sirf tab chhodo jab sach me koi agla kaam ka step na banta ho; (e) reply ke andar [NEXT] ke alawa agla kadam dobara mat likho (UI khud dikhata hai); (f) user requirement 26 Sep (round 36): 'Agla kadam' card SIRF tumhare [NEXT] se banta hai — data se banaya hua koi fallback chip nahi hota, isliye tumne [NEXT] NAHI diya to user ko agla kadam dikhega hi nahi. Isliye apna dimaag lagao jaise ChatGPT/Gemini lagate hain: socho ki user ke liye agla sabse kaam ka kadam kya hai — booking, doosri class/date, seat availability, timings, live status, ya koi saaf sawaal ('kaunsi class me book karun?') — aur wahi [NEXT] me do.",
+    /* Round-52 (user 29 Sep: "purane build jaisa — model apne aap meri wording samjhe; har query AI ke
+     * paas jaaye, deterministic path chale hi na"): do rules — (a) user ki Hinglish wording me filler
+     * ("yaar", "bhai", "please", "kal ke liye", "find out karke do") hote hain; inhe ignore karke
+     * station/city/train/date/class nikaalo, aur station word chhota/typo ho to bhi TOOL ko do (tool
+     * khud resolve karta hai — tum "kaun sa station?" mat poochho jab tak sawaal me koi jagah hi na ho).
+     * (b) "tum kya kar sakte ho / kya nahi" ka jawab TUM apne shabdon me do (sach rule 28 me hai). */
+    "27. USER KI WORDING (29 Sep 2026, user ka saaf aadesh): Hinglish/Hindi/English mixed sawaalon me filler shabd aate hain — 'yaar', 'bhai', 'please', 'na', 'zara', 'kal/parso', 'ke liye', 'find out karke do', 'bata do'. Inhe apne aap ignore karo aur user ka ASLI matlab nikaalo (kaun sa station · train · date · class · passengers · kya jaanna hai). Station/city ka naam adhoora ya chhota ho (jaise 'Ldh', 'svdk', 'katra') to seedha TOOL ko do — tools khud resolve karte hain (galti ho to tool bata dega). Jab tak sawaal me koi jagah/city ka zikr hi na ho, tabhi 'kahan se/kahan jaana hai' poochho.",
+    "28. TUM KYA KAR SAKTE HO (capability sawaal): jab user poochhe 'tum kya kar sakte ho', 'kya nahi kar sakte', 'tum kaun ho' — usi bhasha me chhota, saaf, honest jawab do (list format theek hai). Sach: train search/plan (from→to + date, direct/connecting), kisi bhi train ka naam·route·timetable·live status·kitni late, seat availability + fare (ConfirmTkt · RailYatri · eRail se REAL data, WL/RAC ka sach), booking aage badhana (class/seat chun kar passenger form kholna — IRCTC handoff), PNR status, station code/naam/city, general railway rules aur knowledge. Do cheezein NAHI karte (user ke rule se): (1) IRCTC par 'Continue to IRCTC' khud click nahi karte, (2) passenger details/OTP/payment khud nahi bharte. Jo verified nahi, uska andaaza mat lagao — saaf bol do.",
   ]
     .filter(Boolean)
     .join("\n");
@@ -2180,6 +2467,31 @@ export function ensureBookingOffer(reply: string | null, userText: string | null
   if (BOOKING_OFFER_ALREADY_RE.test(reply)) return reply;
   if (!BOOKABLE_REPLY_RE.test(reply) || NO_DATA_REPLY_RE.test(reply)) return reply;
   return `${reply.trimEnd()}\n\nBook karna hai? Aap Confirm screen (ya card ke “Sabhi trains · Book →”) se khud confirm karenge — booking/payment main nahi karta. Bolo to aage badhaun.`;
+}
+
+/** Round-40b (user: "ek dum accurate answer"): KNOWLEDGE sawaal + curated KB entry → verified KB jawab
+ * hi do (model ki memory ya adhoore web-scrape se pehle; budget khatam hone par bhi). Live sawaal
+ * (seat/fare/status/PNR/booking/journey) isse bilkul nahi chhoote — wahan tools hi chalte hain. */
+function kbAuthoritativeRebound(userText: string): string | null {
+  if (liveDataQuestion(userText)) return null;
+  /* Round-41: "Amritsar station code kya hai" → SEARCH_STATIONS tool ka kaam (specific station ka
+   * code chahiye, generic definition nahi) — KB-first skip. */
+  if (asksStationCode(userText)) return null;
+  const kb = railKbAnswer(userText);
+  if (!kb) return null;
+  const kbText = kb.replace(/\(Ye general railway knowledge hai[^)]*\)\s*$/, "").trim();
+  if (!kbText) return null;
+  /* Round-41: comparison me DONO taraf ka jawab — KB answer me dono subjects + comparison dhaancha
+   * ho tabhi authoritative; warna model/web dono side laaye (adhoora ek-tarfa jawab nahi). */
+  if (isComparisonQuery(userText)) {
+    const both = comparisonSubjects(userText);
+    if (!both) return null;
+    const low = kbText.toLowerCase();
+    const hasBoth = low.includes(both[0].toLowerCase()) && low.includes(both[1].toLowerCase());
+    const cmpShape = /\bvs\b/i.test(kbText) && (kbText.match(/•/g) ?? []).length >= 3;
+    if (!hasBoth || !cmpShape) return null;
+  }
+  return `${kbText}\n\n(General railway knowledge — official/IRCTC se cross-check kar sakte hain.)`;
 }
 
 /** Trace/test ke liye: model ke raw args ko zod se guzar kar EXECUTED args nikaalo. */
@@ -2375,6 +2687,10 @@ function groundingCheck(content: string, steps: ToolTraceStep[], evidenceParts: 
     " " +
     JSON.stringify(steps.map((s) => s.args)) +
     " " +
+    /* Round-40: tool ke data ka preview bhi evidence hai — warna provider ka verified number
+     * (jaise CHECK_AVAILABILITY ka "47 seats") summary me verbatim na hone par "ungrounded" lagta tha. */
+    JSON.stringify(steps.map((s) => s.dataPreview ?? "")) +
+    " " +
     evidenceParts.join(" ");
   const numbers = content.match(/\d+(?:\.\d+)?/g) ?? [];
   const bad = numbers.filter((n) => n.length >= 3 && !evidence.includes(n));
@@ -2524,6 +2840,13 @@ async function answerFromWebScrapeTool(questionText: string): Promise<{ summary:
 }
 
 function deterministicSummary(steps: ToolTraceStep[]): string {
+  /* Round-43: user ko sirf saaf jawab — internal instruction/noise scrub. */
+  return scrubInternalNotes(deterministicSummaryRaw(steps));
+}
+
+function deterministicSummaryRaw(steps: ToolTraceStep[]): string {
+  /* Round-43: tool summaries me model ke liye instructions hote hain ("Jawab me SAARI lines likho…") —
+   * deterministic summary user ko dikhta hai, isliye wahan se internal notes hata kar bhejo. */
   const okSteps = steps.filter((s) => s.ok);
   /* Round-18m-33 (screenshot: "User se poochho (options EXACTLY ye do…)" user ko dikh gaya): needs_choice step ka
    * summary MODEL-instruction hai — user ko sirf saaf sawaal + options. */
@@ -2534,7 +2857,7 @@ function deterministicSummary(steps: ToolTraceStep[]): string {
     const opts = (choiceStep.summary.match(/^\d+\.\s.+$/gm) ?? []).map((l) => l.replace(/\s*User chune to.*$/s, "").trim());
     return `${head}${opts.length ? `\n${opts.join("\n")}\nNeeche se chuniye.` : ""}`;
   }
-  if (!okSteps.length) return "Ye jaankari abhi provider se nahi mil pa rahi. Main gadh ke nahi bataunga.";
+  if (!okSteps.length) return "Ye jaankari abhi provider se nahi mil pa rahi — bina verified data main andaza nahi lagaunga. Thodi der baad phir try karein, ya bataao to doosra tareeka (app/station board) bataun.";
   /* Round-15: WEB_SEARCH ka answer-ready result (topicpage) hi user ka
    * jawab hai — bullet-list mein "• Web search: 3 results" jaisa raw dump
    * nahi. Model fail/empty ho to seedha yahi do. */
@@ -2596,6 +2919,48 @@ type AgenticTransport = {
   hfFallback: { model: string; url: string; apiKey: string } | null;
 };
 
+/* ── Round-52 (29 Sep 2026, user: "har query AI ke paas jaaye — model khud samjhe, jaise ChatGPT"):
+ * ab tak chain ka pehla model (config ka primary) har turn me pehle try hota tha — agar wo sawaal par
+ * slow/timeout ho (prod me Muse 30s+ leta tha), to poora turn budget usi me jaata tha aur fallback ko
+ * 5-6s hi milte the → turn fail → jawab deterministic rescue se aa jaata tha (user ko laga "AI samajh
+ * hi nahi raha"). Ab "model health" yaad rakhi jaati hai: jo model HAAL HI me fail hua ho wo agle
+ * turns me chain ke aakhir me chala jaata hai (aur jo jawab de chuka ho wo aage) — config ka order
+ * default rehta hai, hum sirf usko us model se bachate hain jo abhi kaam nahi kar raha. */
+type ModelHealth = { lastOkAt: number; lastFailAt: number; fails: number; oks: number };
+const modelHealth = new Map<string, ModelHealth>();
+/** Itni der tak ek failure "taaza" maani jaati hai (uske baad model ko dobara mauka milta hai). */
+const MODEL_UNHEALTHY_MS = 10 * 60_000;
+
+/** Chain ko health ke hisaab se stable-order karo: healthy (ya nadaan) models pehle, recently-fail wale aakhir me. */
+export function orderModelChain(chain: string[]): string[] {
+  const now = Date.now();
+  const unhealthy = (m: string): boolean => {
+    const h = modelHealth.get(m);
+    if (!h) return false;
+    return h.lastFailAt > h.lastOkAt && now - h.lastFailAt < MODEL_UNHEALTHY_MS;
+  };
+  const preferred = chain.filter((m) => !unhealthy(m));
+  const demoted = chain.filter((m) => unhealthy(m));
+  return [...preferred, ...demoted];
+}
+
+/** Call ka nateeja yaad rakho (chain ordering ke liye — user-facing kahin nahi jaata). */
+export function noteModelOutcome(model: string, ok: boolean): void {
+  const h = modelHealth.get(model) ?? { lastOkAt: 0, lastFailAt: 0, fails: 0, oks: 0 };
+  if (ok) {
+    h.lastOkAt = Date.now();
+    h.oks += 1;
+  } else {
+    h.lastFailAt = Date.now();
+    h.fails += 1;
+  }
+  modelHealth.set(model, h);
+}
+
+export function _clearModelHealth(): void {
+  modelHealth.clear();
+}
+
 function agenticTransport(): AgenticTransport | null {
   if (env.agenticProvider === "hf") {
   if (!env.hfToken || !env.hfModel) return null;
@@ -2617,9 +2982,11 @@ function agenticTransport(): AgenticTransport | null {
     ? [benchOverride]
     : [env.nvidiaModel, ...(env.nvidiaFallbackModel && env.nvidiaFallbackModel !== env.nvidiaModel ? [env.nvidiaFallbackModel] : [])];
   /* Round-13b: HF (GLM) chain ke end mein — NIM drift par bhi agentic zinda
-   * rahe (ai-ping prod: deepseek-v4-flash hang, llama/qwen/kimi 410/404). */
+   * rahe (ai-ping prod: deepseek-v4-flash hang, llama/qwen/kimi 410/404).
+   * Round-53: AI_LLM_* override (naya provider key) lagne par HF fallback band — user ki di hui
+   * chain hi chalti hai (HF credits khatam hain). */
   const hfFallback =
-    env.hfToken && env.hfModel && !benchOverride && !models.includes(env.hfModel)
+    !env.aiLlmOverrideActive && env.hfToken && env.hfModel && !benchOverride && !models.includes(env.hfModel)
       ? { model: env.hfModel, url: `${env.hfBaseUrl.replace(/\/$/, "")}/chat/completions`, apiKey: env.hfToken }
       : null;
   return {
@@ -2869,7 +3236,53 @@ export async function runAgenticTurn(input: {
   const historyTurns = (Array.isArray(input.history) ? input.history : [])
     .filter((h) => h && (h.role === "user" || h.role === "assistant") && typeof h.content === "string" && h.content.trim())
     .slice(-8)
-    .map((h) => ({ role: h.role, content: redact(h.content.slice(0, 700)) }));
+    /* Round-55: assistant ke jawab me poori list hoti hai — 700 chars par kat jaati thi (trains context se
+     * gayab ho jaati thin), isliye assistant ke liye zyada jagah. User ke sawaal chhote hote hain.
+     * ── Round-56: context hi samajh hai ───────────────────────────────────────────────────────────
+     * 29 Sep ke screenshots: "esmein se best train batao" par poori list dump; pehli list me Sachkhand
+     * 12715 tha, agli me nahi. 12-trains wali list 900–1200 chars ki hoti hai — 1500 par bhi columns/rows
+     * kat sakti hain. ChatGPT ke paas poora thread rehta hai, isliye wo follow-up samajh leta hai.
+     * Ab assistant ke messages poori tarah (4000) jaate hain, user ke 1500. */
+    .map((h) => ({ role: h.role, content: redact(h.content.slice(0, h.role === "assistant" ? 4000 : 1500)) }));
+
+  /* ── Round-56: "esmein se best" = PICHHLE jawab ka reference (naya sawaal nahi) ────────────────────
+   * Ye naya niyam nahi hai — ye wahi ek usool hai jo ChatGPT follow karta hai: user jo list dekh raha
+   * hai, sawaal usi ke baare me hai. Pehle har turn naya live board maanga jaata tha (do call me list
+   * 5 trains → 14 trains ho gayi — user ne screenshot me wahi pakda) aur model ke paas pichhli list bhi
+   * kat-chuki hoti thi. Ab: pichhli list POORI + ek general hidayat model ke saamne rehti hai, faisla
+   * usi ka — naya board tabhi jab user naya route/date/train/class de ya "abhi/live status" maange. */
+  const prevAssistantFull = [...(input.history ?? [])]
+    .reverse()
+    .find((h) => h?.role === "assistant" && typeof h.content === "string" && h.content.trim());
+  const prevListNums = previousListTrains(input.history);
+  const prevListBlock =
+    prevAssistantFull && prevListNums.length >= 2
+      ? {
+          role: "system" as const,
+          content:
+            `PICHHLA JAWAB (user abhi yahi list apni screen par dekh raha hai — trains: ${prevListNums.join(", ")}):\n"""\n` +
+            `${redact(String(prevAssistantFull.content).slice(0, 4000))}\n"""\n` +
+            "Usool: agar naya sawaal in hi trains ke baare me hai (best/sabse acchi/sasti/kaunsi/2nd/inko/inme se/kitna time/compare/ruk jati hai kya) — " +
+            "to jawab ISI list se do; naya board MAT maango, poori list dobara MAT likho, sirf jo poocha gaya wo bolo. " +
+            "Fresh board sirf tab jab user naya route/date/train/class de ya 'abhi/current/live status' maange.",
+        }
+      : null;
+  /* ── Round-55: "in me se best train batao" jaise follow-up par CANDIDATES block ────────────────────
+   * User ki shikayat: pehli list me Sachkhand tha, agle sawaal par list badal gayi aur AI ne poora dump
+   * kar diya. Ab: pichhle jawab ki wahi trains candidates banti hain (dobara poora board nahi), aur
+   * model ko saaf kaha jaata hai — inhi me se EK best chuno + 1 line kyun + runner-up. */
+  const pickFollowup = isPickFollowup(String(input.text ?? ""), input.history);
+  const pickCandidates = pickFollowup ? previousListTrains(input.history) : [];
+  const pickBlock =
+    pickCandidates.length >= 2
+      ? `FOLLOW-UP (chunav): user PICHHLI list me se chunna chahta hai — candidate trains: ${pickCandidates.join(", ")}. ` +
+        `Ab poora naya board MAT laao: FIND_SEATS ko train_numbers="${pickCandidates.slice(0, 12).join(",")}" ke saath call karo ` +
+        `(wahi route/date jo pichhle turn me thi; date na pata ho to user se ek hi line me poochho). ` +
+        `Jawab ka dhaancha: (1) pehli line me EK winner — "Best: <number> <name> — <class> <AVL x|WL y|RAC> · ₹fare · departure"; ` +
+        `(2) "Kyun:" ek chhoti line (sabse zyada confirmed seats / earliest departure / sasta / kam WL — jo data kehta ho); ` +
+        `(3) "Runner-up: <number> ..." ek line; (4) [NEXT] book chip. Poori list dobara likhna MANA hai — sirf winner + runner-up.`
+      : null;
+  const routeFact = await routeFactLine(String(input.text ?? "")).catch(() => null);
   const messages: ChatMsg[] = [
     {
       role: "system",
@@ -2892,6 +3305,9 @@ export async function runAgenticTurn(input: {
         input.text,
       ),
     },
+    ...(pickBlock ? [{ role: "system" as const, content: pickBlock }] : []),
+    ...(routeFact ? [{ role: "system" as const, content: routeFact }] : []),
+    ...(prevListBlock ? [prevListBlock] : []),
     ...historyTurns,
     {
       role: "user",
@@ -2912,8 +3328,11 @@ export async function runAgenticTurn(input: {
 
   // AI chain: NVIDIA = primary (GPT-OSS) -> fallback (Nemotron); HF = single GLM.
   // Model chain poor fail ho to upar caller (runAgent) deterministic fallback chalata hai.
-  const modelChain = transport.models;
+  /* Round-52: recently-fail wale model aakhir me (dekho orderModelChain). */
+  const modelChain = orderModelChain(transport.models);
   let repaired = false;
+  /* Round-54b: live-data sawaal par bina tool jawab → ek corrective round. */
+  let zeroToolRepaired = false;
   /* Round-34 (user: "agla kadam na humesha AI hi chunne sabh sochke… agla kadam fallback pe verified
    * data se mat aaye"): agar model ne [NEXT] nahi di par is turn me kaam ka tool data hai, to EK
    * chhoti repair call se model se hi agla kadam maanga jaata hai — reply wahi purana rehta hai. */
@@ -2931,14 +3350,39 @@ export async function runAgenticTurn(input: {
   /* Round-18m-29: deferred planner decision (validated from the final answer). */
   let pendingDecision: { plan: JourneyPlan; cands: JourneyCandidate[] } | null = null;
 
+  /* Round-40e: KNOWLEDGE sawaal + curated KB entry → seedha verified KB jawab (model/web/24 tool-calls se
+   * pehle, 0.3s). Live sawaal (seat/fare/status/PNR/booking/journey) isse bilkul nahi chhoote — unme
+   * tools hi chalte hain. Isi wajah se live par jawab path-to-path nahi badalta (deterministic). */
+  {
+    const kbEarly = kbAuthoritativeRebound(input.text);
+    if (kbEarly) {
+      return {
+        ok: true,
+        reply: kbEarly,
+        grounded: true,
+        steps: [],
+        modelUsed: null,
+        latencyMs: Date.now() - startedAll,
+        failureReason: "kb_authoritative_early",
+      };
+    }
+  }
+
   // Vercel function wall (~30s default) — poora turn is budget ke andar raho.
   // Wall paar hua to jo tool-data mila uska summary return karo (null nahi).
   /* Stage-5L-net: 90s wall + 66s planner left no room for a final AI round; mobile saw "network error". 70s still covers RANK + short reply. */
-  const TURN_TIME_BUDGET_MS = Number(process.env.AI_AGENTIC_TURN_BUDGET_MS ?? 70000);
+  /* Round-52: 70s → 90s default. Prod me 45s set tha — bade sawaal (route verification + model ka
+   * doosra round) me budget khatam ho jaata tha aur jawab deterministic summary par gir jaata tha
+   * (user: "AI samajh hi nahi raha"). User ne latency 40-125s accept ki hai. */
+  const TURN_TIME_BUDGET_MS = Number(process.env.AI_AGENTIC_TURN_BUDGET_MS ?? 90000);
   const timeLeft = () => TURN_TIME_BUDGET_MS - (Date.now() - startedAll);
 
   for (let step = 1; step <= MAX_STEPS; step++) {
     if (timeLeft() < 2500) {
+      const kbBudget = kbAuthoritativeRebound(input.text);
+      if (kbBudget) {
+        return { ok: true, reply: kbBudget, grounded: true, steps, modelUsed, modelFallbacks, latencyMs: Date.now() - startedAll, failureReason: "kb_authoritative" };
+      }
       if (steps.length && timeLeft() > -20000 && webRescueEligible(input.text, steps, { allowOkSteps: knowledgeQuestion(input.text) })) {
         const rescued = await webRescueAnswer(input.text, steps, steps.length + 1);
         if (rescued) {
@@ -2964,10 +3408,18 @@ export async function runAgenticTurn(input: {
     /* Round-18g: har model-fail ek structured log line + response.modelFallbacks —
      * warna "Muse kyun nahi chala" prod par andaza rehta tha. */
     const noteModelFailure = (m: string, why: string, ms: number) => {
+      noteModelOutcome(m, false); /* Round-52: agle turns me ye model chain ke aakhir me jaayega */
       modelFallbacks.push({ model: m, reason: why, ms, round: steps.length });
       console.log(JSON.stringify({ agenticModel: m, failure: why, ms, round: steps.length, budgetLeftMs: timeLeft() }));
     };
-    for (const model of modelChain) {
+    /* Round-52b (prod telemetry 29 Sep: Render IP se NIM chat-call 60s+ tak kuch jawab nahi deta —
+     * queue/limit; GET /models to 0.5s me chalta hai. Isliye: model chain ke aage-peeche ek dynamic queue —
+     * timeout par (aur poora budget bacha ho) wahi model EK baar dobara try hota hai; http-error par nahi
+     * (wo key/access ka issue hota hai, dobara try karne se sirf time jaata hai). */
+    const modelQueue = [...modelChain];
+    const retriedModels = new Set<string>();
+    for (let qi = 0; qi < modelQueue.length; qi += 1) {
+      const model = modelQueue[qi];
       /* Round-13b: HF fallback model chain ke end mein — uska endpoint/key
        * alag hai (HF router), baaki sab NVIDIA NIM par. */
       const hf = transport.hfFallback && model === transport.hfFallback.model ? transport.hfFallback : null;
@@ -2977,13 +3429,13 @@ export async function runAgenticTurn(input: {
        * NIM par hang ho raha tha — 40s timeout poora budget kha jata tha aur
        * fallback ko ~5s hi milte the (dono timeout). Ab har agle model ke
        * liye 8s RESERVE — primary mara to fallback ko asli mauka mile. */
-      const modelsAfterThis = Math.max(0, modelChain.length - modelChain.indexOf(model) - 1);
+      const modelsAfterThis = Math.max(0, modelQueue.length - qi - 1);
       /* Round-18g (prod telemetry 2026-09-10): Muse-glimmer NIM par 20-35s/round
        * leta hai (tiny prompt bhi 7-15s). Round 2+ mein use sirf 4-8s milte the
        * → har baar timeout → GPT-OSS/GLM jawab dete the. Primary (chain[0]) ko
        * ab kam-se-kam AI_PRIMARY_MIN_MS (default 20s) milta hai jab tak budget
        * bacha ho; fallbacks ke liye reserve 8s → 6s. */
-      const isPrimary = modelChain.indexOf(model) === 0;
+      const isPrimary = qi === 0;
       /* Stage-5L-net: 40s primary floor ate the whole turn when Muse hung; 18s still covers healthy NIM rounds. */
       const primaryMinMs = Math.max(4000, Number(process.env.AI_PRIMARY_MIN_MS ?? 18000));
       const reservePerFallback = 6000;
@@ -3054,11 +3506,16 @@ export async function runAgenticTurn(input: {
         json = parsed;
         msg = m;
         modelUsed = typeof parsed.model === "string" ? parsed.model : model;
+        noteModelOutcome(model, true); /* Round-52: ye model abhi kaam kar raha hai — aage rakho */
         break;
       } catch (err) {
         clearTimeout(timer);
         lastFailure = err instanceof Error && err.name === "AbortError" ? "timeout" : "network";
         noteModelFailure(model, lastFailure, Date.now() - callStarted);
+        if (lastFailure === "timeout" && !steps.length && timeLeft() > 45000 && !retriedModels.has(model)) {
+          retriedModels.add(model);
+          modelQueue.push(model);
+        }
         continue;
       }
     }
@@ -3282,7 +3739,10 @@ export async function runAgenticTurn(input: {
         } else if (
           /* Round-33 (user: "Kal,1" par list hi nahi aayi — AI ne passengers dobara poochh liye): SEARCH_TRAINS
            * ek LIST tool hai — usme passengers ki zaroorat hi nahi (seat/plan tools me hai). */
-          (toolName === "JOURNEY_ANALYZE" || toolName === "RANK_JOURNEY_OPTIONS" || toolName === "FIND_CONNECTIONS" || toolName === "CHECK_AVAILABILITY" || toolName === "FIND_VACANT_SEATS" || toolName === "FIND_PARTIAL_ROUTE_SEATS" || toolName === "FIND_ALTERNATIVE_TRAINS") &&
+          /* Round-43: CHECK_AVAILABILITY (khaas train ki availability) ab bina passengers ke bhi chalti hai —
+           * availability ek DATA jawab hai (jaise ChatGPT), sufficiency ka faisla booking par hota hai.
+           * Route-level seat tools (FIND_*) par pax ki shart waise hi chalti hai. */
+          (toolName === "JOURNEY_ANALYZE" || toolName === "RANK_JOURNEY_OPTIONS" || toolName === "FIND_CONNECTIONS" || toolName === "FIND_VACANT_SEATS" || toolName === "FIND_PARTIAL_ROUTE_SEATS" || toolName === "FIND_ALTERNATIVE_TRAINS") &&
           !(input.known?.passengers && input.known.passengers >= 1) &&
           !(typeof args.passengers === "number" && args.passengers >= 1 && userStatedPax(input.text, args.passengers, { bareDigitIsPax: lastAskedPax })) &&
           !(input.known?.dateProvided === false && dateHint?.kind !== "date") /* date pehle poochhegi (upar/neeche wala guard) */
@@ -3295,7 +3755,7 @@ export async function runAgenticTurn(input: {
             ok: false,
             source: null,
             summary:
-              "PASSENGERS MISSING — kitne log travel kar rahe hain ye pata nahi. Seat availability / journey plan party-size par depend karta hai (2 logon ke liye AVL 1 kaafi nahi), isliye ye tool bina passengers ke nahi chalega. 1 ASSUME MAT KARO. Reply mein sirf poochho: kitne passengers (1–6)? (route/date jo pata hai wo confirm karte hue). User number de to isi tool ko `passengers` arg ke saath dobara call karo.",
+              "PASSENGERS MISSING — kitne log travel kar rahe hain ye pata nahi. Seat availability / journey plan party-size par depend karta hai (2 logon ke liye AVL 1 kaafi nahi), isliye ye tool bina passengers ke nahi chalega. 1 ASSUME MAT KARO. Reply mein SIRF poochho: kitne passengers (1–6)? — route/date/class jo pata hai (ya server resolve kar chuka hai) wo DOBARA MAT POOCHHO; sirf passengers ka jawab aate hi wahi tool dobara chalao. User number de to isi tool ko `passengers` arg ke saath dobara call karo.",
             data: null,
             rejected: "passengers_required",
           };
@@ -3327,7 +3787,7 @@ export async function runAgenticTurn(input: {
         ) {
           input.capture.passengers = args.passengers;
         }
-        result = await executeApprovedTool(toolName, args, { userText: input.text, capture: input.capture ?? null, passengers: input.known?.passengers ?? (typeof args.passengers === "number" && args.passengers >= 1 && args.passengers <= 6 && userStatedPax(input.text, args.passengers, { bareDigitIsPax: lastAskedPax }) ? args.passengers : null), deferDecision: true });
+        result = await executeApprovedTool(toolName, args, { userText: input.text, capture: input.capture ?? null, pickCandidates: isPickFollowup(String(input.text ?? ""), input.history) ? previousListTrains(input.history) : [], passengers: input.known?.passengers ?? (typeof args.passengers === "number" && args.passengers >= 1 && args.passengers <= 6 && userStatedPax(input.text, args.passengers, { bareDigitIsPax: lastAskedPax }) ? args.passengers : null), deferDecision: true });
         }
         // Structured table capture (user feedback 2026-09-05): SEARCH/JOURNEY
         // success par rows nikalo — client proper <table> render karega, aur
@@ -3335,6 +3795,40 @@ export async function runAgenticTurn(input: {
         if (input.capture && (toolName === "SEARCH_TRAIN_BY_NUMBER" || toolName === "SEARCH_TRAIN_BY_NAME")) {
           const pk = result.data as TrainPickerResult | null;
           if (pk && Array.isArray(pk.matches) && pk.matches.length) input.capture.trainPicker = pk;
+        }
+        /* Round-53: FIND_SEATS ka poora live data capture — cards isi se bante hain (text/cards ek data). */
+        if (result.ok && input.capture && toolName === "FIND_SEATS") {
+          const d = result.data as {
+            from?: string; to?: string; date?: string;
+            rows?: import("./seatFilter.js").SeatFilterRow[];
+            wlRows?: import("./seatFilter.js").SeatFilterRow[];
+            onlyAvailable?: boolean; classCodes?: string[];
+            trainsSeen?: number;
+          } | null;
+          /* Round-53e: ek hi turn me agar do FIND_SEATS calls hui (jaise pehla poora board, doosra
+           * "sirf confirm" — jo khaali aa gaya), to khaali result pehle wale kaam ke capture ko overwrite
+           * na kare — warna cards ke liye data hi nahi bachta (prod probe: payload 0, jawab me 2 trains). */
+          const richerSeat =
+            !input.capture.seat ||
+            (input.capture.seat.rows.length + input.capture.seat.wlRows.length) <=
+              ((d?.rows?.length ?? 0) + (Array.isArray(d?.wlRows) ? d.wlRows.length : 0));
+          if (d && Array.isArray(d.rows) && richerSeat) {
+            const drop = /ROUTE:\s*(.+)/.exec(String(result.summary ?? ""))?.[1] ?? null;
+            const near = /NEARBY:\s*([\s\S]*?)(?:\n\d+ rows|\nSource:|$)/.exec(String(result.summary ?? ""))?.[1] ?? null;
+            input.capture.seat = {
+              from: String(d.from ?? args.from ?? ""),
+              to: String(d.to ?? args.to ?? ""),
+              date: String(d.date ?? args.date ?? ""),
+              rows: d.rows,
+              wlRows: Array.isArray(d.wlRows) ? d.wlRows : [],
+              source: result.source ?? null,
+              dropNote: drop ? `ℹ️ ${drop.trim()}` : null,
+              nearbyNote: near ? `🧭 ${near.trim()}` : null,
+              trainsSeen: Number(d.trainsSeen ?? d.rows.length),
+              onlyAvailable: Boolean(d.onlyAvailable),
+              classCodes: Array.isArray(d.classCodes) ? d.classCodes : [],
+            };
+          }
         }
         if (result.ok && input.capture && toolName === "FIND_ALTERNATIVE_TRAINS") {
           input.capture.alternatives = result.data as AlternativeTrainsResult;
@@ -3479,7 +3973,12 @@ export async function runAgenticTurn(input: {
         messages.push({
           role: "tool",
           tool_call_id: tc.id,
-          content: JSON.stringify({ ok: result.ok, source: result.source, summary: result.summary, data: result.data }),
+          content: JSON.stringify({
+            ok: result.ok,
+            source: result.source,
+            summary: result.ok ? result.summary : `${result.summary}${toolRecoveryHint(toolName)}`,
+            data: result.data,
+          }),
         });
         /* Round-18m-29: planner ka FAISLA ab isi loop ki final call mein (alag decision
          * call nahi → AI calls 3→2). Model ko wahi grounded candidate sheet + principles
@@ -3612,7 +4111,7 @@ export async function runAgenticTurn(input: {
     }
     /* Round-32: model ke [NEXT] (agla kadam) pehle alag — warna wo line user ko dikh jaati. */
     const extracted = extractNextActions(redact(content));
-    const clean = scrubProactiveOffers(extracted.text);
+    const clean = scrubInternalNotes(scrubProactiveOffers(extracted.text));
 
     // Repair pass (one-shot): model ne tools chala kar data le liya, phir bhi
     // "info maango" wala jawab de diya? Ek corrective call do — data upar hai.
@@ -3655,6 +4154,31 @@ export async function runAgenticTurn(input: {
         modelUsed, modelFallbacks, latencyMs: Date.now() - startedAll,
         failureReason: "model_asked_instead_of_answered",
       };
+    }
+
+    /* ── Round-54b: ZERO-TOOL SELF-REPAIR (ChatGPT ka feedback loop, RailBook me) ────────────────────
+     * Live-data sawaal (seat/fare/status/PNR/timetable/board/cancellation) par model ne koi tool hi
+     * nahi chalaya — aur jawab me data jaise numbers ya "mere paas access nahi hai" likh diya. User ka
+     * niyam: aisa jawab kabhi nahi. Ye per-question patch nahi — general loop hai (system rule 25b ka
+     * programmatic roop): ek corrective round, phir usi data se jawab. */
+    const legitClarify = /kaun\w* station|station\s+(?:chun|choose|select|batao)|kitne (?:passenger|log|aadmi)|kis date|konsi date|kis din/i.test(clean);
+    const liveZeroTool =
+      steps.length === 0 &&
+      !zeroToolRepaired &&
+      step < MAX_STEPS &&
+      liveDataQuestion(String(input.text ?? "")) &&
+      !legitClarify &&
+      (/(₹|AVL|WL|RAC|AVAILABLE|WAITLIST|\b\d{5}\b|\b\d{1,2}:\d{2}\b)/i.test(clean) ||
+        /access nahi|nahi de sakta|nahi bata sakta|nahi kar sakta|IRCTC par (?:check|dekh)|khud dekh|mera access|available nahi hai mere/i.test(clean));
+    if (liveZeroTool) {
+      zeroToolRepaired = true;
+      messages.push({ role: "assistant", content });
+      messages.push({
+        role: "user",
+        content:
+          "SYSTEM CHECK: ye LIVE data ka sawaal hai aur tumne abhi koi tool call NAHI kiya. Bina tool ke seat/fare/status/PNR/time/board ka jawab dena MANA hai — aur 'mere paas access nahi hai' likhna bilkul galat hai (ye saare tools tumhare paas hain). Abhi SAHI tool call karo: live status → TRACK_TRAIN · seat/availability → CHECK_AVAILABILITY ya FIND_SEATS · fare → GET_FARE · PNR → CHECK_PNR · timetable/route → GET_TIMETABLE · station board → GET_STATION_BOARD · cancelled trains → GET_CANCELLED_TRAINS — phir usi tool ke data se jawab likho.",
+      });
+      continue;
     }
 
     // System prompt (date map, resolver line, known context) server-generated hai —
@@ -3722,9 +4246,27 @@ export async function runAgenticTurn(input: {
       });
       continue;
     }
-    const check = groundingCheck(clean, steps, evidenceAll);
+    /* Round-40: KNOWLEDGE-mode sawaal par model ka apna jawab accept hota hai (ChatGPT jaisa) —
+     * pehle har 3+ digit number ko tool-evidence se match karne ki zabardasti thi, isliye sahi general
+     * knowledge jawab ("1969", "23 platforms") bhi reject ho kar user ko "data nahi mila" milta tha.
+     * LIVE-mode (seat/fare/status/PNR/booking) par strict grounding waise hi chalta hai. */
+    const knowledgeMode = !liveDataQuestion(input.text);
+    /* Knowledge mode me bhi LIVE-claims (₹ fare, AVL/RAC/WL count, PNR, platform number) evidence se
+     * verify hote hain — "kuch bhi fake nahi" (sirf general knowledge numbers allowed). */
+    const evidenceText =
+      JSON.stringify(steps.map((s) => s.summary)) +
+      " " +
+      JSON.stringify(steps.map((s) => s.args)) +
+      " " +
+      JSON.stringify(steps.map((s) => s.dataPreview ?? "")) +
+      " " +
+      evidenceAll.join(" ");
+    const check = knowledgeMode ? liveClaimCheck(clean, evidenceText) : groundingCheck(clean, steps, evidenceAll);
+    /* Knowledge mode me [NEXT] chips reply ke apne text se bhi validate hote hain (model apne
+     * knowledge ke hisaab se hi sahi suggestion de sakta hai); live mode me sirf tool-evidence. */
+    const nextEvidence = knowledgeMode ? [...evidenceAll, clean] : evidenceAll;
     /* Round-32: model ka "agla kadam" bhi evidence se verify — jo number/naam is turn me nahi aaya, drop. */
-    const nextActions = extracted.actions.filter((a) => groundingCheck(`${a.label} ${a.utterance}`, steps, evidenceAll).grounded);
+    const nextActions = extracted.actions.filter((a) => groundingCheck(`${a.label} ${a.utterance}`, steps, nextEvidence).grounded);
     /* Round-34: model ne agla kadam nahi diya par is turn me verified data hai → model se hi maango. */
     if (
       !nextActions.length &&
@@ -3808,6 +4350,10 @@ export async function runAgenticTurn(input: {
       }
       /* Round-16o: koi tool succeed nahi hua aur general sawaal hai → web se
        * asli jawab (model ki memory nahi) — "provider se nahi mil" ke bajaye. */
+      const kbUngrounded = kbAuthoritativeRebound(input.text);
+      if (kbUngrounded) {
+        return { ok: true, reply: kbUngrounded, grounded: true, steps, modelUsed, modelFallbacks, latencyMs: Date.now() - startedAll, failureReason: "kb_authoritative" };
+      }
       if (webRescueEligible(input.text, steps)) {
         const rescued = await webRescueAnswer(input.text, steps, steps.length + 1);
         if (rescued) {
@@ -3828,7 +4374,7 @@ export async function runAgenticTurn(input: {
         ok: steps.some((s) => s.ok),
         reply: hasWebAnswer
           ? deterministicSummary(steps)
-          : `${deterministicSummary(steps)}\n(AI ka jawab providers ke data se match nahi hua — sirf verified data dikha raha hoon.)`,
+          : `${deterministicSummary(steps)}\n(Sirf provider ka verified live data dikhaya gaya hai.)`,
         grounded: false,
         steps,
         modelUsed, modelFallbacks, latencyMs: Date.now() - startedAll,
@@ -3841,9 +4387,29 @@ export async function runAgenticTurn(input: {
     let nextFailure: string | null = null;
     if (!nextActionsFinal.length && okSteps.length > 0 && check.grounded) {
       const dedicated = await nextStepFromModelOnly({ userText: input.text, reply: clean, steps });
-      const val = dedicated.filter((a) => groundingCheck(`${a.label} ${a.utterance}`, steps, evidenceAll).grounded);
+      const val = dedicated.filter((a) => groundingCheck(`${a.label} ${a.utterance}`, steps, nextEvidence).grounded);
       nextActionsFinal = val;
       nextFailure = val.length ? "next_step_from_dedicated_call" : "next_step_dedicated_empty_no_fallback";
+    }
+    /* Round-40 (user: "jaise chatgpt… ek dum accurate answer"): KNOWLEDGE mode me curated KB entry ko
+     * authoritative maano — model ki memory se pehle. Agar is turn me koi tool data nahi aaya aur KB me
+     * is sawaal ka verified jawab hai (Vivek route, pet rule, pehli train, zones…), to wahi user ko do —
+     * model ki memory ke galat number (jaise "4273 km") user tak na jaayein. Tool data aaya ho to model
+     * ka (us data wala) jawab hi chalta hai. */
+    /* Round-40b: KB curated hai — knowledge-mode sawaal par web-scrape ke adhoore jawab se bhi PEHLE. */
+    if (knowledgeMode) {
+      const kbStory = kbAuthoritativeRebound(input.text);
+      if (kbStory) {
+        return {
+          ok: true,
+          reply: kbStory,
+          grounded: true,
+          steps,
+          modelUsed, modelFallbacks, latencyMs: Date.now() - startedAll,
+          failureReason: "kb_authoritative",
+          nextActions: nextActionsFinal.length ? nextActionsFinal : null,
+        };
+      }
     }
     return {
       ok: true,
@@ -3856,7 +4422,11 @@ export async function runAgenticTurn(input: {
     };
   }
 
-  // Step budget kharch — honest deterministic summary.
+  // Step budget kharch — honest deterministic summary (KB-entry wale knowledge sawaal pehle).
+  const kbTail = kbAuthoritativeRebound(input.text);
+  if (kbTail) {
+    return { ok: true, reply: kbTail, grounded: true, steps, modelUsed, modelFallbacks, latencyMs: Date.now() - startedAll, failureReason: "kb_authoritative" };
+  }
   if (webRescueEligible(input.text, steps, { allowOkSteps: knowledgeQuestion(input.text) })) {
     const rescued = await webRescueAnswer(input.text, steps, steps.length + 1);
     if (rescued) {

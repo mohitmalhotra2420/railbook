@@ -62,10 +62,11 @@ describe("Round-22 · seat-related replies sundar rows me", () => {
     expect(container.querySelector(".rp-st.wl")?.textContent).toMatch(/WL 12/);
   });
 
-  it("seat se related na ho to paragraph hi rehta hai (kuch bigadta nahi)", () => {
+  it("seat se related na ho to rows nahi banti — Round-47 me readable sections (kuch bigadta nahi)", () => {
     const text = "Aapki train 12014 Amritsar se Ludhiana 04:55 par nikalti hai aur 06:57 par pahunchti hai.";
     const { container } = render(<ReplyText text={text} />);
     expect(container.querySelectorAll(".rp-row").length).toBe(0);
-    expect(container.querySelector("p.msg-text")?.textContent).toBe(text);
+    expect(container.querySelector(".ac")).toBeTruthy();
+    expect(String(container.textContent).replace(/\s+/g, "")).toContain(text.replace(/\s+/g, ""));
   });
 });

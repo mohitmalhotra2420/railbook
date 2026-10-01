@@ -1,856 +1,385 @@
-# RailBook — Addendum v1.4.3 (24 Sep 2026)
 
-**Release:** `c552093` (Render deploy `dep-daqi4mm7bikc738jp9gg` — **live**, 24 Sep 2026 13:16 UTC)
-**APK:** `RailBook-v1.4.3-release.apk` — versionCode **26**, versionName **1.4.3-voice-seat-intent**
 
----
+**Round-43k part 2 (live verification ke baad mile do gaps bhi band):**
+- **Grounded route-fact injector** (`agentic.ts routeFactLine`): khaas train + station wale kisi bhi sawaal par ("X se chalti hai?", "Y par rukti hai?", "Z tak jaati hai?") timetable ka SACHCH model ko diya jaata hai — stop ka role (origin / stop #n / aakhri stop) + arr/dep. Isse "origin X nahi hai, isliye X se nahi chalti" jaisa galat tark band.
+- **Negative claim do source se:** "ye station is train me nahi" ek NEGATIVE claim hai — isliye claim se pehle doosra (web-scrape) schedule source bhi dekha jaata hai; dono chup rahein tab hi fail. (Wajah: ek provider ke stop-list me gap ho sakta hai.)
+- **Shehar-sibling fact:** station route me na ho par usi SHEHAR ka koi doosra station route me ho to wahi batate hain — live: `12054 ludhiana se haridwar tak chalti hai?` → "12054 LDH par stop nahi karti; isi shehar ka **DDL (Dhandari Kalan)** route me hai — departure 09:20" (+ chip "DDL ka seat"). General hai: kisi bhi train x multi-station city par.
+- **Marker scrub:** model ke control tokens (`[END]`, `(done)`) user ko kabhi nahi dikhte; `[NEXT]` chips bache rehte hain.
+- Full suite **122 files / 1341 tests pass** (`/tmp/r43k-suite5.log`).
 
-## 1. Naya: "bolne wala" screen (VoiceSheet)
+**Round-43k part 3 (live verification me pakdi gayi 2 aur cheezein):**
+- **Dono side NLU se aane par verification skip ho jaati thi** (live: `12951 mumbai rajdhani haridwar` → NLU ne origin=BCT, destination=HW de diya aur code chup-chaap aage badh gaya, jabki HW us route me nahi hai) — ab har path par verify hota hai, aur jo station route me nahi wo segment endpoint bhi nahi banta.
+- **Doosre source se bacha station segment endpoint nahi banega** (warna provider se ulta HW→HW jaisa data maangte).
+- Full suite **122 files / 1341 tests pass** (`/tmp/r43k-suite6.log`).
 
-ConfirmTkt ke "Listening" screen jaisa:
+**Round-43k part 4 (leak):** tool ka RAW text (`Station checks: BCT onRoute: false`, `"resolvedRoute"` jaisa JSON echo) reply me kabhi nahi — `scrubInternalNotes` me raw-tool-echo filter (`/tmp/r43k-suite7.log`).
 
-- Mic dabate hi **sheet** khulti hai — jo bolte ho wo **live** likha jata hai (interim transcript).
-- **Chips** (ek tap me sawaal): Get Confirmed Ticket · AC Trains · 2A me seat? · Best Alternatives.
-- **Bada mic** (level ke saath ring pulse) + **✍️ Type** (keyboard) + **✕** (cancel).
-- **OK ✓ Bhejo** dabane par hi sawaal jata hai — **auto-send band** (manual commit pehle se tha, ab dikhta bhi hai).
+**Round-43k part 5 (nuance har path par):** `GET_TIMETABLE` ke station line me bhi same-shehar ka route-station aata hai (`citySiblingOnRoute`) — isliye jab model timeout ho kar tool-summary fallback chalta hai tab bhi `12054 ludhiana se haridwar tak chalti hai?` ka jawab "LDH par stop nahi, **DDL (Dhandari Kalan) 09:20** se haan" hota hai, adhoora "LDH use nahi hoti" nahi. Suite 122/1341 pass (`/tmp/r43k-suite8.log`).
 
-Purana inline voice panel hata diya gaya (ek hi jagah voice UI). Naya file: `src/components/VoiceSheet.tsx` (+ `.vs-*` CSS).
+## §9.36 — Round-44 (28 Sep 2026): "particular station kitne baje pahuchi thi" — har phrasing, seedha jawab
 
-## 2. Naya: server-side seat intent (AI-side samajh)
+**User (3 screenshots):** ek hi sawaal teen tarah se poochha aur teen alag (do galat) jawab mile:
+1. `12013 ka ludhiana aarival kitne baje ka tha 27 sept ko` → theek (model ne timetable se bataya)
+2. `At what time 12013 arrived ldh on 27 sept` → **"Kahan jaana hai? Station bataiye."** ❌
+3. `12013 kal ludhiana kitne baje pahunchi thi ?` → live + history + timetable ka poora dump, jawab beech me chhupa; SELECT TRAIN card me **model-instruction leak** ("uska tool AB call karo…") ❌
+User: "kya abh mai ek ek test kru!? Possible nhi hai… AI kyu nahi sahi answer de rha jo poocho usse. plz fix everything."
 
-Server khud bhasha padh kar filter karta hai — `server/understand/seatIntent.ts` + `server/agent/seatFilter.ts`:
+**Root causes (teen, sab general):**
+- Arrival-at-station ka deterministic jawab **sirf non-AI mode** me chalta tha (`!aiFirst`); AI-first me model bharosa tha — model timeout/wrong par legacy fallback "Kahan jaana hai?" de deta tha.
+- Typo (`aarival`), English phrasing (`At what time … arrived`) — regex/text me cover nahi.
+- Tool ke data me **model ke liye likhi instruction** (`note: "Train resolve ho gayi. … uska tool AB call karo"`) — client TrainPicker use UI me render karta hai → user ko dikh gayi.
 
-- **Class:** 1A / 2A / 3A / 3E / SL / CC / 2S / EC (+ "sab class" → sab).
-- **Seat words:** seat / सीट / सीटें / बर्थ / खाली / उपलब्ध / available.
-- **Sort:** "sabse sasti / low fare" → fare asc · "sabse fast / jaldi" → duration asc.
-- **Time:** "5 baje ke baad" → 17:00 · "रात 8 के बाद" → 20:00 · "17:30 ke baad" → 17:30 (Hinglish + Devanagari numerals).
-- **Quota** (TQ/PT/LD) aur **sirf confirmed** bhi.
+**Fix:**
+- `simpleArrivalQuestion()` — saaf arrival sawaal (koi seat/fare/book/live/plan/list intent nahi) par **AI-first me bhi** deterministic arrival jawab pehle chalta hai. + typo-tolerant words, `eta`, English phrasings.
+- `runDateLabel()` — user ka din (27 sept / kal / aaj / 27-09 / parso) jawab me: "12013 (…) — **27 Sep 2026 ki run ke liye** timetable ke hisaab se: LDH arrival 20:16, departure 20:19."
+- **Binary sawaal** (`X pahunch gayi kya?`) → `arrivalBinaryTurn()`: live run data se haan/na (Journey completed ⇒ haan; run start nahi hua ⇒ "abhi nahi, aaj 16:30 se start"; route-order se current vs asked stop; NTES "Departed from X at HH:MM" line).
+- **"X par rukti hai kya?"** → `stoppingQuestionTurn()`: route ke sach se haan (arr/dep ke saath, multi-station bhi) ya saaf "nahi, is route me nahi" (+ shehar-sibling).
+- "kitni der rukti hai" (halt duration) bhi usi family me — timetable se "halt ~3 min".
+- **Leak net:** `SEARCH_TRAIN_BY_NUMBER` ke data se model-instruction note hata di (guidance ab system prompt rule 33 "RESOLVE-ONLY RESULT" — general) + `scrubInternalNotes` me `user ko … bolo/batao` pattern; `⚠ STALE` text bhi ab seedha user-facing.
+- Live precheck ("kahan hai/late") sirf non-AI mode me (AI ke paas TRACK_TRAIN/GET_TRAIN_HISTORY hai).
 
-AI jawab ke saath ek **seat line** append hoti hai; `seatFilter` payload bhi response me aata hai (client fallback ke liye).
-Agar model jawab na de aur seat intent ho → deterministic seat reply (`source: "evidence"`).
+**Proof (live 12013, IST):** `At what time 12013 arrived ldh on 27 sept` → "…27 Sep 2026 ki run ke liye…Ludhiana Jn (LDH): arrival 20:16, departure 20:19" **1.1s** · `12013 kal ludhiana kitne baje pahunchi thi ?` → wahi **0.7s** · `12013 LDH pahunch gayi kya` → "nahi, abhi nahi pahunchi (aaj ka run 16:30 se, LDH arrival 20:16)" · `12013 kal ludhiana pahunch gayi thi kya` → "haan, pahunch chuki hai (run poori)" · `12013 haridwar par rukti hai kya` → "nahi, HW par rukti nahi (route NDLS → ASR)". Tests: `tests/round44-arrival-at-station.test.ts` (10) · full suite **123 files / 1351 tests pass**.
 
-**Feature flag:** `SEAT_FILTER_SERVER` (default **ON**; `0/false/off` → purana behaviour).
+## §9.37 — Round-45 (28 Sep 2026): FULL AI-FIRST — model pehle, deterministic sirf rescue
 
-### Live proof (railbook-gegs.onrender.com, 24 Sep)
+**User ka challenge:** "jab AI ke paas sabhi tools hai … har query sabse pehle AI ke paas jaani chahiye … tum handler ya rules update kyu krte ho … Ese to user experience kharab ho jayega." Trade-off saaf rakha gaya → user ne chuna: **full AI-first + accuracy-only** ("sahi jawab, chahe 10-20s lage").
 
-| Sawaal | Result |
-|---|---|
-| "Ludhiana se New Delhi 2A mein seat hai kal?" | `💺 2A me seat wali 6 trains — 14036 2A AVL 40 ₹845 · 11078 2A AVL 29 ₹825 … (LDH → NDLS · live board)` — source `evidence`, 6 rows |
-| "Ludhiana se New Delhi kal 3A mein sabse sasti seat wali train" | `sort: cheapest`, `💺 3A me seat wali 3 trains · sabse sasta pehle — 11078 3A AVL 98 ₹585 · 14036 3A AVL 185 ₹600 · 22706 3A AVL 248 ₹730` |
-| "लुधियाना से नई दिल्ली रात 8 के बाद स्लीपर में सीट चाहिए कल" | `classes: [SL]`, `afterMinute: 1200`, line: `💺 SL me aaj koi seat wali train nahi mili (20:00 ke baad). 1 trains ka time pata nahi chal paya.` |
+**Naya flow (booking hukm chhodkar har sawaal):**
+1. **Model pehle** — wo khud tools chunta hai (TRACK_TRAIN / GET_TIMETABLE / CHECK_AVAILABILITY / TRACK/…). R44 ka "AI-first me bhi deterministic arrival pehle" **supersede**.
+2. **Deterministic sirf 3 haalat me** (rescue net, preemption nahi):
+   (a) AI off/unconfigured, (b) model fail/timeout/throw, (c) **model ka jawab us sawaal ka jawab hi na ho** (khokhla: "Kahan jaana hai? Station bataiye." ya sirf train-summary) aur hamare paas usi sawaal ka verified (real tool data) jawab maujood ho. Warna model ka jawab hi user ko jaata hai.
+3. **Booking hukm** (`isBookingMutation`) pehle jaisa deterministic — 2-rok rule intact.
 
-"Delhi" likhne par (multi-station) pehle station choice aata hai — phir seat filter. Ye purana behaviour hai, badla nahi.
+**Implementation (`server/agent/run.ts`):** 4 precheck blocks → named fallback functions + `!aiFirst` gates:
+- `singleTrainSeatTurn(req, seeded)` · `livePrecheckTurn(req)` · `arrivalFamilyTurn(req, seeded)` · `departureTurn(req, seeded)`.
+- `answerKind45(text)` (seat / arrival / live — sirf 3 qismein, per-question rule nahi) + `replyAdequateFor45(kind, reply, question)` (jawab me ASLI data hai ya nahi: seat → AVAILABLE/WL/RAC/₹/N/A; arrival → sawaal ka station + waqt ya "rukuti hi nahi"/route-line; live → waqt/delay/position).
+- `deterministicRescue45(kind, req, seeded)` — qism ke hisaab se pehla verified jawab (seat → seat turn pehle, live → live turn pehle, warna arrival family pehle).
+- Model-fail rescue aur adequacy net dono **isi** helper se chalte hain (duplicate logic nahi). Telemetry: `{adequacyRescue: kind, modelHad: "..."}` prod log me.
 
-## 3. Seat Finder client layer (fallback) — pehle jaisa
+**Isi round me band kiye gaye do gap (live testing me mile):**
+- **`kitni der rukti hai` hijack:** `LIVE_TODAY_RE` me "kitni der" hai, isliye halt sawaal live-status ban jaata tha → `livePrecheckTurn` ab `STOPPING_Q_RE`/`HALT_QUESTION_RE` wale sawaal nahi leta. Live: `12013 LDH par kitni der rukti hai` → "LDH par 3 minute rukti hai · arrival 20:16, departure 20:19" (42s, model ne khud).
+- **Route me na hone wala station:** `12013 haridwar arrival kitne baje` → "Kahan jaana hai?" aur `… pahunch gayi kya` → live ka raw dump aa jaata tha. Ab `routeMismatchTail()` (ek hi sach-text) arrival / binary / departure teeno me + `DEPART_QUESTION_RE` me "kab chalti/chalte/nikalti" bhi. Live: "12013 ka route NDLS → ASR hai, isme Haridwar nahi aata — isliye train Haridwar pahunchti hi nahi."
 
-`src/seatfinder.ts` + `src/components/SeatFinder.tsx`: chat ke train table **aur** journey plan card — dono par chips (✅ Confirmed only · class · Time · ⚡ Sabse jaldi · 💰 Sabse sasta), **seats upar / WL neeche**, board-only trains "time —" ke saath. Ye AI down hone par bhi chalta hai.
+**Proof (prod `4f404d7`, live battery 9 sawaal, 0 leak):** `12013 kal ludhiana kitne baje pahunchi thi ?` → 27 Sep ki run, LDH arrival 20:16 (§112s, model ne summary di → verified rescue) · `At what time 12013 arrived ldh on 27 sept` → LDH 20:16 (§117s) · `12013 haridwar arrival kitne baje` → saaf route correction (§107s) · `12013 LDH par kitni der rukti hai` → halt 3 min (§42s) · `12054 haridwar ke liye seat check krna` → CC/2S date-wise availability (§91s, rescue) · `12054 late hai kya` → "time par chal rahi hai, delay 0 min, abhi Ambala Cant Jn" (§44s). Full suite **124 files / 1359 tests pass** (`/tmp/r45-suite4.log`), naya `tests/round45-ai-first.test.ts` (6 tests) + R44 ka "AI-first me deterministic jeetta hai" wala test **R45 semantics** me update.
 
-## 4. Jo **nahi** chhua (user condition)
+**Khuli baatein (agle round ke liye):**
+- **Latency:** AI-first me simple sawaal 40–125s le rahe hain (model ka round 20–35s + tools; R44 me yahi 1–3s the). Knob: `AI_AGENTIC_TURN_BUDGET_MS` / `AI_PRIMARY_MIN_MS` / model chain order — user bole to 20–30s me laa denge.
+- **Model ne `HWR` likh diya** (Haridwar = `HW`) — model ki slip, hamare data me sahi. Candidate: reply ke station codes ko apne station-data se verify karne wala general net.
 
-- AI ka search karne ka tareeka, tools/API calling ka tareeka — **waisa hi**.
-- Alternatives + connecting journeys ka logic — **waisa hi**.
-- Seat filter sirf **maujooda route-board** par lagaya gaya (koi naya endpoint/tool nahi).
+## §9.38 — Round-46 (28 Sep 2026): station-code verification net (model ke galat code band)
 
-## 5. Tests / build
+**Live case (R45 battery):** `12013 haridwar pahunch gayi kya` par model ne likha "…isme **Haridwar (HWR)** station nahi aata" — route sahi tha par **code galat**: IR me Haridwar = `HW`, aur `HWR` asli me **HATWAR** hai. User code hi IRCTC me type karta hai — isliye galat code = galat data (user ka standing rule: "kuch bhi fake mat rakho").
 
-- Naye tests: `tests/server-seat-intent.test.ts` (9), `tests/voice-sheet.test.tsx` (5) — kul **90 files / 911 tests PASS**.
-- `npm run build` OK.
-- APK sha256: `1239b443746196316747aa78ff1966a8e2e6c3f359645e8654e78d2f9bc43226` (cert SHA-256 `c2e38a05…d176`, v1.4.2 par in-place upgrade).
+**Fix — general verification (per-question rule nahi, R43k wahi soch):**
+- Naya data: `server/data/station-codes.ts` — **8989 IR stations** (code → naam), source **datameet/railways stations.json** (data.gov.in list). Regenerate: `node tools/build-station-codes.mjs` (source repo me: `tools/station-list-source.json`).
+- Naya module `server/agent/stationCodes.ts`: `verifyStationCodes(reply)` reply ke **code+naam jodi** dhoondta hai — teen forms: `Naam (CODE)`, `CODE Naam`, `Naam — CODE`; naam ko normalize karta hai (jn/junction/cantt/city suffix hata; "new" jaisa shabd nahi hata — warna New Delhi = Delhi ho jaata).
+- **Sirf tab badalta hai jab naam hamare data me ho aur uska code kuch aur ho** (jaise Haridwar→HW, jabki reply me HWR), warna reply ko haath nahi lagaya jaata. Code asli station ka ho aur naam se milta ho (New Delhi ↔ Delhi, Ambala ↔ UMB/UBC) → chhod diya jaata hai; naam hi hamare data me na ho (jaise "Someplace (ZZZZ)") → kuch nahi (andaza nahi).
+- **Wiring:** `scrubInternalNotes()` ke aakhir me (wahi ek darwaza jahan se model ka reply jaata hai — leak nets bhi wahi lagte hain). Telemetry: `{stationCodeFix:{label,from,to,why}}` prod log me.
+- **Tests:** `tests/round46-station-codes.test.ts` (7) — live case, dono forms, unknown-code case, **false-positive battery** (10 asli reply lines: sibling DDL/Dhandari Kalan, route line, seat/fare line, "Delay: … Next stop: …", source line — sab untouched), scrub integration, aur end-to-end (model ka reply `HWR` ke saath → user ko `HW` milta hai).
 
----
+**Proof (prod `2f9c008`, live 3/3, 0 leak):** `12013 haridwar pahunch gayi kya` → "…Haridwar **HW** is route par nahi hai…" (§133s) · `12013 haridwar par rukti hai kya` → "Timetable mein Haridwar/**HW** ka koi stop nahi hai" (§49s) · seat case unchanged (`12054 (ASR → HW) — 28/29 Sep CC/2S…`, §57s). Full suite **125 files / 1366 tests pass** (`/tmp/r46-suite1.log`).
 
-## 6. Round-15.1 — user screenshots ke 3 fix (24 Sep, commit `b2a7b55`, deploy `dep-daqj42ou01pc738bvhf0` LIVE)
+**Workspace note:** is round me workspace 11th baar reset hua (HEAD stale `1b8be9f`) — `recover.sh` se `2abdaf0` wapas, `npm ci`, aur R46 ke naye files (backup se) restore; koi kaam nahi gira.
 
-| # | Shikayat (screenshot) | Kyun ho raha tha | Fix |
-|---|---|---|---|
-| 1 | Results card me **Swarn Shatabdi ki sirf ek class** ("CC AVL") dikh rahi thi, jabki **EC bhi available** thi | Route board kuch classes **UNKNOWN** ke saath deta hai (12029 me `EC: UNKNOWN`), aur card UNKNOWN ko seat list me nahi dikhata | Seat Finder ab adhoori trains ka **per-train class board** laata hai (wahi `/api/availability?trainNumber=…` jo TrainBoard "Refresh seats" use karta hai) aur UNKNOWN row ki jagah **asli row** rakhta hai. Live: 12029 → `CC AVL 86` + **`EC AVL 6 ₹660`**. Max 10 trains, 3 ek saath, koi naya endpoint nahi |
-| 2 | "12029 ki seat availability CC 2026-09-25 ko LDH se BEAS" → AI ne seat nahi batayi, "provider se nahi mil pa rahi" | App **`/api/agent`** (agentic) path use karta hai; humara seat-intent filter sirf `/api/agent/auto` (autonomous) me lagaya gaya tha. 6-parallel load test me provider **http_429** bhi mila | Seat intent ab **app ke path par** bhi: `parseSeatIntent` → maujooda route-board filter → jawab ke saath honest seat line (AI fail/429 ho to **akeli line**). Boli gayi train ki row pehle. Koi naya tool/endpoint/planner change nahi. Live: `💺 CC me seat wali 1 train — 12029 CC AVL 86 ₹345. (LDH → BEAS · live board)` |
-| 3 | "AC trains dikhao" par **2S / SL** bhi dikh gayi thi | "AC" ko koi class-word nahi maana jaata tha → koi filter nahi lagta tha; client me `\bec\b` ka matlab galat se **CC** tha | AC = **1A/2A/3A/3E/CC/EC** (server `classGroup: "AC"` + client `acOnly` + **❄️ AC** chip, preview me bhi). `EC` (Executive Chair Car) ab CC nahi banta. Live: `💺 AC (1A/2A/3A/3E/CC/EC) me seat wali 8 trains — 12203 3A AVL 220 ₹285 · 12029 CC AVL 86 ₹345 · …` |
+## §9.39 — Round-47 (28 Sep 2026): chat ki UI padhne-layak (sections + chips + timetable) aur naya header
 
-**Saath me:** mic permission wala message ab action batata hai — "Allow popup me Allow dabao — ya Settings → Apps → RailBook → Permissions → Microphone ON karo … chaaho to type bhi kar sakte ho".
+**User (screenshot, 28 Sep):** "first screenshot mein dekho etna lamba chat padhna kitna mushkil ho rha, thoda attractive banao so that readable ho, clean UI ho, response ko clear cards, larger text, spacing, status chip aur timetable sections mein divide kiya jaaye" + "header bhi wahan se payment ka sign hta do aur header bhi better banao naye buttons rakho yeh purane htado". Scope boundary saaf: **"baki AI, API, backend, architecture kuch mat touch Krna"**.
 
-**Jo nahi chhua:** AI search/tools/API calling, alternatives + connecting journeys logic — sab waisa hi (user condition).
+**Kya kiya (sirf `src/` — koi server/AI/API change nahi):**
+- **Naya component `src/components/AnswerCard.tsx`** — prose jawab ko padhne-layak sections me:
+  1. **status chips** — jo baat reply me sach me likhi hai wahi chip banti hai (delay/on-time/stale/cancelled/scheduled/date/WL/available). Kuch invent nahi; na ho to chip hi nahi.
+  2. **headline** — pehla jumla bada (16.5px, weight 650).
+  3. **timetable board** — arrival/departure waqt bade numbers me + station code/naam (do shakal: `Ludhiana Jn (LDH)` aur `Ludhiana Jn LDH par`).
+  4. **body** — baaki jumle alag-alag, line-height 1.62, sections ke beech spacing; waqt/date/₹/seat-count highlight.
+  5. **source footer** — `Source: …` chhota aur muted (pehle body ke andar chipka tha; ab paragraph ke aakhir me chipka ho to bhi alag ho jaata hai).
+  - Model ke `**bold**` markers ab highlight ban jaate hain (literal asterisk user ko nahi dikhta).
+  - `⚙️ Route/schedule dekha → Live position dekhi` jaisi tool-line ab **chips** me — prose ke andar nahi.
+- **Wiring:** `ReplyText` ka fallback (jab seat rows na mile) aur Concierge ka AI-note path dono AnswerCard par. Seat-rows wala `ReplyText` path **waise hi** hai (data bilkul same).
+- **Header:** ₹ (wallet/payment) button header se **hata diya** (wallet booking flow ke apne buttons — `onWallet` — se khulta rehta hai). Purane text-glyphs `✚ ▦ ☰` ki jagah naye **SVG icons** (`IconChat`, `IconBoard`, `IconGrid`, `IconTicket` gold accent) — 42px tap target, hover/active states, gradient topbar + build-tag chip. Booking ka safar ab **dots + ticks** stepper me (✓ Journey · **Train** · 3 Passengers · 4 Payment) — labels wahi 4.
+- **Readability polish:** user bubble 15px, thread padding, `msg-kicker` refine, assistant text sections me.
 
-**Load test (6 parallel seat sawaal):** 5 clean pass, 1 me `source=none failureReason=http_429` — ye model-provider ka rate-limit tha, aur **ab us case me bhi seat line** user ko milti hai (fallback flag `seatFilterFallback: true`).
+**Tests:** `tests/round47-chat-ui.test.tsx` (8) — chips sirf text se, timetable/station (dono shakal), screenshot ka asli jawab (headline + board + chips + source + **koi lafz chhupta nahi**, jumla-wise check), inline-source footer, tool-line chips, ReplyText integration, header glyph/₹ assertions, stepper+CSS. 3 purane UI tests (R20/R22/R29) **R47 semantics** me update: pehle "prose paragraph hi rehta hai" assert karte the — ab AnswerCard sections + whitespace-insensitive "poora text maujood" check. Full suite **126 files / 1374 tests pass** (`/tmp/r47-suite1.log`).
 
-**APK:** v1.4.3 hi chalega — app WebView me live site (`railbook-gegs.onrender.com`) kholta hai, isliye ye teeno fix app me apne aap aa gaye. Naya APK chahiye to bolo (v1.4.4 bump kar denge).
+**Preview:** `tools/build-round47-preview.mts` asli React components se render + asli built CSS inline karta hai (preview aur app bilkul ek jaise) — `/home/user/RailBook/previews/RailBook-round47-2026-09-28.html` (95943 B), pehle (screenshot wala look) vs ab, side-by-side dono phone frames.
 
-**Tests:** 90 files / **925 PASS** (`npm run build` clean).
+**Proof (prod `69992d5`, live):** deployed CSS/JS bundle me naye classes maujood (`ac-board`/`ac-chip`/`ai-step` — grep se verify). Build: `npx vite build` clean (83.55 kB CSS / 494 kB JS).
 
----
+## §9.40 — Round-48 (29 Sep 2026): seat card me SAARI classes (parser fix)
 
-## 7. Round-15.2 — naye screenshots (build `b2a7b55`) ke fix — commit `b8f510e` (LIVE)
+**User (2 screenshots, 29 Sep):** "green wale portion mein sabhi classes mein available seats sahi bta rha lekin neeche card mein sabhi classes show nhi ho rhi" — green line (server ka asli data) me `12054 2S AVL 660 ₹150 · CC AVL 17 ₹480` likha tha, par usi train ka card "1 class" (sirf 2S) dikha raha tha; `15015` ki 4 classes me se 3; `12030` / `12204` / `12498` ke cards hi nahi ban rahe the.
 
-| Screenshot | Kya dikha | Asli wajah | Fix |
-|---|---|---|---|
-| 1 & 4 | Seat Finder card me **SAARI 28 trains "data nahi aayi"**, SEAT 0 rows, WAITLIST 0 rows | Us waqt **route board call khaali aayi** thi (provider busy/rate-limit — hamare 6-parallel load test me bhi ek baar `http_429` mila). Card khaali board par har train ko "data nahi aayi" list kar deta tha | `fetchRouteBoard` **ek baar khud retry** karta hai, FAIL **cache nahi** hota; board poora khaali ho to card saaf kehta hai **"Live board abhi nahi aa payi (provider busy)" + ↻ Dobara try karo** (28-row confusion nahi). Saath me pehle **6 trains ka per-train board** khud try hota hai taaki asli data dikhe |
-| 2 | "Mujhe kal ludhiana se beas ki 2A ki seats dikhana" → **journey plan card** dikha, seat jawab nahi | Seat line reply me **thi**, par journey card wale message me AI text **"AI note — tap karo"** me collapse ho jata hai → jawab chhup gaya | Seat line (💺 …) ab **card ke UPAR hamesha** dikhti hai (baaki text pehle jaisa note me) |
-| 4 & 6 | "AC trains dikhao" → 2S/SL bhi | (round-15.1 me theek) ab AC = 1A/2A/3A/3E/CC/EC; **❄️ AC** chip live hai | — |
-| — | 2A poochhne par **WL ka pata hi nahi chalta tha** | `onlyAvailable` WL rows ko hata deta tha → line "koi seat wali train nahi mili" keh kar chup ho jaati thi | Ab WL rows alag se nikaal kar line: **"💺 2A me abhi koi AVAILABLE/RAC seat nahi — WL wali 13 trains hain: 18103 2A WL 1 ₹725 · 11057 2A WL 1 ₹725 · 12483 2A WL 5 ₹770. Confirm% hum nahi dete…"** (live verified) |
+**Root cause (UI parser — `src/components/ReplyText.tsx`):** server ki compact seat line me **train ka naam nahi hota** (`12054 2S AVL 660 ₹150 · CC AVL 17 ₹480`). Purana `ROW_RE` naam maangta tha, isliye:
+- `2S AVL 660 ₹150` ko **naam** maan leta tha aur agla class chip (`CC`) hi asli row ban jaata tha → pehli class gayab, aur baaki classes `rest` (plain text) me chali jaati thin;
+- pehla segment ("💺 sab class me seat wali 19 trains — 12054 …") lead-in hone ki wajah se `rowOf` hi fail karta tha → us train ka card banta hi nahi tha;
+- fare me trailing comma aa jaata tha (`₹510,`).
 
-**Tests:** 90 files / **928 PASS**.
+**Fix (sirf UI, AI/API/backend untouched):**
+- `ROW_COMPACT_RE` + `COMPACT_HEAD_RE`: number ke turant baad class code ho to **compact row** (naam khaali) — jaisa text me hai waisa hi.
+- Train ke naam me ab **ank nahi** aate (`[^…\d]{2,60}`) — "2S AVL 660 ₹150" kabhi naam nahi ban sakta.
+- Lead-in `… — 12054 …` / `… : 12054 …` head chip me alag (aur lead-in khud row na ho — negative lookahead).
+- Fare regex `₹\s?\d(?:[\d,]*\d)?` — trailing comma band (teenon regexes me).
+- `groupReplyRowsByTrain`: same train+class+status+count+fare do jagah likha ho (AI ki per-train lines **aur** neeche ki compact line dono me — 29 Sep ka live case) to card me **ek hi baar**, aur jo info kisi ek me thi wo bachi rehti hai (`dep` fill; input rows mutate nahi hoti).
 
-### "ConfirmTkt seconds me kaise?" (user sawaal)
-ConfirmTkt apna **data pipeline cache** rakhta hai (unke paas apna scraping/DB layer hai) + parallel queries, isliye instant lagta hai. Hum **live providers** (railyatri / ConfirmTkt web / erail) se per-train data laate hain — isliye kabhi provider busy hone par slow/empty milta hai (jaise screenshot 1 me). Isi liye humne retry + honest "board nahi aayi" state + per-train fallback add kiya — **jhooth nahi, dheema sahi**.
+**Proof (aapke exact text par + live):** `parseReply(SCREENSHOT_LINE)` → 12 cards, 26 class rows; `12054 → [2S AVAILABLE 660, CC AVAILABLE 17]`, `14680 → [2S, CC]`, `12014 → [CC, EC]`, `15015 → [3E, SL, 2A, 1A]`, `15708 → 4 classes`; lead-in head chip me; render me cards 12 aur `.rp-crow` 26. Live (prod text): `sab class me seat wali trains batao` → 19 cards / 54 rows, `12054` 2 classes, `15015` 4 classes; dono-sections wala case ab duplicate nahi (12054 = 2 rows).
+**Suite:** 127 files / **1379 tests** pass (`/tmp/r48-suite2.log`); naye `tests/round48-seat-card-all-classes.test.tsx` (5) + purane R20/R22/R25/R26/R27/R29 wire formats waise hi pass.
+**Live:** code `60c7401` + `e501ddc` → deploy `dep-datd2pdg1s2s738tlm9g`, `/api/version` = `e501ddc`, bundle me naya parser confirm.
+**Preview:** `RailBook-round48-2026-09-29.html` (pehle vs ab phones + train-wise before/after table).
 
----
+## §9.41 — Round-49 (29 Sep 2026): board me sirf wahi trains jo maangi hui station TAK JAATI HAIN
 
-## 8. Round-17 — AI khud seat/filter ka sawaal handle karta hai (naya tool `findSeats`) — commit `6bbf2a8`, deploy `dep-daql08m7bikc73fr3dg0` **LIVE**
+**User (3 screenshots, 29 Sep):** `Mujhe ludhiana se SVDK jaana hai kal confirm seat findout krke do` — chat me `12265 JAT DURONTO EXP` aur `13151 KOAA JAT EXPRES` bhi seat rows ke saath aa gayi, jabki dono **Jammu Tawi (JAT) par khatam** hoti hain, SVDK (Katra) tak jaati hi nahi. User: *"maine to svdk tak maangi hai confirm seat wo fir jammu ki kyu dikha rha beech mein"*.
 
-User brief: *"Haan yeh kro do not specific to 2A, user kuch bhi pooch sakta hai"* — matlab sawaal **2A tak seemit nahi**; AI khud samjhe, khud decide kare kaunsa tool chalana hai, aur **live** data se poora jawab de. Kuch bhi fake nahi.
+**Root cause:** ConfirmTkt ka route-board `to` ke "paas ka bada station" wali trains bhi deta hai (Katra ke liye JAT) — provider data me gadbad nahi, par user ke liye wo **unbookable** hai: na seat us segment ki hoti hai, na train wahan jaati hai.
 
-### 8.1 Naya tool (ek hi naya hissa)
+**Fix (general — wahi tool-level verification usool, per-question rule nahi):**
+- Naya module `server/agent/routeSegment.ts`: board ke har train ka route **provider timetable** (`routedSchedule`, 6h cache, 6 parallel) se dekha jaata hai; jo train `to` tak nahi jaati (ya `from` par rukti hi nahi / order ulta hai) wo list se **hat jati hai**. **Route pata na chale to train rakhi jaati hai** (andaza nahi — sirf verified-negative hataate hain). Telemetry: `{routeDrop:{from,to,dropped:["12265(JAT)", …]}}`.
+- **Saaf note** (`routeDropNote`): *"ℹ️ 12425 JAMMU RAJDHANI (last stop JAT), … 12265 JAT DURONTO EXP (last stop JAT) — ye SVDK tak nahi jaati, isliye list se hata di."* — reply line me, `FIND_SEATS` output me (taaki AI bhi wahi sach bole), aur client card me (`dropNote` → `seatFilter` serializer → `api.ts` types → `SeatListBlock` me amber note strip).
+- Lagaya teen jagah: `seatFilterFor` (chat line + card rows), `seatFinderTool` (FIND_SEATS pool — AI un trains ki rows likh hi nahi sakta), aur `/api/availability` route-board (wahi bug class UI board me).
 
-`server/agent/seatFinderTool.ts` → **`runFindSeatsTool(...)`**
+**Proof (prod `6531728`, live):** `Mujhe ludhiana se SVDK jaana hai kal confirm seat findout krke do` → `LDH → SVDK` par sirf **20433 JAMMU MAIL** aur **11449 JBP SVDK EXP** (dono sach me SVDK jaati hain) + note me 13 hati trains (`12425, 14661, 12413, 12265, 13151, 11077, 12207, 18309, 12355, 12237, 22431, 15651, 12549`). Control: `LDH → JAT` maangne par `12265 / 13151 / 12237` **waise hi list me** rehti hain (koi false drop nahi). Live spot-check: `12919 Malwa` SVDK=true (rakhi), `15651 → last JAT` / `12549 → last MCTM` (hati).
+**Suite:** 128 files / **1386 tests** pass; naya `tests/round49-seat-segment-verify.test.ts` (7) — servesSegment (order/ulta/unknown), filter + note, resolver-fail par train rakhna, seatFilterFor, FIND_SEATS, JAT maangne par no-drop, aur client-payload wiring.
+**Deploy:** `0ebce68` (main fix) + `6531728` (dropNote client tak) → deploy `dep-datk4anlot8c73fsu7hg`, `/api/version` = `6531728`.
 
-| Input | Values | Note |
-|---|---|---|
-| `from`, `to`, `date` | station code / name, `YYYY-MM-DD` | `stationCode()` se normalize |
-| `class_code` | `2A`/`3A`/`1A`/`3E`/`CC`/`EC`/`SL`/`2S`, `AC`, `ALL` | `classesFromArg()`: `AC` → 1A/2A/3A/3E/CC/EC, `ALL` → saari |
-| `only_available` | bool | WL rows alag rakhta hai (`wlRows`) |
-| `depart_after` | `"17:00"`, `"5 baje ke baad"`, `"raat 9 ke baad"` | `minutesFromArg()` → departure-minute filter |
-| `sort_by` | `cheapest` / `fastest` | — |
-| `train_numbers` | `["12029"]` | specific train ke sawaal |
-| `quota`, `passengers` | optional | — |
+## §9.42 — Round-50 (29 Sep 2026): "JAT tak wali trains ka alag section" + dikhaayi wali seat rows LIVE
 
-Output: `{ ok, source, summary, data { from, to, date, classCodes, onlyAvailable, rows, wlRows, missingClass, unknownTime, summary } }`.
+**User (29 Sep, R49 ke jawab par):** *"Haan banado"* — JAT tak khatam hone wali trains ka **alag section** (IRCTC bhi `LDH → Katra` search me yahi trains dikhata hai). Saath me naya bug: *"12265 mein 2S seat availability IRCTC pe and confirmtkt pe bhi show ho rhi thi but mere app mein nahi"* (10:03 ka screenshot: `2S WL —` — number hi nahi, jabki IRCTC par us class ka apna status tha).
 
-**Data kahan se (koi naya source nahi):** maujooda **routedRouteBoard + routedClassBoard** (wahi endpoints jo Seat Finder/TrainBoard use karte hain) — 6 trains batch me, 25s budget, per-train fallback.
+**Root cause (2 hisse):**
+1. **Freshness:** ConfirmTkt board apni **purani cache** serve karta hai aur status non-empty hone par chain use "success" maan leti hai → wahi purana row app tak chala jaata hai (2S ka row `stale`/istedat bhi galat lagti thi). Aur CT ka `cacheTime` **IST me** likha hota hai (bina zone) → `Date.parse` usko UTC maan kar timestamp 5:30 ghante *future* me chala jaata tha (purani row "fresh" dikhti thi, UI ka "last updated" bhi aage chhapta tha).
+2. **UI:** R49 ke baad JAT tak wali trains list se hat gayi thin — par unme seats thi, aur user unhe IRCTC par dekh bhi raha tha; unko chhupana bhi jhooth tha, unhe beech me dikhana bhi.
 
-### 8.2 AI ise kaise use karta hai
+**Fix (general, per-question rule nahi):**
+- `server/agent/routeSegment.ts` → naya `nearbyCandidatesNote(trains, dropped, from, to)`: hati hui trains jinme **seat-detih class** (AVAILABLE/RAC) hai, unka saaf alag section — *"🧭 JAT tak (aage ka safar khud): 12265 JAT DURONTO EXP (2A AVL 5 · 3A AVL 10) | 13151 KOAA JAT EXPRES (SL AVL 8) | 12237 BEGUMPURA EXP (1A AVL 1)"* + *"(Inme LDH→JAT tak ka ticket hota hai, SVDK ka nahi.)"*. Sirf WL wali train ka offer nahi (jhootha offer band). Wiring: `seatFilterFor` (`nearbyNote` + line), `seatFinderTool` (FIND_SEATS summary me `NEARBY:` line — AI bhi yahi sach likhta hai), `app.ts` serializer → `api.ts` → `orchestrate.ts` → `Concierge.tsx` (`.sf-note.near` blue note) → `styles.css`.
+- `server/railway/router.ts` → naya export `enrichTrainsFreshness` (`enrichFocusTrains` wrapper): chat/card wale seat jawab me bhi wahi freshness pass jo `/api/availability` ke focus trains par chalta tha — dikhaayi jaane wali trains (seat wali pehle, phir WL; max 6) ke stale/UNKNOWN/future-dated rows ka live probe (18s budget). Live row na mile to purani row waise hi (kuch invent nahi).
+- `secondOpinionRow()` (naya, wahi file): chain ka row fresh nahi (30 min se purana / `stale` / future-dated) ya seat nahi dikha raha, to **IRCTC-sourced RailYatri** se cross-check — seat wali + fresh row jeetti hai, warna jo zyada fresh ho; dono na ho to chain ka row waise hi. (Fresh + seat wali row par extra call nahi — latency bachti hai.)
+- `server/railway/confirmtkt.ts` → naya `ctCacheTimeMs()`: `cacheTime` 3h+ future me ho to IST maan kar 5:30 ghata do — purani row ab `fresh` nahi lagti (probe hota hai) aur `updatedAt` sahi chhapta hai.
 
-- Tool dono engines me register: `agentic.ts` (`FIND_SEATS` + ArgSchema + executor) aur `autonomous.ts`/`autoTools.ts` (`findSeats`; `case "findSeats"`).
-- Dono **system prompts me "SEAT RULE"**: seat/class/filter ka sawaal aaya → **pehle tool, phir jawab**; apni yaad se seat kabhi nahi; WL par confirm% kabhi nahi; 3-5 trains.
-- **Duplicate jawab band:** AI ne khud `findSeats` chalaya aur clean jawab likha → server wali deterministic seat line **attach nahi** hoti (`app.ts` ~L278, `autonomous.ts` ~L1027). Pehle dono aate to 2 jawab dikhte.
+**Proof (live, 29 Sep ~10:50 IST):** `LDH → SVDK 2026-09-30` board 7 trains → main rows sirf **20433 / 11449** (SVDK tak), aur `🧭 JAT tak` section me **12265 (2A AVL 5 · 3A AVL 10) | 13151 (SL AVL 8) | 12237 (1A AVL 1)**; `dropNote` waise hi 13 hati trains. Control `LDH → JAT`: koi drop nahi (`dropNote null`), aur 12265 ki **2S row ab number ke saath** — `2S WL 1 ₹225` (pehle `WL —`), 3A `AVL 10`, 2A `AVL 5`, SL `WL 3`. Dono live sources ek hi baat keh rahe hain: ConfirmTkt API `2S = RLWL9/WL1 ₹225` (cacheTime 10:40) aur RailYatri/IRCTC `RLWL9/WL1 ₹225` (updated 10:46) — subah (09:13) IRCTC par 2S AVAILABLE ₹225 thi, yaani seat bhar gayi; ab app **live row** dikhata hai, purani cache par atakta nahi. Exact user sawaal par agent: 23.6s, deterministic + `nearbyNote`/`dropNote` dono client payload me.
+**Suite:** 130 files / **1397 tests** pass; naye `tests/round50-seat-freshness-nearby.test.ts` (8) + `tests/round50-live-second-opinion.test.ts` (3); ek purana test (`route-board-live-enrich` ka "17 ghante purani SL row") naye vyavhaar ke hisaab se update — ab fresher row (RailYatri/IRCTC) jeetti hai.
+**R50b (usi round me, prod live check par mila):** live row me count na ho (RailYatri ka `RLWL/AVAILABLE` jaisa status) to `AVL —` ke bajaye saaf **`AVL`** — `seatFilter` ki line + `fmtRow` + nearby section ka `classBit` + `ReplyText`. (Prod check me `20433 3E AVL — ₹565` dikh raha tha; ab `3E AVL ₹565`.)
+**Deploy:** `0db7048` → deploy `dep-datkn6qd0e5s73cgmvgg`; `b604eaf` (R50b) → deploy `dep-datkpp7avr4c73dusd50` — `/api/version` = `b604eaf` MATCH.
+**Prod verify (b604eaf):** (1) `Mujhe ludhiana se SVDK jaana hai kal confirm seat findout krke do` → 7.0s, rows sirf `20433`, `dropNote` + **`nearbyNote`** dono reply aur client payload me (`🧭 JAT tak … 12265 (2A AVL 5 · 3A AVL 10) | 13151 (SL AVL 8) | 12237 (1A AVL 1)`); (2) `LDH se JAT kal confirm seat batao` → 7.0s, **koi drop nahi** (`nearbyNote null`), 12265 `3A AVL 10 · 2A AVL 5`, 20433 `3E AVL ₹565` (dash gaya).
+**Preview:** `RailBook-round50-2026-09-29.html` (pehle vs ab phones + 2S ka poora sach table).
 
-### 8.3 Live proof (`railbook-gegs.onrender.com`, build `6bbf2a8`, 24 Sep)
+## §9.43 — Round-51 (29 Sep 2026): user ki wording ("Yaar LDH se…") + confirm/available par SAARI classes
 
-| Sawaal (LDH → BEAS, 25 Sep 2026) | AI ka tool | Time | Jawab (asli) |
-|---|---|---|---|
-| 2A me kaunsi train me seat hai … kal | `FIND_SEATS` | 22.5s | `14719 BKN ASR EXP · 2A · AVAILABLE 84 seats · ₹725` + "23 trains check ki gayi, 2A me seat sirf 1 train me hai" |
-| AC trains dikhao | `FIND_SEATS` | 15.3s | 9 AC trains: `14719 3A 306 ₹520`, `12203 3A 220 ₹285`, `12029 CC 86 ₹345` … |
-| sabse sasti seat wali | `FIND_SEATS` | 21.0s | `14679 2S 373 ₹65`, `12497 2S 80 ₹80`, `12053 2S 852 ₹90`, `14719 SL 287 ₹150` |
-| sirf confirmed seat wali | `FIND_SEATS` | 20.6s | Sirf AVAILABLE list (`12053 2S 852 ₹90` …), WL hataayi |
-| raat 9 baje ke baad ki trains me seat | `FIND_SEATS` | 12.5s | Saaf "koi bhi train me seat available nahi" (21:00+) — **jhooth nahi** |
-| 2A me WL kitni hai | `FIND_SEATS` | 34.0s | Available + WL dono: `14719 2A AVL 84 ₹725`, `18103 WL 1 ₹725`, `12483 WL 5 ₹770` — WL par **koi confirm% nahi** |
-| 12029 me CC seat hai kya | `FIND_SEATS` + `CHECK_AVAILABILITY` | 179.5s* | `12029 CC WL 1 ₹415` (railyatri/IRCTC data) + alternative `12497 CC AVL 28 ₹320` |
-| AUTO mode (`/api/agent/auto`) 2A sawaal | khud chune: search + per-train availability | 19.5s | Wahi asli jawab, `toolsUsed` me AI ke apne calls |
+**User (29 Sep, build b604eaf ke do screenshots):**
+1. `Yaar LDH se SVDK ke liye kal ke liye confirm seat find out karke do na` → app ne jawab diya *`"Yaar Ldh" ke liye exact station chahiye — station ka naam ya code bataiye.`* — jabki "Ldh" = LDH. User: *"purane build mein to AI meri wording ko samjh rha tha latest build mein kyu nhi"*.
+2. *"12265 mein 2S available seat nahi show hui thi … sabhi class kyu nahi show hoti jabh bhi specifically confirm, available poocho"*.
 
-\* Ye ek case **180s** le gaya — us waqt railway API down thi, isliye scraper fallback (railyatri/ConfirmTkt web) chala. Data sahi, sirf slow. Baaki sawaal **12.5–34s** me.
+**Root cause (1):** `legacy-stations.matchStation` poore phrase par exact/alias/city-word match karta tha; "Yaar Ldh" / "bhai ldh" / "kal ldh" jaise phrase se kuch match nahi hota tha → wahi phrase `unresolvedFrom` ban jaati thi → `routedStationSearch("Yaar Ldh")` kuch nahi deta → "exact station chahiye" sawaal (aur `atlasFallback`/rescue se wahi jawab user tak). Purane builds me model isse apne aap samajh jaata tha, par deterministic rescue path me ye gap tha.
 
-### 8.4 Jo **nahi** chhua (user condition — binding)
+**Fix (1) — general, tool-level (per-question rule nahi):** `stationWordInPhrase()` — poore-phrase wale saare purane checks ke **baad**, phrase ke andar ka saaf station word dhoondha jaata hai (alias/code list se, word-boundary Unicode-safe). Do shartein: (a) exactly **ek** station nikle (poora route likha ho — "ldh se svdk" — to yahan se kuch nahi; wo from/to parser ka kaam hai), (b) koi **cluster-city** (delhi/mumbai/kolkata…) hit na ho (unke liye clarification hi chahiye). Isse NLU ka from/to **aur** AI-extraction (`mapExtraction` bhi `matchStation` hi use karta hai) dono theek hote hain — jo bhi filler likho ("yaar", "bhai", "kal", "please"), station word phaans nahi jaata.
 
-AI ka search karne ka tareeka, tools-aur-API calling ka way, alternatives + connecting journeys ka poora logic — **jaisa tha waisa hi**. Sirf **ek naya tool** + prompt rule + duplicate-line suppression add hua; koi purana endpoint/logic/filter nahi badla.
+**Root cause (2):** "confirm/available" maangne par `seatSummaryLine` ka seat-branch sirf `pick.seat` (AVAILABLE/RAC rows) likhta tha — usi train ki baaki classes (jaise 12265 ki 2S/SL/1A) line me aati hi nahi thin (card rows+wlRows jodta hua tha, par text aur card match nahi karte the — R48 ka usool tuth raha tha).
 
-### 8.5 Tests / deploy
+**Fix (2):** ab jawab me jo train hai, uski **SAARI classes** usi line me aati hain — AVAILABLE/RAC pehle, phir usi train ki WL/N-A rows status ke saath (`12265 3A AVL 10 ₹860 · 2A AVL 5 ₹870 · 1A WL 1 ₹1,435 · SL WL 3 ₹355 · 2S WL 1 ₹225`). Sirf-WL trains list me **nahi** aati (R25 ka usool: available-only filter trains par lagta hai, train ke andar classes chhupane par nahi). AI path me bhi: `runFindSeatsTool` ab `OTHER CLASSES (inhi trains ki baaki classes — inhe bhi status ke saath likho, chhupao mat): …` line + instruction *"Har train ki line me uski SAARI classes likho"* bhejta hai. Sab data live board se — kuch banaya nahi jaata.
 
-- Naye tests: `tests/find-seats-tool.test.ts` (11) — tool registry dono engines me, `classesFromArg`/`minutesFromArg`, AC = 1A/2A/3A/3E/CC/EC, WL par confirm% nahi, per-train board fallback. `tests/agentic-toolcalling.test.ts` list 23 → **24 tools**.
-- Kul: **91 files / 939 tests PASS**; `npm run build` clean.
-- Deploy: `dep-daql08m7bikc73fr3dg0` @ `6bbf2a8`. Pehla deploy "live" hua par `/api/version` **purana commit** dikha raha tha (stale build) → **clear-cache redeploy** ke baad `6bbf2a8` confirm.
-- APK: **v1.4.3 hi chalega** — app WebView me live site kholta hai, isliye ye sab app me apne aap aa gaya. Naya APK chahiye to v1.4.4 bump kar denge.
+**Proof (local, AI on, aapka exact sawaal):** `Yaar LDH se SVDK ke liye kal ke liye confirm seat find out karke do na` → 21.1s, NLU `from=LDH, to=SVDK`, koi unresolved nahi, jawab: `* 20433 JAMMU MAIL — 1A AVL 1 ₹1,530 · 3E AVL 1 ₹625 — 01:47 departure` + `💺 … 20433 1A AVL 1 ₹1,530 · 3E AVL 1 ₹625 · 2A WL 1 ₹925 · 3A WL 1 ₹675 · SL N/A ₹270` + drop note + `🧭 JAT tak …`. Probe: `matchStation("Yaar Ldh")=LDH`, `"bhai ldh"=LDH`, `"kal ldh"=LDH`; control: `"delhi"`/`"mumbai"`/`"blorp xqz"` → undefined (clarification wahi).
+**Suite:** 131 files / **1402 tests** pass; naya `tests/round51-station-filler-allclasses.test.ts` (5).
+**Preview:** `RailBook-round51-2026-09-29.html` (pehle vs ab phones).
 
----
+## §9.44 — Round-52 (29 Sep 2026): “har query AI ke paas — deterministic path chale hi na”
 
-## 9. Round-19 — "subah" ka time window, Seat Finder me **saari** AVL classes, seat jawab card ke upar — commits `9d17ba3` + `f3f9090`, deploy `dep-daqm8cbtqb8s73b59dt0` **LIVE**
+**User (29 Sep, bbb7c84 ke baad):** *“purane builds me model isse apne aap samajh jaata tha, to ab bhi purane build jaisa hi rakho ki model apne aap samjhe sab — AI first for everything and deterministic path chle hi na, deterministic path khtm krdo; bas AI pe hi har query jaaye aur wo decide kare kaun sa tool kaun sa API, jaise ChatGPT mein hota hai.”*
 
-User ke round-18 screenshots + round-19 note, teen cheezein:
+**Root cause (asli wajah — poore round ka nichod):** `server/agent/run.ts` me `isBookingMutation()` ka regex akela **`confirm`** shabd par bhi match kar leta tha (`/confirm(?:\s*karo|…)?/`). Isliye `"…kal ke liye confirm seat find out karke do na"` **booking hukm** maan liya jaata tha → `aiFirst = false` → poora AI-first flow **skip** → jawab deterministic engine deta tha. Isi liye 7 second me jawab aata tha aur model ne koi tool chalaya hi nahi — aur user ko lagta tha “AI meri baat samajh hi nahi raha”, jabki model ko mauka hi nahi mila tha. (Probe se pakka hua: `runAgenticTurn` kabhi call hua hi nahi; `agenticConfigured()=true`, `AI_OWNS_FLOW` unset.)
 
-1. **Seat Finder "✅ Available"** me sirf **2 trains / 3 rows** aa rahi thi — jabki usi screen ke **upar wale card** me `12926 2A AVL 5 / 3A AVL 24 / SL AVL 8`, `11078 2A AVL 8` dikh rahi thi ("direct mein bahut si trains available hai lekin neeche seat finder mein avl mein sabhi show nhi kar rhi… sabhi available classes bhi nhi aa rhi").
-2. **"Mujhe kal subha ki trains btana amritsar se ludhiana ki"** → poori din ki list (14:25 / 16:50 / 18:55 bhi). "AI ko kya mera question samajh nahi aaya jo relevant tool call nahi kiya."
-3. Plan/journey card ke saath seat ka jawab **"AI note — tap karo"** ke andar chhup jata tha.
+**Fix (1) — booking-hukm detector sahi kiya (`run.ts`):** mutation ab ASLI hukm hi hai — `book kar do`, `12919 book krdo`, `ticket book kar`, `booking karo`, `confirm & book`, `confirm karo/kar do`, `payment kar do`, `paise de do`, `haan book`. “confirm” **khud** sirf tab mutation hai jab sawaal me seat/availability context na ho (`CONFIRM_IMPERATIVE_TEXT && !SEAT_CONTEXT_TEXT`). Yaani: *“confirm seat”, “confirmed seat wali trains”, “2S confirm hai kya”, “seat availability confirm karo”* = **seat sawaal** (AI-first), *“haan confirm karo”* = booking hukm (deterministic booking flow waise hi).
 
-### 9.1 Time window (subah / dopahar / shaam / raat + "X se pehle")
+**Fix (2) — model health ordering (`agentic.ts`):** `orderModelChain()/noteModelOutcome()/_clearModelHealth()` — jo model haal hi me (10 min) fail hua ho wo chain ke **aakhir** me chalta hai; healthy model pehle. Default chain fast-first: `ENV NVIDIA_MODEL=openai/gpt-oss-20b`, `NVIDIA_FALLBACK_MODEL=meta/muse-glimmer-30b` (Render env bhi update kiya). `AI_AGENTIC_TURN_BUDGET_MS=90000`, `AI_AGENTIC_TIMEOUT_MS=45000`. Muse bade agentic prompt par 30–70s leta hai — isliye wo ab default primary nahi (per-call timeout par turn fail hota tha aur deterministic rescue jawab de deta tha).
 
-| Shabd | Window |
-|---|---|
-| subah / subha / savere / morning | 04:00–12:00 |
-| dopahar / afternoon | 12:00–17:00 |
-| shaam / evening | 17:00–21:00 |
-| raat / night | 21:00 → 04:00 (wrap) |
-| "12 baje se pehle" / "8 baje se pahle" | upper bound only |
-| "subah 8 se pehle" | 04:00–08:00 (dono bound) |
-| "raat 9 ke baad" | 21:00+ (ghadi jeetti hai) |
+**Fix (3) — tools bhi user ki wording samajhte hain:** naya `server/agent/stationArg.ts` `resolveStationArg()` + `legacy-stations.matchStationStrict()` (sirf pakka match: code/naam/alias/filler-hatane-ke-baad-1-2-shabd/fuzzy, cluster-city → undefined) — `FIND_SEATS`, `SEARCH_TRAINS`, `JOURNEY_ANALYZE` ke station args isse resolve hote hain. NLU ka purana **loose** `matchStation()` (R51) waisa hi rakha (“Delhi Saturday ko 2 passengers ke liye sabse fast…” jaisa lamba tail tootta nahi), isliye R51 ka fix intact hai. `resolveStationRef()` (agentic) me bhi “2–5 akshar = code” check ab **asli code** (8,989 ka local dataset) par hi lagta hai — “delhi”/“katra” jaise city naam galti se code ban kar lookup fail nahi karte.
 
-- Server: `server/understand/seatIntent.ts` (`TIME_WINDOWS`, `beforeMinute`, `departAfterMinute`, `departBeforeMinute`, `windowLabel`) → `server/agent/seatFilter.ts` (`inTimeWindow`, `pickSeatRows` window + `unknownTime` count, line me "Subah (04:00–12:00)").
-- Tool: `findSeats` me `depart_after` ab **shabd bhi** samajhta hai (`"subah"`, `"raat"`), aur **`depart_before`** naya. Dono engines me same.
-- AI: dono system prompts me **TIME-WINDOW RULE** — "subah/dopahar/shaam/raat" ka sawaal aaya to **pehla tool call FIND_SEATS** ho, aur jawab me sirf usi window ki trains; poora din ki list mat do.
-- Client: `src/seatfinder.ts` me wahi WINDOWS + `beforeMin`, `src/components/SeatFinder.tsx` ke **Time** chip me 🌅 Subah / ☀️ Dopahar / 🌇 Shaam / 🌙 Raat options (auto-select jab user ne window boli ho).
+**Fix (4) — capability/meta sawaal bhi model ka:** `run.ts` ka capability gate `&& !aiFirst` (system-prompt rule 28 model ko honest capability batata hai). Fixed jawab sirf AI-off / key-gayab / model-fail par.
 
-> **Round-19b me ek chhupa bug bhi mila (live verify ke dauraan):** window sirf tab banti thi jab sawaal me **koi digit na ho** — "kal subha **2A** me seat" ka `2A` window ko hata deta tha. Ab sirf asli **clock reading** (`17:00`, `9 baje`) window ko rokta hai; class/train/passenger/date ke digits nahi. Server + client dono me fix (test: `tests/server-seat-intent.test.ts`).
+**Fix (5) — saari classes model ke jawab me:** `FIND_SEATS_DESCRIPTION` + prompt ka SEAT RULE: jawab me tool ke `summary` (rows **+** wlRows) ki SAARI entries likhni hain — “sirf AVAILABLE rows likhna adhoora hai”. Pehle model sirf AVAILABLE line likh deta tha (1 row) aur uske WL/baaki classes chhup jaati thin.
 
-### 9.2 Seat Finder ka data base = **card ke apne per-train rows**
+**Proof (local, AI on, aapke exact sawaal):** `Yaar LDH se SVDK ke liye kal ke liye confirm seat find out karke do na` → **`engine: agentic_tool_calling`**, model `openai/gpt-oss-20b`, `toolTrace: FIND_SEATS ✓` (24 s), jawab me 7 trains × saari classes live board se (`20433 1A AVL 1 ₹1,530 · 2A WL 1 ₹925 · 3A WL 1 ₹675 · 3E WL 1 ₹625 · SL N/A ₹270`, `11449 … SL WL 62 ₹240`, `12919 … SL WL 18 ₹270` …) + `[NEXT]` chip; doosra probe (rule tighten ke baad) 49 s, table format me wahi sab. Capability sawaal `tum kya kar sakte ho` bhi `agentic_tool_calling` (11.6 s, model ke shabdon me). Model ne khud station (LDH/SVDK), date (kal) aur tool choose kiya.
 
-- `Concierge.tsx` plan ke **direct options ke `classOptions`** (jo card me dikhte hain — per-train, har class probed, AVL/RAC/WL) ko Seat Finder ko **`cardBoard`** ke roop me deta hai; `SeatFinder.tsx` unhe **base** banata hai aur route board se sirf **missing** classes/trains jodta hai (`mergeBoardsPreferCard`).
-- Isliye ab **upar card aur neeche Seat Finder ke numbers ek jaise** hain (wahi data), aur jin trains ki poori class-list card me thi wo Available list se gayab nahi hoti.
-- Live proof (LDH → MTJ · 25 Sep, asli board): **pehle** 2 trains / 3 rows (`11078 3A AVL 18 · 11058 3E RAC 42 · 11058 2A RAC 6`) → **ab** 6 rows: `12926 3A AVL 23 ₹915 · 11078 2A AVL 8 ₹1,070 · 12926 SL AVL 8 ₹360 · 11078 3A AVL 7 ₹760 · 12926 2A AVL 5 ₹1,270 · 11058 2A AVL 2 ₹1,210`. Kyun badla: route board (ek call me saare trains) **purana/adhoora** ho sakta hai (12926 ko sab WL batata tha), per-train board fresh hota hai — ab card ka per-train data hi base hai. **Kuch bhi banaya hua nahi.**
+**Suite:** 132 files / **1410 tests** pass (pehle wale 7 fails: 5 model-default tests + capability source-assert + “delhi airport” station test — sab intentional update, dekho neeche), naya `tests/round52-ai-owns-everything.test.ts` (8): model-health ordering, `matchStationStrict`/`resolveStationArg` (filler ✓, “Delhi airport” ✗), `resolveStationArg`+`FIND_SEATS` integration, booking-hukm detector (asli hukm ✓ / seat sawaal ✗), aur app-level test ki “confirm seat” sawaal par **engine `agentic_tool_calling`** hi chalta hai.
+**Preview:** `RailBook-round52-2026-09-29.html` (pehle vs ab phones + kya badla).
 
-### 9.3 Seat jawab card ke neeche nahi chhupta
+**R52b — model route-level seat sawaal par sahi tool chune (rule 32):** prod probe me dikha ki model route-level seat sawaal (`LDH se JAT kal confirm seat batao`) par `JOURNEY_ANALYZE` chun leta tha — wo tool **passengers** maangta hai, isliye turn wahin atak jaata tha (aur phir deterministic rescue jawab de deta). Rule 32 me ab saaf line hai: *route-level seat sawaal (do station ke beech, koi ek train+class fix nahi, pax bhi nahi bataya) → **FIND_SEATS** (pax optional); aise sawaal par JOURNEY_ANALYZE/RANK_JOURNEY_OPTIONS mat chalao.* Local probe (dono sawaal, rule ke baad): `LDH se JAT kal confirm seat batao` → 51.9s, `FIND_SEATS ✓`, 3 trains × saari classes; `Yaar LDH … SVDK` → 73.8s, `FIND_SEATS ✓`, 7 trains × saari classes + `[NEXT]` chip.
 
-`server/app.ts`: `hasPlanCard = journey || alternatives` — jab card hai to 💺 seat line **card ke upar** dikhti hai (pehle "AI note" me collapse ho jaati thi). Bina card wale sawaal par purana rule: AI ne khud `FIND_SEATS` chalaya ho to duplicate line nahi.
+**R52c — prod (Render) se NVIDIA NIM par chat-call hang (`/api/ai-ping` evidence):** prod par model kabhi jawab deta hi nahi tha. Iska pakka saboot: `/api/ai-ping` (chhota "Reply with exactly: OK" request, 30–35s timeout) → `openai/gpt-oss-20b`, `meta/muse-glimmer-30b`, `nvidia/nemotron-3.5-lightning-30b-a3b`, `deepseek-ai/deepseek-v4.1-flash` **sab timeout**; jabki `GET /api/admin/nvidia` (wahi host, `/models`) **494ms** me chalta hai aur sandbox se wahi chat-call **1–2.5s** me jawab deta hai. Yaani NIM tak connection theek hai, par Render ke shared egress IP se `/chat/completions` queue me atak jaata hai (Nemotron-nano ne turant `503 Worker local total request limit reached (16/16)` diya). HF fallback bhi dead hai (`HF router: included credits depleted`). Isliye:
+- **retry-queue** (`agentic.ts`): `modelQueue` dynamic — timeout par (aur ≥45s budget bacha ho, aur turn ke pehle round me) wahi model **ek baar dobara** try hota hai; http-error par nahi (wo access/key ka issue hota hai).
+- **IPv4-first DNS** (`server/index.ts`: `dns.setDefaultResultOrder("ipv4first")`) — Render par IPv6 route hang ka shak.
+- Render env: `AI_AGENTIC_TURN_BUDGET_MS=180000`, `AI_AGENTIC_TIMEOUT_MS=45000`, `AI_PRIMARY_MIN_MS=20000`, `HF_MODEL` khaali (dead provider chain se hata).
+**Prod verify (5877a20):** `LDH se JAT kal confirm seat batao` → **agentic**, `FIND_SEATS ✓`, 184s (gpt-oss attempt timeout → muse ne jawab diya), jawab: `💺 sab class me seat wali 3 trains — 12265 3A AVL 10 ₹860 · 2A AVL 5 ₹870 · 1A WL 1 ₹1,435 · 2S WL 1 ₹225 · SL WL 3 ₹355 | 20433 1A AVL 1 ₹1,270 · 3A AVL 1 ₹565 · 2A WL 1 ₹770 · 3E WL 1 ₹565 · SL N/A ₹225 | 13151 2A AVL 1 ₹725 · 3A N/A ₹520 · 3E N/A ₹520 · SL N/A ₹195`; `tum kya kar sakte ho` → **agentic** 169s, model ke shabdon me poora capability jawab (train search/plan, live status, seat+fare, PNR, station board, rules, booking handoff). Yaani prod par bhi ab **jawab AI deta hai** — latency NIM ke queue ki wajah se 170–185s tak jaati hai (aapne 45s+ accept kiya hai; queue clear hone par wahi jawab 20–50s me aata hai, jaise local par).
 
-### 9.4 Live proof (build `f3f9090`, 24 Sep 17:57 UTC)
+## §9.45 — Round-53 (29 Sep 2026): text = cards (ek hi live data) · app me back button · naya provider sirf env se
 
-| Sawaal | AI ka tool | Time | Jawab (asli) |
-|---|---|---|---|
-| Mujhe kal subha ki trains btana amritsar se ludhiana ki | `FIND_SEATS` | 20.0s | Sirf **Subah 04:00–12:00**: `12014 CC AVL 357 ₹510 (04:55)`, `12318 SL AVL 95 ₹180 (05:55)`, `14720 SL AVL 388 ₹150 (08:10)`, `12926 SL AVL 151 ₹180 (07:20)` — 16:50/18:55 **gayab** |
-| Mujhe kal subha **2A** me seat wali trains batao LDH se BEAS | `FIND_SEATS` | 43.8s | `14719 2A AVL 84 ₹725 (04:25)` + "23 trains check ki gayi… 10 trains me ye class hi nahi hai" |
-| Mujhe kal subha ki trains batao LDH se BEAS | `FIND_SEATS` | 62.9s | `14719 3A AVL 306 ₹520 (04:25)`, `14719 SL AVL 287 ₹150`, `14631 SL AVL 154 ₹150 (04:46)`, `12029 CC AVL 86 ₹345 (11:11)` |
-| LDH se BEAS kaise jau kal plan batao (koi window nahi) | `RANK_JOURNEY_OPTIONS` | 198s | Poora plan card (32 options) — jaisa pehle tha, wahi |
-| 2A me seat hai kya (window ke bina) | — (server line) | 6.2s | `💺 2A me abhi koi AVAILABLE/RAC seat nahi — WL wali 13 trains hain…` + "Confirm% nahi dete" |
+**User ke 4 point:** (1) *“Green portion wali trains card mein nahi dikh rhi”* (screenshot: text “17 trains”, neeche cards me kuch aur/kam); (2) latency se zyada **quality** priority; (3) *“kon sa model best work karega mere railbook ke liye, uski key main baad mein dunga”*; (4) Android app: *“back buttons nahi hai”* + *“ek baar IRCTC pe autofill hogya to reopen pe bhi RailBook directly IRCTC se open hoti hai, not from starting”*.
 
-"Test pass hote to live par kaam kyu nahi karta tha?" — Round-19 me ye bhi theek kiya: pehle tests **hisse** test karte the (filter, parse, UI) par **turn ka assembly** aur **digit-guard** wala path koi test nahi utha raha tha. Ab `tests/round19-seat-line-turn.test.ts` asli `/api/agent` turn ka jawab check karta hai (card + 💺 line, duplicate suppression, AI-fail fallback, window slots).
+**Root cause (cards ka gap):** jawab ka **text** model ke `FIND_SEATS` result se banta tha, par **cards** (`app.ts`) ke liye `seatFilterFor()` **dobara** board fetch karta tha — do alag snapshots (aur `maxRows` ka 12-train cap). Isliye text me saari trains/classes, cards me kuch aur. Yahi “green portion wali trains card me nahi” ka asli karan tha.
 
-### 9.5 Jo **nahi** chhua
+**Fix (1) — ek hi data:** `agentic.ts` me `SearchCapture.seat` add — `FIND_SEATS` ke result ka poora capture (**rows, wlRows, from/to/date, source, dropNote, nearbyNote, trainsSeen, onlyAvailable, classCodes**). `run.ts` `AgentResponse.seatCapture` return karta hai; `app.ts` me capture maujood ho (aur date valid ho) to **`seatFilterFor()` skip** — cards seedha usi capture se bante hain. Yaani text aur cards ab kabhi alag ho hi nahi sakte.
 
-AI ka search/planning ka tareeka, tools-aur-API calling ka flow, alternatives + connecting journeys ka poora logic, journey ranking — **jaisa tha waisa hi**. Sirf: window padhna (server+client), window wale sawaal par `findSeats` ka prompt + params, aur seat line ka dikhne ka niyam.
+**Fix (2) — card payload ka apna cap:** naya `SEAT_PAYLOAD_MAX_TRAINS = 60` (pehle 12). Text line ka `SEAT_LINE_MAX = 12` waisa hi hai — par line ke tail me honest pointer: `+N trains aur bhi hain — neeche poori live list me` (R25 ka rule bani rahi hai: “card” shabd par trains chhupane ka bahana nahi banta). `app.ts` me `seatCardPointer` — jab model ke jawab me rows na hon, tab bhi 1 honest line (`➕ N trains ke rows neeche cards me hain (live board se) — jaise 12265, 20433, 13151, 11058 …`), 15-line wall nahi.
 
-### 9.6 Tests / deploy
+**Fix (3) — “confirm bola to confirm dikhao”:** `app.ts` me `seatOnlyAvailable` hone par payload ke `wlRows` **sirf unhi trains ke** rakhe jaate hain jinme seat mili hai (usi train ki baaki classes chhupti nahi — Round-51 usool intact). Colors/status real: WL rows live board ke.
 
-- Naye/updated: `tests/find-seats-tool.test.ts` (14), `tests/server-seat-intent.test.ts` (21), `tests/seat-finder-card.test.tsx` (12), **`tests/round19-seat-line-turn.test.ts` (naya, 6)**.
-- Kul: **92 files / 957 tests PASS**; `npm run build` OK; server `tsc` clean.
-- Deploy: `dep-daqm06psrm7s73dj27e0` @ `9d17ba3` → `dep-daqm8cbtqb8s73b59dt0` @ `f3f9090` (`/api/version` se confirm).
-- APK: **v1.4.3 hi chalega** (app WebView me live site kholta hai) — ye sab app me apne aap aa gaya. Naya build chahiye to v1.4.4 bump kar denge.
+**Fix (4) — naya provider sirf ENV se (aapki key ke liye):** `server/env.ts` me `AI_LLM_BASE_URL` + `AI_LLM_API_KEY` + `AI_LLM_MODELS` (comma chain) — set hote hi **poora AI stack** (agentic brain, NLU/extraction, journey decisions) usi OpenAI-compatible endpoint par chala jaata hai; `nvidiaBaseUrl/nvidiaApiKey/nvidiaModel/nvidiaFallbackModel` overrides; `hfFallback` chain se hat jaata hai. Aadha config (key ke bina) = kuch nahi hota → purana NVIDIA path bilkul safe. Recommendation doc: `docs/MODEL-RECOMMENDATION.md` (Groq free `openai/gpt-oss-120b` primary; quality-first OpenRouter chain `claude-sonnet-4.6` → `z-ai/glm-5` → `gpt-oss-120b`; Cerebras `zai-glm-4.7` tez fallback; Sarvam Hinglish layer; **Groq par `llama-3.3-70b-versatile` 16 Aug 2026 se retired**). Sabak: NIM prod par queue-stuck (30–60s) — wahi model Groq par 1–2s; chain me do alag provider rakho.
 
-### 9.7 Round-19c — Seat Finder "Available" ab **purane route board** par bharosa nahi karta
+**Fix (5) — Android app (v1.5.0, APK bana):** nav bar (Bar visible, 48dp) — **‹ Back · ⌂ RailBook home · ⟳ Reload** + right me label (RailBook / IRCTC). `goBackSmart()`: IRCTC par ho → history saaf karke **RailBook home**; RailBook ke andar → WebView `goBack()`; home par → “dobara dabao to exit” (2.2s)। `onResume()`: app background se wapas aayi aur page IRCTC par hai (ya Android ne restore kiya) → wapas **RailBook home** (chat web app ke localStorage se wahin mil jaati hai); `openRailbook()` ke 4s andar history clear (IRCTC ki purani entry peeche na rah jaye). Prewarm ke dauraan (IRCTC jaan-boojh kar khul raha ho) chhedte nahi. APK v1.5.0: `versionCode 33`, `versionName 1.5.0-nav-quality` · `RailBook-v1.5.0-release.apk` (4,823,319 B, SHA256 `55fe7412ad993c6f4cbd0eaf619bb0d3803a57eae3dd44082443abb838954265`) + `RailBook-Android-v1.5.0-Source.zip` (117,232 B) — `/home/user/RailBook/APKs/`.
 
-User ne dobara wahi baat boli (screenshots ke saath): *"direct mein bahut si trains available hai lekin neeche seat finder mein avl mein sabhi show nhi kar rhi"*.
+**Proof (local, aapke sawaal):** `LDH se JAT kal confirm seat batao` → `engine: agentic_tool_calling`, `openai/gpt-oss-20b`, `FIND_SEATS ✓`, **22.2s** · board me **20 trains**, seat-wali 4 (`12265, 12445, 12237, 20433`) · payload **10 seat rows + 9 WL rows** · **text ke trains = card ke trains (dono 12265,12445,12237,20433)** · reply me 4-train table (saari classes) + “*All trains listed above have at least one confirmed seat (AVL)*” + `[NEXT] Book 12265 · 3A (AVL 10 ₹860)`. Cards usi payload se render (preview me asli payload se dikhaya).
 
-Do alag surfaces hain, dono me ab sach:
+**Tests:** naye `tests/round53-text-cards-and-provider.test.ts` (6: 16-train board par payload me saari trains; FIND_SEATS → capture.seat; app-level “confirm” par cards me sirf seat-wali trains; honest tail; AI_LLM_* override on/off) + `tests/round53-app-nav-and-irctc-return.test.ts` (5 source-guards: nav bar ids, `goBackSmart`, `onResume` IRCTC-return, `updateWhereLabel`, version 1.5.0/33). Full suite **134 files / 1421 tests PASS**.
 
-| Surface | Base data | Round-19c ka add |
-|---|---|---|
-| **Plan card ke neeche** (`block.type === "journey"`) | card ke per-train `classOptions` (round-19, `cardBoard`) | — (pehle se fresh) |
-| **Chat ka train table** (`TrainTableView`) | route board (`/api/availability` ek call, saare trains) | **"✅ Available" tap karne par** jo trains route board me koi AVL/RAC row nahi deti, unka **per-train board** (same endpoint jo TrainBoard "Refresh seats" chalata hai) laaya jata hai — max 6 trains, 3 ek saath |
+**Preview:** `RailBook-round53-2026-09-29.html` (pehle vs ab phones, Android nav bar mock, provider table).
 
-- Naya: `trainsUnverifiedForSeats()` + `mergeClassBoardsVerified()` (`src/seatfinder.ts`). Fresh per-train probe **jeetta hai** (khaali/UNKNOWN wapas aaya to purani row safe); purana `mergeClassBoards` (gaps bharna, maujooda row nahi chhedta) waisa hi hai.
-- Latency: sirf "Available" tap par, max 6 trains → 2 batch. "Sabhi trains" default waisa hi fast.
+**R53b/R53c — cards ka train-set ab THEEK se text se match karta hai (prod probe se pakda gaya):**
+- **R53b:** prod (0bd2aee) probe me dikha ki model `FIND_SEATS` ko `only_available` **bhejta hi nahi** (user ne “confirm seat” maanga tha, par tool args me true nahi gaya) — isliye cards me poore board ke 12 trains (52 WL rows) aa gaye, jabki jawab me 4 trains. Fix: capture branch me `seatOnlyAvailable = cap.onlyAvailable || slots.confirmedOnly` (saaf “confirm/confirmed” wording; “seat availability batao” jaisa sawaal available-only nahi hai, wahan saari trains — WL bhi — chahiye).
+- **R53c:** ulta mismatch bhi mila — `“saari trains ki seat availability batao”` par model 12 trains likhta hai (WL wali bhi) par cards me sirf 4 (seat-wali) reh gayi thin. Fix (general): **cards ke trains = jawab me likhi 5-digit trains ∩ payload ke trains**; jawab me koi train number na ho (capability/PNR jaise sawaal) to poora payload waisa hi (kuch chhupta nahi). Class-level detail (usi train ki baaki classes) payload se hi.
+- **R53c (formatting):** usi probe me model ne pivot-jaise table banaya jisme `2A WL, 2A WL (2) … (9)` repeat ho gaya. `FIND_SEATS` summary me saaf instruction: *har train ek line, table/pivot mat banao, ek hi class/status ek hi baar* — probe me ab saaf per-train lines.
 
-**Live proof (LDH → MTJ · 25 Sep, 24 Sep 18:02 UTC — user ke screenshot wali route):**
+**Prod verify (c259803):** `LDH se JAT kal confirm seat batao` → **agentic**, `FIND_SEATS ✓`, **34s**, payload trains `11077, 12237, 15651` = jawab ke trains (**MATCH**); `LDH se JAT kal saari trains ki seat availability batao` → **agentic**, `FIND_SEATS ✓` (2 calls), **19s**, payload `11077, 12207, 12237, 12355, 12475, 12919, 15651, 18309, 22431` = jawab ke trains (**MATCH**). Suite: **134 files / 1423 tests PASS** (`round53-text-cards-and-provider` ab 8 tests).
 
-| Source | 12926 PASCHIM EXPRESS 09:40 |
-|---|---|
-| Route board `/api/availability` (ek call, saare trains) | 2A **WL 4** · 3A **WL 14** · SL **WL 68** · 1A WL 1 |
-| Per-train board `/api/availability?trainNumber=12926…` (fresh) | 2A **AVL 5 ₹1,270** · 3A **AVL 23 ₹915** · SL **AVL 8 ₹360** |
-| Usi waqt 11078 JHELUM 3A (ulta case) | route board **AVL 8** · per-train **NOT_AVAILABLE** |
+**Final chain (R53/R54):** `d4dda38` → `f893a2c` → `6660596` → `84494a1` → `0bd2aee` → `50b23b6` → `c259803` → `6adfcf4` → `2d745a6` → `161cf03` → `938fc51` → `b5e3a40` → `2109cf4` → `1cdc071` → `6cd72e9` → `d32ed39` → **`f43f63f`** — prod LIVE (`/api/version` MATCH).
 
-Iska matlab: route board dono direction me galat ho sakta hai. `Seat Finder Available` list ka natija (same payload se, asli client functions se):
-**pehle** 3 rows / 2 trains (`11078 3A AVL 8 ₹760 (04:30)` ← ye actually N/A tha, `11058 3E RAC 42 ₹785`, `11058 2A RAC 6 ₹1,210`)
-→ **ab** 4 rows: `12926 3A AVL 23 ₹915 (09:40)` · `12926 SL AVL 8 ₹360` · `12926 2A AVL 5 ₹1,270` · `11058 2A AVL 1 ₹1,210` — aur wo purani `11078 AVL 8` row nikal gayi (per-train fresh: N/A).
+**R53e — cards kabhi chhote nahi, kabhi bade nahi (pointer bhi sach):**
+- **Cards ab tool ka POORA snapshot dikhate hain** (R53c ka "jawab me likhi trains" wala filter hata diya). Kyun: us filter se ek naya jhooth bana — jawab ke saath jo pointer line judti thi (`➕ 8 trains ke rows neeche cards me hain …`) un trains ke naam batati thi jo cards me aati hi nahi thin. Ab text me kam trains ho to card me poori class-detail rehti hai + pointer line sach bolti hai.
+- **Fabricated-train guard segment-level** (line-level nahi): `·`/`|` se judi line me sirf wahi hissa hatta hai jisme aisa 5-digit number ho jo kisi tool ke data me nahi; baaki jawab (aur model ki wording) bacha rehta hai.
+- **Do FIND_SEATS calls wale turn:** khaali result pehle wale kaam ka capture overwrite nahi karta (warna cards ka data hi khatam — prod probe me payload 0, jawab me 2 trains).
+- **Jab KISI train me confirmed seat hi na ho:** tool WL rows poora deta hai (warna model ke paas honest jawab ka data nahi hota aur grounding check jawab reject kar deta), aur cards bhi WL trains dikhate hain — text+cards dono: *"is waqt koi confirmed seat nahi hai… ye trains WL me hain"*.
+- **Test:** `round53-text-cards-and-provider` ab **12 tests**.
 
-Tests: `tests/seat-finder.test.ts` (naye 2), `tests/seat-finder-card.test.tsx` (naya 1 — "Available" tap → per-train verify → AVL rows). Kul **92 files / 960 tests PASS**.
+**R53f — user "confirm" bole to tool me `only_available` force:** prod probe me model ne `only_available: false` bhej diya (user "confirm" maang raha tha) → tool ne WL trains ka poora data diya, model ne 9 trains likh di, par cards (confirm ke hisaab se) sirf 3 seat-wali trains dikhate the. Fix (`agentic.ts` FIND_SEATS case): user ki wording confirmedOnly ho to flag force — model ke paas WL-only trains likhne ko hoti hi nahi.
+**Prod verify (f43f63f):** `LDH se JAT kal confirm seat batao` → payload 5 = jawab 5 (**MATCH**, 21s); `Yaar LDH se SVDK … confirm seat find out karke do na` → payload 3 = jawab 3 (**MATCH**, 11s). Suite **134 files / 1427 tests PASS**.
 
-### 9.8 Round-19d — card ki **direct** list bhi window se filter (connecting/alternatives untouched)
+**Final chain (R53/R54):** `d4dda38` → `f893a2c` → `6660596` → `84494a1` → `0bd2aee` → `50b23b6` → `c259803` → `6adfcf4` → `2d745a6` → `161cf03` → `938fc51` → `b5e3a40` → `2109cf4` → `1cdc071` → `6cd72e9` → `d32ed39` → `f43f63f` → **`6f5b94e`** — prod LIVE (`/api/version` MATCH).
 
-User: *"Card filter karo lekin connecting/alternatives mein change na aayein wo waisa hi rahe."*
+## §9.46 — Round-54 (29 Sep 2026): "ChatGPT sahi tool kaise chunta hai?" — aur uske liye humne kya kiya
 
-- **Sirf direct trains (0 change)** par filter — `JourneyOptions` me naya prop `window={afterMin, beforeMin, label}` (Concierge `seatFind.intent` se aata hai; matlab user ke apne shabdon se).
-- Filter **client-side dikhane par** hai: plan/engine/AI ka data waisa hi rehta hai — isliye connecting, alternatives, ticket tricks, doosri dates, hub-leg lists **bilkul waise** dikhte hain (un par filter lagta hi nahi).
-- Hero: agar AI ka pick direct tha aur window ke bahar (jaise "subah" poochne par 16:50 Shatabdi), to hero **window ka best direct** ban jata hai aur header "Window ke hisaab se · <label>" dikhata hai.
-- Window bar + chip: "🕒 Subah (04:00–12:00) — direct trains sirf isi window ki (N mili)" + **"Sabhi N direct dikhao"** (ek tap me poori list wapas). Window me koi direct na ho to list khaali nahi hoti — saaf note + poori list.
-- Window na bole to kuch nahi badalta (koi default filter nahi).
-- Naya: `departureInWindow()` (`src/seatfinder.ts`, server `inTimeWindow` ka mirror — same windows, raat me wrap); `filterSeatRows` bhi wahi helper use karta hai.
-- Test: `tests/round19d-card-window.test.tsx` (4). Kul **93 files / 964 tests PASS**; `npm run build` OK; server tsc clean.
+**User ka sawaal:** *"ChatGPT ke developer ne sab tools pehle se nahi likhe honge, phir bhi wo har sawaal par sahi tool kaise chun leta hai? Humara AI bhi waisa hi kare."*
 
-### 9.9 Round-19e — Seat Finder **train-wise** (har train ki saari classes ek saath) + preview ki galti
+**Jawab ka nichod (poora doc: `docs/TOOL-ROUTING-EXPLAINER.md`)** — 5 pillars: (1) tool ka **description** instruction hota hai ("jab X poochhe to pehle ye"), (2) **policy layer** = thode general rules (30/31/32/33/34), (3) model ki **general reasoning** (intent padhna pretraining se), (4) **feedback loops** — grounded check, adequacy net, tool-fail par agla tool, ambiguity par ek saaf sawaal, (5) **eval batteries** — har release par alag-alag sawaalon ki routing jaanch, aur failure ka ilaaj rule/description me (us sawaal par patch nahi).
 
-User (screenshot ke saath): *"upar card mein classes available mein sabhi dikh nhi rhi jabh ki neeche classes zyada hai"*.
+**R54 me humne kya add kiya:**
+- **Tool-recovery HINT (`agentic.ts`)**: jab koi tool fail hota hai, us ke result ke saath model ko **usi kaam ke agle tools ki list** chali jaati hai (`TRACK_TRAIN` ✗ → `GET_STATION_BOARD, GET_TIMETABLE, WEB_SEARCH` try karo; `CHECK_PNR` ✗ → `WEB_SEARCH`; `FIND_SEATS` ✗ → `CHECK_AVAILABILITY, SEARCH_TRAINS`). Model ko rule yaad rakhne ki zaroorat nahi — hint data ke saath aata hai (ChatGPT ke loop wala hissa). Test: `round53-text-cards-and-provider` (13 tests).
+- **Eval battery repo me permanent**: `tools/round54-routing-battery.mts` — 12 alag-alag sawaal (live status, route, seat, train+class seat, fare, PNR, cancellation, station board, rules, GK, coach position, route+timing) aur har ek ka sahi tool family; report PASS / KB / FAIL. Aaj ka result: **10/12 model ne khud sahi tool chuna**, 2 (rules aur GK) **curated KB** se 0 second me verified jawab (R40b design — model ki memory se galat number aa sakta hai, jaise R40 me 4,273 km).
+- **Aage ka tarika (provider/key aane par):** battery har release par; FAIL ka ilaaj tool description/policy me — per-question patch kabhi nahi.
 
-**Do cheezein nikli:**
+### §9.46b — Round-54b (29 Sep 2026): zero-tool self-repair + prod routing battery
 
-1. **Mere preview ki galti:** us preview me **upar wale panel ke numbers haath se likhe the** (ek purane snapshot se) aur neeche wala card doosre payload ka tha — isliye `11078 3A AVL 7` upar aur `AVL 8` neeche dikh raha tha. Ab har preview **ek hi asli payload** se banta hai (`provas/ldh-mtj-real.json`, live server se).
-2. **UI ki asli kami:** Seat Finder me har class ki apni row thi aur **6 rows ke baad "aur rows dekho"** — lambi list me train ki kuch classes pehli nazar me chhup jaati thi.
+**User ka sawaal (dobara):** *"ChatGPT har sawaal par sahi tool kaise chun leta hai? Humara AI bhi waisa hi perfectly kare."* Jawab ke 5 pillars `docs/TOOL-ROUTING-EXPLAINER.md` me hain (tool ka description = instruction · policy rules · model ki general reasoning · **feedback loops** · eval battery). Is round me do cheezein ZAMEEN par utaari gayin:
+1. **Tool-recovery HINT (R54):** tool fail hone par model ko usi kaam ke agle tools ki list di jaati hai (`CHECK_PNR ✗ → WEB_SEARCH try karo`, `TRACK_TRAIN ✗ → GET_STATION_BOARD/GET_TIMETABLE`, `FIND_SEATS ✗ → CHECK_AVAILABILITY/SEARCH_TRAINS`) — prod battery me live dikha: `CHECK_PNR✗ → WEB_SEARCH` aur `GET_COACH_POSITION✗ → GET_TRAIN_INFO`.
+2. **Zero-tool self-repair (R54b):** LIVE sawaal par model bina tool jawab de (data jaise numbers ya "access nahi hai") → server ek corrective round bhejta hai aur model sahi tool chala kar usi data se jawab deta hai. Legit clarification (station/passenger/date) exempt. Test: `tests/round54-self-repair.test.ts` (2).
+3. **Eval battery permanent + prod mode:** `tools/round54-routing-battery.mts` (12 sawaal; `--prod` se live server par). **Prod result (5df4cd4): 10/12 PASS + 2 KB-path (curated KB, 0s)** — local wahi natija.
 
-**Fix (client-only, data/AI/API untouched):**
+## §9.47 — Round-55 (29 Sep 2026): "in me se best train batao" samajhna + list ka turn-to-turn sthir rehna
 
-- `SeatFinder.tsx` me naya `TrainGroup` — **ek train = ek block**, uske andar uski **saari classes chips** me (card jaisa): `12926 PASCHIM EXPRESS · 3A AVL 23 ₹915 · SL AVL 8 ₹360 · 2A AVL 5 ₹1,270`.
-- Limit ab **trains** par hai (seat 8, WL 4 — "aur N trains dekho"), **classes par kabhi nahi**.
-- "Available" tab = AVL/RAC chips (uss class ke liye aapka hi rule: *"Available pe click kre to Available + RAC dikhao"*); WL/N-A chips apne train ke block me **"🚆 Sabhi trains"** me — wahan bhi train-wise.
-- Verify (asli payload, client ke apne functions se): **10/10 trains** me jitni AVAILABLE/RAC classes card me hain, utni hi Seat Finder me aati hain; ek bhi class chhupti nahi.
+**User ke 2 screenshots (29 Sep):** (1) "ASR se LDH 3A me seat batao" par pehli baar list me SACHKHAND 12716 dikhi, agli baar gayab — jaise list badal gayi; (2) phir "esmein se best train batao" bola to AI ne poori list dobara dump kar di. User: *"ChatGPT ka dekho usne samjh liya… waisa hi perfectly samjhe."* Teen asli wajahein milin:
 
-**Bonus (flaky test jo raat 12 baje toota):** `tests/route-board-live-enrich.test.ts` me date `2026-09-24` hardcoded thi; IST me 25 Sep hote hi wo "beet chuki" ho gayi aur live probe (jo past journey-date par **jaan-boojh kar** null deta hai) test ko gira raha tha. Ab date IST-today se aati hai. Kul **93 files / 967 tests PASS**.
+1. **Model ka chupke lagaya time-window (sabse bada karan):** user ne waqt bola hi nahi tha, par model ne FIND_SEATS ko `depart_after: subah / 04:00–12:00` bhej diya → us window ke bahar wali trains (jaise Sachkhand) list se gayab. **Fix (general):** `seatPick.ts` → `askedTimeWindow()` (subah/savere/dopahar/shaam/raat/8 baje/12:30/am-pm/morning…). User ke shabdon me waqt na ho to `dropUnaskedWindow()` model ke args se window hata deta hai — data chhupane ka koi bahana nahi. Aur jab hataaya jaata hai, tool ke result me model ko saaf note milta hai ("server ne tumhara window hata diya — POORE din ka board hai, jawab me window ka zikr mat karo") + rule 36, warna model apne (na-lagi) window ko jawab me likh deta tha.
+2. **History truncation:** assistant ke pichhle jawab 700 chars par kat jaate the — list ke trains follow-up ke context se hi gayab ho jaate the. Ab assistant history 1500 chars (user 700) — list poori context me rehti hai.
+3. **"in me se best" ka koi handling nahi tha:** ab `seatPick.ts` → `isPickFollowup()` (≥2 candidates + best/behtar/sabse acchi/recommend… ya follow-up shabd + train/wala), `previousListTrains()` (pichhle assistant jawab se max 12 train numbers), aur `pickBestTurn()` (run.ts) jo **wahi candidates** `FIND_SEATS(train_numbers=…)` se live re-check karke jawab me **EK best + "Kyun:" + "Runner-up:"** likhta hai (poori list dobara nahi). Sorting: AVAILABLE → seats desc → departure → RAC → WL. Adequacy gate `answerKind45 → "pick"` (1–3 numbers + best-word) + rescue order pick → single-train → general.
 
-### 9.10 Round-19f — "Available" me bhi **poora card** (koi train/class chhupti nahi)
+**Test:** `tests/round55-pick-and-window.test.ts` (8) — pure units + asli `executeApprovedTool("FIND_SEATS")` par: window drop hone par 19:45 wali train bhi aati hai (Sachkhand wapas), window maange jaane par filter lagta hai, pick turn me sirf pichhli list ke candidates check hote hain.
 
-User ne wahi shikayat dobara screenshot ke saath bheji: *"upar card mein classes available mein sabhi dikh nhi rhi jabki neeche classes zyada hai"* — us screenshot me upar **Seat Finder** tha aur neeche **journey card**, aur dono ke numbers/classes alag the.
+4. **Chhoti par asli rukawat (routing battery ne pakdi):** pick follow-up me 12 candidates ka comma-string 71 chars ka hota tha, par tool schema `train_numbers` ko 60 chars tak hi leta tha → model ka pehla call schema-fail. Ab limit 200 (20 trains). Aur ek purani gap bhi band hui: *"12094 me 3A me kitni seat khali hai kal"* (train number diya, station nahi) par tool pehle hi "kahan se, kahan tak" pooch leta tha — ab `FIND_SEATS` ka from/to optional hai aur **server khud us train ka POORA route timetable se** le leta hai (origin → destination), summary me saaf likh kar ki ye route timetable se liya gaya (user ne nahi bataya). Do chhoti robustness cheezein bhi: model `from: ""` bheje to bhi chalta hai, `sort_by` me ulta-seedha shabd (jaise "availability") poore call ko fail nahi karta (ignore ho jaata hai), aur agar model train number args me bhejna bhool jaaye par user ke sawaal me number ho → server sawaal se hi number utha leta hai.
 
-Ab Seat Finder ki "✅ Available" list bhi wahi poora sach dikhati hai jo upar card dikhata hai:
+5. **Soft-field safety net (R55f — is round ki sabse aam galti ka ilaaj):** live probes me baar-baar dekha ki model ka **poora tool call sirf ek soft field** ki wajah se marta tha (`passengers: 0` → "≥1 chahiye", `sort_by: "availability"` → enum galat, lamba `train_numbers`). Ab `executeApprovedTool` me zod ke bataye galat fields **hata kar dobara parse** hota hai — baaki call chalti hai (server default/auto behaviour lagata hai) aur model ko summary me saaf note milta hai ki kaun sa field gira (taaki wo uske liye alag se user ko na sataye). Sirf tab fail hota hai jab hataane ke baad bhi call valid na ho (jaise `date: "kal"`). Test: `tests/round55-pick-and-window.test.ts` §(f).
 
-- **Pehle:** Available = sirf AVL/RAC classes, aur baaki trains (jinke kisi class me seat nahi) list me aate hi nahi the — isliye upar card me 10 trains x 4-5 classes, neeche 2 trains dikhte the.
-- **Ab:** har train ka ek **block** aur us block me uski **SAARI classes** — seat wali **rangdar** chips (AVL/RAC + fare), baaki (WL/N-A) **halki** chips (tap par fresh check phir bhi chalta hai). Aur jinke kisi class me seat nahi, wo trains **"SEAT NAHI"** heading ke neeche, apni saari classes ke saath (halki). Cap sirf **trains** par (8 seat / 8 no-seat), classes par kabhi nahi.
-- **Verification (asli payload se, component ka asli render):** LDH -> MTJ · 25 Sep par Seat Finder me **10/10 trains** aur unki **saari classes** (12926: 3A AVL 23 · SL AVL 8 · 2A AVL 5 · 1A N/A) — upar wale card se bilkul match.
-- Seat Finder ke andar build ab hamesha "all" (WL/N-A rows bhi banti hain); section-level gating UI me — "Sabhi trains" me WL **section** alag, "Available" me WL/N-A chips usi train ke block me halki.
-- Tests: `tests/seat-finder-card.test.tsx` (18) — Available me saari classes + halki chips, "SEAT NAHI" section. Kul **93 files / 969 tests PASS**.
+6. **Model fail/timeout par bhi pick (R55g):** prod probe me primary model timeout (45s) → fallback 500 → deterministic path ne poori list dump kar di (asal screenshot wali galti dobara). Ab model fail wale branch me bhi sawaal "pick" hai to pehle `pickBestTurn` chalta hai (chhota "Best + Kyun + Runner-up" jawab), tab hi list-wala path. Test §(g).
 
-### 9.11 Round-20 (25 Sep) — Direct card = Seat Finder jaisa, class chip tap → seedha IRCTC-jaisa passenger form, aur chat ka lamba jawab
+**Live probe (2 turn, asli providers):** turn1 "ASR se LDH kal 3A me seat batao" → 12 trains (12716 SACHKHAND sameth, koi jhoothi window nahi); turn2 "esmein se best train batao" → *"Best: 18104 ASR TATA EXP – 3A AVAILABLE 69 seats ₹520 … Kyun: sabse zyada confirmed seats aur sasta fare. Runner-up: 12926 PASCHIM EXP – 3A AVAILABLE 64 seats ₹565"* — koi dump nahi, wahi list.
 
-User ne teen screenshots ke saath teen cheezein maangi thi:
+## §9.48 — Round-56 (29 Sep 2026): "ChatGPT samajh gaya, mera AI kyu nahi?" — context, not rules
 
-**1) "Direct trains ka UI bhi bilkul Seat Finder jaisa same to same chip wala ho"**
+**User ka sawaal (2 screenshots + ChatGPT ka jawab):** *"ChatGPT ke developer ne har baar naya rule thodi likha… tum kitne rule likhoge? ChatGPT ne samajh liya, mera AI kyu nahi?"* Ye bilkul sahi sawaal hai, aur jawab architecture me hai — niyamon me nahi.
 
-- Naya shared block `src/components/TrainClassBlock.tsx` — **wahi ek markup** jo Seat Finder ka `TrainGroup` pehle se banata tha (`.sf-group` + left accent, header me train number/naam/time/"N classes (M me seat)", chips me class code + badge (AVL/RAC/WL/N-A) + fare, `off` = halki chip).
-- Journey plan ka **DIRECT TRAINS** card (`JourneyOptions.tsx`) bhi ab yahi block use karta hai — Seat Finder card aur direct card ki shakal **bilkul ek** (screenshot 1 = screenshot 2). Sirf rendering badla: data wahi plan/board payload, koi naya API/AI logic nahi. `↻ purana data` ka tag chip par, header tap se poora train (purana behaviour as-is).
+**Asli wajah (code me mili, guess nahi):**
+1. **Context katta tha.** Pichhla assistant jawab model ko 1500 characters tak hi jaata tha (pehle 700). 12-trains wali list 900–1200 chars ki hoti hai — yaani model ne apni hi pichhli list poori **kabhi dekhi hi nahi**. ChatGPT ke paas poora thread hota hai; isliye "in me se best" uske liye aasan hai. Yahan wo andha tha.
+2. **Har turn naya board.** Follow-up par bhi app naya live board maangta tha — user ke apne screenshots me list 5 trains → 14 trains badal gayi, Sachkhand (12715) doosri baar aaya pehli baar nahi. ChatGPT ne kuch fetch hi nahi kiya: sawaal usi list ka tha.
+3. **Phir ek chhota free model**, jo adhoori list + "naya data laao" wale mahaul me reasoning nahi kar paaya.
 
-**2) "Kisi bhi class pe tap → seedha passenger form; upar train number, date, from, to apne aap; form IRCTC ke according same to same — sirf insurance aur payment chhod kar; jis train me catering ho usme catering; class wahi jo train me asli hai"**
+**Fix (structural, ek hi usool — per-question rule nahi):**
+- Assistant history 4000 chars (poori list), user 1500.
+- Pichhli list hone par ek system block: **PICHHLA JAWAB (user abhi yahi screen par dekh raha hai — trains: …)** + wahi text poora + usool: *list-reference sawaal → usi list se jawab, naya board nahi, poori list dobara nahi; fresh board sirf naya route/date/train/class ya "abhi/live" par.*
+- Rule 35 ko phrase-list se hata kar usool bana diya (in me se/2nd wala/usme se/jo bheja tha … "best" tak seemit nahi).
+- Deterministic `pickBestTurn` ab sirf **rescue** hai (model fail/khokhla jawab) — jaisa R45 ka usool hai.
 
-- `src/booking/fromOption.ts` (naya, sirf mapping): `stationOf` · `classFromBoardRow` · `trainFromRouteOption` · `bookingFromSeatRow` · `bookingFromChipPayload` — jo chip par dikha wahi booking me jaata hai (koi number/status invent nahi, koi naya API call nahi).
-- Chip tap par: class **bookable** (AVL/RAC/WL) → `SELECT_TRAIN_AND_CLASS { toPassengers: true }` → berth step skip, seedha **Passengers** screen; warna (N/A/data nahi) purana fresh-seat-check chat flow. Wahi wiring Seat Finder ke chips par bhi (`onBook` prop).
-- Passenger form (IRCTC ke passenger-details page jaisa): upar **journey summary** (train number · naam · date · from → to · class badge · fare · source), phir per passenger **Name / Age / Gender / Berth preference** + **Food choice** (sirf jab train me pantry ho), **ID proof (type + number, optional)**, aur IRCTC ke dono checkbox (Book only if confirm berths / Consider for auto up-gradation), phir **Contact details** (10-digit mobile, email, WhatsApp updates). **Insurance aur payment ka koi block nahi** (wo IRCTC handoff par).
-- **Catering data real:** naya read-only endpoint `GET /api/trains/:number/pantry` — andar wahi maujooda `scrapeTrainFactsWeb` chalta hai jo AI ka TRAIN_FACTS tool pehle se use karta hai (koi naya source nahi). Probe: **12926 pantry = true**, **12014 pantry = false** → food choice sirf 12926 par dikhta hai, 12014 par honest note ("pantry nahi hai — IRCTC eCatering se en-route station par"). Data na aaye to `null` + "provider se nahi aayi" (jhooth nahi).
-- **Class real train data ke according:** berth options `BERTH_BY_CLASS` se (CC me Window/Aisle, SL me Lower/Middle/Upper…), class code/fare/status chip me jo tha wahi.
+**Test:** `tests/round56-conversation-memory.test.ts` (3) — outgoing model request capture kar ke naapta hai: poori 12-trains list (pehla aur aakhri number dono) model ke paas gayi, "PICHHLA JAWAB" block + usool gaya, aur control (list hi na ho to block nahi).
 
-**3) "Chat ka lamba jawab padne me mushkil — thoda attractive banao"**
+**Bonus (R56b):** pick ka adequacy gate pehle sirf `best`-jaise shabdon par chhota jawab sweekar karta tha — "inme se 2nd wala kaunsi hai" jaise chunav par model ka sahi jawab bhi replace ho jaata tha. Ab gate usool par hai: chunav ka lafz ho to ranked chhota jawab (≤6 trains) theek, lafz na ho to data wala 1–3 trains; poora board dump khokhla. Live: *"Inme se 2nd wali train **12926 PASCHIM EXPRESS** hai. ASR → LDH, 30 Sep 2026, 3A · AVAILABLE 61 seats · ₹565"*.
 
-- Naya `src/components/ReplyText.tsx` — **sirf presentation** (msg.text waisa hi rehta hai): screenshot 3 wala ek-hi-line text (`* 11057 CSMT ASR EXPRESS – 3E AVAILABLE 44 seats ₹520, dep 12:55 * …`) ab **rows** me: train number + naam, class chip, AVL/RAC/WL badge (tone ke hisaab se rang), fare, time — aur window/route wali line upar **chip** me, aakhri sentence neeche tail me (kuch chhupta nahi, kuch invent nahi). Pipe wale SEAT rows (`"A | B | C"`) bhi rows ban jaate hain. Pattern match na ho to poora text pehle jaisa paragraph.
+## §9.49 — Round 57 (29 Sep 2026): jawab ka apna layout (table/bullet) + seat board se Connecting/Alternative page + leg-wise Book
 
-**Tests:** naye `tests/round20-chip-to-passenger.test.tsx` (7) · `tests/round20-passenger-form.test.tsx` (9) · `tests/round20-pantry-api.test.ts` (3) → kul **96 files / 986 tests PASS**; `tsc -p tsconfig.server.json` clean; client TS errors me koi naya error nahi (puraane exactly wahi 67).
+**User (Chrome screenshot: Google ka "shikanji vs jaljeera" table jawab):** *"Ek to na yeh layout ui sahi kro connecting trains ka and secondly automatically ui table form mein yan bullet form mein aaye and secondly available mein connecting ka option jo next page pe open ho and alternate trains ka options bhi dikhe and connecting trains mein na user ko booking ka option and alternate mein bhi and na zip nhi load ho rha workplace mein dubara do."* Scope: **UI-only** (data/AI/API ko chhua nahi).
 
-**Preview (single-source):** `/home/user/RailBook/previews/RailBook-round20-2026-09-25.html` — asli payload (`provas/asr-ldh-2026-09-26-board.json` + search times + live AI reply) se asli React components ka render + built CSS.
+**Kya bana:**
 
-### 9.12 Round-21 (25 Sep) — IRCTC autofill me food + dono checkbox + mobile/email, aur deploy
+1. **Chat jawab auto table (ya bullet) — jaise ChatGPT/Google deta hai.** `ReplyText` me naya `SeatCompareTable`: jab jawab me **2+ trains ki seat rows** hain to wahi rows (jo pehle hi text se parse hoti thi — kuch naya nahi banaya) table me: **Train · Class · Status · Fare · Dep**. Upar chhota **Table / Cards** toggle (default table). Row tap → usi train/class ka passenger form (`onBook(r, groupOf(r))`), footer hint "*row par tap = passenger form*". Bina-rows wale jawab bilkul pehle jaise.
+2. **Prose jawab bullets me.** `AnswerCard` me `rest` sentences ab heading + bullet list (`ac-bullets`), aur "Label: text" wale jumle me label **bold** — lamba deewar-jaisa paragraph nahi.
+3. **Seat board se next page.** `SeatListBlock` ke neeche do naye button: **Connecting trains · Leg 1 → Leg 2** aur **Alternative trains & dates** → `onOpenPage(page, from, to, date)`. Concierge `openPlanPage()` wahi route/date ka poora plan maangta hai (*"<from> se <to> <date> ka poora plan banao — connecting trains aur leg-wise seat bhi dikhao (<pax> passenger ke liye)"*), aur plan block **usi page** par khulta hai (`pendingPlanPageRef` + `consumePlanPage()` one-shot → JourneyOptions `initialPage`). Page ka data server ke asli plan se hi aata hai.
+4. **Connecting aur Alternative dono me booking.** `JourneyOptions` me `bookableOf(leg)` + `bookLeg()`: har connecting leg par **`Book Leg N · <class>`** (AVAILABLE/RAC = green, WL/N-A = amber) aur leg ke class chips par bhi **Book**; alternative/leg lists me bhi. Bina verified class (availability.classCode) koi button nahi — jhootha booking nahi. Tap par `onBookLeg` → `onBookClass` (ticket segment `ticketFrom/ticketUpto`, availability row, date) → wahi passenger form jo chips se khulta hai.
+5. **Layout saaf.** Leg cards ka spacing/hierarchy, leg number badge, boarding/deboarding + date per leg, layover line ("Change @ UMB · layover 33m"), Book button alag row me (`.jx-lrow-book` full-width).
 
-User ne maanga: *"passenger details ke saath food bhi autofill ho, 'Book only if confirm berths are allotted', 'Consider for auto up-gradation', aur mobile + email (agar user ne enter kiya ho) — iske baad deploy krdena."*
+**Bug fix (same round, testing me mila):** leg card `<button>` ke andar class-chip/Book ke `<button>` the — HTML me nested button invalid hai (browser hoist kar deta hai). Leg card ab `div role="button"` + `tabIndex` + Enter/Space handling → andar ke Book taps sahi jagah jaate hain (vitest me validateDOMNesting warning pehle aa rahi thi, ab nahi).
 
-**Payload (web → app/extension)** — `src/irctc/handoff.ts`
+**Test:** `tests/round57-chat-table-and-connect-book.test.tsx` (9) — table default (2+ rows) + toggle + row tap → 12926 booking callback, control (1 row = no table), bullets + bold label, seat board ke dono next-page callbacks (aur callback na ho to button nahi), connecting ke dono legs par Book + click ka payload (15098/LDH/3A/2026-09-30), aur availability ke bina Book nahi. Full suite **138 files / 1459 tests PASS**; `tsc -p tsconfig.server.json` clean.
 
-- Naya **V2** payload (`IrctcHandoffPayloadV2`): `version: 2`, `journey` (waisa hi), `passengers[{name, age, gender, berth, **food**, **bookOnlyIfConfirm?**, **autoUpgrade?**}]`, aur **`contact?{mobile?, email?}`**. Flags sirf `true` par hi payload me jaate hain (`false`/absent = site ka default waisa hi — hum kabhi uncheck nahi karte).
-- Food labels IRCTC ke apne option text se match karte hain: `VEG → "Veg"`, `NON_VEG → "Non Veg"`, `NO_FOOD → "No Food"`; khaali chhoda to `""` → IRCTC ka default (`Catering Service Option`).
-- Contact validation: mobile 10 digit aur email shape — **galat ho to handoff reject** (`ok: false` + error), chupke drop nahi hota.
-- **Backward compatibility (jaan-boojh kar):** V2 alag key `railbookAutofillPayloadV2` me likha jaata hai; **purani key `railbookAutofillTestPayload` aur `postMessage` dono me exact purana V1 shape** hi jaata hai. Isliye purane app/extension (v1.4.3 tak) par kuch nahi tootta — unhe sirf food/contact/checkbox nazar nahi aate.
-- Review screen ka handoff card ab contact bhi bhejta hai (`ReviewStatus.tsx` → `IrctcHandoff ... contact={state.contact}`), aur summary me food/flags/contact ki lines dikhti hain.
+**Deploy:** `c2573f2` → prod `/api/version` MATCH (startedAt 2026-09-29T16:30:14.944Z). Preview (real data: ASR→LDH live board + LDH→JAT poora plan): `previews/RailBook-round57-2026-09-29.html`.
 
-**Android engine (autofill sach me bharta hai)** — `assets/autofill/fieldmap.js` + `irctc-passenger.js`
+## §9.50 — Round 58 (29 Sep 2026): "results page blank" — ek undefined naam poora app gira deta tha (+ zip halka)
 
-- `fieldmap.js`: allowlists me `food` + `bookOnlyIfConfirm`/`autoUpgrade` + page-level `contact.mobile`/`email`; `FOOD_MAP` (site option TEXT se — value guess nahi); `FLAG_RULES` + `flagTargets`/`fillFlags` (checkbox `.checked = true` sirf true par, aur **kabhi uncheck nahi**); `expectedPaths`/`fillFields` me naye paths; `version === 2 ? 2 : 1` passthrough.
-- `irctc-passenger.js`: `passengerFoodChoice` select ke liye **"No Food" ab mapped** (`FOOD_UNMAPPED` se nikaal diya); naye `contactAnchor` (page-level `mobile|phone` / `e-?mail`, visible, non-sensitive, passenger rows ke **baahar**, exactly-1 warna NOT FOUND) aur `flagAnchors` (checkbox label/formcontrolname signal, row-scoped). `MainActivity.kt` ab pehle V2 key padhta hai, phir purani.
-- **Round-21b fix (real-site shapes):** IRCTC par ye checkbox kabhi passenger row ke andar, kabhi uske neeche ki **apni row/section** me hote hain → naya `pickFlagTarget()`: pehle exact row match, warna shared anchor (exactly 1 = sabke liye ek hi control) ya DOM-order match (anchors ki ginti == passengers ki ginti); ambiguous par **NOT FOUND** (galat passenger ko tick nahi karte). Ye bug preview banate waqt pakda gaya (2 notFound → 0).
+**User (screenshots 22:28/22:29):** *"Yeh pehle ese search krta hai fir results page blank aa rha and secondly zip workspace mein nhi load ho rha plz …give me zip workspace bhi over load hai"*
 
-**Verification**
-
-- `tests/irctc-handoff.test.tsx` **13/13 PASS** (allowlists, food labels, flags only-true + legacy me kabhi nahi, contact valid-only + invalid error, summary lines); full suite **96 files / 992 tests PASS**; server `tsc` clean; client TS baseline 67 (koi naya nahi).
-- Naya **asli-engine check**: `tools/round21-autofill-engine-check.mjs` — app ke wahi do assets jsdom me ek IRCTC-jaisa page par chalaata hai: **25/25 PASS** (V2 validate, V1 untouched, galat mobile reject, unknown key reject, food Veg/No Food, dono checkbox, blank = untouched, mobile/email, shared-pair shape, per-row shape, sensitive guard, generic `data-rb` path).
-- **Preview (single-source):** `/home/user/RailBook/previews/RailBook-round21-2026-09-25.html` — usi asli engine ka result (14 filled / 0 notFound), payload badal ke live dobara chala sakte ho.
-- **Deploy:** commit `93dc921` → Render `dep-daqvdufavr4c73f6ek8g` **LIVE 2026-09-25T04:23:11Z**; `/api/version` = `93dc921`; live bundle me `railbookAutofillPayloadV2`, `railbookAutofillTestPayload`, `Book only if confirm berths`, `auto up-gradation`, `Food choice`, `No Food` sab maujood.
-- **APK v1.4.4** (`RailBook-v1.4.4-release.apk`, versionCode 27) — assets badle hain isliye device par naya APK zaroori hai; purana v1.4.3 APK sirf food/contact/checkbox ke bina autofill karta rahega (kuch tootta nahi).
-
-### 9.13 Round-21b/21c (25 Sep) — "jo real provider kehta hai wahi dikhao" + chat se Seat Finder UI hataya
-
-User (2 screenshots): RailBook ke passenger form me **Food choice** dikh raha tha, par IRCTC ke booking page par wo option hi nahi tha —
-*"es train mein food choice hai hi nahi to fir kyu dikha rha? kuch bhi fake mat rakho jo real provider se aaye wahi dikhao, aur wo map bhi ho RailBook se IRCTC pe."*
-Saath hi: *"seat finder aur direct trains ab same hi show kar rahe hain to seat finder ka UI sirf chat section se hata do — SeatFinder.ts, filters, AI using seat finder yeh sab delete nahi karna."*
-
-**1) Catering: per-source sach (koi merged guess nahi)**
-
-- `server/railway/webscrape.ts`: `ScrapedTrainFacts` me naya **`pantrySources {erail, confirmtkt}`** (additive; erail ka "Pantry is (not) available" aur confirmtkt ka `HasPantry` alag-alag rakhe jaate hain). Merged `pantry` waisa hi rehta hai (purane callers safe).
-- `GET /api/trains/:number/pantry` ab deta hai: `sources`, **`conflict`**, **`premiumCatering`** (Rajdhani/Shatabdi/Duronto/Vande Bharat/Tejas — catering fare me included; "Jan Shatabdi" ko premium nahi maana jaata), **`foodChoiceExpected`**, `evidence[]` (insaani zubaan me) aur honest `note`. Sab kuch wahi maujooda `scrapeTrainFactsWeb` se — koi naya source nahi.
-- **Live asli misaal:** `12716` → erail "available", confirmtkt `HasPantry=false` → **conflict**, `foodChoiceExpected=false` (aapka case!) · `12926` wahi · `12014` Shatabdi → premium hone se `true` (erail na kehne par bhi, kyunki catering fare me hai) · `22691` Rajdhani → `true` · `12497` → dono na, `false`.
-- `src/views/Passengers.tsx`: **Food choice dropdown sirf `foodChoiceExpected === true` par**; conflict par amber honest line (dono sources ke saath), "nahi mili" par eCatering line, data na aaye par "provider se nahi aayi" — **guess kabhi nahi**.
-- Android app panel (`railbook-webview-bridge.js`): agar IRCTC ke page par food field hi nahi mila to ab saaf line aati hai — *"IRCTC ke is page par food/catering option nahi mila — is train/class me IRCTC ne nahi diya, isliye form ki Food choice apply nahi hui"* (chup-chaap skip nahi).
-
-**2) Chat section se Seat Finder UI hataya (baaki sab intact)**
-
-- `src/views/Concierge.tsx`: `<SeatFinder>` ke dono mounts (plan card + train table) aur uska import hata diya; `TrainTableView` ab sirf table deta hai. **Delete kuch nahi hua** — `src/components/SeatFinder.tsx`, `src/seatfinder.ts` (intent + `departureInWindow` filter), `server/agent/seatFinderTool.ts`, `server/agent/seatFilter.ts` aur AI ka seat intent waise hi hain; plan card ka time-window filter (jo Seat Intent se aata hai) aur class chips (shared `TrainClassBlock`) bilkul waisa hi chalta hai.
-
-**Tests / verify:** naye `tests/round21b-pantry-sources.test.ts` (6) · `tests/round21b-food-gate.test.tsx` (4) · `tests/round21c-chat-without-seatfinder.test.ts` (4); `tests/round20-passenger-form.test.tsx` naye payload shape par update → kul **99 files / 1006 tests PASS**; server `tsc` clean; client TS errors HEAD ke barabar (68, koi naya nahi).
-**Live:** commit `99a0c9d` → Render `dep-dar1ucc9v7es7396tt80` **LIVE 2026-09-25T07:14:55Z**; `/api/version` = `99a0c9d`; pantry curls (5 trains) upar wale natije dete hain.
-**Preview (single-source):** `/home/user/RailBook/previews/RailBook-round21b-2026-09-25.html` — asli components + built CSS + **live** payloads (plan `provas/asr-ndls-2026-09-26-plan.json`, pantry live).
-**APK v1.4.5** (versionCode 28) — bridge ki nayi honest line ke liye.
-
-### 9.14 Round-22 (26 Sep) — seat-answer padhne layak, direct card ke shuru me filters, aur IRCTC overlay 45s
-
-User ke teen points (2 screenshots + 1 filter screenshot):
-
-**1) "Pehle screenshot mein ese simple answer padhna bada mushkil hai — thoda attractive banao (AI seat finder se related answer ho to)"**
-
-- `src/components/ReplyText.tsx`: parser me **em-dash (—)** separator aur "… departure" wala suffix add hua — screenshot ka asli text (`* 12484 ASR TVCN SF EXP — SL — AVAILABLE 102 seats — ₹180 — 05:55 departure`) ab **rows** me tootta hai. Purane `–` / `-` / `|` formats waise hi chalte hain.
-- Headline ab chips me baant-ti hai (route · window+class) aur rows ke upar ek **honest summary line** (`💺 2 me seat (102, 42) · fare ₹150–₹180`) — jo **sirf usi text ke numbers** se banti hai, kuch invent nahi. Row na bane to jawab pehle jaisa paragraph hi rehta hai (kuch chhupta nahi).
-
-**2) Filter screenshot: "yeh filter direct train ke card mein starting mein add kro"**
-
-- Naya shared `src/components/SeatFilterBar.tsx` — **wahi chips** jo Seat Finder card me thi (✅ Available · 🚆 Sabhi trains · Sab class · 1A/2A/3A/3E/SL/CC/2S/EC · ❄️ AC · Time · ⚡ Sabse jaldi · 💰 Sabse sasta). SeatFinder.tsx aur JourneyOptions.tsx dono yahi ek component use karte hain (dono jagah shakal bilkul same).
-- **Direct trains card ke shuru me** chips row lagti hai; filter **sirf direct list** par chalta hai — connecting / alternatives / alternative dates / planner ka data waisa hi rehta hai (user ka purana rule: "card filter karo lekin connecting/alternatives mein change na aayein"). Class/AC filter par har train ke block me sirf wahi class chip dikhti hai; "Sabse sasta" filtered class ke fare par chalta hai (jo dikh raha hai wahi compare hota hai).
-- Purana window-toggle (19d) ka state hata diya — window ab **Time chip** se hi control hota hai (`Time: Sab (poori list)` = window hatao), aur chips ke neeche ek honest filter line + **Clear** button aata hai. Tests update: `tests/round19d-card-window.test.tsx`.
-
-**3) "Second screenshot: sirf likho redirecting to irctc and time; 30 sec ke baad bhi extra 30 sec leta — countdown 45 sec ka karo"**
-
-- Android app: `strings.xml` ka `prewarm_title` ab **"Redirecting to IRCTC…"**; step-by-step lines wala TextView hidden (progress status bar me). `MainActivity.kt`: **ek hi 45s countdown** (pehle 30s + extra 30s phase tha) aur uske baad seedha honest reveal — koi extra wait nahi; status line: "IRCTC login page 45s me nahi aaya — jo page hai wahan se aap continue kar sakte hain (login aap karein)."
-
-**Tests / verify:** naye `tests/round22-seat-reply-rows.test.tsx` (4) · `tests/round22-direct-card-filters.test.tsx` (8) → kul **101 files / 1018 tests PASS**; server `tsc` clean; client TS 67 (HEAD ke barabar — ek puraana test-side error bhi fix hua). **Preview:** `/home/user/RailBook/previews/RailBook-round22-2026-09-26.html` (asli components + built CSS + live plan payload; filter wale card chips par asli click karke capture kiye gaye states).
-**APK v1.4.6** (versionCode 29) — overlay change ke liye.
-
-### 9.15 Round-23 (26 Sep) — Available me sirf AVL/RAC, review page par sirf Continue to IRCTC, aur app ka asli version label
-
-**1) "Screenshot abhi bhi 30 sec dikha raha hai"**
-
-- Wajah **purana APK** thi: device par jo build chal raha tha usme purani strings thi. v1.4.6 me `prewarm_title` = "Redirecting to IRCTC…", 45s countdown aur step-lines hidden ho chuki hain (dex me `45s khatam…` hai, `30s khatam` nahi — v1.4.5 me ulta).
-- Asli confusion ki jadh bhi band ki: header ka version ek **hardcoded string** tha (`v1.2.8`) — isliye device par kaun sa build hai pata hi nahi chalta tha. Ab `MainActivity.appVersionLabel()` **packageManager se asli `versionName (versionCode)`** dikhata hai (v1.4.7 se aage), aur default string neutral ("RailBook") kar di.
-
-**2) "Available selection pe WL wali class bhi show hoti hai, jabki sirf available ya RAC show honi chahiye"**
-
-- `src/components/JourneyOptions.tsx`: ✅ Available mode me ab **sirf AVL/RAC class chips** dikhti hain (WL/N-A chips chhup jaati hain), aur jis train me ek bhi AVL/RAC class nahi wo list se hat jati hai. 🚆 Sabhi trains par purana rule — **har train ki saari classes (WL/N-A halki)** — waisa hi rehta hai.
-- Seat Finder card (jo abhi chat me mount nahi hota, code intact hai) apne purane "saari classes halki" rule par hi hai — bolo to wahan bhi same kar dunga.
-
-**3) "Review page par bas Continue to IRCTC → andar sab hata do"**
-
-- `src/views/ReviewStatus.tsx` (`FareReview`): ab sirf **IrctcHandoff card** hai. Hata diya — booking summary (Train/Date/From→To/Class/Seat/Passengers/Base fare/Service fee/Total), wallet card, "Nothing is confirmed…" note, aur neeche ka **sticky CTA (Confirm Booking / Add Money)**. Page title "Continue to IRCTC".
-- `src/components/IrctcHandoff.tsx`: **"Copy journey + passenger summary" button**, **copy-ready summary block** aur **technical payload preview** UI se hata diye (user: "user ko nahi show hona chahiye"). Click par summary ab bhi chupke clipboard par jaati hai (best-effort) aur ek chhoti honest line rehti hai ("Kuch bhi auto-submit nahi hota · login/OTP/CAPTCHA/payment RailBook ke paas nahi aate"). Payload banana/store karna waisa hi hai (tests se verify).
-- RailBook ke andar ka booking flow (Passengers → confirm) **waise hi maujood hai** — sirf review screen se wo buttons gaye (user ka flow: journey RailBook me, booking IRCTC par).
-
-**Tests:** naya `tests/round23-avail-chips-and-review.test.tsx` (3) · `tests/irctc-handoff.test.tsx` update (preview/copy UI hatne ke baad payload verify) → kul **102 files / 1021 tests PASS**; server `tsc` clean; client TS 67 (baseline). **APK v1.4.7** (versionCode 30) — dynamic version label ke saath.
-
-### 9.16 Round-24 (26 Sep) — "Review fare" → "Review journey", review page par journey summary + Continue, aur blank-screen fix
-
-**1) "Review fare ki jagah review journey aana chahiye"**
-
-- `src/views/Passengers.tsx`: sticky CTA label ab **"Review journey"**, voice prompt line bhi — "SAB READY — **Review journey** dabaiye."
-- `src/voice/speakGuide.ts`: bolne wali line bhi "Sab details fill ho gayi hain. **Review journey** dabaiye."
-- (Aage ka screen bhi "Review journey" title ke saath khulta hai.)
-
-**2) "Uski page pe journey summary — jo bhi user ne details fill ki hongi — show ho aur uske NEECHE Continue to IRCTC; uske elawa us page pe kuch mat rakhna"**
-
-- `src/views/ReviewStatus.tsx` (`FareReview`) me **journey receipt** wapas aaya (user ke screenshot-2 wale rows, wahi `.summary`/`.row` markup): **Train · Date · From → To · Class · Seat · Passengers · Base fare · Service fee · Total**.
-- Uske neeche ek doosra receipt card: **har passenger ki poori detail** (naam · umar · gender · berth · khaana (jab bhara ho) · ID proof (jab bhara ho) · "book only if confirm berth" / "auto up-gradation" (jab tick ho)) + **Mobile · Email · WhatsApp updates**. Data sirf wahi jo user ne bhara — kuch naya/invent nahi. Fare na aaya ho to "Fare unavailable" (guess nahi).
-- DOM order: receipt pehle, **Continue to IRCTC uske neeche** — aur page par uske elawa kuch nahi: wallet, sticky "Confirm Booking", copy summary, purana "Nothing is confirmed…" note aur handoff card ka heading/paragraph — sab nahi.
-- `src/components/IrctcHandoff.tsx`: card ab **sirf button** hai (koi heading/para/note line nahi). Honest baat button ke `title` par + click ke baad ke status message me (wahi pehle wali line: auto-submit nahi hota, login/OTP/CAPTCHA/payment user ke paas).
-
-**3) "Passenger details fill karne ke baad kaafi scroll down karna padta + page (bas background) dikh raha tha"**
-
-- Root-cause check (live site ko phone-size Chromium me chala kar + device screenshot ke pixel analysis): us screenshot me passenger page ka **content hi khaali** tha — `passengers` list khaali hone par page ke beech me kuch render hi nahi hota, par prompt "SAB READY" aur CTA enabled dikhte the.
-- Fix: `Passengers.tsx` me do guards — (a) list khaali mile to **apne aap ek blank passenger card** ban jaata hai, (b) screen khulte hi scroller **top** par aur `resize`/`visualViewport` (keyboard/IME) ke baad scroll ko content ke andar **clamp** kiya jaata hai — isliye keyboard band hone ke baad page khaali hisse par atka hua nahi dikhta.
-- Purane Android WebView ke liye CSS fallbacks: `min-height:100vh` pehle, phir `100dvh` (`.app`, `.concierge`), sheets me `88vh/92vh` pehle, aur `.overlay-screen` / `.jx-page` / `.vs-scrim` me `inset:0` se pehle explicit `top/right/bottom/left:0` (`inset` sirf Chrome 87+ me hota hai).
-- Review page ka content ab lamba hai isliye "verify karne ke liye" scroll ki zarurat nahi — summary page par hi milti hai; CTA dock me hamesha screen par rehta hai.
-
-**Tests:** naya `tests/round24-review-journey.test.tsx` (8 — receipt rows, passenger/contact lines, DOM order summary→button, "uske elawa kuch nahi", khaali list ka guard, scroll reset, CSS fallback) · `tests/round23-avail-chips-and-review.test.tsx` update (Round-24 ke saath align) · `tests/irctc-handoff.test.tsx` update (note line hata — title par) → kul **103 files / 1029 tests PASS**.
-**Tools:** `tools/probe-device-scroll.mjs` (live site ko phone-size Chromium me khol kar layout/scroll measure karta hai — `npm i -D playwright` chahiye) · `tools/build-round24-preview.mjs` → preview `RailBook-round24-2026-09-26.html`.
-**APK:** is round me Android code change nahi — app wahi v1.4.7 WebView se live site load karta hai, isliye naya APK zaroori nahi.
-
-### 9.17 Round-25 (26 Sep) — "baki trains seat finder card mein kyu le jaata?" → saari trains isi jawab me
-
-**User (screenshot 2, aakhri line):** "+5 aur SL available trains Seat Finder card mein hain. ⚙️ find seats"
-
-**Wajah (root cause):**
-
-- Ye line AI ne apne aap nahi banayi — wo **server ki summary line se copy** hui thi: `server/agent/seatFilter.ts` ke `seatSummaryLine()` me `· +N aur (Seat Finder card me)` likha tha.
-- Wo pointer **purane rounds me sach tha** (tab chat ke andar Seat Finder card mount hota tha). Round-21c me card chat se hata diya gaya (user: "seat finder aur direct trains ab same hi hain") — par line aise hi reh gayi, isliye (a) AI wahi baat likhta raha, aur (b) **baki trains kahin dikhti hi nahi thi**.
-
-**Fix (teen layer, koi naya endpoint/AI-logic change nahi):**
-
-1. `server/agent/seatFilter.ts` — `seatSummaryLine()` ab **saari** seat rows isi line me likhti hai (`SEAT_LINE_MAX = 12`; bahut zyada hon to honest tail `+N aur bhi hain`, koi card pointer nahi). WL wali branch bhi 12 tak + honest tail. `seatFilterFor()` ka default `maxRows` 8 → 12 (wahi board data, koi extra call nahi).
-2. `server/agent/seatFilter.ts` — naya `missingSeatLines(replyText, rows)`: jo seat-wali trains AI ke jawab me **nahi** aayi, unki lines bana deta hai (format wahi jo chat ka `ReplyText` rows me todta hai: `* 19611 All ASR EXP — SL — AVAILABLE 174 seats — ₹150 — 06:25 departure`). `server/app.ts` ke turn assembly me ye lines **usi jawab me** jod di jaati hain (sirf jab AI ka apna jawab ho aur plan card na ho — AI fail hone par wahi compact `💺` line dikhti rehti hai, jisme saari trains pehle se hain). Kuch invent nahi — sirf live board rows.
-3. Prompt/tool honesty: `agentic.ts` SEAT RULE me saaf likha — "SAARI seat wali trains ki lines likho (top 3-5 nahi) … 'baaki trains kisi card/Seat Finder me hain' jaisi baat kabhi mat likho, chat me aisa koi card nahi dikhta"; `seatFinderTool.ts` ki summary me bhi wahi rule + SEAT rows 8 → 12.
-4. Client safety net: naya `src/chatText.ts` → `stripSeatCardPointer()`; `Concierge.tsx` assistant text render se pehle isse guzarta hai, isliye kabhi model phir bhi "Seat Finder card" likhe to **screen par woh jhoothi baat nahi jaati** (baaki text jaisa tha waisa rehta hai — kuch chhupta nahi).
-
-**Live proof (deploy `fe9f372` ke baad, asli site par):**
-
-- `/api/agent` par wahi screenshot wala sawaal ("Ludhiana se Amritsar 27 Sep SL class me seat wali trains batao") → jawab me **saari 10 seat-wali trains** (19611 AVL 174 … 15707 AVL 1) + `💺 SL me seat wali 10 trains … (LDH → ASR · live board)`; text me **"Seat Finder card" ka zikr nahi**.
-- Asli browser (Pixel-size Chromium, live site) par wahi sawaal → chat me **10 rows** (19611, 14615, 14631, 14663, 13005, 12903, 14653, 20807, 11057, 15707), summary "💺 10 me seat (174, 50, 26, 22, 7, 5, 4, 4, 3, 1) · fare ₹150–₹180", aur aakhri line par koi jhootha pointer nahi. Screenshots: `previews/round25-live-seat-answer-top.png` / `-bottom.png` (tool: `tools/probe-live-seat-answer.mjs`).
-- Round-25b refinement (live check me pakda gaya): pehle WL/N-A rows bhi jawab me jud rahi thi (18 lines) — ab sirf **jo query ne maanga** wahi (seat rows). Tabhi jodi gayi rows 10, WL alag se nahi.
-
-**Tests:** naya `tests/round25-seat-answer-all-trains.test.tsx` (7 — summary line saari rows, honest tail, `missingSeatLines`, ReplyText me lines → rows, client strip, aur **turn-level** `/api/agent` assembly: AI ne 1 train likhi → baaki 2 ki lines judi, duplicate nahi, koi card pointer nahi; AI fail → sirf compact line) → kul **104 files / 1036 tests PASS**; server `tsc` clean; client TS 67 (baseline). **Preview:** `RailBook-round25-2026-09-26.html` (pehle/ab, asli ReplyText + asli server helpers se render). **Builder:** `tools/build-round25-preview.mjs`.
-**APK:** Android change nahi (WebView live site load karta hai) — v1.4.7 hi current.
-
-### 9.18 Round-26 (26 Sep) — "WL trains bhi dikhao" (sirf-available filter sirf maangne par) + "10 trains par 9 kyu"
-
-**User (screenshot):** "trains total 10 hai lekin mere ko 9 show kar rhi" + "SL ho ya koi bhi class, usmein sirf available mat show karo — W/L trains bhi show karo kyunki user ne specifically nahi bola ki available SL dikhao".
-
-**1) Count mismatch (10 → 9)**
-
-- Wajah: AI aksar **pehli train ko hi intro line me** likh deta hai — "27 Sep 2026, SL class, 1 passenger ke liye seat available wali trains: 19611 All ASR EXP — SL — AVAILABLE 174 seats — ₹150". `ReplyText` ka label-match (`^([^:]{2,40}):`) sirf 40 akshar tak tha, isliye wo poori line **head** me chali jaati thi aur us row ko rows me nahi ginnti thi → summary "9 me seat" (jabki 10 trains).
-- Fix: `src/components/ReplyText.tsx` me label limit **140 akshar** — ab wo row alag row hai, count match karta hai. Saath me summary line ab **total + seat/WL ka farq** batati hai: `💺 14 trains: 10 me seat (174, 107, …) · 4 WL/N-A · fare ₹150–₹180` (pehle sirf "N me seat").
-- Ek aur case bhi cover hua: row ke baad usi line par tail sentence ("… ₹150 Ye 10 trains SL me abhi available hain.") — row ginn me aati hai, sentence tail me chali jaati hai (kuch chhupta nahi).
-
-**2) Default me WL/N-A bhi (filter sirf jab user khud maange)**
-
-- `server/understand/seatIntent.ts`: naya `EXPLICIT_AVAILABLE_WORDS` (`available|availability|avl|vacant|khali|khaali`, Hindi उपलब्ध/खाली) + `confirmed` — **sirf tabhi** `onlyAvailable = true`. Warna false (default). Pehle har seat-sawaal par true ho jaata tha — isi wajah se WL trains gayab thi.
-- `server/agent/seatFilter.ts` → `seatSummaryLine()` me **all-mode branch**: ek hi line me saari trains (pehle AVL/RAC, phir WL/N-A) + saaf count — `💺 SL me 14 trains — 10 me seat (AVL/RAC), 4 me WL/N-A: … · +N aur bhi hain. (LDH → ASR · live board)`. Rows ki cap `SEAT_LINE_MAX = 12` (aage honest tail), `maxRows` default bhi 12.
-- `server/app.ts`: `seatOnlyAvailable = slots.onlyAvailable` (default false) — AI ke jawab me chhoot gayi trains ki lines tab **AVL/RAC + WL/N-A dono** se banती hain.
-- `server/agent/seatFinderTool.ts` + `autoTools.ts` + `toolSpecs.ts`: `only_available` ka default ab **false** (WL bhi) — true sirf jab user ne khud available/confirmed maanga ho. Prompt (`agentic.ts` SEAT RULE, `autonomous.ts` 8b) me bhi wahi rule likha.
-
-**Live proof (deploy `630c6f9`):**
-
-- Asli sawaal "Ludhiana se Amritsar 27 Sep SL class me seat wali trains batao" (bina "available" shabd) → jawab me **18 trains**: 10 AVL/RAC + 8 WL/N-A, aur line `💺 SL me 18 trains — 10 me seat (AVL/RAC), 8 me WL/N-A: …`. Browser (Pixel-size) par bhi: **18 rows**, summary `💺 18 trains: 10 me seat (174, 107, 50, 22, 5, 4, 4, 3, 2, 1) · 8 WL/N-A · fare ₹150–₹180`, koi card pointer nahi.
-- Filter tabhi lagta hai jab user khud maange: "sirf available SL trains dikhao" → **sirf 10 available** (koi WL/N-A row nahi), line "Ye 10 trains SL me abhi available hain".
-
-**Tests:** naya `tests/round26-seat-all-classes.test.tsx` (7 — intent default vs explicit, all-mode summary line, purana filtered branch, intro-line row count 10/10, trailing-sentence row, WL ke saath summary) + `tests/round25-seat-answer-all-trains.test.tsx` update (WL row ab usi jawab me aati hai) → kul **105 files / 1043 tests PASS**; server `tsc` clean; client TS 67 (baseline).
-**Preview:** `RailBook-round26-2026-09-26.html` (pehle vs ab + live screenshots) · builder `tools/build-round26-preview.mjs`.
-**APK:** Android change nahi (WebView live site) — v1.4.7 hi current.
-
-### 9.19 Round-27 (26 Sep) — "ek hi class dikha raha" (har train ki SAARI classes) + tap → passenger form + native mic (WebView me Web Speech nahi hota)
-
-**User (2 screenshots + 4 points):**
-
-1. "yeh ek hi class dikha rha, jabhi ki aur bhi classes mein seat available hai same train mein — i check from confirmtkt" → jawab/block me har train ki **saari** classes (AVL/RAC/WL) ek saath.
-2. "baki ki trains live board par hai aa raha" → live board ki saari trains **usi jawab/block** me (koi jhootha pointer nahi).
-3. "agar yahan koi class pe tap kare to user ko fir sidha passenger form pe laajao booking ke liye" → chat ke seat chips tappable.
-4. "mic working nahi hai" → app ke WebView me mic chale.
-
-**1) Per-train grouping (server)**
-
-- `server/agent/seatFilter.ts`: naye helpers `groupRowsByTrain()` (train-wise groups, order barqarar), `trainClassesText()` (`CC AVL 444 ₹675 · 3A AVL 71 ₹520 · EC AVL 23 ₹1,015`) aur `statusText()`. `seatSummaryLine()` ke **dono** branch (seat-mode aur all-mode) ab per-train likhte hain — train ke andar ` · `, trains ke beech ` | `, aage `+N trains aur bhi hain` (cap `SEAT_LINE_MAX = 12` **trains** par).
-- `missingSeatLines()` bhi per-train: `* 12013 AMRITSAR SHTABDI — CC AVL 444 ₹675 · 3A AVL 71 ₹520 — 06:10 departure`.
-- **Cap fix (live probe me pakda gaya):** `SEAT_LINE_MAX` pehle `rows` (train × class) par lagta tha — isliye 12013 ki EC / 15707 ki 3E-3A-SL / 20807 ki 3E-2A-SL payload se kat jaati thi (text me dikhti thi, block/khaan me nahi). Ab `capRowsByTrain(rows, maxTrains)` se cap **trains** par — 12 trains aur unki saari classes (test: 12 × 3 = 36 rows).
-
-**2) Chat ka tappable block (client)**
-
-- `src/ai/orchestrate.ts`: naya `Block` type `seatlist`; `src/api.ts`: `AgentResponse.seatFilter`.
-- `src/views/Concierge.tsx`: agent path me `agentRes.seatFilter` (rows + wlRows) se `seatlist` block; naya `SeatListBlock` — train-wise `TrainClassBlock` groups (wahi component jo Seat Finder/direct card me lagta hai), header `Seat wali trains (live board) · N trains · M me seat · confirmtkt`, har class chip **tappable** → `openBookingFromSeatRow()` → usi train/class ka **passenger form** (wahi `bookingFromSeatRow` flow). Board rows me schedule time nahi hota, isliye time label **"🕑 live board"** (jhootha time nahi).
-- `src/chatText.ts`: `seatListGroups()` (pure grouping helper, testable) + `stripDuplicatedSeatRows()` — block hone par text se row-list lines hat jaati hain (dense 💺 summary line, AI ki apni `* 12013 … · CC · AVAILABLE 418 seats · ₹675` bullet rows, separator `·`/`—`/`|` kuch bhi ho) — **intro/closing prose bachi rehti hai**.
-- `src/components/ReplyText.tsx`: `AVL`/`AVAIL` status bhi row banta hai (pehle compact jawab plain text ban jaata tha) + ek line me ek train ki **saari classes** → alag-alag rows (`extraClassRows`).
-
-**3) Native mic (Android WebView me Web Speech API hota hi nahi)**
-
-- Naya `app/src/main/java/com/railbook/assist/VoiceBridge.kt` — `SpeechRecognizer` (hi-IN, partial results), `@JavascriptInterface` `RailBookVoice.isAvailable()/start(lang)/stop()/abort()`, aur `window.__railbookVoice.dispatch({type:start|partial|final|error|end, text, code})`; Android error names → Web Speech error names.
-- `MainActivity.kt`: `wv.addJavascriptInterface(VoiceBridge(this, wv), "RailBookVoice")` + `onDestroy` me cleanup; `AndroidManifest.xml` me `<queries><intent android:action="android.speech.RecognitionService">` (Android 11+ package visibility).
-- Client: naya `src/voice/nativeSpeech.ts` (bridge → Web Speech jaisa adapter: `onstart/onresult/onend/onerror`), `speech.ts` me `isSpeechSupported()`/`isSecureVoiceContext()`/`createRecognizer()` native-aware, `useVoiceInput.ts` native bridge hone par `getUserMedia` call nahi karta (WebView me wahi atak jaata tha).
-- APK **v1.4.8** (vc 31, `1.4.8-native-mic-all-classes`) isi round me bana.
-
-**Live proof (deploy `6e336cf` → `f16b799` → `7dd4c18` → `76d53c3`, sab `f16b799+` par verify):**
-
-- `/api/agent` "Kya kal ke liye koi available seat hai ludhiana se amritsar ke liye?" (LDH→ASR, 27 Sep, 1 pax) → `seatFilter: rows 30, wlRows 32, trainsSeen 25, source web_confirmtkt`; line `12013 CC AVL 424 ₹675 · EC AVL 23 ₹1,015 | 19611 SL AVL 174 ₹150 · 3A AVL 71 ₹520 · 3E AVL 15 ₹520 · 2A AVL 14 ₹725 | 20807 3A 62 · 3E 8 · 2A 6 · SL 4 | … | +6 trains aur bhi hain`.
-- Browser (Pixel-size, `tools/probe-live-r27.mjs`): **20 groups** — 12013 (CC+EC), 19611 (4 classes), 22487 (CC+EC), 14631 (SL + 3A WL 18), 20807 (4), 14615 (SL + 3E + 3A WL + "2A status nahi mila")… har train ki **saari** classes ek block me; text me duplicate row-list nahi.
-- **Chip tap → `Passengers` screen** (screenshot: 12013 AMRITSAR SHTABDI · LDH → ASR · 2026-09-27 · ₹675/passenger · passenger form) — exactly user ka point (c).
-- **Mic (native path):** probe me `window.RailBookVoice` bridge inject karke mic tap → `native calls: start:hi-IN`, koi "Mic band" message nahi, page errors `[]`; transcript sheet me aaya aur "OK ✓ Bhejo" par sawaal chala gaya.
-
-**Tests:** naya `tests/round27-seat-classes-and-mic.test.tsx` (12 — per-train grouping/text, summary line, `missingSeatLines` per-train, `capRowsByTrain` (12×3=36), `seatListGroups`, chips tap callback, text dedupe, ReplyText multi-class rows, Concierge wiring, native bridge adapter (browser vs app), Kotlin/manifest presence) + `tests/round25-seat-answer-all-trains.test.tsx` format update → kul **106 files / 1055 tests PASS**; server `tsc` clean; client TS 67 (baseline); build `dist/assets/index-CJnycmVY.js` 471.63 kB.
-**Preview:** `RailBook-round27-2026-09-26.html` (pehle vs ab block, server summary lines, live screenshots) · builder `tools/build-round27-preview.mjs` · probe `tools/probe-live-r27.mjs`.
-**APK:** v1.4.8 (`RailBook-v1.4.8-release.apk`, vc 31) — native mic ke liye zaroori.
-
-### 9.20 Round-28 (26 Sep) — black handoff panel + blue header user ko nahi (backend me) · passenger dock hamesha screen par · 45s → 30s + "details khud bhar jaayengi"
-
-**User (3 screenshots + 4 points):**
-
-1. "Ist screenshot mein yeh black wala handoff details user ko nhi dikhni chahiye, backend pe rakho" (IRCTC page ka bada black diagnostic box).
-2. "Second screenshot mein yeh jo upar blue colour mein header hai wo user ko na dikhe, backend pe rakho" (Android top bar).
-3. "passenger form mein na kaafi neeche scroll down krna padhta hai to user ko pata chlta hai review journey button bhi hai uski ek baar check kro page ka ui sahi karo".
-4. "redirect to irctc time 45 sec se 30 sec krdo and sath mein user ko inform kro ki apki details automatically fill ho jayengi irctc pe, dubara dalne ki zarort nhi hai".
-
-**1) Black handoff panel hataya (Android bridge)**
-
-- `app/src/main/assets/autofill/railbook-webview-bridge.js`: purana `banner()` bada fixed panel (`RailBook app · assisted fill`, `Detected (…)`, `Filled (…)`, read-only note) render karta tha. Ab uski jagah `postNotice()` + `pill()`: page par **ek line wali pill** (rounded, `pointer-events:none`, **6s me khud hide**; STOP/reject wale serious message 12s ya `sticky`), aur wahi text **native** ko `ui-notice` event + `fill-result` ke saare diagnostics (`filledCount/failed/notFound/siteChanges/refusedClicks/paxFilled`) ke saath jaata hai (status bar + log + Toast). Kuch chhupta nahi — sirf screen par nahi dikhta.
-- `MainActivity.kt`: naya `setStatus(msg, toast)` + `"ui-notice" ->` branch; fill-result par `paxFilled` hone par Toast: "✅ Aapki details IRCTC par bhar di gayi hain — yahan dobara kuch daalne ki zaroorat nahi. Sirf login/OTP/payment aap karenge."
-- Refused-click / unexpected-change STOP par page par ab sirf: "⚠️ Autofill ruk gaya — RailBook me dobara Continue dabaiye" (detail `console.warn` + native me).
-
-**2) Blue header screen se gayab (logic zinda)**
-
-- `activity_main.xml`: `topBar` par `android:visibility="gone"` — version · BHASHA · status line · safety hint · RAILBOOK / IRCTC / CLEAR HANDOFF sab ab screen par nahi; **buttons, listeners, HandoffStore clear, Bhasha cycle, status text sab wahi code** (backend). `WebView` aur `prewarmOverlay` ab `parent` ke top se bandhe (poori screen).
-- User-facing updates sirf chhote Toast (`setStatus`) se: handoff saved, IRCTC block (CDN), login page ready, auto-fill ho gayi.
-
-**3) Passenger page ka dock hamesha screen par**
-
-- Wajah: `.overlay-screen` `.app` ke **andar** `absolute` tha, aur `.app` ki `min-height: 100dvh` par chat lambi hone par wo (device test frame me) **1400px+** ho jaata hai → overlay bhi utna lamba, isliye uska bottom dock (VoiceBar + CTA) screen ke neeche chala jaata tha (user ko bahut scroll karke pata chalta tha ki "Review journey" button hai).
-- Fix: `src/styles.css` me `.overlay-screen` ab `position: fixed; top/left/right: 0; height: 100vh; height: 100dvh; max-width: 480px; margin: 0 auto` (purane WebView ke liye explicit offsets, `inset` par bharosa nahi). `.sticky-cta` me `flex-shrink: 0` + top border.
-- CTA label bhi honest: details adhoori → **"Review journey (pehle details bharo)"** (disabled), poora bharte hi **"Review journey"**.
-- Probe (`tools/probe-pax-dock.mjs` + `tools/probe-live-r28.mjs`): CTA `top 1336px` (screen 900, bina scroll nahi dikhta) → ab **`top 836px`, `btnVisibleWithoutScroll: true`**; naiveh live browser me bhi confirm.
-
-**4) 45s → 30s + auto-fill assurance (teen jagah)**
-
-- `PREWARM_COUNTDOWN_MS = 30_000L` (aur "45s" wale messages → "30s"), `PREWARM_EXTRA_WAIT_MS = 0L` jaisa tha.
-- Prewarm overlay me `prewarmNote` line: "Aapki details IRCTC par khud bhar jaayengi — jo yahan bhara hai wo dobara daalne ki zaroorat nahi. Sirf login/OTP/payment aap karenge."
-- `src/components/IrctcHandoff.tsx` me `isRailBookAppContext()` + `autoFillNotice(inApp)` — **app me**: "IRCTC khulte hi aapki journey + passenger details khud bhar jaayengi — wahan dobara daalne ki zaroorat nahi. Sirf login/OTP/payment aap karenge (security)."; **browser me jhooth nahi**: "RailBook app (Android) me ye details IRCTC par khud bhar jaati hain — browser me summary clipboard se paste kar sakte ho." Review page par Continue button ke neeche, aur passenger page ke dock me wahi assurance.
-
-**Live proof (deploy `20be5c2`):** live browser (Pixel-size, 430×900) — seat chip tap → passenger form: `btnLabel "Review journey (pehle details bharo)"`, `btnTop 836`, `btnVisibleWithoutScroll true`, note visible + text theek; form bharne par `label "Review journey"`, `disabled false`, phir Review page par `#irctc-continue` bina scroll dikhta hai aur `#irctc-autofill-note` line maujood.
-
-**APK v1.4.9** (versionCode 32, `1.4.9-clean-ui-30s`, 4,819,427 B, sha256 `4ea684c3…8e1ce`): bridge files verified — purana panel string APK ke andar bhi nahi, pill + assurance line maujood.
-**Tests:** naya `tests/round28-pax-dock-and-autofill-note.test.tsx` (15 — dock/CTA/assurance, overlay CSS, Android header gone par listeners zinda, 30s constant, bridge me panel gone + `ui-notice` + diagnostics) + round-24 CSS assert update → kul **107 files / 1070 tests PASS**; client TS 67 (baseline); build `index-3AgEmAG-.js` 472.71 kB.
-**Preview:** `RailBook-round28-2026-09-26.html` (`tools/build-round28-preview.mjs`).
-
-### 9.21 Round-29 (26 Sep) — "same train ki classes alag alag cards me kyun" → ek train = ek card · class tap → seedha form · "book krdo" par AI khud form · "vaishno devi" (chhota naam) → SVDK
-
-User ke do screenshots (@`20be5c2`) ke chaar points. Grouping **sirf display level** par hai — provider ka jawab/text, API calls, fare/availability ka source aur booking engine waisa hi.
-
-**1) Ek train = ek card (chat ka train-list)**
-
-- Screenshot 1 me `22432` do baar aur `19804` do baar (same train ke classes alag cards me) — aur wo cards chat ke **text se bane rows** the (`ReplyText`), jo tappable bhi nahi the.
-- Fix: `src/components/ReplyText.tsx` me naya pure helper **`groupReplyRowsByTrain()`** (trainNumber primary key) + grouped render:
-  - ek card = ek train; header me `number` + `naam` **sirf ek baar** + `N classes` count;
-  - andar har class ki **apni row** — `3A | AVL 122 | ₹635`, `SL | AVL 94 | ₹250` (har class ka apna status/count/fare/dep; koi merge/average/sum nahi);
-  - **order preserve** (jo train pehle aayi wahi card wahin; koi sort/filter nahi);
-  - bilkul same record (class+status+count+fare+dep) dobara aaye to ek hi baar — par alag status/fare wala record chhupta nahi (overwrite bhi nahi);
-  - input rows **mutate nahi** hoti (derived view-model).
-- Live board wala block (`.sf-group`, Round-27) pehle se train-wise tha; ab **dono** jagah ek train = ek card.
-
-**2) Class par tap → seedha passenger form**
-
-- Chat card ki class row ab **button** hai (available/RAC/WL/status-pata-nahi) → `openBookingFromReplyRow()` → wahi `selectTrainAndClassGo()` jo Seat Finder/direct card ke chips par lagta hai. `N/A`/`REGRET` par jhootha button nahi (wahan booking ka rasta hi nahi).
-- Live proof: `12208 KGM GARIB RATH · 3A · SVDK → LDH · 2026-09-27 · ₹470` → passenger form.
-
-**3) "22432 mein 3A book krdo" → AI khud passenger form kholta hai (loop khatam)**
-
-- Pehle: "…check kar raha hoon" repeat, "Check hui?" par bhi wahi jawab, aur ek baar text beech se kata hua ("ability check karne ke liye…") jabki date pehle se pata thi.
-- Ab: `src/booking/autobook.ts` (naya, pure + tested) + Concierge me booking-intent gate —
-  `isBookingIntent()` ("book krdo / booking kardo / ticket chahiye" haan; sawaal nahi) → train (message/context/last-mentioned) + class (message) → `pickRowForBooking()` (usi class ki openable row, warna us train ki pehli openable row) → `buildAutoBookSeat()` → seedha passenger form. Date sirf jo user/server ne di (form ka "aaj" default guess nahi).
-- Status pata na ho (**UNKNOWN** — data ke saath aaya hi nahi) to **bhi** form khulta hai; asli availability + fare "Review journey" par provider se (`goReview`), aur wahan bookable na ho to wahi rok deta hai. `booking/state.ts` ka `SELECT_TRAIN_AND_CLASS` bhi UNKNOWN par screen badalta hai (N/A/REGRET/CANCELLED par purana guard).
-- `Passengers.tsx` ki lines honest: fare `0` → "💰 Fare abhi confirm nahi — Review journey par provider se aayega", timings khaali → "🕑 Timings provider ke data me nahi the" (pehle "₹0" aur "🕑 → " jaisa adhoora dikhta tha).
-- Text ka adhoora kata hua hissa bhi gaya: `ReplyText` ka parser ab aadhe shabd par ruk kar row nahi banata — poora jumla paragraph hi rehta hai.
-
-**4) "vaishno devi" jaisa chhota station naam → SVDK**
-
-- `server/understand/legacy-stations.ts` + `src/ai/stations.ts` alias map me: `vaishno devi`, `vaishno devi katra`, `vaishnodevi`, `vishno devi`, `mata vaishno devi`, `shri mata vaishno devi (katra)`, `smvd katra`, `वैष्णो देवी`, `वैष्णो देवी कटरा`, `वैष्णोदेवी`, `माता वैष्णो देवी` — sab **SVDK** (koi naya station/naam nahi, sirf alias).
-- Live: "Vaishno devi se Ludhiana kal ke liye…" par header `SVDK → LDH, 2026-09-27` (pehle "vaishno devi" parse hi nahi hota tha).
-
-**Files:** `src/components/ReplyText.tsx` · `src/views/Concierge.tsx` (onBook wiring + booking-intent auto-advance) · `src/booking/autobook.ts` (naya) · `src/booking/state.ts` · `src/views/Passengers.tsx` · `src/styles.css` (`.rp-gcount/.rp-crows/.rp-crow`) · `src/ai/stations.ts` + `server/understand/legacy-stations.ts` (aliases).
-**Tests:** naya `tests/round29-group-same-train-book.test.tsx` (**22**) + round-20/round-27 ke ReplyText asserts grouped markup par update → **108 files / 1091 tests PASS**; server tsc clean · client tsc 67 (baseline) · build `index-DIw-tok9.js` 477.97 kB.
-**Live proof (`686a88f`):** turn 1 — `boardGroups 19 · trains 19 · duplicateTrains [] · svdkRoute true` (har train ek hi card me; chhota naam resolve hua) · class chip tap → `12208 · 3A · SVDK → LDH · 2026-09-27 · ₹470` · "12208 mein 3A book krdo" → form khud khula (train+class+date; row me fare na hone par honest line). Chat me Round-28 ki assurance line + "Review journey (pehle details bharo)" CTA bhi zinda.
-**Preview:** `RailBook-round29-2026-09-26.html` (`tools/build-round29-preview.mjs`) · probes `tools/probe-live-r29.mjs` (local, mock) + `tools/probe-live-r29-live.mjs` (live). **APK nahi** — r29 me koi Android/native change nahi (app wahi live web URL load karta hai), isliye v1.4.9 hi chalti rahegi.
-
-### 9.22 Round-30 (26 Sep) — "12013 ki seat availability" maanga, poori 21-train ki board kyun khul gayi
-
-User ke 2 screenshots (@`686a88f`): sawaal tha **"12013 ki seat availability btana kal ke liye ludhiana se amritsar ke liye"** — par chat me **poori live board (21 trains × saari classes, 12 me seat)** khul gayi; 12013 ka asli jawab uske baad aaya. User: *"yeh question pe board kyu le aata … maine to maanga hi nahi"*.
-
-**Wajah:** Round-27 se chat me `seatlist` block banta hai jo **hamesha server ke poore `seatFilter` payload** (poori board) se render hota tha — chahe user ne ek train poochi ho. Jaan-boojh kar "sab dikhao" tha (r25/26/27 ke rules), lekin focus wale sawaal me wo "unmaangi list" ban jaata tha.
-
-**Fix (display-level scope):**
-
-- `src/chatText.ts`: naye pure helpers —
-  - `trainNumbersInText(text)`: message me se train number(s), order preserve + duplicate ek baar. **Saal (2026), tareekh (`2026-09-27`, `27/09/2026`), time (`18:01`, `7 baje`) chhod deta hai** (warna wo 4-5 ank ke number train jaise lagte hain).
-  - `focusSeatRows(rows, focus)`: focus khaali → poori list **waisi hi**; focus ho → sirf usi train ki rows; maangi train list me na ho → kuch nahi (unrelated board nahi thopte). Input mutate nahi hoti.
-- `src/views/Concierge.tsx`: `seatlist` block ab `trainNumbersInText(trimmed)` se scoped — `focus: [12013]` + sirf usi train ki rows. Block sirf tab banta hai jab rows bachi hon.
-- `SeatListBlock` header: focus par **"Aapki maangi train (live board) · 12013 · 1 train · 1 me seat"** (halka green pehchaan `sf-focused`); generic par pehle jaisa "Seat wali trains (live board) · N trains".
-- Round-29 ka booking auto-advance bhi wahi helper use karta hai (`trainNumbersInText(trimmed)[0]`) — "2026" ko train samajhne ka risk khatam.
-- Server/provider/booking: kuch nahi chhua — payload, rows, fares waisi hi aati hain; sirf dikhaya kam hota hai (aur maang na ho to poora).
-
-**Live proof (deploy `0b36c52`):** A) 12013 ka sawaal → `blocks=1 · focused=true · groups=1 · chips=2` ("Aapki maangi train (live board) 12013 · 1 train · 1 me seat" · `CC AVL 354 ₹675` · `EC AVL 23 ₹1,015`) · B) usi chat me "kal ke liye seat wali trains batao" → `blocks=2 · groups=20 · chips=59` (pehle jaisa poora board). Local probe: 14610 (list me nahi) → koi block nahi.
-**Tests:** naya `tests/round30-focused-train-seat-block.test.tsx` (11) → **109 files / 1103 tests PASS**; server tsc clean · client 67 (baseline) · build `index-BF7JVy_K.js` 478.55 kB.
-**Preview:** `RailBook-round30-2026-09-26.html` (`tools/build-round30-preview.mjs`) · probes `tools/probe-live-r30.mjs` (local) + `tools/probe-live-r30-live.mjs` (live). **APK nahi** — koi Android change nahi.
-
-### 9.23 Round-31 (26 Sep) — "answer ke baad AI ko next step pe leke jaana chahiye… AI khud dimaag kyu nahi lagata?"
-
-User: *"maine specific train ki availability poochi and AI ne sahi answer bhi diya — ab AI ko passenger ko next step pe leke jaana chahiye na… not specific to seat availability but any question asked and answered… To AI khud ka dimaag kyu nahi lagata?"*
-
-**Jawab (design):** model ke paas booking/payment ka koi tool nahi hai (`confirmBook` hamesha false) — usse "khud soch kar" agla kadam (screen kholna/ticket banwana) lene dena wahi jagah thi jahan pehle galat screen khulti thi (Round-18m-7) aur numbers ban jaate the (standing rule: **kuch bhi fake nahi**). Isliye agla kadam ab **data se** banta hai, model ke andaze se nahi.
-
-**Kya lagaya:** `src/ai/nextstep.ts` (naya, pure + tested) + Concierge me har jawab ke baad ek **"➡️ Agla kadam"** card (1–2 tappable chips + honest hint):
-
-| Jawab me kya aaya | Agla kadam |
-|---|---|
-| seat rows (khaas train) | `Book <train> · <class> (AVL/RAC/WL # ₹fare)` — AVL > RAC > WL, phir zyada seats; doosra chip: `doosri classes (…)` (sirf usi train ki) |
-| seat rows (generic) | sabse achhi seat wali train ka Book chip + `Baaki trains bhi (N)` |
-| sab N/A/Regret | `Jahan seat hai wahi dikhao` + honest hint |
-| sirf WL | WL ka sach + "ticket waitlist me rahega" (jhootha available nahi) |
-| train list (seat data nahi) | `Kis train me seat hai?` |
-| journey plan | pehle bookable leg ka Book chip; kuch bookable na ho → `Doosri date dekho` |
-| live status/schedule/stops | `<train> ki seat availability` |
-| kuch verified nahi | **koi chip nahi** |
-
-Chip wahi utterance bhejta hai jo pehle se chalte flows ko trigger karti hai — `Book 12013 · CC (AVL 354 ₹675)` → `12013 mein CC book krdo` → Round-29 ka auto-advance **seedha passenger form** (live: form me `12013 · CC · LDH → ASR · 📅 2026-09-27` + "details IRCTC par khud bhar jaayengi" + Review journey). Koi naya number/naam/fare invent nahi hota — jo row me dikha wahi label me.
-
-**Files:** `src/ai/nextstep.ts` (naya) · `src/ai/orchestrate.ts` (block type `nextstep`) · `src/views/Concierge.tsx` (`askedTrains` ek jagah + block push + `NextStepCard` export) · `src/styles.css` (`.ns-card/.ns-chip`).
-**Live proof (`de97b12`):** seat ka jawab → chips `Book 12013 · CC (AVL 354 ₹675)` + `12013 ki doosri classes (EC)`; tap → passenger form (12013 · CC · LDH → ASR · 2026-09-27). Local probe: list → `Kis train me seat hai?`; stops → `12013 ki seat availability`; koi data nahi → koi card nahi.
-**Tests:** naya `tests/round31-next-step.test.tsx` (18) → **110 files / 1121 tests** (1120 pass; 3 RailCore network-flaky tests alag chalane par pass) · server tsc clean · client 67 (baseline) · build `index-C4mTfzQI.js` 478.7 kB. Round-30 ka test bhi update (`askedTrains` ek jagah).
-**Preview:** `RailBook-round31-2026-09-26.html` (`tools/build-round31-preview.mjs`) · probes `tools/probe-live-r31.mjs` (local) + `tools/probe-live-r31-live.mjs` (live). **APK nahi** — koi Android change nahi.
-
-### 9.24 Round-32 (26 Sep) — "har query pehle model ke pass jaani chahiye and wo decide kare kya karna hai"
-
-User (correction): *"har query pehle model ke pass jaani chahiye and wo decide kare kon sa tool use karna yan kya karna hai, user ka answer kahan se laana hai"* — matlab **agla kadam bhi model chalaye**, data sirf validate kare aur fallback de. (Round-31 me agla kadam data se banta tha; wahi framing user ne reject ki — "dimaag data ka lagta hai, model ka nahi".)
-
-**Model-first flow pehle se hi intact tha** (verify kiya): client har query `/api/agent` par bhejta hai (locally sirf 3 exceptions — `criticalBookingFlow`, `classPickWhileSelected`, `localUiQuery`), aur server par **model tool chunta hai** (deterministic NLU/routing sirf fallback; booking mutations deterministic; model ke paas booking tool nahi, `confirmBook` hamesha false). Ab **agle kadam ka choice bhi model ka** hai:
-
-1. **Prompt rule 26 (agentic.ts):** jawab ke ekdum aakhir me 1–2 line *bilkul is format me* — `[NEXT] <chhota label> => <wahi baat jo user bhej sakta hai>`. Rule: sirf **isi turn ke tool data** se (koi naya train number/naam/fare/count nahi), label me wahi number jo data me hai, max 2 lines, kuch verified na ho to koi `[NEXT]` line nahi (zaroori nahi har baar), aur reply ke andar agla kadam dobara nahi likhna (UI khud dikhata hai). Rule 13 update: generic "kya aur chahiye?" chit-chat band, par asli agla kadam hamesha.
-2. **Server extraction + evidence filter:** `extractNextActions()` reply se `[NEXT]` lines **alag** karta hai (warna wo line user ko dikh jaati), aur har action `groundingCheck(label + " " + utterance)` se guzarta hai — jo number/naam/code is turn ke tool evidence me nahi mila, wo **drop** (fake chip ka rasta band). Result `AgenticTurn.nextActions` → `AgentResponse.nextActions` → `/api/agent` → `src/api.ts`.
-3. **Client model-first + fallback:** `Concierge.tsx` pehle `agentRes.nextActions` dikhata hai — card par tag **"AI ne chuna"** (tooltip: "AI ne khud ye agla kadam chuna"). Model ne kuch na diya / sab drop ho gaya → Round-31 ka data-derived `nextStepsFor()` chalta hai, tag **"verified data se"**. Kuch bhi verified na ho → koi card nahi.
-
-**Round-32b (LIVE par pakda gaya, fix):** asli model ke tool ne ek provider se data liya (`CHECK_AVAILABILITY` → **web_railyatri**: `CC AVL 334 ₹490` — "IRCTC data, railway API down tha") aur screen ka live board doosre provider se bana (**web_confirmtkt**: `CC AVL 341 ₹675`) — dono asli, par **ek hi screen par same train+class ke do alag number**. Standing rule ("kuch bhi conflicting/fake nahi") ke hisaab se fix: naya pure `reconcileNextActions(actions, boardRows)` (agentic.ts, `server/app.ts` me lagaya) — model ka **chuna hua action waise hi** rehta hai, sirf wo **seat/fare numbers** chip se hat jaate hain jo usi train+class ke board rows se na milte hon (train number kabhi nahi hatta, jargon-only chip drop, board me na ho to kuch nahi chhedte, generic count jaise `Baaki trains bhi (24)` conflict nahi maana jaata).
-
-| Situation | Kya dikhta hai |
-|---|---|
-| model ne `[NEXT]` diya, evidence me sab match | chips model ke, tag **"AI ne chuna"** |
-| model ne `[NEXT]` diya par koi cheez evidence me nahi | wo line **drop** (server) → data fallback, tag "verified data se" |
-| model ne `[NEXT]` hi nahi diya (ya clarifying sawaal poochha) | data fallback (Round-31), tag "verified data se" |
-| chip ke numbers board se takra rahe hain | sirf wo numbers chip se hat gaye (action model ka) |
-| kuch bhi verified nahi | **koi card nahi** |
-
-**Live proof (`dc257a0`):** "12013 ki seat availability batao kal ke liye ludhiana se amritsar, 1 passenger" → `engine=agentic_tool_calling`, `meta/muse-glimmer-30b`, `nextActions=[{label:"Book 12013 · CC (AVL 334)", primary:true}]` (fare ₹490 board ke ₹675 se takra raha tha → strip). Browser probe: A) tag **"AI ne chuna"** + model chip → B) tap → passenger form (12013 · CC · LDH → ASR · 2026-09-27) → C) "12013 ka schedule batao" (deterministic turn) → tag **"verified data se"** `12013 ki seat availability` → D) suvidha wala sawaal → **koi card nahi**. Local probe (built dist + mock server shapes): **6/6 PASS** (model chips, chip tap, ungrounded drop → data fallback, list fallback, plain → koi card nahi, user ke train number se honest chip).
-
-**Files:** `server/agent/agentic.ts` (rule 13/26, `NextAction`, `extractNextActions`, evidence filter, `reconcileNextActions`) · `server/agent/run.ts` (field + mapping) · `server/app.ts` (reconcile wiring) · `src/api.ts` · `src/ai/orchestrate.ts` (`nextstep` block `source?: "model" | "data"`) · `src/views/Concierge.tsx` (model-first branch + tag) · `src/styles.css` (`.ns-tag`).
-**Tests:** naya `tests/round32-model-next-step.test.ts` (22 — 14 Round-32 + 8 Round-32b) + round-31 test update → **111 files / 1143 ALL PASS** · server tsc clean · client 67 baseline · build `index-CW1i71n2.js` 482.8 kB.
-**Preview:** `RailBook-round32-2026-09-26.html` (`tools/build-round32-preview.mjs`) · probes `tools/probe-live-r32.mjs` (local) + `tools/probe-live-r32-live.mjs` (live). **APK nahi** — koi Android change nahi (app live URL load karta hai).
-
-### 9.25 Round-33 (26 Sep) — "AI ko saare tools khule" + "kya AI meri baat samajh nahi paaya?"
-
-User (3 screenshots): *"mainay esko yeh bola … esne trains list krdi without fare and timings, fir maine alternative trains poocha lekin fir list bta di … kya AI meri baat samjh nhi paaya … ek kaam kro AI ko jitne bhi tools available hai wo sabh provide kro I mean no restriction on using any tool bss AI continue to IRCTC pe click nhi karega na hi passenger details khud se fill krega, don't fake anything sabh real and live data hona chahiye, first use confirm tkt, then rail yatri, then e rail on API fallback to fetch relevant data, like fare, seat availability, timings, route, station codes, live status, etc. depends on user question AI should handle everything without restriction on any tool."*
-
-**Root causes (live reproduce karke pakde):**
-1. **"Kal,1"** — `RANK_JOURNEY_OPTIONS` **PASSENGERS MISSING** se reject ho gaya (userStatedPax ne "Kal,1" ko pax nahi maana kyunki usme "log/passenger" shabd nahi the) → model ne pax **dobara** poochh liya. Purane gate me `SEARCH_TRAINS` bhi pax ke bina chalta hi nahi tha (jabki wo list tool hai).
-2. **"plan banao"** ka koi saaf prompt rule nahi tha → model ne seat/list tools chune.
-3. **"alternative trains"** — `FIND_ALTERNATIVE_TRAINS` kab call karna hai wo rule 2b me sirf WL/RAC case ke liye likha tha, general "alternative / doosri trains" ke liye nahi → model wahi list dohra deta tha.
-4. **Web fallback order** — availability me **railyatri pehle** tha, confirmtkt baad me; trains-between ka web fallback sirf erail tha (jisme **fare nahi** hota) → isliye "list without fare and timings".
-
-**Kya badla:**
-- **Tools ki azadi (rule 27):** saare tools khule, koi count-limit nahi (web search ka "max 1 call" cap bhi gaya) — sirf 2 cheezein kabhi nahi: **"Continue to IRCTC" click** aur **passenger form khud bharna** (booking mutations deterministic hi rahe; `confirmBook` hamesha false).
-- **Sawaal ka matlab pehle (rule 28):** "plan/journey plan/best" → `RANK_JOURNEY_OPTIONS`/`JOURNEY_ANALYZE`; "alternative/doosri trains/iske alawa" → `FIND_ALTERNATIVE_TRAINS`; "trains batao" → `SEARCH_TRAINS`; seat → seat tools. Har train list me **timing (dep → arr + duration) aur fare (jo tool ne diya) ZAROOR**.
-- **Provider order central (`server/railway/webOrder.ts`, naya pure module):** `WEB_PROVIDER_ORDER = confirmtkt → railyatri → erail`, capability-wise chains (availability / fare / trains-between / schedule / station / live). Router me availability ki **dono** branches, `withFareFilled`, `erailFareBreakdown` aur `searchTrainsRouted` ab isi chain se chalte hain. Jo site capability support nahi karti wo chain me aati hi nahi (live = railyatri ETA, station codes = erail list, trains-between = confirmtkt → erail).
-- **Train list me timings + fare:** naya `confirmTktTrainsBetween` (route board → TrainResult; `boardRowsToTrainResults` pure mapping, tested) — web chain ka pehla qadam; erail (IRCTC timetable list) aakhri. `SEARCH_TRAINS` ke data me per-train `fares` bhi.
-- **Seat cards par timings:** `seatFilter` ab **har** turn me times laata hai (wahi ek search call, deduped) → card par `🕑 20:19 · 2h 46m` (pehle sirf "live board").
-- **`SEARCH_TRAINS` ko pax ki zaroorat nahi** (gate se hataya); pax-precondition sirf seat/plan/connection tools par.
-- **"Kal,1" fix:** `userStatedPax` me — pichhla sawaal passengers ka tha to message ka akela number pax hai (date/`dd-mm-yyyy`/5-digit train number ka hissa pehle hata diya jaata hai). Model ke args se aaya pax **capture** hokar `ctx` me yaad rehta hai → agle turn me "kya ab bhi 1 passenger?" nahi.
-- `fareSource` type widen (confirmtkt/railyatri bhi honest source ho sakte hain).
-
-**Live proof (`a96ed83`):** "plan bana sakte ho?" → sawaal; **"Kal,1"** → `RANK_JOURNEY_OPTIONS` ok (source web_confirmtkt) → JOURNEY PLAN card: LDH → NDLS · 27 Sept · **1 passenger** · 19 direct · 6 me seat · RECOMMENDED · direct 22478; **"Alternative trains"** → `FIND_ALTERNATIVE_TRAINS` ok → 12484 ASR TVCN 08:12→12:55 (4h 43m) 3A AVL 110 ₹635 · 12716 SACHKHAND 3A AVL 47 ₹635 · 11058 3E AVL 29 ₹600 · 12926 1A AVL 1 ₹1,620 + "usi train ki doosri class" + alt-date chips; seat answer → card par `🕑 20:19 · 2h 46m`.
-**Files:** `server/railway/webOrder.ts` (naya) · `server/railway/router.ts` (chains + confirmtkt trains-between) · `server/providers/types.ts` (fareSource) · `server/agent/agentic.ts` (rules 27/28, pax gate, capture.passengers, userStatedPax, SEARCH_TRAINS fares) · `server/agent/run.ts` (capture→ctx) · `server/agent/seatFilter.ts` (times hamesha) · `src/views/Concierge.tsx` (card timing text).
-**Tests:** naya `tests/round33-tool-freedom-and-provider-order.test.ts` (26) + 4 purane update (toolcalling MULTI-TURN, round18m30h gate, route-board stale, round18g fareSource) → **112 files / 1169 ALL PASS** · server tsc clean · client 67 baseline · build `index-C0QGbnrE.js` 483.0 kB.
-**Preview:** `RailBook-round33-2026-09-26.html` (`tools/build-round33-preview.mjs`) · live probe `tools/probe-live-r33-live.mjs`. **APK nahi** (koi Android change nahi).
-
-### 9.26 Round-34 (26 Sep) — "seats to pehle hi hain, phir kahe passengers poochh raha?" + "agla kadam hamesha AI chune"
-
-User (2 screenshots): *"First screenshot mein 12380 mein seats available hai and then I said book 12380 to eske pass seats to pehle hi hain to fir kyu dubara pooch rha kya AI apna brain use nhi kar raha ? And Agla kadam na humesha AI hi chunne sabh sochke and suggestions bhi de user ko, agla kadam fallback pe verified data se mat aaye"* (+ ek sawaal: "kya tumne AI logic / tools calling way / thinking mein kuch change kiya?")
-
-**Root causes:**
-1. **"Book 12380"** client ke `isBookingIntent` me **fail** ho raha tha — purana regex sirf `book … kar/krdo/karo…` pakadta tha, "Book <number>" (bare hukm) nahi. Isliye message server ko gaya, jahan model ne resolve + seat-check kiya aur pax gate ne "kitne passengers?" poochh liya — jabki **seat data us chat me pehle hi dikh chuka tha**.
-2. **Agla kadam** model ke `[NEXT]` na dene par data-derived fallback ("verified data se") dikha deta tha — user chahta hai agla kadam **hamesha AI khud sochke** chune.
-3. (Probe me pakda) passenger form khula hone par koi bhi naya sawaal client ke local booking path me chala jaata tha ("Nahi, seat availability ki jankari mere paas nahi hai") — jabki user ka standing rule: **har query pehle model ke paas**.
-
-**Fixes (Round-34):**
-- **`isBookingIntent` me bare booking hukm:** `book|booking|reserve` + 4-5 digit train number (aage/peeche, `?` ke bina) → booking intent. Train number ke bina akele "book" par trigger nahi (koi jhootha form nahi).
-- **Seat rows yaad:** client ab pichhle seat turn ki rows `lastSeatRowsRef` me rakhta hai (route+date ke saath) — booking hukm par form **usi asli data se** bharta hai (status/seats/fare/timing), dobara check karne ka bahana nahi. Route/date match na ho to purani rows use nahi hoti (nayi journey par purana fare nahi lagta).
-- **NEXT-repair pass (server):** model ka jawab grounded ho, turn me ok tool data ho, par `[NEXT]` na ho → **ek chhoti repair call** model ko jaati hai: *"SIRF 1-2 line: [NEXT] <label> => <utterance>, sirf isi turn ke tool results se"* → chips model ke hi bante hain (agar wo bhi na de to data fallback, aakhri upay). Prompt **rule 26** bhi sakht: data aaya ho to `[NEXT]` ZAROOR — "user ka data-derived fallback tabhi chalta hai jab tumne kuch na diya ho".
-- **Local booking path sirf booking ki baaton ka:** `criticalBookingFlow` me naya guard `freshQuestionDuringBooking` — train number ya seat/fare/time/status/stops wala sawaal form khula hone par bhi **model ke paas** jaata hai; confirm/aage/back/details local hi rehte hain.
-
-**Live proof (`a1aff0d`):**
-- "kal ke liye ludhiana se amritsar seat wali trains batao" → seat board + agla kadam **"AI ne chuna"**;
-- **"Book 12053"** → seedha passenger form: *12053 ASR JANSHATABDI · 2S · LDH → ASR · 📅 2026-09-28 · 🕑 19:48 → 💰 ₹110 per passenger* — koi pax sawaal nahi (`paxAsk:false`), purani seat list ke data se;
-- form khula hone par "12013 ki seat availability batao" → **model ka jawab**: 12013 CC AVL 650 ₹675 · EC AVL 32 ₹1,015 (pehle local path "jankari nahi hai" bolta tha);
-- poore probe me **NEXT tags: model 4 · data-fallback 0** (agla kadam har turn model ka).
-
-**User ke sawaal ka jawab (AI logic/tools calling me kya badla?):** is round me **model, provider tools, execution path (model tool chunta hai → server allowlist+zod se chalata hai), booking safety (`confirmBook` hamesha false) — kuch nahi badla**. Badla: (a) client ka booking-intent detection (UI-level), (b) client ki seat-rows memory (UI-level), (c) **prompt rules 26/27/28** (AI ke sochne ke rules — Round-33/34 me add/tighten), (d) Round-34 me `userStatedPax`/pax-precondition jaise **tool *preconditions*** (kab tool chalta hai) — tool ka *kaam* wahi hai, (e) provider chain sirf **data source order** (user ke aadesh par confirmtkt → railyatri → erail).
-
-**Files:** `src/booking/autobook.ts` (isBookingIntent) · `src/views/Concierge.tsx` (lastSeatRowsRef + freshQuestionDuringBooking) · `server/agent/agentic.ts` (NEXT-repair pass + rule 26 tighten).
-**Tests:** naya `tests/round34-book-known-seats-and-model-next.test.tsx` (16) + `agentic-toolcalling` ka call-count update (mock model [NEXT] deta hi nahi → repair call bhi ginti hai) → **113 files / 1185 ALL PASS** · server tsc clean · client 69 (baseline) · build `index-BLb0w2Ig.js` 483.9 kB.
-**Preview:** `RailBook-round34-2026-09-26.html` (`tools/build-round34-preview.mjs`) · live probe `tools/probe-live-r34-live.mjs`. **APK nahi** (koi Android change nahi).
-
-### 9.27 Round-35 (26 Sep) — "19028 mein book krdo" par AI ne class kyun nahi poochhi?
-
-User: *"mainay bola vaishno devi se ludhiana ki seat availability btao to AI ne bta di … uske baad maine 19028 train mein na multiple class mein seats available thi to maine bola '19028 mein book krdo' to AI ne yeh nahi poocha kon si class mein book karun, bhai esa kyu ho rha abh mai kya ek ek cheez check krun? AI khud kyu nhi soch rha kya sahi logic se poochhna chahiye, khud kyu nhi dimag laga raha wo, har cheez thodi btani padegi use."*
-
-**Root cause:** booking intent par client `pickRowForBooking` chup-chaap **pehli openable row** utha kar passenger form khol deta tha — us train me agar 3–5 classes khuli thi (jaise 19028), to AI ka koi sawaal hi nahi aata tha; user ko andaza bhi na chalta ki konsi class khul gayi. (Aur agar list me SL/WL row pehle hoti to WL ka form khul sakta tha.)
-
-**Fixes (Round-35):**
-- **Naya block `classchoice`** (`src/ai/orchestrate.ts` + Concierge): jab booking hukm aaye, **class boli na ho**, aur us train me **ek se zyada class khuli ho** (AVAILABLE/RAC) → form **ruk jaata hai** aur card aata hai: *"13042 HIMGIRI EXPRESS me 2 classes khuli hain — 3A (AVAILABLE 29), 2A (AVAILABLE 7). Kaunsi class me book karun?"* Chips = **sirf wo classes jo board par sach me khuli hain**, label me wahi status/seats/fare jo provider ne diya (`3A · AVAILABLE 29 · ₹520`). Chip tap → wahi class wala booking sentence → **seedha us class ka passenger form**.
-- **Ek hi class khuli ho** to poochhne ki zaroorat nahi (seedha wahi class) — user ko faltu sawaal nahi.
-- **`pickRowForBooking` ab seat-wali class prefer karta hai** (AVAILABLE/RAC pehle, phir WL) — class na boli ho to WL/`N/A` row ka form nahi khulta.
-- **Model ko bhi sikhaya (rule 28):** booking maangi gayi ho, class na boli ho, aur ek se zyada class khuli ho → **pehle SAAF poochho "kaunsi class me book karun?"** aur `[NEXT]` me wahi classes chips ke roop me do (jaise `[NEXT] 19028 · 3A (AVL 26 ₹565) => 19028 mein 3A book krdo`); uski class ke bina aage mat badho. Isi turn me model ne khud bhi poochha ("Class confirm karo — is train mein kaunsi class chahiye?") aur khud ke chips diye.
-
-**Live proof (`b97b3c7`, probe `tools/probe-live-r35-live.mjs` — user ka route):**
-- "vaishno devi se ludhiana kal ki seat availability batao" → seat board (18 trains · 12 me seat);
-- **"Book 13042"** (us board se, 2 classes me seat) → **form RUK gaya**, model ne khud poochha *"Class confirm karo — kaunsi class chahiye?"* aur card: `🪑 13042 — KAUNSI CLASS ME BOOK KARUN?` chips **3A · AVAILABLE 29 · ₹520** / **2A · AVAILABLE 7 · ₹725**;
-- chip tap → passenger form **13042 HIMGIRI EXPRESS · 3A · SVDK → LDH · 📅 2026-09-28 · 💰 ₹520/pax** (jo dikha wahi gaya; jis class ka timing provider ke data me nahi tha wahan honest line "Timings provider ke data me nahi the").
-
-**Files:** `src/ai/orchestrate.ts` (Block `classchoice`) · `src/views/Concierge.tsx` (gate + `ClassChoiceCard`) · `src/booking/autobook.ts` (seat-wali class prefer) · `server/agent/agentic.ts` (rule 28 class-ambiguous).
-**Tests:** naya `tests/round35-ask-class-when-ambiguous.test.tsx` (15) → **114 files / 1200 ALL PASS** · server tsc clean · client 69 (baseline) · build `index-DcFTsEZG.js` 485.8 kB.
-**Preview:** `RailBook-round35-2026-09-26.html` (`tools/build-round35-preview.mjs`). **APK nahi** (koi Android change nahi).
-
-### 9.28 Round-36 (26 Sep) — "agla kadam AI se aaye, ChatGPT/Gemini jaisa khud soche; fallback pe verified data se na aaye"
-
-User: *"Bhai agla kadam AI se aaye wo khud ka dimag lagaye jaise chatgpt yan gemini lagata hai waisa hi next question pooche or soche kya poochna hai, fallback pe verified data se na aaye, and AI har baar apna brain use kre."*
-
-**Root causes (live probe se pakde):**
-1. **Data-derived fallback** ab bhi maujood tha: model `[NEXT]` na de to client `nextStepsFor` (verified data se bane chips) dikha deta tha — tag "verified data se".
-2. **Model ka NEXT-repair** sirf tab chalta tha jab main loop me 9s+ budget bachta ho — plan/seat turns 60-70s kha jaate the, isliye wo trigger hi nahi hota.
-3. **Plan fast-path** (`RANK_JOURNEY_OPTIONS`/`JOURNEY_ANALYZE`) reply ke saath hi early-return karta tha — `[NEXT]` extraction tak pahunchta hi nahi (isi liye "Kal,1" ke poore plan par bhi card nahi aata tha).
-4. **Dedicated NEXT call ka provider bug:** chain ke aakhri model (HF/GLM) ko **NVIDIA endpoint** par bheja ja raha tha → 404 → chup-chaap kuch nahi.
-
-**Fixes:**
-- **Client:** data-derived branch + import poora hata — "Agla kadam" card SIRF `nextActions` (model ke, server par tool-evidence se validated) se banta hai. Model na de to **card dikhta hi nahi** (nakli/jhootha next step nahi).
-- **Server (main loop):** repair ab **do koshish** karta hai — pehli *"apna dimaag lagao — jaise ChatGPT/Gemini karte hain: socho ki user ke liye is jawab ke BAAD sabse kaam ka agla kadam kya hai (sawaal bhi ho sakta hai)"*, doosri sakht (sirf ek `[NEXT]` line). Dono fail → koi fallback nahi (`next_step_repair_empty_no_fallback`).
-- **Dedicated NEXT call (naya `nextStepFromModelOnly`)**: chhota, sasta, apna timeout (`AI_NEXT_STEP_TIMEOUT_MS`, default 12s) — sirf user sawaal + jawab + verified tool results (dataPreview) ka compact prompt. **Provider-aware candidates** (HF model apne URL/key par), **fast model pehle** (chain ka chhota model), phir primary — per-candidate timeout. Jawab bhi `groundingCheck` se validate hota hai (jhootha number/naam drop). Na mile to `null` — kuch nahi.
-- **Plan fast-path** par bhi wahi dedicated call (ab plan turn par bhi agla kadam aata hai).
-- **Prompt (label/utterance):** Hinglish aur seedha bhejne layak; agar model ne khud sawaal poochha ho to us sawaal ka sambhavit jawab bhi chip ban jaata hai.
-
-**Live proof (`05622f4`, probe `tools/probe-live-r36-live.mjs`, asli model + asli data — 6 turns):**
-- T1 "plan bana sakte ho?" → AI ka apna clarifying sawaal (koi tool data nahi → koi chip nahi, sahi);
-- **T2 "Kal,1"** → plan + card **"Book 22478 · CC (AVL 2 ₹1830)"** (AI ka chuna, Hinglish);
-- **T3 "alternative trains"** → card **"Book 22486 · 2S (AVL 504 ₹155)"**;
-- T4 seat list → card **"12013 · LDH"**; T5 timetable → card; T6 web answer → card;
-- **NEXT tags → AI (model): 5 · data-fallback: 0 · koi card nahi: 1/6** (wo ek turn AI ka apna clarifying sawaal tha, jisme koi tool data hi nahi aaya).
-
-**Files:** `src/views/Concierge.tsx` (fallback branch + import removed) · `server/agent/agentic.ts` (`nextStepFromModelOnly`, repair 2-attempts, plan fast-path NEXT, rule 26 (d)/(f)) · tests: `tests/round36-agla-kadam-sirf-ai-ke-dimaag-se.test.ts` (13) + round31/32/34 + agentic-toolcalling updates.
-**Tests:** **115 files / 1214 ALL PASS** · server tsc clean · client 69 (baseline) · build `index-k0C8DtSn.js` 482.5 kB.
-**Preview:** `RailBook-round36-2026-09-26.html` (`tools/build-round36-preview.mjs`). **APK nahi** (Android change nahi).
-
-### 9.29 Round-37 (27 Sep) — "12054 mein 2S book krdo" 3 baar, form nahi khula: AI khud samjhe aur ek dumm sahi outcome de
-
-User (27 Sep screenshot): *"mainay 3 baar bola 12054 mein 2s book krdo … AI wahi reply dohra raha, form khula hi nahi … AI khd kyu nhi samjh ke sahi se outcome deta? mai kya har choti choti cheez check karun? jaise chatgpt/gemini/claude/manus — ek dum perfect answer/outcome do."*
-
-**Root cause (live repro se, `/api/agent` raw):** picker tap ke turant baad ka turn deta tha `context.origin/destination = null`, aur "book krdo" turn par `intent/nextActions/seatFilter/trains.rows` sab khaali — client ka booking gate (`target.trainNumber && from && to && date`) fail hone par chup-chaap kuch nahi karta tha, aur model wahi class-sawaal dohrata rehta tha. Doosra bug: passenger form khula hone par naya booking-hukm **local raste me atak jaata tha** (agent call hi nahi jaati thi, "Samajh raha hoon…" par chup).
-
-**Kya lagaya:**
-1. **`resolveBookingTarget()` (naya, `src/booking/autobook.ts`, pure)** — train/class/route/date har **verified** source se: booking state → is turn ke seat rows → picker tap → yaad rakhi seat rows (wahi route/date) → trains list → server ctx → **user ke apne chat se** (`extractRouteDateFromChat`: "ASR se HW", "ludhiana se amritsar", "kal/aaj/parso", dd-mm-yyyy). Kuch bhi andaza nahi — jo user ne khud bola wahi. Missing sirf date ho to AI saaf date maangta hai (class dobara nahi).
-2. **Client booking branch resolver par** — class boli ho to usi class ka form; class na boli + 2+ class khuli → Round-35 ka class-choice card; `state`/picker memory (`lastPickedTrainRef`) se route/date bharte hain.
-3. **Form khula + wahi hukm dobara** → turant saaf line: "✅ 12054 · 2S ka passenger form pehle se khula hai… (Continue to IRCTC aap khud dabayenge; main passenger details nahi bharta)" — **koi server chakkar nahi, koi "main booking nahi kar sakta" nahi**.
-4. **`criticalBookingFlow` fix** — booking-hukm wale message ab local raste me nahi atakte; jawab har haal me milta hai (probe: pehle 3rd request hi nahi jaati thi).
-5. **Repeat-guard (server)** — model wahi jawab dobara likhe to ek **corrective call** ("user ka naya message us sawaal ka jawab/aadesh hai, aage badho"); prompt me **rule 29 "JAWAB EK DAMM SEEDHA"** (seedha outcome pehle, ek baar bata diya = FINAL, apna purana sawaal dobara nahi, knowledge sawaal par confident + verified).
-6. **Server picker-capture** — "12054 … (ASR → HW) select ki" jaisa message aane par ctx me origin/destination/selectedTrain lock ho jaate hain.
-7. **General/railway knowledge jawab ki quality (ChatGPT jaisi):** raw Wikipedia dump ki jagah `polishWebReply` + `composeWebAnswer` — model se **composed 2-4 line Hinglish** (sirf diye gaye facts se, model na de to purana answer-ready text waisa hi); **comparison sawaal** ("Vande Bharat aur Rajdhani me kya fark hai") par **dono** subjects ka topic page (`comparisonSubjects()` + "DOOSRI CHEEZ" block + dono source URLs); railKB **token-overlap** matching (0.75+ aur 2+ token) se "waiting list ticket confirm hone ke rules" jaisa alag-shabdon wala sawaal bhi KB se; "AI ka jawab providers ke data se match nahi hua" line sirf live-data claims par (web/KB jawab par nahi).
-
-**Live proof (`b738b8c`, user ka exact scenario):** T1 "12054 ki seat availability batao ASR se HW kal ke liye" → real seat jawab · **T2 "12054 mein 2S book krdo" → passenger form khul gaya (12054 · 2S · ASR → HW · 📅 2026-09-28)** · T3 wahi dobara → "form pehle se khula hai" (koi loop nahi) · comparison sawaal → "Vande Bharat Sleeper + Rajdhani Express" composed jawab dono sources ke saath · KB sawaal (luggage/WL rules/tatkal) → seedha sahi jawab.
-**Tests:** naya `tests/round37-booking-loop-and-repeat-guard.test.ts` (37) + round29/30/34/35 anchors update → **117 files / 1251 ALL PASS** · server tsc clean · client 69 (baseline) · build `index-B8_cbDTF.js` 487.5 kB.
-**Files:** `src/booking/autobook.ts` · `src/views/Concierge.tsx` · `server/agent/agentic.ts` · `server/agent/railkb.ts` · `server/agent/run.ts` · tests · probes `tools/probe-live-r37-live.mjs`, `tools/probe-r37-debug.mjs`. **APK change nahi** (web fix — app live URL load karta hai).
-
-### 9.30 Round-38 (27 Sep) — "kisi bhi sawaal ka ek dumm sahi jawab, jaise ChatGPT/Gemini/Claude/Manus"
-
-User (R37 ke turant baad, dobara): *"abh yeh AI ko samjhna chahiye tha and sahi answer karna chahiye tha kyu nhi kiya … jaise chatgpt yan gemini yan claude yan manus — koi bhi trains, India railway, Booking, live status, stations etc (examples) poochun to ek dum se accurate answer dete hai but mera AI kyu nhi krta — esko bhi waisa banao, user ke questions samjho aur ek dum perfect answer/outcome do."*
-
-**Pehle naapa (battery):** naya `tools/probe-r38-battery.mjs` — 18 sawaal, 8 category (train identity, station, fare, live status, schedule, rules, catering, berth, list, capability, station code, general speed, accessibility, off-domain, light, booking). Result @`b738b8c`: **18/18 jawab, 18/18 Hinglish** — par **accuracy** me ye galat/adhoora:
-- "Ludhiana junction ke kitne platform hain?" → Wikipedia ka page **"Raipur Haryana Junction railway station"** ka (galat station!) — aur wahi user ko chala gaya.
-- "Sleeper coach me kitne berth hote hain?" → Vande Bharat Sleeper ka page (count nahi).
-- "Rajdhani ki top speed kitni hoti hai?" → ek specific Rajdhani service ka average-speed page (mojibake).
-- "Vande Bharat me khaana milta hai?" / "chai" → raw English Wikipedia / "verified data nahi mila".
-- "Wheelchair facility?" → "Passenger train toilet" ka adhoora page.
-
-**Kya lagaya (R38 + R38b):**
-1. **Subject guard** (`server/agent/subject.ts`, naya): jawab ka page user ke sawaal ke **strong shabdon** se match hota hai (station/train ke naam, numbers) — generic railway/bolne ke shabd (platform, berth, khana, mujhe, batao…) subject nahi bante. Galat page **skip** ho jaata hai (agli koshish chalti hai); **saari** koshish fail → saaf jawab *"is sawaal ka sahi page nahi mila — verified data nahi hai"* + jo **sach me** bata sakte hain wo suggest (station code/naam, wahaan ki trains, fare/seat/live status) — **kuch bhi andaze se nahi**.
-2. **Web-rescue me bhi** subject-match (`results.find(...)`) — pehla galat snippet nahi jaata.
-3. **KB me stable railway facts** (`railkb.ts`): coach berth count (SL 72 · 3A 64 · 2A 46 · 1A 22 · CC 78 · 2S 108 · EC 56) · Rajdhani 130 km/h MPS (+ comparison line) · Vande Bharat 160 operational / 183 trial · onboard khana (IRCTC catering, eCatering/1323) · platform count ka **honest** jawab · **divyangjan/wheelchair facility** (concession, reserved berths, ramp/lift, escort).
-4. **RULES_TOPIC_RE** me khana/khaana/food/meal/chai/berth/platform/top speed/maximum speed/kitni tez/divyangjan/wheelchair — ye topics **pehle KB** (stable fact, Hinglish, turant), web sirf jab KB me na ho.
-
-**Live natija (battery dobara, `1136870`):**
-| sawaal | pehle | ab |
-|---|---|---|
-| Ludhiana platform count | Raipur Haryana Jn ka page (galat) | "mere live data me platform count nahi hoti" + jo bata sakta hoon (honest) |
-| Sleeper coach berth | Vande Bharat Sleeper page | **SL 72 berth** (+ 3A/2A/1A/CC/2S/EC counts) |
-| Rajdhani top speed | galat service ka page (mojibake) | **130 km/h MPS** + comparison |
-| Vande Bharat khana | raw English Wikipedia | IRCTC catering ka Hinglish jawab |
-| Train me chai | "verified data nahi mila" | IRCTC catering ka jawab |
-| Wheelchair facility | "Passenger train toilet" (adhoora) | Divyangjan facility ka poora jawab |
-
-**Battery summary:** 18/18 direct jawab · 18/18 Hinglish · **avg latency 33.1s → 23.5s**. R37 ka user-scenario dobara verify: "12054 mein 2S book krdo" → form khula, dobara hukm → "form pehle se khula hai" (loop nahi).
-**Tests:** naya `tests/round38-any-question-accuracy.test.ts` (12) + round15 web-answer test update (top-speed ab KB se) → **117 files / 1264 ALL PASS** · server tsc clean · client 69 (baseline) · build `index-COu_oIzK.js` 487.5 kB.
-**Files:** `server/agent/subject.ts` (naya) · `server/agent/agentic.ts` · `server/agent/railkb.ts` · `tests/round38-any-question-accuracy.test.ts` · `tools/probe-r38-battery.mjs` · `tools/build-round38-preview.mjs`. **APK change nahi** (web fix). Android bridge v1.4.9 APK se restore kiya gaya (31,495 B, `postNotice`×2) — workspace reset ke baad.
-
-### 9.31 Round-39 (27 Sep) — "har tarah ke sawaal" (24-sawaal battery): mode guard, roz ke rules, general knowledge, capability
-
-User (R38 ke baad, wahi demand dobara): *"abh yeh AI ko samjhna chahiye tha … mai kya abh har choti choti cheez check karun? AI khud kyu nhi samjh ke sahi se outcome deta? jaise chatgpt/gemini/claude/manus … koi bhi trains, Indian railway, booking, live status, stations etc (examples) — ek dum accurate answer do."*
-
-**Pehle naapa:** naya `tools/probe-r39-battery.mjs` — **24 naye sawaal** (station code/naam/distance/city · train naam/compare/count/route · booking tatkal/fare-fark/senior/child · live late/kahan · rules pet/smoking/charging/AC-fail/bedroll · general biggest/longest/Konkan · capability). Live `1136870` par weak jawab mile:
-| sawaal | pehle (galat/weak) |
-|---|---|
-| "Ludhiana se Amritsar kitni doori hai?" | **Delhi–Amritsar–Katra Expressway** (sadak) ka jawab 😑 |
-| "Kutta train me le ja sakte hain?" | "verified rule nahi mil paya" (51s) |
-| "Train me smoking allowed hai?" | "specific rule nahi de paaye" (37s) |
-| "Mobile charging point har coach me?" | raw "UNVERIFIED" bullet dump (42s) |
-| "AC kharab ho gaya to paisa wapas?" | "koi verified rule nahi" (108s!) |
-| "3A aur 2A me fare ka fark?" | "koi relevant data nahi" (65s) |
-| "Indian Railways ka sabse bada station?" | kuch nahi aaya |
-| "Konkan Railway kahan se kahan tak?" | **Mangalore Central station** ka page |
-| "Tum kya nahi kar sakte?" | AI ne **booking flow** shuru kar diya — **"Kahan se jaana hai?"** |
-
-**Kya lagaya (R39 + R39b):**
-1. **Mode guard** (`server/agent/subject.ts`): rail sawaal par road/air/metro wala page **reject** (user khud road poochhe to allowed). Distance sawaal par honest line: *"rail/road doori km mere providers me nahi aati — jo sach me bata sakta hoon: aapke route ki asli trains + journey time"* (Expressway/highway data railway sawaal me **kabhi** nahi).
-2. **Roz ke rules KB:** pet/dog (sirf 1A/FC + Luggage Van, booking zaroori, baaki coaches me nahi) · smoking (COTPA banned + vape, penalty) · charging point (reserved coaches me berth/seat ke paas, general/purane rakes me nahi) · **AC-fail refund** (TTE certificate + TDR 20 ghante ke andar + difference formula 3A/2A → SL, 1A/EC → FC, CC → 2S) · **bachche ka ticket** (<5 free bina berth; 5–12: alag berth = full, share = half) · 2A vs 3A fare order (`2S < SL < 3A < CC < 2A < EC/1A`, 2A ~25–40% mehnga, exact provider se).
-3. **General knowledge KB:** sabse bada station = **Howrah Jn (23 platforms)** + top-5 list · sabse lambi route = **Vivek Express 15905/15906, Dibrugarh → Kanyakumari ~4,154 km (kuch sources 4,286)** · **Konkan Railway = Roha (MH) → Thokur (Mangaluru) ~741 km, 1998**. RULES_TOPIC_RE me in ke words — **KB web se pehle** (pehle web par Ernakulam/Mangalore ke galat pages aa rahe the).
-4. **Capability/meta sawaal** (`run.ts`, deterministic): "tum kya (nahi) kar sakte ho", "tum kaun ho" → **fixed honest jawab**: kya-kya karta hoon + wahi **2 rok** (IRCTC click nahi, passenger details/OTP/payment nahi) + "verified nahi to guess nahi". Live: **0.3s** me jawab (pehle 2-3s me galat booking sawaal).
-5. **Client amenity replies** (`src/ai/facts.ts`) ab sach bolte hain: charging/bedding/catering/wifi ka asli jawab — pehle "gadh ke nahi bataunga" type replies thi.
-6. **Subject-guard me Hindi adjectives** (lambi/lamba/bada/chhota/sabse…) generic — warna sahi Wikipedia page ("Longest train services…") reject ho jaata tha.
-
-**Live natija (deploy `f10d824` ke baad):**
+**Asli wajah (playwright + prod console se, andaza nahi):** R57 me `BlockView` ke props me **`onOpenPlanPage` destructure hona reh gaya tha**, par use kiya gaya tha. Jawab aate hi render ke waqt:
 ```
-"Ludhiana se Amritsar kitni doori hai?"  → honest: rail/road km data nahi + journey-time offer  ✅
-"Kutta train me le ja sakte hain?"       → 1A/FC + Luggage Van, booking zaroori, baaki me nahi ✅
-"Mobile charging point har coach me?"    → reserved me haan, general/purane me nahi            ✅
-"AC kharab ho gaya to paisa wapas?"      → TTE certificate + TDR 20h + difference formula      ✅
-"3A aur 2A me fare ka fark?"             → order + 25–40% + "exact provider se"               ✅
-"Sabse bada station?"                    → Howrah Jn 23 platforms (+ top-5)                    ✅
-"Konkan Railway kahan se kahan tak?"     → Roha → Thokur, 741 km, 1998                         ✅
-"Sabse lambi train route?"               → Vivek Express, ~4,154 km (~82.5h)                   ✅
-"Tum kya nahi kar sakte?"                → capability + 2 rok, 0.3s (booking sawaal nahi)       ✅
+ReferenceError: onOpenPlanPage is not defined
+    at BlockView …
 ```
-**Tests:** naya `tests/round39-every-question-battery.test.ts` (11) + round38 (23) + intelligence/round15 anchors → **118 files / 1286 ALL PASS** · server tsc clean · client 69 (baseline) · build (R39b) · **APK change nahi**.
-**Files:** `server/agent/subject.ts` · `server/agent/railkb.ts` · `server/agent/agentic.ts` · `server/agent/run.ts` · `src/ai/facts.ts` · tests · `tools/probe-r39-battery.mjs`. **Workspace reset note:** reset par `/home/user/recover.sh` (fetch+reset+npm ci+APK bridge restore) chalao.
+React ne poora tree **unmount** kar diya → screen par sirf khaali cream page (kuch bhi nahi, composer bhi nahi). Server side bilkul theek tha (jawab 15s me aa gaya) — sirf UI mara.
+
+**Fix (3 layer, taaki ye class dobara kabhi na ho):**
+1. **Asli bug:** `onOpenPlanPage` BlockView ke props me destructure ho gaya. Verify playwright se — wahi sawaal ab poori tarah render hota hai (pills, class rows, per-train cards, seat board).
+2. **ErrorBoundary (naya, general):** app-level + har message (text) + har card ke around. Ab koi bhi render error sirf apni jagah "⚠️ … dikha nahi paaya" card deta hai (retry + refresh buttons ke saath); baaki chat, purane messages aur composer chalta rehta hai. `resetKey` se naya message aane par boundary khud reset.
+3. **Gate:** `tools/check-undefined-names.sh` — frontend `tsc` me purane type-noise (TS2322/2339/18047…) hain, par **undefined name** (TS2304/TS2552) hamesha runtime crash hota hai; wahi 2 codes ab fail karte hain. R58 se pehle yahi line prod par 1 error deti thi.
+
+**Bonus fix (usi screenshot me dikha):** progress line "**18/6** checks completed" — total done se chhota. Ab `router.getAvailability` ke andar **har asli provider check** par `addChecks(1)` + `finally { checkDone() }` (dedupe/limit ke andar, isliye double count nahi) aur `turnScope.checkDone` me safety net (`total < done` → `total = done`). Naya test: `tests/round58-checks-count.test.ts` (3).
+
+**Tests:** `tests/round58-blank-screen.test.tsx` (5 — boundary fallback, ek card phatne par doosra theek, retry, seat board wiring, asli prod reply ka render) + round58-checks-count (3). Full suite **138 files / 1467 PASS**; `tsc -p tsconfig.server.json` clean; `check-undefined-names.sh` PASS.
+
+**Zip:** `RailBook-FULL-2026-09-29.zip` ab **33.2 MB** (pehle 60.3 MB) — builder ab sirf **latest APK + v1.4.9** (bridge recovery) pack karta hai, purane 6 APKs `RailBook/APKs` me waise hi hain. Proof screenshots: `previews/r58-blank-before.png` (blank) aur `previews/r58-blank-fixed.png` (same query, poora render).
+
+**Deploy:** `9211dd4` → prod `/api/version` MATCH; playwright se live verify (@9211dd4, poora jawab + cards render, koi pageerror nahi).
+
+## §9.51 — Round 59 (29 Sep 2026): Connecting plan ka apna PAGE (Leg 1 → Leg 2 + Book) — aur card kabhi khaali na jaaye
+
+**User (screenshots 23:19):** *"Connecting trains are not showing leg 1 and leg 2 and don't change the logic jo humne set kara tha connecting trains ke liye and connecting trains next chat page pe open ho same chat page par nhi"*
+
+**Do alag cheezein thin (dono fix hui):**
+
+1. **Card hi nahi banta tha (data ki dikkat nahi, shart ki thi).** `Concierge` me journey card sirf tab banta tha jab `routeOptions.length` ya `directUnavailable` ho — **connecting-only plan** (routeOptions khaali, par `connections`/`legPlans` bhare) me card skip ho jaata tha aur user ke paas sirf lamba text bachta tha (17 ek line wale "Leg 1 – ASR → NDLS …" — screenshot 2 bilkul yahi). Ab `planIsShowable()`: routeOptions / connections / legPlans / directUnavailable — kisi ek me bhi data ho to card banta hai (wahi data, kuch invent nahi).
+2. **Page chahiye tha, chat nahi.** Seat board ke `Connecting trains` / `Alternative trains` button ab **PlanPageSheet** kholte hain — full-screen page: header me route/date/pax + ↻, andar JourneyOptions embedded mode me (apna header nahi, double header nahi) seedha `connect`/`alt` page par. **Chat me koi naya message nahi jaata** — "← Wapas" dabao to chat bilkul waisi. Plan maangne ka text/logic **R57 wala hi** hai (`planPageAsk()`): *"ASR se LDH 2026-09-30 ka poora plan banao — connecting trains aur leg-wise seat bhi dikhao (1 passenger ke liye)"*. Loading par asli progress; plan na mile to saaf message + **Dobara try** (retry) + **Chat me poochho** — jhooth nahi.
+
+**R59b (prod verification me mila):** model ne ek turn par plan ka **sirf TEXT** diya (markdown table!) aur koi payload nahi → page ne imaandaari se "Plan abhi nahi mila" dikhaya. Fix structural: `isPlanAsk()` (plan ka saaf ishaara — "poora plan banao"/"plan bana do") + AI-first branch me rescue — model payload na de to **wahi `planJourney` engine** chalta hai jo har jagah chalta hai (R45 ka usool: deterministic sirf rescue; logic bilkul same, sirf guarantee ki payload khaali na jaaye).
+
+**Prod proof (@65d19d0, playwright headless Chrome):**
+- ASR→LDH: page header *"Connecting trains · Leg 1 → Leg 2 · ASR → LDH · 2026-10-01 · 1 passenger"*; card me **Leg 1 = 14680 ASR DLI EXP (2S AVL 459 · ₹65, 06:15 ASR → 07:34 JRC)**, layover line *"Change @ Jalandhar Cantt (JRC) · layover 36m"*, **Leg 2 = 12550 MCTM DURG SF EXP (SL AVL 19 · ₹180, 08:10 JRC → 08:55 LDH)** — har leg par Bhasha me hint + **Book Leg 1 · 2S / Book Leg 2 · SL** (aur class chips par Book). → `previews/r59-plan-page-legs.png`
+- LDH→ASR (jahan engine ko combo nahi mila): page phir bhi poora khulta hai — 25 direct/13 seat ka plan + honest note *"Is din is route par connecting combo nahi mila…"*. → `previews/r59-plan-page-nocombos.png`
+- "← Wapas" ke baad: `planpage=false`, chat waisi (2 messages), koi pageerror nahi.
+
+**Tests:** `tests/round59-plan-page.test.tsx` (7 — planIsShowable, phrasing wahi, leg 1/2 + Book, back, error+retry, honest note) + `tests/round59b-plan-payload-rescue.test.ts` (2 — isPlanAsk + control). Full suite **142 files / 1476 PASS**; `tsc -p tsconfig.server.json` clean; undefined-name gate PASS. Deploy `65d19d0` → prod `/api/version` MATCH.
+
+## §9.52 — Round 60 (30 Sep 2026): station choice wapas · plan page scroll fix · leg classes ka layout
+
+**User (screenshot 00:25):** *"ambiguous station pe ab choice nahi aati … multiple stations pe choice nahi aati; connecting trains page scroll nhi ho rha; screenshot mein jo classes hai uska layout sahi krdo; zip dedena, logic mat change Krna"*
+
+**1. Ambiguous city par dropdown wapas (logic chheda nahi — sirf payload ki guarantee).**
+Prod probe se asli wajah: `"Delhi jaana hai"` / `"Amritsar se Delhi ka poora plan banao"` me NLU city ko chup-chaap **NDLS** maan leta tha (aur model text me "kaunsa station (NDLS, DLI, NZM)?" poochh deta tha) — isliye koi `choice` payload nahi banta tha aur dropdown dikhta hi nahi tha. Sirf wahi phrasing choice deti thi jahan NLU city ko UNRESOLVED chhodta tha. Fix: **`cityStationAmbiguity()`** — slot city-level naam ho (station ka poora naam/code text me na ho) aur us city me 2+ station ho (asli provider search se) → wahi dropdown. Station ka exact naam/code likha ho to kuch nahi poochhte. Ye AI ke jawab ke saath jaata hai (text model ka, dropdown real data ka) — R45 ka usool: deterministic sirf rescue.
+*Prod proof @a424d4a:* "Delhi jaana hai" → **"📍 Delhi — kaunsa station?"** + NDLS/DLI/NZM/DEC/ANVT/DEE tappable rows.
+
+**2. Plan page ka scroll (asli bug, reproduce + proof ke saath).**
+`.planpage-body` par scrollable content tha (scrollHeight 4902) par **touch swipe se kuch nahi hilta tha** — wajah: embedded JourneyOptions par `overflow:auto` + `overscroll-behavior: contain` the, jo scroll ko apne tak rok dete the. Fix: embed mode me dono reset (`overflow: visible; overscroll-behavior: auto`), `.planpage-body` par `min-height:0` + `touch-action: pan-y`.
+*Proof (asli CSS + asli markup, touch events):* control box 588 · **naya CSS 805** · purana CSS wapas **0** (bug reproduce). *Prod @a424d4a:* plan page par touch swipe ke baad `scrollTop 0 → 746`.
+
+**3. Leg classes ka layout (screenshot me overlap).**
+Leg-list row ka area sirf **127px** chaura tha — train naam 2 line me tootta tha aur class chips container se bahar nikal kar seat-pill/chevron ke upar chadh jaate the. Fix: leg rows ka apna stack (`grid-template-areas: "a a" / "b c" / "d chev"`), aur dono jagah (connecting leg card + leg list) **ek hi `ClassGrid`**: leg ki seat pehle **"· Best"** ke saath, phir baaki classes same shakal me, har chip par **Book** (tap = usi class ka passenger form). Class code duplicate ("CC CC AVL") bhi hataya; Book separator saaf.
+
+**Tests:** `tests/round60-station-choice.test.ts` (5) + `tests/round60-classgrid-layout.test.tsx` (3). Full suite **144 files / 1484 PASS**; server typecheck + undefined-name gate clean. Deploy **a424d4a** → prod MATCH.
+Screenshots: `previews/r60-station-choice.png`, `previews/r60-prod-plan-legs.png`, `previews/r60-classes-layout.png`.

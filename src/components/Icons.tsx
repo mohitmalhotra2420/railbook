@@ -30,3 +30,17 @@ export const IconStar = (p: P) => (
 export const IconClose = (p: P) => (
   <svg viewBox="0 0 24 24" {...s} {...p}><path d="M6 6l12 12M18 6 6 18"/></svg>
 );
+
+/* ── Round-47: header ke naye buttons ke icons (purane text-glyphs ✚ ▦ ₹ ☰ ki jagah) ─────────────── */
+export const IconPlus = (p: P) => (
+  <svg viewBox="0 0 24 24" {...s} {...p}><path d="M12 5v14M5 12h14" /></svg>
+);
+export const IconGrid = (p: P) => (
+  <svg viewBox="0 0 24 24" {...s} {...p}><rect x="3.5" y="3.5" width="7" height="7" rx="2"/><rect x="13.5" y="3.5" width="7" height="7" rx="2"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><rect x="13.5" y="13.5" width="7" height="7" rx="2"/></svg>
+);
+export const IconBoard = (p: P) => (
+  <svg viewBox="0 0 24 24" {...s} {...p}><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M7 9h6M7 13h10M7 17h4M16 9h1.5"/></svg>
+);
+export const IconChat = (p: P) => (
+  <svg viewBox="0 0 24 24" {...s} {...p}><path d="M20 15a3 3 0 0 1-3 3H9l-5 3V6a3 3 0 0 1 3-3h10a3 3 0 0 1 3 3Z"/></svg>
+);

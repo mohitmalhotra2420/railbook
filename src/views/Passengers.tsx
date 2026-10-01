@@ -78,9 +78,8 @@ export function Passengers() {
     removePassenger,
     goReview,
   } = useBooking();
-  const berths = state.selectedClass
-    ? BERTH_BY_CLASS[state.selectedClass.code]
-    : [];
+  /* Round-43f: class code na mile (kabhi bhi) to khaali list — poora app blank nahi hona chahiye. */
+  const berths = state.selectedClass ? BERTH_BY_CLASS[state.selectedClass.code] ?? [] : [];
 
   /* ── Catering: train ka REAL pantry data (README: wahi endpoint jo AI ka TRAIN_FACTS tool use
    * karta hai). Sirf tab dikhate hain jab data aa jaye — warna "info nahi mili" (jhooth nahi). */
