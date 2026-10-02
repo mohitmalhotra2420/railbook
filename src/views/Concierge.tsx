@@ -2179,18 +2179,18 @@ export function Concierge() {
             void handleText(`${l.trainNumber} ki seat availability ${l.classCode ? l.classCode + " " : q?.travelClass ? q.travelClass + " " : ""}${l.date} ko ${l.ticketFrom ?? l.from} se ${l.ticketUpto ?? l.to}${l.ticketFrom && l.ticketFrom !== l.from ? ` (boarding ${l.from} se)` : ""}`);
           }}
           onPickClass={(r) => {
-            setPlanPage(null);
-            openBookingFromChip({
+            const payload = {
               ...r,
               row: (r.row as { status?: string | null } | null) ?? null,
               from: r.from,
               to: r.to,
               date: r.date ?? planPage.plan?.query.date ?? planPage.date,
-            });
+            };
+            setPlanPage(null);
+            setTimeout(() => openBookingFromChip(payload), 80);
           }}
           onBookLeg={(l) => {
-            setPlanPage(null);
-            openBookingFromChip({
+            const payload = {
               trainNumber: l.trainNumber,
               classCode: l.classCode ?? "",
               from: l.ticketFrom ?? l.from,
@@ -2203,7 +2203,9 @@ export function Concierge() {
               durationLabel: l.durationLabel ?? null,
               fromName: null,
               toName: null,
-            });
+            };
+            setPlanPage(null);
+            setTimeout(() => openBookingFromChip(payload as never), 80);
           }}
           onPickDate={(d) => {
             const q = planPage.plan?.query;
