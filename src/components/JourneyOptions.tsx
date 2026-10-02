@@ -768,9 +768,20 @@ export function JourneyOptions({
     ? aiRec.kind === "bfe" ? bfeAll.find((b) => b.trainNumber === aiRec.trainNumbers[0] && b.bookFrom === aiRec.bookFrom) ?? null : null
     : plan.directUnavailable ? bfeFresh ?? bfeAll[0] ?? null : bfeBeatsBest ? bfeFresh : null;
   const bfeRest = bfeAll.filter((b) => b !== bfeHero);
-  // 2 Oct 2026 fix: Alternative page shows direct board's ticket tricks even when bfeRest empty (hero excluded, bfeAll single) — parity with direct board
+  // 3 Oct 2026 fix: Alternative page must show ALL direct board ticket-tricks (user: LDH->LKO direct me trick dikhe, alternative me nahi)
+  // Merge bfeRest + direct[].earlierStopOptions deduplicated by train+bookFrom+bookUpto, so every trick visible in both places
   const trickFallback: Bfe[] = direct.flatMap((o) => ((o.earlierStopOptions ?? []) as unknown as Bfe[]));
-  const bfeForAlt: Bfe[] = bfeRest.length > 0 ? bfeRest : trickFallback;
+  const bfeForAlt: Bfe[] = (() => {
+    const seen = new Set<string>();
+    const out: Bfe[] = [];
+    for (const b of [...bfeRest, ...trickFallback]) {
+      const key = `${b.trainNumber}|${b.bookFrom}|${b.bookUpto ?? b.destination}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(b);
+    }
+    return out;
+  })();
   /* Round-18m-16: ticket segment = bookFrom → (bookUpto ?? destination); fresh check usi par. */
   const pickBfe = onPickBoardEarlier ? (b: Bfe) => onPickBoardEarlier({ trainNumber: b.trainNumber, bookFrom: b.bookFrom, boardAt: b.boardAt, destination: b.bookUpto ?? b.destination, classCode: b.availability.classCode }) : undefined;
   /* Round-18m-30e: hero SIRF tab jab `best` wahi option ho jo AI ne chuna (same trains) — warna AI verdict
@@ -1046,7 +1057,7 @@ export function JourneyOptions({
     <>
       {bfeForAlt.length > 0 && (
         <Section ic={IC.refresh} title="Same-train alternatives" badge={`+${bfeForAlt.length} option${bfeForAlt.length > 1 ? "s" : ""}`}>
-          {bfeForAlt.slice(0, 7).map((b) => (
+          {bfeForAlt.slice(0, 15).map((b) => (
             <div key={`${b.trainNumber}-${b.bookFrom}`} role="button" tabIndex={0} className="jx-bfe-row" onClick={pickBfe ? () => pickBfe(b) : undefined} onKeyDown={pickBfe ? (e) => { if (e.key === "Enter") pickBfe(b); } : undefined}>
               <div className="jx-bfe-top">
                 <div className="jx-lrow-train"><span className="jx-no">{b.trainNumber}</span> <span className="jx-name">{b.trainName}</span></div>
