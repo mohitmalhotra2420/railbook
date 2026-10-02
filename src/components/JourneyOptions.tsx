@@ -81,6 +81,13 @@ function availTextOf(a: AvailLike | null | undefined): { text: string; tone: Ton
   if (/REGRET/i.test(String(a.status))) return { text: `${cls} Regret`, tone: tone("bad") };
   return { text: cls ? `${cls} ${a.status}` : String(a.status), tone: "muted" };
 }
+function canBookAvail(a: AvailLike | null | undefined): boolean {
+  const s = String(a?.status ?? "").toUpperCase();
+  return s === "AVAILABLE" || s === "RAC" || s === "WAITLIST" || s === "UNKNOWN";
+}
+function canBookStatus(s?: string | null): boolean {
+  return ["AVAILABLE", "RAC", "WAITLIST", "UNKNOWN"].includes(String(s ?? "").toUpperCase());
+}
 /** Round-20: AvailLike row → shared chip data (Seat Finder wali shakal) — kuch naya nahi banate. */
 function chipDataOf(r: AvailLike): ClassChipData {
   const code = classCodeOf(r) || "—";
@@ -211,9 +218,10 @@ function ClassRow({ label, rows, onPick }: { label: string; rows: AvailLike[]; o
            * RailYatri CACHED se aata hai (24h ke andar = stale nahi) — par user ko pata ho ki ye "X min pehle" ka hai. */
           const ageMs = r.asOf ? Date.now() - Date.parse(r.asOf) : NaN;
           const recentButNotLive = !r.stale && Number.isFinite(ageMs) && ageMs > 10 * 60 * 1000;
+          const can = canBookAvail(r);
           const inner = <>{av.text.replace(" ⚠ stale", "")}{r.fare != null ? ` · ${inr(r.fare)}` : ""}{r.stale || recentButNotLive ? <span className="jx-cchip-tag">· {ageLabel(r.asOf)}{onPick ? " ↻" : ""}</span> : null}</>;
           return onPick ? (
-            <button key={classCodeOf(r) || r.status} type="button" className={`jx-cchip jx-cchip-btn jx-cchip-${av.tone}`} onClick={(e) => { e.stopPropagation(); onPick(r); }} title={`${classCodeOf(r)} — passenger form kholo`}>{inner} <span className="jx-cchip-go">Book</span></button>
+            <button key={classCodeOf(r) || r.status} type="button" className={`jx-cchip jx-cchip-btn jx-cchip-${av.tone}`} onClick={(e) => { e.stopPropagation(); onPick(r); }} title={`${classCodeOf(r)} — ${can ? "passenger form kholo" : "seat check"}`}>{inner} {can ? <span className="jx-cchip-go">Book</span> : null}</button>
           ) : (
             <span key={classCodeOf(r) || r.status} className={`jx-cchip jx-cchip-${av.tone}`}>{inner}</span>
           );
@@ -270,8 +278,9 @@ function ListRow({ no, name, mid, midSub, dur, durSub, seat, chips, onClick, onC
           <div className="jx-classes-chips jx-lrow-chips">
             {chips.slice(0, 3).map((r) => {
               const av = availTextOf(r);
+              const can = canBookAvail(r);
               const inner = <>{av.text.replace(" ⚠ stale", "")}{r.fare != null ? ` · ${inr(r.fare)}` : ""}{r.stale ? <span className="jx-cchip-tag"> · {ageLabel(r.asOf)}</span> : null}</>;
-              return onChip ? <button key={r.classCode} type="button" className={`jx-cchip jx-cchip-btn jx-cchip-${av.tone}`} onClick={(e) => { e.stopPropagation(); onChip(r); }}>{inner} <span className="jx-cchip-go">Book</span></button> : <span key={r.classCode} className={`jx-cchip jx-cchip-${av.tone}`}>{inner}</span>;
+              return onChip ? <button key={r.classCode} type="button" className={`jx-cchip jx-cchip-btn jx-cchip-${av.tone}`} onClick={(e) => { e.stopPropagation(); onChip(r); }} title={can ? `${r.classCode} — passenger form kholo` : `${r.classCode} — seat check`}>{inner} {can ? <span className="jx-cchip-go">Book</span> : null}</button> : <span key={r.classCode} className={`jx-cchip jx-cchip-${av.tone}`}>{inner}</span>;
             })}
           </div>
         )}
@@ -290,7 +299,8 @@ const bookableOf = (l: AgentRouteLeg): string | null => {
   const a = l.availability;
   if (!a?.classCode) return null;
   const st = String(a.status ?? "").toUpperCase();
-  return st === "AVAILABLE" || st === "RAC" || st === "WAITLIST" || st === "WL" || st === "N/A" || st === "NOT_AVAILABLE" ? a.classCode : null;
+  // Only AVAILABLE/RAC/WAITLIST/UNKNOWN are bookable — NOT_AVAILABLE/N-A/REGRET should not show Book
+  return st === "AVAILABLE" || st === "RAC" || st === "WAITLIST" || st === "UNKNOWN" ? a.classCode : null;
 };
 
 /** Round-60: leg ki classes ek saaf grid me — pehli chip leg ki seat ("Best"), baaki classes same shakal,
@@ -320,22 +330,23 @@ export function ClassGrid({
         /* av.text me class code pehle se hota hai ("CC AVL 16") — dobara likhne se "CC CC AVL" ho jaata
          * tha; isliye code sirf tab lagao jab text me na ho. */
         const hasCode = Boolean(code) && new RegExp(`^\\s*${code}\\b`, "i").test(status);
-        const can = bookable && Boolean(r.classCode) && Boolean(onBook);
+        const clickable = bookable && Boolean(r.classCode) && Boolean(onBook);
+        const canBook = canBookStatus((r as unknown as { status?: string | null }).status);
         const inner = (
           <>
             {hasCode ? null : <><span className="jx-cchip-cl">{code}</span> </>}
             {status}
             {r.fare != null ? ` · ${inr(r.fare)}` : ""}
             {i === 0 ? <span className="jx-cchip-star"> · Best</span> : null}
-            {can ? <span className="jx-cchip-go">Book</span> : null}
+            {clickable && canBook ? <span className="jx-cchip-go">Book</span> : null}
           </>
         );
-        return can ? (
+        return clickable ? (
           <button
             key={`${r.classCode}-${i}`}
             type="button"
             className={`jx-cchip jx-cchip-btn jx-cchip-${av.tone}${i === 0 ? " jx-cchip-best" : ""}`}
-            title={`${leg.trainNumber} ${r.classCode} — passenger form kholo`}
+            title={`${leg.trainNumber} ${r.classCode} — ${canBook ? "passenger form kholo" : "seat check"}`}
             onClick={(e) => { e.stopPropagation(); onBook!(r); }}
           >
             {inner}
@@ -479,9 +490,11 @@ function LegList({ title, legs, checked, baseDate, dayOffset, onPickLeg, onBookL
               <div className="jx-lrow-d" style={{ gridColumn: "span 2" }}>
                 <span className="jx-classes-chips">{(l.classOptions ?? []).slice(0, 6).map((r) => {
                   const av = availTextOf(r);
-                  const goBook = onBookLeg ? () => (onBookLeg as (leg: AgentRouteLeg, dayOffset: number)=>void)({ ...l, availability: r, departureDayOffset: (l as AgentRouteLeg).departureDayOffset ?? dayOffset ?? 0 } as unknown as AgentRouteLeg, (l as AgentRouteLeg).departureDayOffset ?? dayOffset ?? 0) : undefined;
+                  const can = canBookStatus((r as unknown as { status?: string | null }).status);
+                  const goBook = can && onBookLeg ? () => (onBookLeg as (leg: AgentRouteLeg, dayOffset: number)=>void)({ ...l, availability: r, departureDayOffset: (l as AgentRouteLeg).departureDayOffset ?? dayOffset ?? 0 } as unknown as AgentRouteLeg, (l as AgentRouteLeg).departureDayOffset ?? dayOffset ?? 0) : undefined;
                   const goPick = onPickLeg ? () => onPickLeg({ ...l, availability: r } as unknown as AgentRouteLeg) : undefined;
-                  return <button key={r.classCode} type="button" className={`jx-cchip jx-cchip-btn jx-cchip-${av.tone}`} onClick={goBook ?? goPick}>{av.text} <span className="jx-cchip-go">Book</span></button>;
+                  const handler = goBook ?? goPick;
+                  return handler ? <button key={r.classCode} type="button" className={`jx-cchip jx-cchip-btn jx-cchip-${av.tone}`} onClick={handler}>{av.text} {can ? <span className="jx-cchip-go">Book</span> : null}</button> : <span key={r.classCode} className={`jx-cchip jx-cchip-${av.tone}`}>{av.text}</span>;
                 })}{(l.classOptions ?? []).length === 0 && <span className="jx-sub">data nahi mila</span>}</span>
               </div>
             </div>
@@ -733,12 +746,24 @@ export function JourneyOptions({
   const rec = plan.recovery;
   const baseDate = plan.query.date;
   const pax = plan.query.passengers ?? null;
-  const pick = onPickTrain ? (o: AgentRouteOption) => onPickTrain(o.trainNumbers[0]) : undefined;
-  const pickLeg = onPickLeg ? (l: AgentRouteLeg) => onPickLeg({ trainNumber: l.trainNumber, from: l.from, to: l.to, date: addDays(baseDate, l.departureDayOffset ?? 0), classCode: l.availability?.classCode ?? null, ticketFrom: l.ticketFrom ?? null, ticketUpto: l.ticketUpto ?? null }) : undefined;
+  const [page, setPage] = useState<"direct" | "alt" | "connect" | null>(initialPage ?? null);
+  // 3 Oct fix: inner jx-page overlay covers booking form — close page before opening booking (avoids back-press)
+  const closePageThen = (fn: () => void) => { if (page) setPage(null); fn(); };
+  const wrapPickClass = onPickClass ? ((q: Parameters<NonNullable<typeof onPickClass>>[0]) => closePageThen(() => (onPickClass as unknown as (q: typeof q) => void)(q))) as typeof onPickClass : undefined;
+  const wrapPickTrain = onPickTrain ? ((n: string) => closePageThen(() => onPickTrain(n))) as typeof onPickTrain : undefined;
+  const wrapPickLeg = onPickLeg ? ((l: Parameters<NonNullable<typeof onPickLeg>>[0]) => closePageThen(() => (onPickLeg as unknown as (l: typeof l) => void)(l))) as typeof onPickLeg : undefined;
+  const wrapBookLeg = onBookLeg ? ((l: Parameters<NonNullable<typeof onBookLeg>>[0], d?: number) => closePageThen(() => (onBookLeg as unknown as (l: typeof l, d?: number) => void)(l, d))) as typeof onBookLeg : undefined;
+  const wrapPickBoard = onPickBoardEarlier ? ((o: Parameters<NonNullable<typeof onPickBoardEarlier>>[0]) => closePageThen(() => (onPickBoardEarlier as unknown as (o: typeof o) => void)(o))) as typeof onPickBoardEarlier : undefined;
+  const wrapPickDate = onPickDate ? ((d: string) => closePageThen(() => onPickDate(d))) as typeof onPickDate : undefined;
+  const wrapPickStations = onPickStations ? ((f: string, t: string) => closePageThen(() => onPickStations(f, t))) as typeof onPickStations : undefined;
+  const wrapOpenBoard = onOpenBoard ? (() => closePageThen(() => onOpenBoard())) as typeof onOpenBoard : undefined;
+
+  const pick = wrapPickTrain ? (o: AgentRouteOption) => wrapPickTrain(o.trainNumbers[0]) : undefined;
+  const pickLeg = wrapPickLeg ? (l: AgentRouteLeg) => (wrapPickLeg as unknown as (x: { trainNumber: string; from: string; to: string; date: string; classCode?: string | null; ticketFrom?: string | null; ticketUpto?: string | null }) => void)({ trainNumber: l.trainNumber, from: l.from, to: l.to, date: addDays(baseDate, l.departureDayOffset ?? 0), classCode: l.availability?.classCode ?? null, ticketFrom: l.ticketFrom ?? null, ticketUpto: l.ticketUpto ?? null } as any) : undefined;
   /* Round-57: leg ka "Book" → seedha passenger form (ticket segment wahi jo leg par verified hai). */
-  const bookLeg = onBookLeg
+  const bookLeg = wrapBookLeg
     ? (l: AgentRouteLeg, dayOffset?: number) =>
-        onBookLeg({
+        (wrapBookLeg as unknown as (a: unknown, b?: number) => void)({
           trainNumber: l.trainNumber,
           from: l.from,
           to: l.to,
@@ -751,7 +776,7 @@ export function JourneyOptions({
           arrival: l.arrival ?? null,
           durationLabel: durLabel(l.durationMinutes ?? null),
           availability: (l.availability as unknown as Record<string, unknown>) ?? null,
-        })
+        } as unknown as Parameters<NonNullable<typeof onBookLeg>>[0], dayOffset)
     : undefined;
   const altStations = (rec?.alternateStations ?? []).filter((o) => o.count > 0);
   const partial = rec?.partialRoute;
@@ -783,7 +808,7 @@ export function JourneyOptions({
     return out;
   })();
   /* Round-18m-16: ticket segment = bookFrom → (bookUpto ?? destination); fresh check usi par. */
-  const pickBfe = onPickBoardEarlier ? (b: Bfe) => onPickBoardEarlier({ trainNumber: b.trainNumber, bookFrom: b.bookFrom, boardAt: b.boardAt, destination: b.bookUpto ?? b.destination, classCode: b.availability.classCode }) : undefined;
+  const pickBfe = wrapPickBoard ? (b: Bfe) => (wrapPickBoard as unknown as (o: { trainNumber: string; bookFrom: string; boardAt: string; destination: string; classCode: string }) => void)({ trainNumber: b.trainNumber, bookFrom: b.bookFrom, boardAt: b.boardAt, destination: b.bookUpto ?? b.destination, classCode: b.availability.classCode } as any) : undefined;
   /* Round-18m-30e: hero SIRF tab jab `best` wahi option ho jo AI ne chuna (same trains) — warna AI verdict
    * "via NDLS" aur hero "DIRECT WL 74" jaisa mismatch ho jaata hai. Connecting pick → hero = wahi connecting option. */
   const sameTrains = (a: string[] | undefined, b: string[] | undefined) => !!a && !!b && a.join("+") === b.join("+");
@@ -841,7 +866,7 @@ export function JourneyOptions({
     o.changes > 0 && o.legs.length > 1 ? (
       <ConnCard key={o.trainNumbers.join("+")} c={{ station: o.legs[0].to, stationName: o.legs[0].toName ?? null, legs: o.legs, layoverMinutes: o.layoverMinutes ?? 0, totalDurationMinutes: o.durationMinutes, valid: true } as unknown as AgentConnection} baseDate={baseDate} onPickLeg={pickLeg} onBookLeg={bookLeg} />
     ) : (
-      <ListRow key={o.trainNumbers.join("+")} no={o.trainNumbers[0]} name={o.trainNames[0]} mid={`${o.origin}→${o.destination}`} midSub={`${o.departure} · ${o.arrival}${dateTag(baseDate, o.arrivalDayOffset)}`} dur={o.durationLabel} durSub="Direct" seat={seatOf(o)} chips={chipsOf(o)} onClick={pick ? () => pick(o) : undefined} onChip={onPickClass ? (r) => onPickClass({ trainNumber: o.trainNumbers[0], classCode: r.classCode, from: o.origin, to: o.destination, date: baseDate, row: r, trainName: o.trainNames[0] ?? null, departure: o.departure ?? null, arrival: o.arrival ?? null, arrivalDayOffset: o.arrivalDayOffset ?? null, durationLabel: o.durationLabel ?? null, fromName: o.legs?.[0]?.fromName ?? null, toName: o.legs?.[0]?.toName ?? null }) : undefined} />
+      <ListRow key={o.trainNumbers.join("+")} no={o.trainNumbers[0]} name={o.trainNames[0]} mid={`${o.origin}→${o.destination}`} midSub={`${o.departure} · ${o.arrival}${dateTag(baseDate, o.arrivalDayOffset)}`} dur={o.durationLabel} durSub="Direct" seat={seatOf(o)} chips={chipsOf(o)} onClick={pick ? () => pick(o) : undefined} onChip={wrapPickClass ? (r) => (wrapPickClass as unknown as (q: any) => void)({ trainNumber: o.trainNumbers[0], classCode: r.classCode, from: o.origin, to: o.destination, date: baseDate, row: r, trainName: o.trainNames[0] ?? null, departure: o.departure ?? null, arrival: o.arrival ?? null, arrivalDayOffset: o.arrivalDayOffset ?? null, durationLabel: o.durationLabel ?? null, fromName: o.legs?.[0]?.fromName ?? null, toName: o.legs?.[0]?.toName ?? null }) : undefined} />
     );
   /* Round-18m-12 (user: "har train × har class check ho, RAC bhi dikhe"): seat-check
    * audit list — HAR direct train ka poora class board (AVL/RAC/WL/N-A, stale ⚠), aur
@@ -858,7 +883,6 @@ export function JourneyOptions({
   const [openTricks, setOpenTricks] = useState<Record<string, boolean>>({});
   /* 24 Sep 2026 (user: "alternative trains ka alag page, leg 1/leg 2 ka alag page banao,
    * front chat me sirf header rahe"): poora detail ab alag page par. */
-  const [page, setPage] = useState<"direct" | "alt" | "connect" | null>(initialPage ?? null);
   /* Window/Time chip ki honest line — toggle ab wahi Time chip badalta hai (duplicate state nahi). */
   const windowBar = winOn && direct.length > 0 && (
     <div className="jx-windowbar">
@@ -936,9 +960,9 @@ export function JourneyOptions({
               countText={countTextOf(rowsOfTrainFiltered(o))}
               rows={rowsOfTrainFiltered(o).map(chipDataOf)}
               onChip={
-                onPickClass
+                wrapPickClass
                   ? (c) =>
-                      onPickClass({
+                      (wrapPickClass as unknown as (q: Parameters<NonNullable<typeof onPickClass>>[0]) => void)({
                         trainNumber: o.trainNumbers[0],
                         classCode: c.code,
                         from: o.origin,
@@ -978,7 +1002,7 @@ export function JourneyOptions({
             <div key={`${b.trainNumber}-${b.bookFrom}-${b.bookUpto ?? ""}`} className="jx-sb-alt">
               <span className="jx-sb-alt-label">Ticket {b.bookFromName ?? b.bookFrom} ({b.bookFrom}){b.bookUpto ? ` → ${b.bookUptoName ?? b.bookUpto} (${b.bookUpto})` : ` → ${b.destination}`} · board {b.boardAt}, utro {b.destination}:</span>
               <ClassRow label="" rows={b.classOptions ?? [b.availability]} onPick={
-                onPickClass
+                wrapPickClass
                   ? (r) =>
                       onPickClass({
                         trainNumber: b.trainNumber,
@@ -1074,7 +1098,7 @@ export function JourneyOptions({
               <div className="jx-strip-labels" style={b.bookUpto ? { gridTemplateColumns: "repeat(4, 1fr)" } : undefined}><span>Book from</span><span>Boarding</span><span>Deboarding</span>{b.bookUpto && <span>Book upto</span>}</div>
               {/* Round-18m-14: alternative row ki classes bhi tappable (stale → refresh). */}
               <ClassRow label="" rows={(b.classOptions ?? [b.availability]).filter((r) => r.classCode !== b.availability.classCode || r.stale)} onPick={
-                onPickClass
+                wrapPickClass
                   ? (r) =>
                       onPickClass({
                         trainNumber: b.trainNumber,
@@ -1098,8 +1122,9 @@ export function JourneyOptions({
                 {(b.classOptions ?? []).filter((r) => r.classCode !== b.availability.classCode).length > 0 && (
                   <span className="jx-classes-chips">{(b.classOptions ?? []).filter((r) => r.classCode !== b.availability.classCode).slice(0, 3).map((r) => {
                     const av = availTextOf(r);
+                    const can = canBookAvail(r);
                     const inner = <>{av.text.replace(" ⚠ stale", "")}{r.fare != null ? ` · ${inr(r.fare)}` : ""}{r.stale ? <span className="jx-cchip-tag"> · {ageLabel(r.asOf)}</span> : null}</>;
-                    return onPickClass ? <button key={r.classCode} type="button" className={`jx-cchip jx-cchip-btn jx-cchip-${av.tone}`} onClick={(e)=>{e.stopPropagation(); onPickClass({trainNumber: b.trainNumber, classCode: r.classCode, from: b.bookFrom, to: b.bookUpto ?? b.destination, boardAt: b.boardAt, row: r, trainName: b.trainName, departure: b.bookFromDeparture ?? null, arrival: b.arrival ?? null, arrivalDayOffset: b.arrivalDayOffset ?? null, durationLabel: durLabel(b.durationMinutes ?? null), fromName: b.bookFromName ?? null, toName: (b.bookUpto ? b.bookUptoName : b.destinationName) ?? null});}}>{inner} <span className="jx-cchip-go">Book</span></button> : <span key={r.classCode} className={`jx-cchip jx-cchip-${av.tone}`}>{inner}</span>;
+                    return wrapPickClass ? <button key={r.classCode} type="button" className={`jx-cchip jx-cchip-btn jx-cchip-${av.tone}`} onClick={(e)=>{e.stopPropagation(); (wrapPickClass as unknown as (q: any)=>void)({trainNumber: b.trainNumber, classCode: r.classCode, from: b.bookFrom, to: b.bookUpto ?? b.destination, boardAt: b.boardAt, row: r, trainName: b.trainName, departure: b.bookFromDeparture ?? null, arrival: b.arrival ?? null, arrivalDayOffset: b.arrivalDayOffset ?? null, durationLabel: durLabel(b.durationMinutes ?? null), fromName: b.bookFromName ?? null, toName: (b.bookUpto ? b.bookUptoName : b.destinationName) ?? null});}} title={can ? `${r.classCode} — passenger form kholo` : `${r.classCode} — seat check`}>{inner} {can ? <span className="jx-cchip-go">Book</span> : null}</button> : <span key={r.classCode} className={`jx-cchip jx-cchip-${av.tone}`}>{inner}</span>;
                   })}</span>
                 )}
               </div>
@@ -1133,14 +1158,14 @@ export function JourneyOptions({
       {plan.directUnavailable && altStations.length > 0 && (
         <Section ic={IC.pin} title="Doosra station · same city" badge={`${altStations.length}`} foot="Aapka route badla nahi — tap karke confirm karein.">
           {altStations.slice(0, 3).map((o) => (
-            <ListRow key={`${o.from}-${o.to}`} no={o.best?.trainNumbers[0] ?? "—"} name={o.changed === "origin" ? "Alternate boarding" : "Alternate destination"} mid={`${o.from}→${o.to}`} midSub={o.best ? `${o.best.departure} · ${o.best.arrival}` : `${o.count} trains`} dur={o.best?.durationLabel ?? null} durSub={`${o.count} trains`} seat={o.best?.availability ?? null} onClick={onPickStations ? () => onPickStations(o.from, o.to) : undefined} />
+            <ListRow key={`${o.from}-${o.to}`} no={o.best?.trainNumbers[0] ?? "—"} name={o.changed === "origin" ? "Alternate boarding" : "Alternate destination"} mid={`${o.from}→${o.to}`} midSub={o.best ? `${o.best.departure} · ${o.best.arrival}` : `${o.count} trains`} dur={o.best?.durationLabel ?? null} durSub={`${o.count} trains`} seat={o.best?.availability ?? null} onClick={wrapPickStations ? () => wrapPickStations(o.from, o.to) : undefined} />
           ))}
         </Section>
       )}
       {plan.directUnavailable && altDates.length > 0 && (
         <Section ic={IC.cal} title="Other dates" badge={`${altDates.length} alternative${altDates.length > 1 ? "s" : ""}`} foot="Aapki date badli nahi — tap karke us date ka plan dekho. Jahan seat likhi hai wahi verify hui hai.">
           {altDates.map((d) => (
-            <button key={d.date} type="button" className="jx-drow" onClick={onPickDate ? () => onPickDate(d.date) : undefined}>
+            <button key={d.date} type="button" className="jx-drow" onClick={wrapPickDate ? () => wrapPickDate(d.date) : undefined}>
               <span className="jx-drow-date">{formatShortDate(d.date)} · {d.count} train{d.count > 1 ? "s" : ""}</span>
               <span className="jx-drow-proof">{d.seatProof ?? "seat status unverified"}</span>
               <span className="jx-lrow-chev">{IC.chev}</span>
@@ -1298,7 +1323,7 @@ export function JourneyOptions({
             { ic: IC.rupee, text: bfeHero.availability.fare != null ? inr(bfeHero.availability.fare) : "Fare on select" },
           ]} />
           <ClassRow label="Available classes · tap = booking" rows={bfeHero.classOptions ?? [bfeHero.availability]} onPick={
-                onPickClass
+                wrapPickClass
                   ? (r) =>
                       onPickClass({
                         trainNumber: bfeHero.trainNumber,
@@ -1481,7 +1506,7 @@ export function JourneyOptions({
           {tab === "alt_date" && (
             <div className="jx-list">
               {altDates.map((d) => (
-                <button key={d.date} type="button" className="jx-drow" onClick={onPickDate ? () => onPickDate(d.date) : undefined}>
+                <button key={d.date} type="button" className="jx-drow" onClick={wrapPickDate ? () => wrapPickDate(d.date) : undefined}>
                   <span className="jx-drow-date">{formatShortDate(d.date)} · {d.count} train{d.count > 1 ? "s" : ""}</span>
                   <span className="jx-drow-proof">{d.seatProof ?? (d.fastest ? `fastest ${d.fastest.number}` : "")}</span>
                   <span className="jx-lrow-chev">{IC.chev}</span>

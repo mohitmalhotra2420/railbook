@@ -70,7 +70,7 @@ const EXPLICIT_AVAILABLE_WORDS =
   /\b(available|availability|avl|vacant|khali|khaali)\b|उपलब्ध|खाली|उपलब्धता/iu;
 
 const CONFIRMED_WORDS =
-  /(confirmed|कन्फर्म|confirm|pakki|पक्की|सीट\s*वाली|seat\s*wali|जो\s*पक्की)/i;
+  /(confirmed|कन्फर्म|confirm|pakki|पक्की|जो\s*पक्की)/i;
 const FASTEST_WORDS =
   /sabse\s*(?:jaldi|fast|tez|तेज़)|fastest|kam\s*time|jaldi\s*pahunch|सबसे\s*(?:जल्दी|तेज़)|कम\s*समय/iu;
 const CHEAPEST_WORDS =

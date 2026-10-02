@@ -378,7 +378,7 @@ h2 { font-size: 17px; }
 }
 .chip.ok { background: var(--green-soft); color: var(--green); }
 .chip.rac { background: var(--green-soft); color: var(--green); } /* Round-18m-22: RAC = available (green) */
-.chip.wl { background: var(--red-soft); color: var(--red); } /* WL = red (confirm filter: WL hide, RAC green) */
+.chip.wl { background: #e0e7ff; color: #1d4ed8; } /* WL = blue (Round-18m-26) */
 .chip.stale { background: #f4ecdc; color: #6b5b3e; } /* Round-18m-26: tan = purana */
 .chip.no { background: #fdecec; color: #9b1c1c; } /* Round-18m-26: red = N/A/Regret */
 .chip.unk { background: #f3f1ed; color: #9aa1a9; }
@@ -1057,7 +1057,7 @@ h2 { font-size: 17px; }
 .tb-avl { font-size: 12px; font-weight: 700; }
 /* Round-18m-26 scheme: green = available, tan = purana, blue = WL, red = N/A/Regret. */
 .tb-avl.ok { color: var(--green); }
-.tb-avl.wl { color: var(--red); }
+.tb-avl.wl { color: #1d4ed8; }
 .tb-avl.rac { color: var(--green); } /* Round-18m-22: RAC = available (green) */
 .tb-avl.stale { color: #6b5b3e; background: #f4ecdc; border-radius: 6px; padding: 1px 4px; }
 .tb-avl.bad { color: #9b1c1c; }
@@ -1593,7 +1593,7 @@ table.traintable {
 .jo-avl-ok, .jo-avl-cell.jo-avl-ok { color: var(--green); }
 .jo-avl-warn, .jo-avl-cell.jo-avl-warn { color: var(--amber); }
 .jo-avl-stale, .jo-avl-cell.jo-avl-stale { color: #6b5b3e; background: #f4ecdc; border-radius: 6px; padding: 1px 5px; }
-.jo-avl-wl, .jo-avl-cell.jo-avl-wl { color: var(--red); }
+.jo-avl-wl, .jo-avl-cell.jo-avl-wl { color: #1d4ed8; }
 .jo-avl-bad, .jo-avl-cell.jo-avl-bad { color: var(--red); }
 .jo-avl-muted, .jo-avl-cell.jo-avl-muted { color: var(--muted); font-weight: 500; }
 .jo-fare { font-weight: 700; color: var(--navy); }
@@ -1880,7 +1880,7 @@ table.traintable {
 /* Round-18m-26 colour scheme (user): green = available, tan = purana/stale, blue = WL, red = N-A/Regret. */
 .jx-seat-ok .jx-seat-main { background: #e6f6ec; color: #0d6b3a; }
 .jx-seat-stale .jx-seat-main { background: #f4ecdc; color: #6b5b3e; }
-.jx-seat-wl .jx-seat-main { background: var(--red-soft); color: var(--red); }
+.jx-seat-wl .jx-seat-main { background: #e0e7ff; color: #1d4ed8; }
 .jx-seat-warn .jx-seat-main { background: #fff7d6; color: #8a5a00; }
 .jx-seat-bad .jx-seat-main { background: #fdecec; color: #9b1c1c; }
 .jx-seat-muted .jx-seat-main { background: #eef1f6; color: #4b5563; }
@@ -1905,7 +1905,7 @@ table.traintable {
 /* Round-18m-19 (user): AVL = green, RAC = yellow, WL/Regret/N-A = red — har jagah same. */
 .jx-cchip-ok { background: #e6f6ec; color: #0d6b3a; border-color: #9fd6b0; }
 .jx-cchip-stale { background: #f4ecdc; color: #6b5b3e; border-color: #d9c9a3; } /* Round-18m-26: tan = purana data */
-.jx-cchip-wl { background: var(--red-soft); color: var(--red); border-color: #f2b8b8; } /* WL = red */
+.jx-cchip-wl { background: #e0e7ff; color: #1d4ed8; border-color: #a5b4fc; } /* WL = blue (Round-18m-26) */
 .jx-cchip-warn { background: #fff7d6; color: #8a5a00; border-color: #f3d98a; }
 .jx-cchip-bad { background: #fdecec; color: #9b1c1c; border-color: #f2b8b8; }
 .jx-cchip-muted { background: #eef1f6; color: #4b5563; border-color: #d5dbe5; }
