@@ -27,7 +27,7 @@ function depHour(t: TrainResult): number {
 }
 
 function classOk(c: ClassAvailability, prefs: Prefs): boolean {
-  if (prefs.confirmedOnly && c.status !== "AVAILABLE") return false;
+  if (prefs.confirmedOnly && c.status !== "AVAILABLE" && c.status !== "RAC") return false;
   if (!prefs.confirmedOnly && !isBookable(c.status)) return false;
   if (prefs.classCodes?.length && !prefs.classCodes.includes(c.code)) return false;
   if (prefs.acOnly && !AC_CODES.includes(c.code)) return false;

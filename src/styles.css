@@ -378,7 +378,7 @@ h2 { font-size: 17px; }
 }
 .chip.ok { background: var(--green-soft); color: var(--green); }
 .chip.rac { background: var(--green-soft); color: var(--green); } /* Round-18m-22: RAC = available (green) */
-.chip.wl { background: #e7eefc; color: #1d4ed8; } /* Round-18m-26: blue = WL */
+.chip.wl { background: var(--red-soft); color: var(--red); } /* WL = red (confirm filter: WL hide, RAC green) */
 .chip.stale { background: #f4ecdc; color: #6b5b3e; } /* Round-18m-26: tan = purana */
 .chip.no { background: #fdecec; color: #9b1c1c; } /* Round-18m-26: red = N/A/Regret */
 .chip.unk { background: #f3f1ed; color: #9aa1a9; }
@@ -1057,7 +1057,7 @@ h2 { font-size: 17px; }
 .tb-avl { font-size: 12px; font-weight: 700; }
 /* Round-18m-26 scheme: green = available, tan = purana, blue = WL, red = N/A/Regret. */
 .tb-avl.ok { color: var(--green); }
-.tb-avl.wl { color: #1d4ed8; }
+.tb-avl.wl { color: var(--red); }
 .tb-avl.rac { color: var(--green); } /* Round-18m-22: RAC = available (green) */
 .tb-avl.stale { color: #6b5b3e; background: #f4ecdc; border-radius: 6px; padding: 1px 4px; }
 .tb-avl.bad { color: #9b1c1c; }
@@ -1593,7 +1593,7 @@ table.traintable {
 .jo-avl-ok, .jo-avl-cell.jo-avl-ok { color: var(--green); }
 .jo-avl-warn, .jo-avl-cell.jo-avl-warn { color: var(--amber); }
 .jo-avl-stale, .jo-avl-cell.jo-avl-stale { color: #6b5b3e; background: #f4ecdc; border-radius: 6px; padding: 1px 5px; }
-.jo-avl-wl, .jo-avl-cell.jo-avl-wl { color: #1d4ed8; }
+.jo-avl-wl, .jo-avl-cell.jo-avl-wl { color: var(--red); }
 .jo-avl-bad, .jo-avl-cell.jo-avl-bad { color: var(--red); }
 .jo-avl-muted, .jo-avl-cell.jo-avl-muted { color: var(--muted); font-weight: 500; }
 .jo-fare { font-weight: 700; color: var(--navy); }
@@ -1880,7 +1880,7 @@ table.traintable {
 /* Round-18m-26 colour scheme (user): green = available, tan = purana/stale, blue = WL, red = N-A/Regret. */
 .jx-seat-ok .jx-seat-main { background: #e6f6ec; color: #0d6b3a; }
 .jx-seat-stale .jx-seat-main { background: #f4ecdc; color: #6b5b3e; }
-.jx-seat-wl .jx-seat-main { background: #e7eefc; color: #1d4ed8; }
+.jx-seat-wl .jx-seat-main { background: var(--red-soft); color: var(--red); }
 .jx-seat-warn .jx-seat-main { background: #fff7d6; color: #8a5a00; }
 .jx-seat-bad .jx-seat-main { background: #fdecec; color: #9b1c1c; }
 .jx-seat-muted .jx-seat-main { background: #eef1f6; color: #4b5563; }
@@ -1905,7 +1905,7 @@ table.traintable {
 /* Round-18m-19 (user): AVL = green, RAC = yellow, WL/Regret/N-A = red — har jagah same. */
 .jx-cchip-ok { background: #e6f6ec; color: #0d6b3a; border-color: #9fd6b0; }
 .jx-cchip-stale { background: #f4ecdc; color: #6b5b3e; border-color: #d9c9a3; } /* Round-18m-26: tan = purana data */
-.jx-cchip-wl { background: #e7eefc; color: #1d4ed8; border-color: #b7c9f5; } /* Round-18m-26: blue = WL */
+.jx-cchip-wl { background: var(--red-soft); color: var(--red); border-color: #f2b8b8; } /* WL = red */
 .jx-cchip-warn { background: #fff7d6; color: #8a5a00; border-color: #f3d98a; }
 .jx-cchip-bad { background: #fdecec; color: #9b1c1c; border-color: #f2b8b8; }
 .jx-cchip-muted { background: #eef1f6; color: #4b5563; border-color: #d5dbe5; }
@@ -2189,10 +2189,10 @@ table.traintable {
 .ns-hint { font-size: 11px; margin-top: 6px; line-height: 1.4; }
 .sf-tag { border-radius: 999px; font-size: 10.5px; font-weight: 700; padding: 2px 8px; }
 .sf-tag.seat { background: var(--green-soft); color: var(--green); border: 1px solid #bfe3d1; }
-.sf-tag.wl { background: var(--amber-soft); color: var(--amber); border: 1px solid #f0d8b4; }
+.sf-tag.wl { background: var(--red-soft); color: var(--red); border: 1px solid #f2b8b8; }
 .sf-row { display: block; width: 100%; text-align: left; border: 1px solid var(--line); border-radius: 13px; padding: 9px 11px; margin: 0 0 8px; background: #fff; }
 .sf-row.seat { border-left: 4px solid var(--green); }
-.sf-row.wl { border-left: 4px solid var(--amber); background: #fffdf9; }
+.sf-row.wl { border-left: 4px solid var(--red); background: #fffdf9; }
 .sf-l1 { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
 .sf-l1 strong { font-size: 13px; }
 .sf-tname { font-size: 12.5px; color: var(--muted); }
@@ -2202,8 +2202,8 @@ table.traintable {
 .sf-cls { border: 1px solid var(--line); border-radius: 6px; padding: 0 5px; font-weight: 600; }
 .sf-badge { font-size: 11px; font-weight: 700; border-radius: 8px; padding: 2px 8px; }
 .sf-badge.avl { background: var(--green-soft); color: var(--green); }
-.sf-badge.rac { background: #e8f0ff; color: #1d4ed8; }
-.sf-badge.wl { background: var(--amber-soft); color: var(--amber); }
+.sf-badge.rac { background: var(--green-soft); color: var(--green); }
+.sf-badge.wl { background: var(--red-soft); color: var(--red); }
 .sf-badge.na { background: var(--red-soft); color: var(--red); }
 .sf-go { margin-left: auto; font-size: 11.5px; font-weight: 700; color: #fff; background: var(--saffron); border-radius: 9px; padding: 4px 10px; }
 .sf-more { font-size: 11.5px; font-weight: 600; color: var(--saffron); padding: 2px 0 8px; }
@@ -2274,7 +2274,7 @@ table.traintable {
  * saath chips me (upar wale journey card jaisa). Koi class chhupni nahi chahiye. */
 .sf-group { border: 1px solid var(--line); border-radius: 14px; padding: 9px 11px; margin: 0 0 9px; background: #fff; }
 .sf-group.seat { border-left: 4px solid var(--green); }
-.sf-group.wl { border-left: 4px solid var(--amber); background: #fffdf9; }
+.sf-group.wl { border-left: 4px solid var(--red); background: #fffdf9; }
 .sf-group.nodata { border-left: 4px solid #b91c1c; background: #fffafa; }
 .sf-group-h { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; flex-wrap: wrap; }
 .sf-group-t strong { font-size: 13px; }
@@ -2339,8 +2339,8 @@ table.traintable {
 .rp-cls { background: #f1f4f8; border-radius: 6px; padding: 1px 6px; font-weight: 800; color: #22304a; font-size: 11.5px; }
 .rp-st { font-size: 11px; font-weight: 700; border-radius: 8px; padding: 2px 8px; }
 .rp-st.ok { background: var(--green-soft); color: var(--green); }
-.rp-st.rac { background: #e8f0ff; color: #1d4ed8; }
-.rp-st.wl { background: var(--amber-soft); color: var(--amber); }
+.rp-st.rac { background: var(--green-soft); color: var(--green); }
+.rp-st.wl { background: var(--red-soft); color: var(--red); }
 .rp-st.bad { background: var(--red-soft); color: var(--red); }
 .rp-fare { font-weight: 700; color: #374151; }
 .rp-dep { color: var(--muted); }
@@ -2352,8 +2352,8 @@ table.traintable {
 
 /* Round-20: chat rows ka tone (AVL/RAC/WL/N-A) — left border se turant pata chale. */
 .rp-row.ok { border-left-color: var(--green); }
-.rp-row.rac { border-left-color: #1d4ed8; }
-.rp-row.wl { border-left-color: var(--amber); background: #fffdf9; }
+.rp-row.rac { border-left-color: var(--green); }
+.rp-row.wl { border-left-color: var(--red); background: #fffdf9; }
 .rp-row.bad { border-left-color: var(--red); background: #fffafa; }
 
 /* Round-29 (26 Sep, user: "same train ki classes alag alag cards me kyun"): ek train = ek card.
@@ -2591,14 +2591,14 @@ button.rp-crow:active { transform: translateY(1px); }
 .rp-tno { font-weight: 800; color: #0f172a; }
 .rp-tname { display: block; font-size: 11.5px; color: #6b7a8d; font-weight: 600; }
 .rp-td-st.ok { color: #0f7a3d; font-weight: 800; }
-.rp-td-st.rac { color: #1d4ed8; font-weight: 800; }
-.rp-td-st.wl { color: #b45309; font-weight: 800; }
+.rp-td-st.rac { color: var(--green); font-weight: 800; }
+.rp-td-st.wl { color: var(--red); font-weight: 800; }
 .rp-td-st.bad { color: #b91c1c; font-weight: 700; }
 .rp-tr.tappable { cursor: pointer; }
 .rp-tr.tappable:active { background: #f2f8f4; }
 .rp-tr.ok { box-shadow: inset 3px 0 0 var(--green); }
-.rp-tr.rac { box-shadow: inset 3px 0 0 #1d4ed8; }
-.rp-tr.wl { box-shadow: inset 3px 0 0 var(--amber); }
+.rp-tr.rac { box-shadow: inset 3px 0 0 var(--green); }
+.rp-tr.wl { box-shadow: inset 3px 0 0 var(--red); }
 .rp-tr.bad { box-shadow: inset 3px 0 0 var(--red); }
 .rp-tablefoot { font-size: 11px; color: #7b8a9c; padding: 6px 8px 8px; }
 
@@ -2624,7 +2624,7 @@ button.rp-crow:active { transform: translateY(1px); }
 /* (d) Connecting page ka layout — leg cards saaf, "Book" button alag, layover line highlight */
 .jx-leg { position: relative; flex-wrap: wrap; }
 .jx-leg-book { flex: none; align-self: flex-end; margin-left: auto; font: inherit; font-size: 12px; font-weight: 900; padding: 6px 12px; border-radius: 999px; border: 1.5px solid #0f7a3d; background: #f2fbf5; color: #0f7a3d; cursor: pointer; }
-.jx-leg-book.wl { border-color: #b45309; background: #fff8ee; color: #b45309; }
+.jx-leg-book.wl { border-color: var(--red); background: var(--red-soft); color: var(--red); }
 .jx-leg-book:active { transform: scale(.98); }
 .jx-leg-hint { flex-basis: 100%; font-size: 11.5px; color: #6b7a8d; font-weight: 600; margin-top: 4px; }
 .jx-leg-change { display: flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 800; color: #0b3b66; background: #f2f7fd; border: 1px dashed #cbdcee; border-radius: 10px; padding: 6px 10px; margin: 7px 0; }
@@ -2712,21 +2712,6 @@ button.rp-crow:active { transform: translateY(1px); }
 .jx-lrow-leg .jx-cchip { white-space: normal; }
 /* leg list row me ab alag seat pill nahi (grid me hi primary class hai) — uska area khali. */
 .jx-lrow-leg .jx-lrow-d-wrap { display: none; }
-
-/* ── Screenshot fix 2 Oct 2026 — pipe table jo model “Alternative trains” me bhejta hai ─────────
- * Pehle “| Train | Status | …” wali lines plain text + pipes ke saath dikh rahi thi (padhna mushkil).
- * Ab table: header sticky, body scroll, mobile par horizontal swipe. */
-.ac-pipehead{margin:6px 0 4px;display:grid;gap:4px}
-.ac-pipehead-item{font-size:14px;font-weight:800;color:var(--navy);line-height:1.4;background:#eef2ff;border:1px solid #dbe4ff;border-radius:10px;padding:7px 10px}
-.ac-tablewrap{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--line);border-radius:12px;background:#fff;margin:8px 0;box-shadow:0 1px 6px rgba(11,31,58,.06)}
-.ac-table{width:100%;border-collapse:collapse;font-size:13px;min-width:520px}
-.ac-table th{background:#f6f8fb;color:#5b6b7f;font-size:11px;text-transform:uppercase;letter-spacing:.03em;text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap;position:sticky;top:0}
-.ac-table td{padding:8px 10px;border-bottom:1px solid #f0f2f6;vertical-align:middle;white-space:nowrap;font-weight:500}
-.ac-table tbody tr:last-child td{border-bottom:none}
-.ac-table tbody tr:nth-child(even) td{background:#fbfcfd}
-.ac-table tbody td:first-child{font-weight:800;color:var(--navy)}
-.ac-table td:nth-child(3),.ac-table td:nth-child(4){font-weight:700}
-.ac-table td:nth-child(6),.ac-table td:nth-child(7){font-variant-numeric:tabular-nums;font-weight:700;color:var(--ink)}
 
 /* ══ ROUND-62 — AI BOOKING (ADDITIVE) ═════════════════════════════════════════════════════════════════
  * Naya overlay + dock + voice panel. Koi purani class badli nahi gayi — sab naye .aib-* naam. */

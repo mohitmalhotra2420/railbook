@@ -2219,6 +2219,12 @@ export function Concierge() {
             setPlanPage(null);
             void openBoardFor(f, t, d, n);
           }}
+          window={
+            seatFind && (seatFind.intent.afterMin != null || seatFind.intent.beforeMin != null)
+              ? { afterMin: seatFind.intent.afterMin, beforeMin: seatFind.intent.beforeMin, label: seatFind.intent.windowLabel }
+              : null
+          }
+          confirmedOnly={seatFind?.intent.confirmedOnly ?? null}
         />
       )}
       <div className={`composer-hint ${voice.listening ? "live" : ""}`} role="status" aria-live="polite">
@@ -2290,6 +2296,8 @@ export function PlanPageSheet({
   onPickStations,
   onBookLeg,
   onOpenBoard,
+  window: win = null,
+  confirmedOnly = null,
 }: {
   st: PlanPageState;
   onClose: () => void;
@@ -2315,6 +2323,8 @@ export function PlanPageSheet({
     availability?: unknown;
   }) => void;
   onOpenBoard?: (from: string, to: string, date: string, trainNumber: string | null) => void;
+  window?: { afterMin: number | null; beforeMin: number | null; label: string | null } | null;
+  confirmedOnly?: boolean | null;
 }) {
   const title = st.page === "connect" ? "Connecting trains · Leg 1 → Leg 2" : "Alternative trains & dates";
   const q = st.plan?.query;
@@ -2357,6 +2367,8 @@ export function PlanPageSheet({
               initialPage={st.page}
               /* Round-59: page ke andar page na ho — isliye embedded (inline, bina apne header). */
               embedded
+              window={win}
+              confirmedOnly={confirmedOnly}
               onPickTrain={onPickTrain}
               onPickLeg={onPickLeg}
               onPickClass={onPickClass as never}
@@ -2818,6 +2830,7 @@ function BlockView({
             ? { afterMin: seatFinder.intent.afterMin, beforeMin: seatFinder.intent.beforeMin, label: seatFinder.intent.windowLabel }
             : null
         }
+        confirmedOnly={seatFinder?.intent.confirmedOnly ?? null}
       />
     );
   }
