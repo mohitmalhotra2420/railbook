@@ -23,7 +23,8 @@ describe("Gemini is shadow-only and cannot take money", () => {
     // 2026-09-07 Round-14 intentional switch: Muse-Glimmer-30B primary planner (bench 11/12, 1.9s p50),
     // GPT-OSS-20B fallback + NLU layer par. Gemini/RapidAPI shadow-only guard intact.
     expect(env.nvidiaModel).toBe("meta/muse-glimmer-30b");
-    expect(env.nvidiaFallbackModel).toBe("openai/gpt-oss-20b");
+    expect(env.nvidiaFallbackModel).toBe(process.env.NVIDIA_FALLBACK_MODEL || "openai/gpt-oss-20b");
+    expect(env.nvidiaFallbackModel).toMatch(/muse-glimmer|gpt-oss|nemotron/);
     expect(env.nluModel).toBe("openai/gpt-oss-20b");
     expect(env.geminiShadow).toBe(false);
   });

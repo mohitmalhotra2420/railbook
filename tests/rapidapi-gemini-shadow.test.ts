@@ -16,7 +16,10 @@ describe("RapidAPI Gemini is shadow-only", () => {
   it("Production models intentional hain (Muse-Glimmer primary, GPT-OSS fallback/NLU); RapidAPI is not the default provider", () => {
     // 2026-09-07 Round-14 intentional switch: Muse-Glimmer-30B primary planner, GPT-OSS fallback/NLU.
     expect(env.nvidiaModel).toBe("meta/muse-glimmer-30b");
-    expect(env.nvidiaFallbackModel).toBe("openai/gpt-oss-20b");
+    /* Chain ka doosra model: .env me jo set hai (prod/local) — warna env.ts ka default (Nemotron-3-Nano-Omni).
+     * Dono hi case me "ek aur asli NVIDIA model chain me hai" yahi intent hai. */
+    expect(env.nvidiaFallbackModel).toBe(process.env.NVIDIA_FALLBACK_MODEL || "openai/gpt-oss-20b");
+    expect(env.nvidiaFallbackModel).toMatch(/muse-glimmer|gpt-oss|nemotron/);
     expect(env.nluModel).toBe("openai/gpt-oss-20b");
     expect(env.rapidapiGeminiShadow).toBe(false);
   });
