@@ -60,6 +60,7 @@ import { ATTRIBUTE_Q_RE, COUNT_LIST_RE, trainFamilyPage, wikiLargestTable } from
 import { railKbAnswer } from "./railkb.js";
 import { answerCoversSubject, answerMatchesRailMode, subjectHitCount } from "./subject.js";
 import { asksSingleTrainAvailability, asksStationCode, isComparisonQuery, liveClaimCheck, liveDataQuestion, normalizeRailText, scrubInternalNotes } from "./answerMode.js";
+import { StepBudgetExhaustedError, type OrchestrationErrorInfo } from "./orchestrationErrors.js";
 export { asksSingleTrainAvailability } from "./answerMode.js";
 /* Round-18i: rules/procedure topics → KB before Wikipedia (see WEB_SEARCH). */
 const RULES_TOPIC_RE = /\b(tatkal|premium tatkal|rac|waiting list|waitlist|wl|gnwl|pqwl|rlwl|chart|pnr|refund|cancel(?:lation)?|luggage|saman|samaan|blanket|bedroll|pantry|catering|id proof|photo id|concession|senior citizen|quota|break journey|child (?:ticket|fare)|bachcha|tte|ticket checker|arp|advance reservation|kitne din pehle|khana|khaana|food|meal|chai|berth|berths|platform|platforms|coach me kitne|top speed|maximum speed|max speed|kitni tez|divyangjan|divyang|wheelchair|handicapped|accessible|kutta|pet|dog|smoking|sigret|cigarette|charging|charger|ac fail|ac kharab|bachch|child fare|2a 3a|3a 2a|doori|distance|kitne km|kitna door|sabse bada|bada station|largest|biggest|sabse lambi|sabse lamba|longest|konkan|kitne zone|zones|pehli train|first train|sabse puran[a-z]*|kitne railway station|kitne station|sabse tez train|fastest train)\b/i;
@@ -142,6 +143,8 @@ export type AgenticTurn = {
   failureReason: string | null;
   /** Round-32: model ka khud chuna hua "agla kadam" (reply ki [NEXT] lines se, evidence-validated). */
   nextActions?: NextAction[] | null;
+  /** Typed orchestration error (additive). Set only when the step budget was exhausted; `failureReason` stays unchanged. */
+  orchestrationError?: OrchestrationErrorInfo | null;
 };
 
 /* ── Structured train table (user feedback 2026-09-05: chat-text list
@@ -2118,6 +2121,8 @@ type ChatMsg = {
 };
 
 const MAX_STEPS = 6;
+/** Deterministic tool-calling iteration limit (exported for tests / diagnostics). */
+export const AGENTIC_MAX_STEPS = MAX_STEPS;
 
 /** Deterministic weekday→date map (IST) for the next 7 days — model ko date math nahi karni. */
 function weekdayDateMap(nowIso?: string): string {
@@ -4447,5 +4452,6 @@ export async function runAgenticTurn(input: {
     steps,
     modelUsed, modelFallbacks, latencyMs: Date.now() - startedAll,
     failureReason: "step_budget_exhausted",
+    orchestrationError: new StepBudgetExhaustedError(MAX_STEPS, steps.length).toInfo(),
   };
 }
