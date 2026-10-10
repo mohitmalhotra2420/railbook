@@ -1246,7 +1246,9 @@ export async function routedClassBoard(
       }
     }
     if (codes.length) {
-      addChecks(codes.length);
+      /* Round-58: yahan addChecks(codes.length) tha — par har class probe ka count ab
+       * getAvailability khud karta hai (aur wo dedupe/limit ke andar hai). Yahan bhi ginte to
+       * double ho jaata — isliye hata diya. */
       const probed = await Promise.all(
         codes.map((code) => provider.getAvailability(trainNumber, date, from, to, code, quota)),
       );
@@ -1313,9 +1315,50 @@ async function liveRowFor(
   const hit = liveRowCache.get(key);
   if (hit && Date.now() - hit.at < LIVE_ROW_TTL_MS) return hit.row;
   const row = await provider.getAvailability(trainNumber, date, from, to, classCode, quota).catch(() => null);
-  const val = row && row.status !== "UNKNOWN" ? row : null;
+  const val = await secondOpinionRow(row && row.status !== "UNKNOWN" ? row : null, trainNumber, date, from, to, classCode, quota);
   liveRowCache.set(key, { at: Date.now(), row: val });
   return val;
+}
+
+/** Row ki umar (ms) — timestamp parse na ho ya future me ho to -1 (bharosa nahi). */
+function rowAgeMs(row: ClassAvailability): number {
+  const ms = row.updatedAt ? Date.parse(row.updatedAt) : NaN;
+  if (!Number.isFinite(ms)) return -1;
+  const age = Date.now() - ms;
+  return age < -5 * 60_000 ? -1 : age;
+}
+const rowHasSeat = (r: ClassAvailability): boolean => r.status === "AVAILABLE" || r.status === "RAC";
+
+/**
+ * Round-50 (29 Sep 2026) — "IRCTC par seat thi par app me nahi": web chain ka pehla kaamyaab source
+ * aksar ConfirmTkt hota hai, aur wo apni **purani cache** hi lautata hai (status non-empty hone par
+ * chain use "success" maan leti hai). Isliye live rows ke liye ek cross-check: chain ka row fresh
+ * nahi hai, ya seat nahi dikha raha (WL/Regret), to IRCTC-sourced RailYatri se second opinion —
+ *   • wahi (seat wali + fresh) row jeetti hai jisme asli seat dikhe (user ka sawaal "confirm seat"),
+ *   • warna jo row zyada fresh hai; dono na ho to chain ka row waise hi (kuch invent nahi).
+ * Fresh + seat wali row par extra call nahi (latency bachti hai).
+ */
+async function secondOpinionRow(
+  primary: ClassAvailability | null,
+  trainNumber: string,
+  date: string,
+  from: string,
+  to: string,
+  classCode: ClassCode,
+  quota: string,
+): Promise<ClassAvailability | null> {
+  if (!primary) return primary;
+  const age = rowAgeMs(primary);
+  const primaryFresh = primary.stale !== true && age >= 0 && age <= CT_ROW_FRESH_MS;
+  if (primaryFresh && rowHasSeat(primary)) return primary;
+  const alt = await railyatriAvailability(trainNumber, date, from, to, classCode, quota).catch(() => null);
+  if (!alt || alt.status === "UNKNOWN") return primary;
+  const altAge = rowAgeMs(alt);
+  const altFresh = alt.stale !== true && altAge >= 0;
+  if (!altFresh) return primary;
+  if (rowHasSeat(alt) && !rowHasSeat(primary)) return alt;
+  if (age < 0 || altAge < age) return alt;
+  return primary;
 }
 
 /** Tests ke liye cache clear. */
@@ -1381,6 +1424,24 @@ async function enrichFocusTrains(
   if (!jobs.length) return 0;
   await Promise.race([Promise.all(jobs), new Promise((r) => setTimeout(r, 18_000))]);
   return swapped;
+}
+
+/**
+ * Round-50 (29 Sep 2026, user: "12265 mein 2S available seat show ho rhi thi IRCTC/confirmtkt pe
+ * par mere app mein nahi") — chat/card wale seat jawab ke liye bhi wahi freshness pass, jo
+ * /api/availability ke focus trains par pehle se chalta hai: dikhaayi jaane wali trains ke purane/
+ * future-dated/UNKNOWN rows ka live probe (RailYatri/IRCTC pull). Warna ConfirmTkt ka cache row
+ * (jo IRCTC se ulat ho sakta hai — aur "stale" bhi ho sakta hai) hi user tak chala jaata tha.
+ */
+export async function enrichTrainsFreshness(
+  trains: { trainNumber: string; trainName: string; classes: ClassAvailability[]; note?: string }[],
+  numbers: string[],
+  from: string,
+  to: string,
+  date: string,
+  quota = "GN",
+): Promise<number> {
+  return enrichFocusTrains(trains, numbers, from, to, date, quota).catch(() => 0);
 }
 
 /**
@@ -1704,9 +1765,15 @@ export class FallbackRailwayProvider implements RailwayProvider {
      * every call still goes to the provider chain, just under the global concurrency limiter. */
     const key = `avail:${trainNumber}:${date}:${from}:${to}:${classCode}:${quotaCode}`;
     return dedupe(key, () => limited(async () => {
-      const row = await this.getAvailabilityUncached(trainNumber, date, from, to, classCode, quotaCode);
-      checkDone("Seat checks");
-      return row;
+      /* Round-58: ginti ASLI provider checks ki — total check shuru hone par badhta hai aur done
+       * khatam hone par (fail ho ya pass). Isse "18/6 checks completed" jaisa ulta number kabhi
+       * nahi aata; dedupe hit dobara count nahi hota (callback ek hi baar chalta hai). */
+      addChecks(1);
+      try {
+        return await this.getAvailabilityUncached(trainNumber, date, from, to, classCode, quotaCode);
+      } finally {
+        checkDone("Seat checks");
+      }
     }));
   }
 

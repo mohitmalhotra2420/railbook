@@ -32,6 +32,10 @@ export type AgentResponse = {
       seatFilter?: {
         classCodes: string[];
         line: string | null;
+        /** Round-49: jo trains destination tak nahi jaati thin, unka note (card me dikhta hai). */
+        dropNote?: string | null;
+        /** Round-50: unme se seat-detih trains ka alag section (jaise JAT tak, aage khud). */
+        nearbyNote?: string | null;
         rows: {
           number: string;
           name: string;
@@ -173,6 +177,19 @@ export interface NvidiaAdminCatalog {
 export const api = {
   /** Round-20: pantry/catering (read-only) — passenger form ka food choice. */
   trainPantry: (trainNumber: string) => trainPantryApi(trainNumber),
+  /* Round-62 (AI Booking, ADDITIVE): voice provider config + TTS proxy.
+   * Keys sirf server par rehti hain — client sirf provider ka NAAM dekhta hai, audio blob leta hai.
+   * Provider configured na ho to config serverTts:false deta hai aur client device voice par chala jaata hai. */
+  voiceConfig: () => request<{ provider: string; serverTts: boolean; model: string | null; languages: string[] }>("/api/voice/config"),
+  voiceTts: async (text: string, lang = "hi-IN"): Promise<Blob> => {
+    const res = await fetch("/api/voice/tts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, lang }),
+    });
+    if (!res.ok) throw new Error(`voice tts failed (${res.status})`);
+    return res.blob();
+  },
   adminModels: (refresh = false) =>
     request<AdminModelCatalog>(`/api/admin/models${refresh ? "?refresh=1" : ""}`),
   refreshAdminModels: () =>

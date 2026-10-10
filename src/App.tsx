@@ -4,6 +4,7 @@ import { Bookings, Travellers, Wallet } from "./views/Account";
 import { AdminModels } from "./views/AdminModels";
 import { ClassSelect, SeatSelect } from "./views/ClassSeat";
 import { Concierge } from "./views/Concierge";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Passengers } from "./views/Passengers";
 import { FareReview, Status } from "./views/ReviewStatus";
 import { RailTools } from "./views/RailTools";
@@ -46,9 +47,19 @@ export function App() {
     ) : null;
 
   return (
+    /* Round-58: poora app boundary ke andar — koi bhi render error screen ko khaali nahi karega
+     * (user screenshot: search ke baad blank page). */
     <div className="app">
-      <Concierge />
-      {overlay && <div className="overlay-screen">{overlay}</div>}
+      <ErrorBoundary what="chat">
+        <Concierge />
+      </ErrorBoundary>
+      {overlay && (
+        <div className="overlay-screen">
+          <ErrorBoundary what="yeh screen" resetKey={state.screen}>
+            {overlay}
+          </ErrorBoundary>
+        </div>
+      )}
     </div>
   );
 }

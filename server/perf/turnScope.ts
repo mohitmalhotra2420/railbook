@@ -204,6 +204,10 @@ export function checkDone(label = "Seat checks"): void {
   const scope = als.getStore();
   if (!scope) return;
   scope.checksDone++;
+  /* Round-58 (user screenshot: "18/6 checks completed" — 6 se zyada checks chale): total kabhi
+   * done se chhota na dikhe. Asli ginti ka source `router.getAvailability` hai (har unique provider
+   * check par addChecks(1) + checkDone()); ye sirf safety net hai. */
+  if (scope.checksTotal < scope.checksDone) scope.checksTotal = scope.checksDone;
   const e: ProgressEvent = { phase: label, done: scope.checksDone, total: scope.checksTotal, at: Date.now() - scope.startedAt };
   scope.progress.push(e);
   scope.onProgress?.(e);

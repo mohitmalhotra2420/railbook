@@ -20,7 +20,9 @@
  *   train_numbers: sirf in trains par (jaise "12029,12497")
  */
 import { getProvider } from "../providers/index.js";
-import { routedClassBoard, routedRouteBoard, routedStationSearch } from "../railway/router.js";
+import { enrichTrainsFreshness, routedClassBoard, routedRouteBoard, routedSchedule, routedStationSearch } from "../railway/router.js";
+import { filterTrainsServingSegment, nearbyCandidatesNote, routeDropNote } from "./routeSegment.js";
+import { resolveStationArg } from "./stationArg.js";
 import { searchStations as searchLocalStations } from "../data/stations.js";
 import {
   AC_CLASSES,
@@ -91,26 +93,38 @@ export function timeWindowFromWord(raw: string | null | undefined): { after: num
 }
 
 async function stationCode(raw: string): Promise<string | null> {
-  const s = String(raw ?? "").trim();
-  if (!s) return null;
-  if (/^[A-Z0-9]{2,5}$/.test(s) && /[A-Z]/.test(s)) return s.toUpperCase();
-  const local = searchLocalStations(s);
-  if (local.length) return local[0].code;
-  try {
-    const res = await routedStationSearch(s);
-    if (res.stations?.length) return res.stations[0].code;
-  } catch {
-    /* station lookup fail — neeche null */
-  }
-  return null;
+  /* Round-52: user/model ke haath ka station arg (jaise "Yaar Ldh", "Ldh", "svdk", "smvd katra") —
+   * ek jagah se resolve (stationArg.ts). Pehle yahan sirf local exact + provider search thi, isliye
+   * filler wala phrase resolve hi nahi hota tha aur tool "station resolve nahi hua" de deta tha. */
+  const hit = await resolveStationArg(String(raw ?? ""));
+  return hit?.code ?? null;
 }
 
 /**
  * AI ke args se seat jawab. Sirf live rows — jo na mile wo saaf likha jaata hai, gadha nahi jaata.
  */
 export async function runFindSeatsTool(args: FindSeatsArgs): Promise<FindSeatsResult> {
-  const from = await stationCode(args.from);
-  const to = await stationCode(args.to);
+  let from = await stationCode(args.from);
+  let to = await stationCode(args.to);
+  /* R55c (battery: "12094 me 3A me kitni seat khali hai kal"): user ne sirf train number diya, koi
+   * station nahi — pehle tool "station batao" bol kar ruk jaata tha. Ab specific train ka POORA route
+   * timetable se liya jaata hai (origin → destination) — kuch bhi maan-leya nahi, schedule hi sach hai.
+   * Sirf tab jab DONO stations missing ho (aadha-adhoora guess nahi karte). */
+  let autoRouteNote: string | null = null;
+  const wantTrainsEarly = (Array.isArray(args.train_numbers) ? args.train_numbers : String(args.train_numbers ?? "").split(/[\s,]+/))
+    .map((n) => String(n).trim())
+    .filter((n) => /^\d{4,5}$/.test(n));
+  if (!from && !to && wantTrainsEarly.length) {
+    const sched = await routedSchedule(wantTrainsEarly[0]).catch(() => null);
+    const stops = sched?.schedule && "stops" in sched.schedule ? ((sched.schedule as { stops?: { code?: string }[] }).stops ?? []) : [];
+    const first = String(stops[0]?.code ?? "").trim().toUpperCase();
+    const last = String(stops[stops.length - 1]?.code ?? "").trim().toUpperCase();
+    if (stops.length >= 2 && first && last) {
+      from = first;
+      to = last;
+      autoRouteNote = `ℹ User ne station nahi bataya tha — ${wantTrainsEarly[0]} ka POORA route timetable se liya gaya (${first} → ${last}); jawab me isi route ka context saaf likho (aisa na bolo ki user ne ye route maanga tha).`;
+    }
+  }
   const date = String(args.date ?? "").trim();
   if (!from || !to) {
     return { ok: false, source: null, summary: `Station resolve nahi hua (from="${args.from}", to="${args.to}") — user se poochho.`, data: null };
@@ -141,7 +155,29 @@ export async function runFindSeatsTool(args: FindSeatsArgs): Promise<FindSeatsRe
     .map((n) => String(n).trim())
     .filter((n) => /^\d{4,5}$/.test(n));
 
-  const board = await routedRouteBoard(from, to, date, []).catch(() => null);
+  const boardRaw = await routedRouteBoard(from, to, date, []).catch(() => null);
+  /* Round-49: jo train `to` tak jaati hi nahi (ConfirmTkt board me paas ke bade station wali bhi aati
+   * hain — jaise LDH→SVDK me JAT tak wali), wo pool me hi nahi aani chahiye. Warna AI unki seat
+   * rows likh deta hai aur user us train me book nahi kar sakta. */
+  const seg = boardRaw
+    ? await filterTrainsServingSegment(
+        boardRaw.trains.map((t) => ({ trainNumber: String(t.trainNumber ?? "").trim(), trainName: String(t.trainName ?? "") })),
+        from,
+        to,
+      ).catch(() => ({ trains: boardRaw.trains.map((t) => ({ trainNumber: String(t.trainNumber ?? "").trim() })), dropped: [] }))
+    : null;
+  const keptNums = new Set((seg?.trains ?? []).map((t) => String(t.trainNumber).trim()));
+  const board = boardRaw ? { ...boardRaw, trains: boardRaw.trains.filter((t) => keptNums.has(String(t.trainNumber ?? "").trim())) } : null;
+  const dropLine = seg ? routeDropNote(seg.dropped, to) : null;
+  /* Round-50: jo trains segment tak nahi jaati par seat-detih hain — alag section (jaise JAT tak). */
+  const nearbyLine = seg
+    ? nearbyCandidatesNote(
+        (boardRaw?.trains ?? []).filter((t) => seg.dropped.some((d) => d.number === String(t.trainNumber ?? "").trim())) as { trainNumber: string; trainName?: string; classes?: never[] }[],
+        seg.dropped,
+        from,
+        to,
+      )
+    : null;
   if (!board || !board.trains.length) {
     return {
       ok: false,
@@ -229,12 +265,36 @@ export async function runFindSeatsTool(args: FindSeatsArgs): Promise<FindSeatsRe
     windowLabel,
     sortBy,
   };
+  /* Round-50: dikhaayi jaane wali trains ke purane/future rows ka live probe (IRCTC se ulat ho sakta
+   * hai — user ka 2S case). Live row na mile to purani row waise hi rehti hai. */
+  try {
+    if (typeof enrichTrainsFreshness === "function") {
+      const probe = pickSeatRows(pool, slots, times);
+      const probeWl = onlyAvailable ? pickSeatRows(pool, { ...slots, onlyAvailable: false }, times) : probe;
+      const order: string[] = [];
+      for (const r of [...probe.seat, ...probeWl.wl]) if (!order.includes(r.number) && order.length < 6) order.push(r.number);
+      if (order.length) await enrichTrainsFreshness(trains as { trainNumber: string; trainName: string; classes: never[] }[], order, from, to, date, quota);
+    }
+  } catch {
+    /* freshness optional — board data waise hi */
+  }
+
   const pick = pickSeatRows(pool, slots, times);
   /* WL rows alag se (onlyAvailable par bhi), taaki "seat nahi par WL itni" sach bata sake. */
   const wlPick = onlyAvailable
     ? pickSeatRows(pool, { ...slots, onlyAvailable: false }, times)
     : pick;
-  const head = seatSummaryLine({ ...pick, wl: wlPick.wl }, slots, { from, to });
+  /* Round-53d: available-only (confirm/available) maangne par model ko WL-only trains ka data bhejna hi
+   * nahi hai — warna wo unhe jawab me likh deta hai aur cards (jo sirf seat-wali trains dikhate hain)
+   * se mismatch ho jaata hai. Isliye WL rows sirf UN trains ki rakh-te hain jinka koi class AVL/RAC hai;
+   * baaki trains ka sirf COUNT instruction me jaata hai (model ek honest line likh sakta hai). */
+  const winnerSet = new Set(pick.seat.map((r) => r.number));
+  /* Round-53e: agar is waqt kisi train me seat hi nahi (winnerSet khaali), to WL rows SAB rakh-te hain —
+   * warna model ke paas honest jawab ("koi confirmed seat nahi, ye WL trains") ka data hi nahi hota aur
+   * grounding check uske jawab ko reject kar deta hai (deterministic summary aa jaati thi). */
+  const wlForReply =
+    onlyAvailable && winnerSet.size > 0 ? wlPick.wl.filter((r) => winnerSet.has(r.number)) : wlPick.wl;
+  const head = seatSummaryLine({ ...pick, wl: wlForReply }, slots, { from, to });
 
   const fmt = (r: SeatFilterRow) =>
     `${r.number} ${r.name} · ${r.classCode} · ${r.status === "AVAILABLE" ? `AVAILABLE ${r.seats ?? "?"} seats` : r.status === "RAC" ? `RAC ${r.rac ?? "?"}` : r.status === "WAITLIST" ? `WL ${r.waitlist ?? "?"}` : "N/A"}${r.fare != null ? ` · ₹${r.fare}` : ""}${r.departure ? ` · ${r.departure}` : ""}`;
@@ -245,16 +305,57 @@ export async function runFindSeatsTool(args: FindSeatsArgs): Promise<FindSeatsRe
    * likh deta tha, jabki chat me koi Seat Finder card nahi dikhta. Ab saari rows isi call me jaati
    * hain (SEAT_LINE_MAX tak) taaki jawab me saari trains aayein — koi card pointer nahi. */
   if (pick.seat.length) lines.push(`SEAT (${pick.seat.length} rows): ${pick.seat.slice(0, SEAT_LINE_MAX).map(fmt).join(" | ")}`);
-  if (wlPick.wl.length) lines.push(`WAITLIST/N-A (${wlPick.wl.length} rows, confirm% NAHI batana): ${wlPick.wl.slice(0, SEAT_LINE_MAX).map(fmt).join(" | ")}`);
+  if (wlForReply.length) lines.push(`WAITLIST/N-A (${wlForReply.length} rows, confirm% NAHI batana): ${wlForReply.slice(0, SEAT_LINE_MAX).map(fmt).join(" | ")}`);
+  /* Round-51 (user: *"sabhi class kyu nahi show hoti jab bhi specifically confirm, available
+   * poocho"*): jab user ne confirm/available seat maange, jawab me us train ki baaki classes bhi
+   * aani chahiye — warna 2S jaisi class (jo usi train me hai) gayab lagti hai. Ye rows sirf un
+   * trains ki hain jinme seat mili hai (WL-only trains jawab me nahi). */
+  const seatNums = new Set(pick.seat.map((r) => r.number));
+  const seatHave = new Set(pick.seat.map((r) => `${r.number}:${r.classCode}`));
+  const otherClasses = pick.seat.length ? wlPick.wl.filter((r) => seatNums.has(r.number) && !seatHave.has(`${r.number}:${r.classCode}`)) : [];
+  if (otherClasses.length) {
+    lines.push(`OTHER CLASSES (inhi trains ki baaki classes — inhe bhi status ke saath likho, chhupao mat): ${otherClasses.slice(0, SEAT_LINE_MAX).map(fmt).join(" | ")}`);
+  }
   if (pick.missingClass) lines.push(`${pick.missingClass} trains me ye class hi nahi hai — unhe "seat nahi" mat maano.`);
+  /* Round-49: hati hui trains (jo ${to} tak nahi jaati) — model ise jawab me saaf likh de. */
+  if (dropLine) lines.push(`ROUTE: ${dropLine.replace(/^ℹ️\s*/, "")}`);
+  if (nearbyLine) lines.push(`NEARBY: ${nearbyLine.replace(/^🧭\s*/gm, "")}`);
   if (pick.unknownTime) lines.push(`${pick.unknownTime} rows ka time nahi mila (time filter laga tha).`);
   lines.push(`Source: ${board.provider ?? "live board"} · ${pool.length} trains dekhe (${enriched.size} ka alag board check kiya).`);
   lines.push("Jawab me SAARI trains ki lines likho (jo SEAT rows me hain) — 'baaki trains kisi card me hain' jaisi baat kabhi mat likho, chat me aisa koi card nahi dikhta.");
+  /* Round-51: per-train completeness — jo train jawab me hai uski har class ka status likho. */
+  lines.push("Har train ki line me uski SAARI classes likho (SEAT wali pehle, phir usi train ki OTHER/WAITLIST classes status ke saath) — koi class chhupao mat, warna user ko lagta hai wo class hi nahi hai.");
+  /* Round-53b (prod probe 50b23b6): "saari trains ki seat availability batao" par model ne pivot-jaise
+   * table banaya jisme ek hi class/status 9 baar repeat ho gaya (2A WL, 2A WL (2) …) — padhne layak nahi.
+   * Isliye saaf instruction: har train EK line/row, koi column-repeat nahi. */
+  lines.push("Formatting: har train ki EK line likho (jaise yahan upar hai) — table/pivot-columns mat banao aur ek hi class/status kisi train ke liye ek hi baar likho; repeat ya (2),(3) wale duplicates kabhi nahi.");
+  /* Round-53d (prod probe 161cf03 saboot): "confirm seat" wale sawaal par model ne jawab me 7 trains likhi
+   * (jinme 4 poori WL/N-A thin) jabki SEAT rows sirf 3 trains ki thi → cards chhote reh gaye aur user ko
+   * laga "trains card me nahi dikh rahi". User ki maang saaf hai: "agar confirm bola to confirm dikhao na
+   * sirf". Isliye available-only request par JAWAB bhi sirf seat-wali trains ka hota hai. */
+  if (onlyAvailable) {
+    const winnerNums = [...new Set(pick.seat.map((r) => r.number))];
+    const wlOnly = [...new Set(wlPick.wl.map((r) => r.number))].filter((n) => !winnerNums.includes(n));
+    if (!winnerNums.length) {
+      lines.push(
+        "IS WAQT kisi bhi train me CONFIRMED (AVL/RAC) seat nahi hai. Jawab ki pehli line me SAAF likho: 'is waqt koi confirmed seat nahi hai' — phir jo WL/N-A rows upar di hain wo train-wise ek-ek line me likho (WL number ke saath), aur saaf karo ki ye waitlist hai. Kisi train ki seat AVAILABLE mat likho.",
+      );
+    } else {
+      lines.push(
+        `USER NE SIRF CONFIRM/AVAILABLE MAANGA HAI — jawab me SIRF inhi ${winnerNums.length} trains ki lines likho jinme kam se kam ek class AVL/RAC hai` +
+          (wlOnly.length
+            ? ` (baaki ${wlOnly.length} trains me sirf WL/N-A hai — unka number/naam jawab me mat likho; chaho to ek chhoti line: "baaki ${wlOnly.length} trains me sirf WL/N-A hai")`
+            : "") +
+          ".",
+      );
+    }
+    lines.push("Jis train ki line likho, uski SAARI classes (AVL + WL/N-A) usi line me likho — koi class chhupao mat (Round-51 ka niyam).");
+  }
 
   return {
     ok: true,
     source: board.provider ?? null,
-    summary: lines.join("\n"),
+    summary: autoRouteNote ? `${autoRouteNote}\n${lines.join("\n")}` : lines.join("\n"),
     data: {
       from,
       to,
@@ -269,7 +370,8 @@ export async function runFindSeatsTool(args: FindSeatsArgs): Promise<FindSeatsRe
       trainsSeen: pool.length,
       enriched: enriched.size,
       rows: pick.seat,
-      wlRows: wlPick.wl,
+      /* available-only par sirf seat-wali trains ke WL rows (dekho upar wlForReply ki wajah). */
+      wlRows: wlForReply,
       missingClass: pick.missingClass,
       unknownTime: pick.unknownTime,
       summary: head,
@@ -283,6 +385,8 @@ export const FIND_SEATS_DESCRIPTION =
   "Jab user seat/berth/class/availability ya 'kis train me seat hai' poochhe — jaise '2A me seat kaunsi train me hai', " +
   "'AC trains dikhao', 'sabse sasti seat wali train', 'raat 9 ke baad sleeper me seat', 'sirf confirmed wali dikhao', " +
   "'12029 me seat hai kya' — to PEHLE ye tool call karo aur uske result se hi jawab do (kabhi memory se seat mat batao). " +
+  "STATION NA HO TO: user ne sirf train number diya aur koi station nahi bola ('12094 me 3A me kitni seat khali hai') — " +
+  "from/to khaali chhod do, server khud us train ka POORA route timetable se le lega (user se station poochne ki zaroorat nahi). " +
   "Args: class_code = 'ALL' | 'AC' (1A/2A/3A/3E/CC/EC) | '2A','3A','SL','CC','EC','2S','3E','1A' (comma se kai); " +
   "only_available = true SIRF tab jab user ne khud 'available/khali/sirf available/confirmed seat' maanga ho; " +
   "warna false bhejo (default) — tab WL/N-A trains bhi aati hain aur jawab me saari trains status ke saath likhni hain; " +
@@ -290,13 +394,15 @@ export const FIND_SEATS_DESCRIPTION =
   "YA '17:00' / '5 baje ke baad'; depart_before = '12:00' / '12 baje se pehle'. " +
   "'subah ki trains batao' jaisa sawaal aaye to poora din ka jawab MAT do — usi window ki trains batao. " +
   "sort_by = 'cheapest' | 'fastest'; train_numbers = sirf in trains par (comma-separated). " +
-  "WL ka confirm% kabhi mat batao (data nahi hai) — sirf WL number.";
+  "WL ka confirm% kabhi mat batao (data nahi hai) — sirf WL number. "
+  "Result ke `summary` field me har train ki har class ki line hai (AVAILABLE + WL/N-A dono) — apne jawab me "
+  "wahi SAARI entries likho; sirf AVAILABLE rows likhna adhoora hai (jab tak user ne khud 'sirf available' na maanga ho).";
 
 export const FIND_SEATS_PARAMETERS = {
   type: "object",
   properties: {
-    from: { type: "string", description: "Origin station code (LDH) ya city naam (Ludhiana)" },
-    to: { type: "string", description: "Destination station code (BEAS) ya city naam (Beas)" },
+    from: { type: "string", description: "Origin station code (LDH) ya city naam (Ludhiana). Agar user ne station nahi bataya (sirf train number diya) to khaali chhodo — server train ka poora route khud le lega" },
+    to: { type: "string", description: "Destination station code (BEAS) ya city naam (Beas). Station na bata ho to khaali chhodo (server route khud lega)" },
     date: { type: "string", description: "Journey date YYYY-MM-DD" },
     class_code: { type: "string", description: "'ALL' | 'AC' | '1A'|'2A'|'3A'|'3E'|'SL'|'CC'|'EC'|'2S' (comma-separated bhi)" },
     only_available: { type: "boolean", description: "true = sirf AVAILABLE/RAC (sirf jab user ne available/confirmed maanga ho); false (default) = WL/N-A bhi dikhao" },
@@ -307,5 +413,5 @@ export const FIND_SEATS_PARAMETERS = {
     quota: { type: "string", description: "GN (default) | TQ (tatkal) | PT (premium tatkal) | LD (ladies)" },
     passengers: { type: "number", description: "Kitne log (1-6) — sirf jawab me context ke liye" },
   },
-  required: ["from", "to", "date"],
+  required: ["date"],
 } as const;

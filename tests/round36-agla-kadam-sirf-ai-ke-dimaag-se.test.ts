@@ -73,7 +73,7 @@ describe("Round-36 · model se agla kadam — do koshish, phir bhi fallback nahi
     expect(agentic).toContain('"next_step_from_dedicated_call"');
     expect(agentic).toContain('"next_step_dedicated_empty_no_fallback"');
     /* dedicated jawab bhi evidence se validate hota hai */
-    expect(agentic).toContain("const val = dedicated.filter((a) => groundingCheck(`${a.label} ${a.utterance}`, steps, evidenceAll).grounded);");
+    expect(agentic).toContain("const val = dedicated.filter((a) => groundingCheck(`${a.label} ${a.utterance}`, steps, nextEvidence).grounded);");
   });
 
   it("grounded turn me hi repair (ungrounded replies ka apna treatment hai)", () => {

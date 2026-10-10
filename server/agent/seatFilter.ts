@@ -13,7 +13,8 @@
  * WL ka confirm% hum nahi dete (data hai hi nahi) — sirf asli WL number.
  */
 import { getProvider } from "../providers/index.js";
-import { routedRouteBoard } from "../railway/router.js";
+import { enrichTrainsFreshness, routedRouteBoard } from "../railway/router.js";
+import { filterTrainsServingSegment, nearbyCandidatesNote, routeDropNote } from "./routeSegment.js";
 import type { SeatIntentSlots } from "../understand/seatIntent.js";
 
 export interface SeatBoardClass {
@@ -152,16 +153,22 @@ export function pickSeatRows(
 
 /* Round-25: ek jawab me kitni rows dikhayein — "koi cap nahi" ke saath, par jawab padhne layak rahe. */
 export const SEAT_LINE_MAX = 12;
+/* Round-53 (user: "Green portion wali trains card mein nahi dikh rahi"): TEXT line me 12 trains ka cap
+ * theek hai (padhne layak), par CARDS ka payload cap nahi hona chahiye — jo trains jawab me hain wo
+ * saari cards me dikhni chahiye. Isliye payload ke liye alag, bada cap. */
+export const SEAT_PAYLOAD_MAX_TRAINS = 60;
 
 const inr = (n: number | null) => (n == null ? "—" : `₹${n.toLocaleString("en-IN")}`);
 const trainCount = (rows: SeatFilterRow[]) => new Set(rows.map((r) => r.number)).size;
+/* Round-50: count provider ne hi nahi di (jaise RailYatri ka "RLWL/AVAILABLE") to "AVL —" ki jagah
+ * sirf "AVL" — number ka na hona saaf dikhta hai, adhoora dash nahi. */
 const statusText = (r: SeatFilterRow): string =>
   r.status === "AVAILABLE"
-    ? `AVL ${r.seats ?? "—"}`
+    ? (r.seats != null ? `AVL ${r.seats}` : "AVL")
     : r.status === "RAC"
-      ? `RAC ${r.rac ?? "—"}`
+      ? (r.rac != null ? `RAC ${r.rac}` : "RAC")
       : r.status === "WAITLIST"
-        ? `WL ${r.waitlist ?? "—"}`
+        ? (r.waitlist != null ? `WL ${r.waitlist}` : "WL")
         : "N/A";
 
 /** Ek hi train ki rows ko ek text me — "12013 CC AVL 444 ₹675 · 3A AVL 71 ₹520".
@@ -184,7 +191,7 @@ export function groupRowsByTrain(rows: SeatFilterRow[]): { number: string; name:
 }
 
 const fmtRow = (r: SeatFilterRow) => {
-  const status = r.status === "AVAILABLE" ? `AVL ${r.seats ?? "—"}` : r.status === "RAC" ? `RAC ${r.rac ?? "—"}` : r.status === "WAITLIST" ? `WL ${r.waitlist ?? "—"}` : "N/A";
+  const status = statusText(r);
   return `${r.number} ${r.classCode} ${status}${r.fare != null ? ` ${inr(r.fare)}` : ""}${r.departure ? ` (${r.departure})` : ""}`;
 };
 
@@ -227,7 +234,9 @@ export function seatSummaryLine(
       .slice(0, SEAT_LINE_MAX)
       .map((g) => `${g.number} ${trainClassesText(g.classes)}`)
       .join(" | ");
-    const more = grouped.length > SEAT_LINE_MAX ? ` | +${grouped.length - SEAT_LINE_MAX} trains aur bhi hain` : "";
+    /* Round-53: jo trains is line me nahi aayi wo NEECHE CARDS me hain (cards ka payload ab saara hai) —
+     * pehle yahan bas "+N aur bhi hain" likha tha jiska koi pata nahi tha (user ki shikayat). */
+    const more = grouped.length > SEAT_LINE_MAX ? ` | +${grouped.length - SEAT_LINE_MAX} trains aur bhi hain — neeche poori live list me` : "";
     const countBit =
       pick.seat.length && pick.wl.length
         ? `${withSeat} me seat (AVL/RAC), ${wlOnly} me WL/N-A`
@@ -244,18 +253,27 @@ export function seatSummaryLine(
      * us card ko Round-21c me chat se hata diya gaya tha, isliye pointer jhootha tha (aur AI wahi
      * line copy karke "…Seat Finder card mein hain" likh deta tha). Ab SAARI seat rows isi line me
      * aati hain (koi card pointer nahi) — bahut zyada hon to hi "+N aur bhi hain" (bina kisi card ke). */
-    const grouped = groupRowsByTrain(pick.seat);
+    /* Round-51 (user: *"sabhi class kyu nahi show hoti jab bhi specifically confirm, available
+     * poocho"* — 12265 ki 2S usi train me thi par jawab me gayab): jo train is jawab me hai, uski
+     * SAARI classes dikhao — available wali pehle (jaise pick me hain), phir usi train ki WL/N-A
+     * rows (wl pick se). Sirf-WL trains list me nahi aati (Round-25 ka usool wahi rehta hai). */
+    const seatNums = new Set(pick.seat.map((r) => r.number));
+    const have = new Set(pick.seat.map((r) => `${r.number}:${r.classCode}`));
+    const otherClasses = (pick.wl ?? []).filter((r) => seatNums.has(r.number) && !have.has(`${r.number}:${r.classCode}`));
+    const grouped = groupRowsByTrain(otherClasses.length ? [...pick.seat, ...otherClasses] : pick.seat);
     const shown = grouped
       .slice(0, SEAT_LINE_MAX)
       .map((g) => `${g.number} ${trainClassesText(g.classes)}`)
       .join(" | ");
-    const more = grouped.length > SEAT_LINE_MAX ? ` | +${grouped.length - SEAT_LINE_MAX} trains aur bhi hain` : "";
+    /* Round-53: jo trains is line me nahi aayi wo NEECHE CARDS me hain (cards ka payload ab saara hai) —
+     * pehle yahan bas "+N aur bhi hain" likha tha jiska koi pata nahi tha (user ki shikayat). */
+    const more = grouped.length > SEAT_LINE_MAX ? ` | +${grouped.length - SEAT_LINE_MAX} trains aur bhi hain — neeche poori live list me` : "";
     return `💺 ${cls} me seat wali ${trains} train${trains === 1 ? "" : "s"}${when}${sortNote} — ${shown}${more}. (${head})`;
   }
   if (pick.wl.length) {
     const trains = trainCount(pick.wl);
     const top = pick.wl.slice(0, SEAT_LINE_MAX).map(fmtRow).join(" · ");
-    const wlMore = pick.wl.length > SEAT_LINE_MAX ? ` · +${pick.wl.length - SEAT_LINE_MAX} aur bhi hain` : "";
+    const wlMore = pick.wl.length > SEAT_LINE_MAX ? ` · +${pick.wl.length - SEAT_LINE_MAX} aur bhi hain — neeche poori live list me` : "";
     /* WL number hi dikhate hain — confirm% nahi (wo data hamare paas nahi hai). */
     return `💺 ${cls} me abhi koi AVAILABLE/RAC seat nahi${when} — WL wali ${trains} train${trains === 1 ? "" : "s"} ${trains === 1 ? "hai" : "hain"}: ${top}${wlMore}. Confirm% hum nahi dete (data nahi); booking se pehle IRCTC par check karo. (${head})`;
   }
@@ -326,6 +344,10 @@ export interface SeatFilterResult {
   wlRows: SeatFilterRow[];
   trainsSeen: number;
   source: string | null;
+  /** Round-49: jo trains segment tak nahi jaati thin, unka saaf note (jaise SVDK me JAT wali). */
+  dropNote?: string | null;
+  /** Round-50: unme se jo seat-detih hain — alag section (aage khud jaana hoga), yahi IRCTC bhi dikhata hai. */
+  nearbyNote?: string | null;
 }
 
 /**
@@ -342,8 +364,31 @@ export async function seatFilterFor(opts: {
 }): Promise<SeatFilterResult | null> {
   const { from, to, date, slots } = opts;
   if (!from || !to || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
-  const board = await routedRouteBoard(from, to, date, []).catch(() => null);
-  if (!board || !board.trains.length) return null;
+  const boardRaw = await routedRouteBoard(from, to, date, []).catch(() => null);
+  if (!boardRaw || !boardRaw.trains.length) return null;
+  /* Round-49: jo train maangi hui destination tak jaati hi nahi (ConfirmTkt board me JAT tak wali
+   * trains bhi aa jaati hain), use list se hata do + saaf note — warna user "SVDK" maang kar JAT ki
+   * seat dekh raha hota hai (unbookable). Route pata na chale to train rakhi jaati hai. */
+  const seg = await filterTrainsServingSegment(
+    boardRaw.trains.map((t) => ({ trainNumber: String(t.trainNumber ?? "").trim(), trainName: String(t.trainName ?? "") })),
+    from,
+    to,
+  ).catch(() => ({ trains: boardRaw.trains.map((t) => ({ trainNumber: String(t.trainNumber ?? "").trim(), trainName: String(t.trainName ?? "") })), dropped: [] }));
+  const keptNums = new Set(seg.trains.map((t) => t.trainNumber));
+  const board = { ...boardRaw, trains: boardRaw.trains.filter((t) => keptNums.has(String(t.trainNumber ?? "").trim())) };
+  if (!board.trains.length) return null;
+  const dropNote = routeDropNote(seg.dropped, to);
+  /* ── Round-50 (user: "haan banado"): jo trains maangi hui destination tak nahi jaati, unme se jo
+   * seat-detih hain wo alag section me — "JAT tak (aage khud)". User IRCTC par bhi yahi dekhta hai
+   * (LDH→Katra search me JAT-tak wali trains aati hain), isliye option chhupna nahi chahiye — bas
+   * saaf label ke saath, main list se alag. Koi andaza nahi: seats wahi board rows se. */
+  const droppedSet = new Set(seg.dropped.map((d) => d.number));
+  const nearbyNote = nearbyCandidatesNote(
+    boardRaw.trains.filter((t) => droppedSet.has(String(t.trainNumber ?? "").trim())),
+    seg.dropped,
+    from,
+    to,
+  );
 
   /* Round-33 (user 26 Sep: "trains list krdi without fare and timings"): pehle times sirf tab aate the
    * jab time-window/fastest-sort maanga ho — ab HAR seat turn par (wahi ek search call, deduped) taaki
@@ -364,6 +409,24 @@ export async function seatFilterFor(opts: {
     }
   }
 
+  /* ── Round-50: dikhaayi jaane wali trains ke rows LIVE verify karo ──────────────────────────────
+   * User (29 Sep): IRCTC/ConfirmTkt par 12265 ki 2S AVAILABLE thi, par app me nahi dikhi (hamare paas
+   * us row ka purana/future-dated cache tha). Ab pehle ek probe-pick se un trains ka pata chalta hai
+   * jo user ko dikhne wali hain (seat wali pehle, phir WL wali), unke stale/UNKNOWN/future rows ka
+   * live probe (wahi machinery jo /api/availability ke focus trains par chalti hai), phir final pick.
+   * Live row na mile to purani row waise hi rehti hai (kuch invent nahi). */
+  try {
+    if (typeof enrichTrainsFreshness === "function") {
+      const probe = pickSeatRows(board.trains as SeatBoardTrain[], slots, times);
+      const probeWl = slots.onlyAvailable ? pickSeatRows(board.trains as SeatBoardTrain[], { ...slots, onlyAvailable: false }, times) : probe;
+      const order: string[] = [];
+      for (const r of [...probe.seat, ...probeWl.wl]) if (!order.includes(r.number) && order.length < 6) order.push(r.number);
+      if (order.length) await enrichTrainsFreshness(board.trains as { trainNumber: string; trainName: string; classes: never[] }[], order, from, to, date, "GN");
+    }
+  } catch {
+    /* freshness optional hai — board ka data waise hi chalta hai */
+  }
+
   const pick = pickSeatRows(board.trains as SeatBoardTrain[], slots, times);
   /* 24 Sep 2026 (user: "2A ki seats dikhana" → "koi seat wali train nahi mili" par WL ka pata hi
    * nahi chala): onlyAvailable=true par bhi WL rows ALAG se nikaal lo, taaki line bata sake ki
@@ -371,15 +434,21 @@ export async function seatFilterFor(opts: {
   const wlPick = slots.onlyAvailable
     ? pickSeatRows(board.trains as SeatBoardTrain[], { ...slots, onlyAvailable: false }, times)
     : pick;
-  const line = seatSummaryLine({ ...pick, wl: wlPick.wl }, slots, { from, to });
+  const line =
+    seatSummaryLine({ ...pick, wl: wlPick.wl }, slots, { from, to }) +
+    (dropNote ? `\n${dropNote}` : "") +
+    (nearbyNote ? `\n${nearbyNote}` : "");
   /* Round-25: payload/line me saari seat-wali trains (12 tak) — default 8 se badhaya.
    * Round-27: cap ab *trains* par — har train ki SAARI classes isi jawab/block me aani chahiye. */
-  const max = opts.maxRows ?? SEAT_LINE_MAX;
+  /* Round-53: cards me SAARI trains (payload cap bada) — text line ka cap alag hai. */
+  const max = opts.maxRows ?? SEAT_PAYLOAD_MAX_TRAINS;
   return {
     line,
     rows: capRowsByTrain(pick.seat, max),
     wlRows: capRowsByTrain(wlPick.wl, max),
     trainsSeen: board.trains.length,
     source: board.provider ?? null,
+    dropNote,
+    nearbyNote,
   };
 }

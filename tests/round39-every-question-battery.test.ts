@@ -35,7 +35,8 @@ describe("Round-39 · capability/meta sawaal (battery me booking flow shuru ho g
 
   it("train number wale sawaal par capability handler nahi chalta", async () => {
     const src = read("server/agent/run.ts");
-    expect(src).toContain("if (capabilityQ && !/\\b(\\d{4,5})\\b/.test(t)) {");
+    /* Round-52: capability sawaal bhi ab MODEL ka hai (system prompt rule 28) — fixed jawab sirf AI-off/model-fail par. */
+    expect(src).toContain("if (capabilityQ && !/\\b(\\d{4,5})\\b/.test(t) && !aiFirst) {");
   });
 });
 

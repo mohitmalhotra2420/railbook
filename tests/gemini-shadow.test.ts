@@ -22,6 +22,9 @@ describe("Gemini is shadow-only and cannot take money", () => {
   it("Production AI models intentional hain: primary planner Muse-Glimmer, fallback + NLU GPT-OSS", () => {
     // 2026-09-07 Round-14 intentional switch: Muse-Glimmer-30B primary planner (bench 11/12, 1.9s p50),
     // GPT-OSS-20B fallback + NLU layer par. Gemini/RapidAPI shadow-only guard intact.
+    /* Round-61 (30 Sep 2026, user: "Muse ko primary kro and gpt ko secondary yan fallback"): chain
+     * Muse se shuru (samajh/multi-tool behtar) aur gpt-oss-20b fast fallback. Bade prompt ke liye ab
+     * alag primary timeout cap hai (AI_PRIMARY_TIMEOUT_MS) — isliye R52 wali "fast pehle" majboori nahi. */
     expect(env.nvidiaModel).toBe("meta/muse-glimmer-30b");
     expect(env.nvidiaFallbackModel).toBe(process.env.NVIDIA_FALLBACK_MODEL || "openai/gpt-oss-20b");
     expect(env.nvidiaFallbackModel).toMatch(/muse-glimmer|gpt-oss|nemotron/);

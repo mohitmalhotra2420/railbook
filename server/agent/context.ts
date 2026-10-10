@@ -559,7 +559,7 @@ export function factReplyUnavailable(kind: FollowUp | AgentToolName): string {
   if (kind === "timetable" || kind === "getTimetable" || kind === "getTrainInfo") {
     return "Timetable abhi provider se nahi mili.";
   }
-  return "Yeh jaankari abhi railway provider se available nahi hai. Main gadh ke nahi bataunga.";
+  return "Yeh jaankari abhi railway provider se available nahi hai — bina verified data main andaza nahi lagaunga. Thodi der baad phir try karein.";
 }
 
 export function neverAutoBook(_intent?: string, _bookingFlow?: string): boolean {

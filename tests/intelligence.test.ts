@@ -335,11 +335,16 @@ describe("SCREENSHOT #2 (2026-09-06): availability UX + hw-code + slot-resume", 
     expect(r.to?.code).toBe("HW");
   });
 
-  it("bug (b): '12054 ki seat availability?' — sirf CLASS poochho, sab nahi", async () => {
+  /* Round-43 (27 Sep 2026, user screenshot): khaas train ke seat sawaal par poora route-board nahi —
+   * us train ka DATE-WISE class status (ChatGPT jaisa). Pehle test "sirf class poochho" maangta tha;
+   * ab user ki acceptance date-wise clean answer hai, isliye expectation update. */
+  it("bug (b): '12054 ki seat availability?' — usi train ka date-wise class status (poora board nahi)", async () => {
     railcoreAvailMock();
     const r = await runAgent({ text: "12054 ki seat availability?", now: "2026-09-06T11:52:00+05:30" });
     const reply = String(r.reply ?? "");
-    expect(reply, reply).toMatch(/kaunsi class/i);
+    expect(reply, reply).toMatch(/12054/);
+    expect(reply, reply).toMatch(/seat availability:/i);
+    expect(reply, reply).toMatch(/AVAILABLE/);
     expect(reply, reply).not.toMatch(/Train, date, stations aur class chahiye/i);
   });
 
@@ -354,10 +359,66 @@ describe("SCREENSHOT #2 (2026-09-06): availability UX + hw-code + slot-resume", 
     });
     const reply = String(t3.reply ?? "");
     expect(reply, reply).toMatch(/12054/);
-    expect(reply, reply).toMatch(/kaunsi class/i);
+    expect(reply, reply).toMatch(/seat availability:/i);
     expect(reply, reply).not.toMatch(/Kahan jaana|station bataiye/i);
     expect(t3.context?.origin?.code).toBe("LDH");
     expect(t3.context?.destination?.code).toBe("HW");
+  });
+
+  /* Round-43c: user live par "aaj ki" follow-up deta hai — us din 12054 CANCELLED hota hai. Pehle ye
+   * deterministic handler se fall-through karke route-board/agentic par chala jaata tha (47s, ghair
+   * mutaliq jawab). Ab: usi train ka date-wise jawab + agla din bhi (ChatGPT jaisa). */
+  it("T5 'aaj ki' — single-train resume: khali date par agla din bhi (route board nahi)", async () => {
+    setRailcoreFetch(async (input) => {
+      const url = input instanceof URL ? input : new URL(String(input));
+      const p = url.pathname;
+      const sched = p.match(/\/trains\/(\d+)\/schedule$/);
+      if (sched && sched[1] === "12054") {
+        return jsonResponse(200, {
+          success: true,
+          data: {
+            train_number: "12054",
+            train_name: "JAN SHATABDI EXPRESS",
+            running_days: ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"],
+            classes: ["2S", "CC"],
+            total_duration_minutes: 315,
+            stops: [
+              { station_code: "ASR", station_name: "AMRITSAR JN", arrival_time: null, departure_time: "06:15", day: 1 },
+              { station_code: "HW", station_name: "HARIDWAR JN", arrival_time: "11:30", departure_time: null, day: 1 },
+            ],
+          },
+        });
+      }
+      if (p.endsWith("/availability/seats")) {
+        const date = url.searchParams.get("date");
+        const cancelled = date === "2026-09-06";
+        return jsonResponse(200, {
+          success: true,
+          data: {
+            train_number: "12054",
+            from_station_code: "ASR",
+            to_station_code: "HW",
+            journey_date: date,
+            quota: "GN",
+            classes: cancelled
+              ? [{ class_code: "CC", status: "NOT_AVAILABLE", availability_text: "NOT AVAILABLE" }]
+              : [{ class_code: "CC", status: "AVAILABLE", available_count: 294, availability_text: "AVAILABLE 294", total_fare: 205 }],
+          },
+        });
+      }
+      return jsonResponse(404, { success: false, error: { message: "unknown endpoint" } });
+    });
+    const t2 = await runAgent({ text: "12054 ki seat availability btana", now: "2026-09-06T11:52:00+05:30" });
+    const t3 = await runAgent({ text: "aaj ki", context: t2.context as never, known: {}, now: "2026-09-06T11:53:00+05:30" });
+    const reply = String(t3.reply ?? "");
+    expect(reply, reply).toMatch(/12054/);
+    /* Pahla din khali (data nahi) → handler agla din bhi maangta hai; dono date-wise lines aati hain. */
+    expect(reply, reply).toMatch(/06 Sep \(aaj\):/);
+    expect(reply, reply).toMatch(/07 Sep \(kal\): .*AVAILABLE 294/);
+    expect(reply, reply).not.toMatch(/₹0/);
+    expect(reply, reply).not.toMatch(/kitne passengers/i);
+    expect(reply, reply).not.toMatch(/Kahan jaana|station bataiye/i);
+    expect(t3.context?.selectedTrainNumber).toBe("12054");
   });
 
   it("T4 'CC' — availability aati hai + LDH→HW NOT_FOUND par ASR→HW segment-fallback label", async () => {
@@ -371,9 +432,12 @@ describe("SCREENSHOT #2 (2026-09-06): availability UX + hw-code + slot-resume", 
     });
     const t4 = await runAgent({ text: "CC", context: t3.context as never, known: {}, now: "2026-09-06T11:54:00+05:30" });
     const reply = String(t4.reply ?? "");
-    expect(reply, reply).toMatch(/12054 CC: AVAILABLE/i);
-    expect(reply, reply).toMatch(/ASR→HW/);
-    expect(reply, reply).toMatch(/LDH→HW segment ka direct data nahi/i);
+    /* Round-43: user ka apna segment (LDH→HW) hi dikhta hai, class-filter ke saath — provider se usi
+     * segment ka data maanga jaata hai (pehle ASR→HW fallback label + "segment ka direct data nahi"). */
+    expect(reply, reply).toMatch(/12054/);
+    expect(reply, reply).toMatch(/LDH → HW/);
+    expect(reply, reply).toMatch(/CC AVAILABLE/i);
+    expect(reply, reply).not.toMatch(/Kahan jaana|station bataiye/i);
   });
 });
 
@@ -717,7 +781,8 @@ describe("ROUND-4: ChatGPT-jaisa universal railway knowledge", () => {
     const r = await runAgent({ text: "sabse tez train kaunsi hai india mein", now: "2026-09-06T20:00:00+05:30" });
     const reply = String(r.reply ?? "");
     expect(reply, reply).toMatch(/Vande Bharat/i);
-    expect(reply, reply).toMatch(/AI ka general jawab/i);
+    /* Round-40: "sabse tez train" ab KB me hai (Vande Bharat 160 km/h) — KB label bhi honest hai. */
+    expect(reply, reply).toMatch(/AI ka general jawab|general railway knowledge/i);
     expect(reply, reply).not.toMatch(/confirm nahi kar paya/i);
     expect(reply, reply).not.toMatch(/Kahan se jaana/i);
   });

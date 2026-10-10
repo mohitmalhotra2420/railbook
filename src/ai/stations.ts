@@ -252,7 +252,9 @@ export function stationByCode(code: string): Station | undefined {
   return CLIENT_STATIONS.find((s) => s.code === code.toUpperCase());
 }
 
-const CITY_NAME_ALIASES: Record<string, string> = {
+/* R63-fix: AI Booking ko isi map ki zaroorat padi ("delhi"/"दिल्ली" jaise city naam ke liye asli
+ * station list dikhane ke liye) — sirf export hua hai, koi value/behaviour nahi badla. */
+export const CITY_NAME_ALIASES: Record<string, string> = {
   dilli: "delhi",
   दिल्ली: "delhi",
   दिल्ही: "delhi",

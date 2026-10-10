@@ -39,7 +39,7 @@ export function glossaryReply(text: string): string | null {
     return "EC = Executive Chair Car. CC se upar wali chair class, zyada fare. Availability provider se check hoti hai.";
   }
   if (/\b(sl|sleeper)\b/.test(t) || /स्लीपर/.test(raw)) {
-    return "SL = Sleeper class. Non-AC berth (lower/middle/upper). Confirm/WL provider se aata hai — main gadh ke nahi bataunga.";
+    return "SL = Sleeper class. Non-AC berth (lower/middle/upper), 72 berths/coach. Confirm/WL sirf provider ka live data batata hai — main andaza nahi lagaunga.";
   }
   if (/\b(3a|3ac|3 ac|third ac)\b/.test(t) || /थर्ड एसी/.test(raw)) {
     return "3A = AC 3 Tier. AC sleeper, 6 berth per bay. Seats/fare provider se.";
@@ -63,7 +63,7 @@ export function glossaryReply(text: string): string | null {
     return "WL = Waitlist. Ticket confirm nahi. Number provider se aata hai — main WL invent nahi karunga.";
   }
   if (/\b(tatkal)\b/.test(t) || /तत्काल/.test(raw)) {
-    return "Tatkal = last-window quota (TQ). Fare/AVL general se alag ho sakte hain. Official window IRCTC pe hai — main rule gadh ke nahi bataunga.";
+    return "Tatkal = last-window quota (TQ). Fare/AVL general se alag ho sakte hain. Official window IRCTC pe hai — main bina verified rule andaza nahi lagaunga.";
   }
   return null;
 }

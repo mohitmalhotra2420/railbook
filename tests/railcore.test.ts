@@ -221,6 +221,13 @@ describe("NVIDIA + booking state remain unchanged", () => {
     delete process.env.NVIDIA_MODEL;
     delete process.env.NVIDIA_BASE_URL;
     delete process.env.NVIDIA_FALLBACK_MODEL;
+    /* Round-52 me chain fast model se shuru ki gayi thi (muse 30s+ le raha tha); Round-61 me user ne
+     * wapas Muse primary maanga — ab bade prompt ke liye alag primary timeout cap hai, isliye order
+     * badalne ki majboori nahi. */
+    /* Round-61 (30 Sep 2026, user: "Muse ko primary kro and gpt ko secondary yan fallback"): chain
+     * wapas Muse se shuru hoti hai — Muse samajh/multi-tool me behtar, gpt-oss-20b fast fallback.
+     * Turn budget 180s + AI_PRIMARY_TIMEOUT_MS (prod 90s) ki wajah se slow primary ab timeout me
+     * poora turn nahi khota. */
     expect(env.nvidiaModel).toBe("meta/muse-glimmer-30b");
     expect(env.nvidiaFallbackModel).toBe("openai/gpt-oss-20b");
     expect(env.nvidiaBaseUrl).toBe("https://integrate.api.nvidia.com/v1");

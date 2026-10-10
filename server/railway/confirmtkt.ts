@@ -136,10 +136,25 @@ type RawClassCache = {
   quota?: string | null;
 };
 
+/**
+ * Round-50 (29 Sep 2026, user: "12265 2S IRCTC par thi par app me nahi"): ConfirmTkt ka
+ * `cacheTime` **IST me** likha hota hai par zone ke bina ("2026-09-29T10:40:47") — Date.parse
+ * usko UTC maan leta hai aur timestamp 5:30 ghante *future* me chala jaata hai. Us se do gadbad:
+ *  (1) purani row "fresh" lag kar live probe se bach jaati hai (aur app IRCTC se ulat dikhata hai),
+ *  (2) UI me "last updated" 5:30 ghante aage ka chhapta hai.
+ * Data ka time kabhi future me nahi ho sakta — 3h se zyada aage dikhe to IST maan kar 5:30 ghata do.
+ * (Yahi ek honest correction; baaki cases me value waise hi.)
+ */
+export function ctCacheTimeMs(raw: string | null | undefined): number {
+  const ms = raw ? Date.parse(raw) : NaN;
+  if (!Number.isFinite(ms)) return NaN;
+  return ms - Date.now() > 3 * 60 * 60_000 ? ms - 5.5 * 60 * 60_000 : ms;
+}
+
 function classRow(classCode: ClassCode, info: RawClassCache, dateYmd: string): ClassAvailability {
   const parsed = parseConfirmTktAvailability(info.availability, info.availabilityDisplayName);
   const fareNum = info.fare != null && info.fare !== "" ? Number(info.fare) : null;
-  const asOfMs = info.cacheTime ? Date.parse(info.cacheTime) : NaN;
+  const asOfMs = ctCacheTimeMs(info.cacheTime);
   const asOf = Number.isFinite(asOfMs) ? new Date(asOfMs).toISOString() : null;
   const stale = Number.isFinite(asOfMs) ? Date.now() - asOfMs > CONFIRMTKT_STALE_MS : false;
   const chance = typeof info.predictionPercentage === "number" && info.predictionPercentage > 0 ? info.predictionPercentage : null;

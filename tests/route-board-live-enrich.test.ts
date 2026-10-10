@@ -107,15 +107,17 @@ describe("route board: stale/UNKNOWN rows live ho jati hain", () => {
     expect(threeA.stale).toBeUndefined();
   });
 
-  /* Round-33 (user: "first use confirm tkt, then rail yatri"): web chain ka pehla qadam confirmtkt hai,
-   * isliye haazir board ki SL row (AVL 226) ab confirmtkt se hi aati hai — railway API block hone par
-   * bhi asli data, sirf source badla. */
-  it("17 ghante purani SL row bhi live ho jati hai — ab confirmtkt pehle (chain order), stale label hatta hai", async () => {
+  /* Round-33 (user: "first use confirm tkt, then rail yatri"): web chain ka pehla qadam confirmtkt hai —
+   * par Round-50 (user: "IRCTC par 2S thi, app me nahi") me cross-check juda: chain ka row 30 min se
+   * purana (ya seat nahi dikha raha) ho to IRCTC-sourced RailYatri se second opinion, aur wahi row
+   * dikhti hai jo zyada fresh hai. Yahan CT board ki SL row 17 ghante purani hai (AVL 226) aur RY
+   * aaj ka data deta hai (AVL 160) — isliye ab wahi (fresher) dikhta hai, stale label hatta hua. */
+  it("17 ghante purani SL row live ho jati hai — ab fresher row (RailYatri/IRCTC) jeetti hai", async () => {
     const app = createApp();
     const res = await request(app).get(`/api/availability?from=LDH&to=BEAS&date=${DATE}&trains=14631`);
     const t = res.body.trains.find((x: { trainNumber: string }) => x.trainNumber === "14631");
     const sl = t.classes.find((c: { code: string }) => c.code === "SL");
-    expect(sl).toMatchObject({ status: "AVAILABLE", seats: 226, source: "web_confirmtkt" });
+    expect(sl).toMatchObject({ status: "AVAILABLE", seats: 160, source: "web_railyatri" });
     expect(sl.stale).toBeUndefined();
   });
 

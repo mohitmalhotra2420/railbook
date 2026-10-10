@@ -1,7 +1,18 @@
 /** Short Hindi/Hinglish step prompts after a field is filled. */
 
+/* R63-fix (user: "background AI voice bhi nahi aa rahi"): Android/Chrome par speechSynthesis
+ * aksar chup rehta hai — teen wajah:
+ *   1) pehla `speak()` user gesture se pehle chala jaata hai (autoplay policy → chup),
+ *   2) voices list khaali hoti hai jab tak `getVoices()`/`voiceschanged` na chale,
+ *   3) lamba text ya `paused` state (Chrome bug) me rakha jaata hai.
+ * Ab: user ke tap par `unlockSpeech()` (ek silent utterance), voices ka intezaar, saaf line ko
+ * chhote tukdon me bolna, aur ek retry — taaki device voice sach me sunai de. API waise hi hai
+ * (`speakGuide` / `cancelGuide`), isliye purana koi caller nahi tootta.
+ */
+
 let primed = false;
 let speakToken = 0;
+let unlocked = false;
 
 function voices(): SpeechSynthesisVoice[] {
   if (typeof window === "undefined" || !window.speechSynthesis) return [];
@@ -34,6 +45,24 @@ function pickVoice(): SpeechSynthesisVoice | undefined {
   return best;
 }
 
+/** User ke gesture par ek baar chalao — iske bina Chrome/Android pehla speak() chup kar deta hai. */
+export function unlockSpeech(): void {
+  if (unlocked) return;
+  if (typeof window === "undefined" || !window.speechSynthesis) return;
+  unlocked = true;
+  try {
+    const s = window.speechSynthesis;
+    s.getVoices();
+    s.resume();
+    const u = new SpeechSynthesisUtterance(" ");
+    u.volume = 0;
+    u.rate = 1;
+    s.speak(u);
+  } catch {
+    /* ignore */
+  }
+}
+
 export function cancelGuide(): void {
   speakToken += 1;
   if (typeof window === "undefined" || !window.speechSynthesis) return;
@@ -49,20 +78,78 @@ export function cancelGuide(): void {
   }
 }
 
+/** Lamba jawab ek saans me nahi bolna — sentence/120-char tukdon me todo (Chrome long-text bug). */
+function chunks(text: string): string[] {
+  const parts = text
+    .split(/(?<=[.!?…।])\s+/u)
+    .map((x) => x.trim())
+    .filter(Boolean);
+  const out: string[] = [];
+  for (const p of parts) {
+    if (p.length <= 140) {
+      out.push(p);
+      continue;
+    }
+    let buf = "";
+    for (const w of p.split(/\s+/)) {
+      if ((buf + " " + w).trim().length > 140) {
+        if (buf) out.push(buf.trim());
+        buf = w;
+      } else buf = `${buf} ${w}`;
+    }
+    if (buf.trim()) out.push(buf.trim());
+  }
+  return out.length ? out : [text];
+}
+
 function utter(text: string): void {
   if (typeof window === "undefined" || !window.speechSynthesis) return;
-  const u = new SpeechSynthesisUtterance(text);
+  const s = window.speechSynthesis;
   const voice = pickVoice();
-  u.lang = voice?.lang && /^hi/i.test(voice.lang) ? voice.lang : "hi-IN";
-  u.rate = 0.98;
+  const lang = voice?.lang && /^hi/i.test(voice.lang) ? voice.lang : "hi-IN";
   const feminine = voice && /female|woman|lekha|neerja|vaishali|kalpana|heera|swara/i.test(voice.name);
-  u.pitch = feminine ? 1.05 : 1.18;
-  if (voice) u.voice = voice;
+  for (const piece of chunks(text)) {
+    const u = new SpeechSynthesisUtterance(piece);
+    u.lang = lang;
+    u.rate = 0.98;
+    u.pitch = feminine ? 1.05 : 1.18;
+    u.volume = 1;
+    if (voice) u.voice = voice;
+    try {
+      s.speak(u);
+    } catch {
+      /* ignore */
+    }
+  }
+  /* Chrome kabhi kabhi queue ko pause kar deta hai (khaaskar lambi line ke baad) — resume se chalu. */
   try {
-    window.speechSynthesis.speak(u);
+    s.resume();
+    window.setTimeout(() => {
+      try {
+        if (s.paused) s.resume();
+      } catch {
+        /* ignore */
+      }
+    }, 700);
   } catch {
     /* ignore */
   }
+  /* Retry: agar 600ms me kuch shuru hi nahi hua (voices late aayi) → ek baar phir. */
+  const token = speakToken;
+  window.setTimeout(() => {
+    try {
+      if (token !== speakToken) return;
+      if (s.speaking || s.pending) return;
+      const u2 = new SpeechSynthesisUtterance(chunks(text)[0]);
+      u2.lang = lang;
+      u2.rate = 0.98;
+      u2.volume = 1;
+      if (voice) u2.voice = voice;
+      s.speak(u2);
+    } catch {
+      /* ignore */
+    }
+  }, 600);
 }
 
 /** Speak a short guide line. Cancels any previous line first. Prefers Indian Hindi female. */

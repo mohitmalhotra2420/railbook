@@ -63,13 +63,70 @@ const ENTRIES: KbEntry[] = [
       "Premium Tatkal dynamic pricing wala tatkal quota hai — demand ke hisaab se base fare se kaafi zyada ho sakta hai. Normal tatkal ki tarah 1 din pehle khulta hai, par koi refund nahi hota cancellation par (rules IRCTC ke page se verify karein).",
   },
   {
+    keys: ["ludhiana platform", "ludhiana junction platform", "ldh platform", "ludhiana station platform", "ludhiana me kitne platform", "ludhiana kitne platform"],
+    answer:
+      "Ludhiana Junction (LDH) me 7 platforms hain (Wikipedia aur station guides ke hisaab se; 18 tracks, Northern Railway / Firozpur division). Sabse kam platform wale bade stations me nahi — balki Punjab ka sabse vyast junction hai, 200+ trains roz rukti hain. Aapke shehar ka station hai — kuch aur jaanna ho (kaunsi train, seat, live status) to poochh lo.",
+  },
+  {
+    keys: ["sabse purana station", "purana railway station", "oldest station", "pehla station india", "first railway station"],
+    answer:
+      "India ka pehla railway station Bori Bunder (Mumbai) tha — 16 April 1853 ki pehli train wahin se chali (aaj wahi jagah CSMT/Chhatrapati Shivaji Maharaj Terminus hai). Aaj bhi chalu sabse purane station buildings me Royapuram (Chennai, 1856) aur Howrah (1854) aate hain. 'Sabse purana' ka jawab is baat par depend karta hai ki pehla (1853) ya sabse purana surviving building (1856) poochha ja raha ho.",
+  },
+  {
+    /* Round-41: comparison sawaal — dono taraf ka jawab ek jagah. */
+    keys: ["tejas aur vande bharat", "tejas vs vande bharat", "tejas vande bharat fark", "vande bharat vs tejas"],
+    answer:
+      "Tejas vs Vande Bharat — dono premium AC chair-car day trains, par design aur operator alag:\n• Rake: Tejas = locomotive-hauled LHB coaches (IRCTC chalata hai, pehla 2017 Mumbai–Goa); Vande Bharat = self-propelled EMU trainset (locomotive nahi, Indian Railways, 2019 se).\n• Speed: Tejas practical max ~130 km/h (design 200); Vande Bharat 160 km/h, acceleration bahut tez (0–100 ~52 sec vs Tejas 2–3 min) — chhoti doori par VB usually jaldi pahunchti hai.\n• Classes: dono me CC + EC; VB ki EC me 180° rotating seats.\n• Routes: Tejas sirf kuch routes; Vande Bharat 50+ routes.\n• Catering/dynamic pricing: Tejas IRCTC-operated (chef-curated meals, dynamic pricing); VB me bhi onboard catering (service ke hisaab se included).\n• Extras: Tejas par IRCTC delay-compensation policy rahi hai; VB me nahi. Short: chhota safar + speed → Vande Bharat; airline-jaisa premium feel → Tejas.",
+  },
+  {
+    keys: ["sl aur 3a", "sl vs 3a", "3a vs sl", "sleeper aur 3a", "sl 3a me fark", "3a ya sl", "sl ya 3a"],
+    answer:
+      "SL vs 3A (sleeper vs AC 3-tier):\n• SL: non-AC 3-tier — 72 berths/coach, fan + khuli khidki, bedding free nahi (alag/paid), reserved me sabse sasta.\n• 3A: AC 3-tier — 64 berths/coach, poora AC, curtains, bedding (blanket/pillow/sheets) included, zyada privacy.\n• Fare: 3A aam taur par SL se ~1.5–2x (route/distance par depend) — exact apni date par GET_FARE se.\n• Choose: budget → SL; raat ka aaram/garam mausam/bachche-buzurg → 3A. (3A me WL zyada hoti hai.)",
+  },
+  {
+    keys: ["2s aur sl", "2s vs sl", "sl vs 2s", "2s ya sl", "sl ya 2s", "sitting ya sleeper"],
+    answer:
+      "2S vs SL:\n• 2S (Second Sitting): non-AC bench seat, din ke chhote safar ke liye sasta (SL se bhi kam); raat bhar baithna mushkil.\n• SL (Sleeper): non-AC berth, raat ke safar ke liye sahi; thoda mehnga par aaram zyada.\n• Din me 3–5 ghante → 2S; raat ya 6+ ghante → SL. Dono me AC nahi.",
+  },
+  {
+    keys: ["cc aur ec", "cc vs ec", "ec vs cc", "chair car vs executive", "ec me kya alag"],
+    answer:
+      "CC vs EC (Vande Bharat/Shatabdi):\n• CC (AC Chair Car): 3+2 layout, standard legroom, ~72–78 seats/coach, fare kam.\n• EC (Executive Chair Car): 2+2 layout, ~56 seats, zyada legroom + footrest, Vande Bharat me 180° rotating seats, fare CC se ~1.6–2x.\n• Value → CC; business-class feel → EC. Dono chair cars hain (berth nahi).",
+  },
+  {
+    keys: ["coach position", "coach kahan lagega", "dabba kahan", "coach number kaise pata", "coach position kaise"],
+    answer:
+      "Coach position live sirf thodi der pehle milta hai — aam taur par departure se ~1–2 ghante pehle jab rake platform par lagti hai. Iske liye: (1) station ka display board / announcement, (2) IRCTC/NTES app ka 'Coach Position', (3) RailBook ke station-board/coach tools (jab provider data de). Live data na mile to main andaza nahi lagaunga — platform board/app hi final hota hai.",
+  },
+  {
+    /* Round-40: "sabse purani/pehli train", "kitne zone", "kitne station", "sabse tez train" jaisa GK. */
+    keys: ["pehli train", "first train india", "sabse purani train", "train kab chali", "india ki pehli train", "1853 train"],
+    answer:
+      "India ki pehli passenger train 16 April 1853 ko chali thi — Bori Bunder (Mumbai) se Thane, 34 km, teen engine ke saath (Sahib, Sindh aur Sultan). Us din ~400 log safar kiya. Sabse purana aaj bhi chalu station building Royapuram (Chennai, 1856) hai; Bori Bunder wahi jagah hai jahan aaj CSMT (Chhatrapati Shivaji Maharaj Terminus) hai.",
+  },
+  {
+    keys: ["kitne zone", "railway zones", "kitne zones", "zone kitne hain", "zones of indian railways"],
+    answer:
+      "Indian Railways me 18 zonal railways hain — 17 bade zones (Northern, North Western, North Central, North Eastern, Northeast Frontier, Eastern, East Coast, East Central, South Eastern, South East Central, Southern, South Western, South Central, West Central, Western, Central, Konkan Railway) + Kolkata Metro (alag zone). Isliye counting par farq dikhta hai: kai sources Kolkata Metro ko alag gin kar '19 zones' bolte hain, aur South Coast Railway (HQ Visakhapatnam, 2019 me ghoshit) apne divisions ke saath alag zone ban rahi hai. Divisions ~70 hain.",
+  },
+  {
+    keys: ["kitne railway station", "total station", "kitne station hain", "stations in india", "kitne stations"],
+    answer:
+      "Indian Railways ke paas aaj lagbhag 7,300+ railway stations hain (counting method ke hisaab se figure thoda upar-neeche hota hai — sirf halt/flag-shed gine jaayein to zyada). Sabse zyada stations wale zones me Northern Railway aur Central Railway aate hain. Exact official count waqt ke saath badalta rehta hai.",
+  },
+  {
+    keys: ["sabse tez train", "fastest train", "sabse tez gaadi", "fastest train india"],
+    answer:
+      "India ki sabse tez operating trains Vande Bharat Express hain — maximum 160 km/h (Delhi–Agra/Tughlakabad–Agra section), aur Gatimaan Express bhi 160 km/h. Uske baad Tejas Rajdhani aur Rajdhani services (130 km/h MPS). Trial me Vande Bharat ne 183 km/h chhue the; railways 180+ km/h (Vande Bharat sleeper/semi-high-speed upgrades) par kaam kar rahi hai.",
+  },
+  {
     /* Round-39 battery: "Indian Railways ka sabse bada station kaunsa hai?" par kuch nahi aaya tha. */
     keys: ["sabse bada station", "bada railway station", "largest station", "biggest station", "sabse bada railway station", "sabse bada junction"],
     answer:
       "India ka sabse bada railway station (platforms ke hisaab se) Howrah Junction (HWH), West Bengal hai — 23 platforms (India me sabse zyada), roz 600+ trains aur ~10 lakh passengers. Uske baad: Sealdah (21 platforms), CSMT Mumbai (18), Chennai Central (17), New Delhi (16). (Ye general railway knowledge hai — official list IRCTC/Indian Railways se verify kar sakte hain.)",
   },
   {
-    keys: ["sabse lambi train", "sabse lamba route", "longest train route", "longest route", "lambi train route", "sabse lambi route"],
+    keys: ["sabse lambi train", "sabse lamba route", "longest train route", "longest route", "lambi train route", "sabse lambi route", "vivek express", "vivek", "15905", "15906"],
     answer:
       "India ki sabse lambi train route: Vivek Express 15905/15906 — Dibrugarh (Assam) se Kanyakumari (Tamil Nadu), ~4,154 km (Wikipedia ke table ke hisaab se; kuch sources 4,286 km likhte hain), ~82.5 ghante, 9 states — India ki sabse lambi, duniya ki top-25 me. Isse chhoti: 12301/12302 Howrah–New Delhi Rajdhani (~1,451 km).",
   },
@@ -145,7 +202,7 @@ const ENTRIES: KbEntry[] = [
   {
     keys: ["platform kitne", "kitne platform", "platform ki jaankari", "platform number"],
     answer:
-      "Station ke platform ki exact count mere live railway data me nahi hoti (provider seat/fare/train data dete hain, platform count nahi). Main aapko station ka naam/code/city, wahan se chalne wali trains, seat/fare/live status de sakta hoon; platform ki jaankari ke liye Indian Railways ka station page (indiarailinfo) dekh sakte hain.",
+      "Station ke platform ki count mere live seat/fare tools me nahi aati — par main aapko bata sakta hoon: station ka naam/code/city, wahan se chalne wali trains, seat/fare/live status; aur platform/parking jaise station-facts ke liye Hindi/English me poochho ya Indian Railways ke station page (indiarailinfo) dekh lein. Ludhiana Junction ka apna count mere paas hai — 7 platforms.",
   },
   {
     keys: ["rac kya", "rac meaning", "rac kaise", "rac seat", "rac kab confirm", "reservation against cancellation"],
@@ -310,9 +367,18 @@ export function railKbAnswer(questionText: string): string | null {
   for (const entry of ENTRIES) {
     let score = 0;
     const qtok = new Set(q.split(" ").filter((w) => w.length > 1));
+    /* Round-40: "sabse BADA station" aur "sabse PURANA station" alag sawaal hain — key ka
+     * distinguishing (superlative) shabd query me na ho to wo key match nahi maani jaati. */
+    const DISTINCT = ["purana", "purani", "purane", "bada", "badi", "bade", "lambi", "lamba", "lambe", "tez", "sasta", "sasti", "mehnga", "mehngi", "naya", "nayi", "pehla", "pehli", "pehle", "oldest", "biggest", "largest", "longest", "fastest", "cheapest", "first", "sabse"];
+    const keyOk = (k: string) => {
+      const kt = k.split(" ").filter((w) => w.length > 1);
+      const distinctInKey = kt.filter((w) => DISTINCT.includes(w) && w !== "sabse");
+      return distinctInKey.every((w) => qtok.has(w));
+    };
     for (const key of entry.keys) {
       const k = key.toLowerCase();
-      if (k.includes(" ") ? q.includes(k) : new RegExp(`\\b${k}\\b`).test(q)) score += k.includes(" ") ? 3 : 2;
+      if (!keyOk(k)) continue;
+      if (k.includes(" ") ? q.includes(k) : new RegExp(`\\b${k}\\b`).test(q)) score += k.includes(" ") ? 3 + Math.min(2, Math.floor(k.length / 12)) : 2;
       /* Round-37f: user alag shabdon me poochhta hai ("waiting list TICKET CONFIRM hone ke RULES") —
        * key ke zyada-tar token q me hon to wahi entry (sirf multi-word keys par, 60%+ overlap). */
       else if (k.includes(" ")) {

@@ -15,6 +15,9 @@ describe("RapidAPI Gemini is shadow-only", () => {
 
   it("Production models intentional hain (Muse-Glimmer primary, GPT-OSS fallback/NLU); RapidAPI is not the default provider", () => {
     // 2026-09-07 Round-14 intentional switch: Muse-Glimmer-30B primary planner, GPT-OSS fallback/NLU.
+    /* Round-61 (30 Sep 2026, user: "Muse ko primary kro and gpt ko secondary yan fallback"): chain
+     * Muse se shuru (samajh/multi-tool behtar) aur gpt-oss-20b fast fallback. Bade prompt ke liye ab
+     * alag primary timeout cap hai (AI_PRIMARY_TIMEOUT_MS) — isliye R52 wali "fast pehle" majboori nahi. */
     expect(env.nvidiaModel).toBe("meta/muse-glimmer-30b");
     /* Chain ka doosra model: .env me jo set hai (prod/local) — warna env.ts ka default (Nemotron-3-Nano-Omni).
      * Dono hi case me "ek aur asli NVIDIA model chain me hai" yahi intent hai. */

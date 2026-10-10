@@ -43,7 +43,9 @@ describe("FIND_SEATS — registry", () => {
     const t = AGENTIC_TOOLS.find((x) => x.function.name === "FIND_SEATS");
     expect(t).toBeTruthy();
     expect(t!.function.description).toMatch(/seat/i);
-    expect((t!.function.parameters as { required?: string[] }).required).toEqual(["from", "to", "date"]);
+    /* R55c: from/to optional — sirf train number wale sawaal par server khud train ka route le leta hai. */
+    expect((t!.function.parameters as { required?: string[] }).required).toEqual(["date"]);
+    expect(t!.function.description).toMatch(/frame|route|station nahi/i);
   });
   it("autonomous tools me findSeats hai", () => {
     expect(AUTO_TOOLS.some((t) => t.function.name === "findSeats")).toBe(true);

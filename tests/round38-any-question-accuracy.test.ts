@@ -79,10 +79,11 @@ describe("Round-38 · KB me stable railway facts (battery me galat/aadhe jawab a
 
   it("onboard khana/chai (IRCTC catering) aur platform count ka honest jawab", () => {
     expect(railKbAnswer("train me khana milta hai?") ?? "").toMatch(/IRCTC/);
+    /* Round-40b: LDH ka verified count (7 platforms — Wikipedia/station guides) ab KB me hai. */
     const p = railKbAnswer("Ludhiana junction ke kitne platform hain?") ?? "";
     expect(p).toContain("platform");
-    expect(p).toMatch(/nahi hoti|nahi hota/); // honest: apna data nahi
-    expect(p).toContain("indiarailinfo");
+    expect(p).toMatch(/7 platforms/);
+    expect(p).toContain("LDH");
   });
 
   it("divyangjan/wheelchair facility ka KB jawab (adhoora toilet-page nahi)", () => {

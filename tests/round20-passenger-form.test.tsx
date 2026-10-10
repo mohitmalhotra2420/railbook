@@ -207,11 +207,16 @@ describe("Round-20 · chat ka lamba answer", () => {
     expect(container.textContent).toContain("Window ke hisaab se");
   });
 
-  it("pattern match na ho to poora text waisa hi (kuch chhupta nahi)", () => {
+  it("pattern match na ho to poora text waisa hi (kuch chhupta nahi) — Round-47 me sections me", () => {
+    /* Round-47 (user: "lamba chat padhna mushkil"): prose jawab ab headline + body sections me
+     * render hota hai — par har shabd wahi rehta hai (kuch chhupta/naya nahi). */
     const text = "Direct trains nahi mili. Alternatives dekho ya doosri date try karo.";
     const { container } = render(<ReplyText text={text} />);
     expect(container.querySelectorAll(".rp-row").length).toBe(0);
-    expect(container.textContent).toBe(text);
+    expect(container.querySelector(".ac")).toBeTruthy();
+    /* Sections alag blocks hain — whitespace-insensitive compare (har shabd wahi). */
+    expect(String(container.textContent).replace(/\s+/g, "")).toContain(text.replace(/\s+/g, ""));
+    expect(container.querySelector(".ac-head")?.textContent).toBe("Direct trains nahi mili.");
   });
 
   it("screenshot 3 wala ek-line jawab (star bullets) bhi rows me tootta hai", () => {
