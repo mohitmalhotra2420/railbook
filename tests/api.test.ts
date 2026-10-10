@@ -216,192 +216,40 @@ describe("HTTP API", () => {
     expect(res.status).toBe(400);
   });
 
-  it("blocks confirmation when the wallet is short", async () => {
-    resetWallet();
-    const { addMoney, getWallet } = await import("../server/wallet");
-    // drain wallet
-    const w = getWallet();
-    w.balance = 10;
-
-    const created = await request(app).post("/api/bookings").send(await bookable());
-    expect(created.status).toBe(201);
-
-    const confirm = await request(app).post(`/api/bookings/${created.body.booking.id}/confirm`);
-    expect(confirm.status).toBe(402);
-    expect(confirm.body.code).toBe("INSUFFICIENT_FUNDS");
-
-    addMoney(5000);
-    const ok = await request(app).post(`/api/bookings/${created.body.booking.id}/confirm`);
-    expect(ok.status).toBe(200);
-    expect(ok.body.booking.status).toBe("CONFIRMED");
-    expect(ok.body.booking.pnr).toMatch(/^MOCK/);
-  });
-
-  it("does not confirm when the mock provider fails, and refunds the wallet", async () => {
-    setProvider(new MockRailwayProvider(true));
-    const created = await request(app).post("/api/bookings").send(await bookable());
+  /* MOCK BOOKING DISABLED: the old wallet/idempotency/concurrency flow is intentionally gone.
+   * These assert the new contract: no booking, no PNR, no wallet movement, on any input. */
+  it("mock booking create returns 410 and never issues a PNR or touches the wallet", async () => {
+    const app = createApp();
     const before = await request(app).get("/api/wallet");
-    const confirm = await request(app).post(`/api/bookings/${created.body.booking.id}/confirm`);
-    expect(confirm.body.booking.status).toBe("FAILED");
-    expect(confirm.body.booking.pnr).toBeNull();
-    const after = await request(app).get("/api/wallet");
-    expect(after.body.wallet.balance).toBe(before.body.wallet.balance);
-  });
-
-  it("re-confirming the same booking id never debits twice (idempotent, same PNR, provider called once)", async () => {
-    const provider = new CountingMockProvider(false);
-    setProvider(provider);
-    resetWallet();
-    getWallet().balance = 10000; // spec scenario: wallet ₹10,000
-
-    const created = await request(app).post("/api/bookings").send(await bookablePreferred());
-    expect(created.status).toBe(201);
-    const id = created.body.booking.id as string;
-    const fare = created.body.booking.fare.total as number;
-    expect(fare).toBeGreaterThan(0);
-    const debitsFor = (w: { transactions: { type: string; note: string }[] }) =>
-      w.transactions.filter((t) => t.type === "DEBIT" && t.note === `Booking ${id}`).length;
-
-    const first = await request(app).post(`/api/bookings/${id}/confirm`);
-    expect(first.status).toBe(200);
-    expect(first.body.booking.status).toBe("CONFIRMED");
-    expect(first.body.booking.pnr).toMatch(/^MOCK/);
-    expect(first.body.wallet.balance).toBe(10000 - fare);
-    expect(debitsFor(first.body.wallet)).toBe(1);
-    const pnr = first.body.booking.pnr as string;
-
-    const second = await request(app).post(`/api/bookings/${id}/confirm`);
-    expect(second.status).toBe(200);
-    expect(second.body.booking.id).toBe(id);
-    expect(second.body.booking.pnr).toBe(pnr);
-    expect(second.body.wallet.balance).toBe(10000 - fare);
-
-    const third = await request(app).post(`/api/bookings/${id}/confirm`);
-    expect(third.status).toBe(200);
-    expect(third.body.booking.pnr).toBe(pnr);
-
-    const finalWallet = (await request(app).get("/api/wallet")).body.wallet;
-    expect(finalWallet.balance).toBe(10000 - fare);
-    expect(debitsFor(finalWallet)).toBe(1);
-    expect(provider.confirmCalls).toBe(1);
-  });
-
-  it("10 concurrent confirms: exactly one confirmation, baaki 409 CONFIRM_IN_PROGRESS, koi double debit nahi", async () => {
-    const STORM = 10;
-    const provider = new OverlapRaceMockProvider(STORM);
-    setProvider(provider);
-    resetWallet();
-    getWallet().balance = 10000; // spec scenario: wallet ₹10,000
-
-    const created = await request(app).post("/api/bookings").send(await bookablePreferred());
-    expect(created.status).toBe(201);
-    const id = created.body.booking.id as string;
-    const fare = created.body.booking.fare.total as number;
-
-    /* Real HTTP server + server-side in-flight counter: sirf Promise.all scheduling nahi,
-     * balki actual concurrent requests measure hote hain. */
-    const server = http.createServer(app);
-    let inFlight = 0;
-    let maxInFlight = 0;
-    server.on("request", (_req, res) => {
-      inFlight += 1;
-      maxInFlight = Math.max(maxInFlight, inFlight);
-      let settled = false;
-      const done = () => {
-        if (!settled) {
-          settled = true;
-          inFlight -= 1;
-        }
-      };
-      res.once("finish", done);
-      res.once("close", done);
-    });
-    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-    const port = (server.address() as AddressInfo).port;
-
-    let responses: { status: number; body: ConfirmJson; ms: number }[] = [];
-    try {
-      responses = await Promise.all(Array.from({ length: STORM }, () => rawPostConfirm(port, id)));
-    } finally {
-      await new Promise<void>((resolve) => server.close(() => resolve()));
-    }
-
-    /* Asli overlap ka proof: saari 10 requests ek waqt me server par thi aur sab ne booking
-     * ko ek saath DRAFT dekha (barrier). */
-    expect(maxInFlight).toBeGreaterThanOrEqual(STORM);
-    expect(provider.peakGetBookingWaiters).toBeGreaterThanOrEqual(STORM);
-
-    const ok = responses.filter((r) => r.status === 200);
-    const busy = responses.filter((r) => r.status === 409);
-    expect(ok).toHaveLength(1);
-    expect(busy).toHaveLength(STORM - 1);
-    for (const r of busy) {
-      expect(r.body.code).toBe("CONFIRM_IN_PROGRESS");
-      expect(String(r.body.error)).toContain("already in progress");
-    }
-
-    /* Sirf ek confirmation hua — provider bhi ek hi baar chala. */
-    expect(provider.confirmCalls).toBe(1);
-    expect(provider.maxConcurrentConfirm).toBe(1);
-    expect(ok[0].body.booking?.status).toBe("CONFIRMED");
-    const pnr = ok[0].body.booking?.pnr as string;
-    expect(pnr).toMatch(/^MOCK/);
-    expect(ok[0].body.wallet?.balance).toBe(10000 - fare);
-
-    /* Poore storm me exactly ek hi PNR dikha (koi duplicate booking/PNR nahi). */
-    const pnrs = new Set(
-      responses.map((r) => r.body.booking?.pnr).filter((p): p is string => Boolean(p)),
-    );
-    expect(pnrs.size).toBe(1);
-    expect([...pnrs][0]).toBe(pnr);
-
-    const finalWallet = (await request(app).get("/api/wallet")).body.wallet;
-    expect(finalWallet.balance).toBe(10000 - fare);
-    const debits = finalWallet.transactions.filter((t) => t.type === "DEBIT");
-    expect(debits).toHaveLength(1);
-    expect(debits[0].amount).toBe(fare);
-    expect(debits[0].note).toBe(`Booking ${id}`);
-    expect(
-      finalWallet.transactions.filter((t) => t.type === "CREDIT" && t.note.includes("Refund")),
-    ).toHaveLength(0);
-
-    const record = await request(app).get(`/api/bookings/${id}`);
-    expect(record.body.booking.status).toBe("CONFIRMED");
-    expect(record.body.booking.pnr).toBe(pnr);
-
-    /* Race ke BAAD naya sequential confirm: idempotent 200, wahi PNR, koi naya debit /
-     * provider call nahi. */
-    const after = await request(app).post(`/api/bookings/${id}/confirm`);
-    expect(after.status).toBe(200);
-    expect(after.body.booking.pnr).toBe(pnr);
-    expect(after.body.wallet.balance).toBe(10000 - fare);
-    expect(provider.confirmCalls).toBe(1);
-    const walletEnd = (await request(app).get("/api/wallet")).body.wallet;
-    expect(walletEnd.transactions.filter((t) => t.type === "DEBIT")).toHaveLength(1);
-  });
-
-  it("retrieves a booking by mock PNR", async () => {
-    const created = await request(app).post("/api/bookings").send(await bookable());
-    const confirmed = await request(app).post(
-      `/api/bookings/${created.body.booking.id}/confirm`,
-    );
-    const pnr = confirmed.body.booking.pnr;
-    const found = await request(app).get(`/api/bookings/${pnr}`);
-    expect(found.status).toBe(200);
-    expect(found.body.booking.id).toBe(created.body.booking.id);
-  });
-
-  it("rejects invalid passenger payloads", async () => {
     const res = await request(app).post("/api/bookings").send({
       trainNumber: "12014",
-      date: FUTURE,
+      date: "2026-10-11",
       from: "ASR",
       to: "NDLS",
       classCode: "CC",
-      seatPreference: "Window",
-      passengers: [{ name: "1", age: 0, gender: "MALE", berthPreference: "Window" }],
+      seatPreference: "No Preference",
+      passengers: [{ name: "Test Passenger", age: 30, gender: "MALE" }],
     });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(410);
+    expect(res.body.code).toBe("MOCK_BOOKING_DISABLED");
+    expect(JSON.stringify(res.body)).not.toMatch(/MOCK[A-Z0-9]{4,}/);
+    expect((await request(app).get("/api/wallet")).body).toEqual(before.body);
+  });
+
+  it("confirm returns 410 for any id (even repeated or concurrent) and never debits", async () => {
+    const app = createApp();
+    const before = await request(app).get("/api/wallet");
+    const results = await Promise.all(
+      Array.from({ length: 10 }, () => request(app).post("/api/bookings/RB-x/confirm").send({})),
+    );
+    expect(results.every((r) => r.status === 410)).toBe(true);
+    expect((await request(app).get("/api/wallet")).body).toEqual(before.body);
+  });
+
+  it("booking list stays readable (no new bookings created)", async () => {
+    const app = createApp();
+    const res = await request(app).get("/api/bookings");
+    expect(res.status).toBe(200);
   });
 
   it("does not expose provider secrets on meta", async () => {

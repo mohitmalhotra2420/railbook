@@ -1270,81 +1270,24 @@ export function createApp() {
     }
   });
 
-  app.post("/api/bookings", async (req, res, next) => {
-    try {
-      const body = z
-        .object({
-          trainNumber: z.string().min(3),
-          date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-          from: z.string().min(2),
-          to: z.string().min(2),
-          classCode,
-          seatPreference: z.string().min(1),
-          passengers: z.array(passengerSchema).min(1).max(6),
-        })
-        .parse(req.body);
-      const booking = await getProvider().createBooking(body);
-      res.status(201).json({ booking });
-    } catch (err) {
-      next(err);
-    }
+  /* MOCK BOOKING DISABLED: mock DRAFT/MOCK-PNR booking ab nahi banti aur wallet ko touch nahi
+   * hota. Real ticket user IRCTC par khud lega (handoff). Provider createBooking() code route se
+   * judda nahi hai — yeh endpoint hamesha 410 deta hai. */
+  app.post("/api/bookings", async (_req, res) => {
+    res.status(410).json({
+      error: "Mock booking band hai. Ticket ke liye IRCTC handoff use karein.",
+      code: "MOCK_BOOKING_DISABLED",
+      handoff: { officialUrl: "https://www.irctc.co.in/nget/train-search" },
+    });
   });
 
   // Deterministic money + booking authority. AI/orchestrator cannot reach this.
-  app.post("/api/bookings/:id/confirm", async (req, res, next) => {
-    try {
-      const provider = getProvider();
-      const existing = await provider.getBooking(req.params.id);
-      if (!existing) {
-        res.status(404).json({ error: "Booking not found." });
-        return;
-      }
-      /* Idempotent duplicate-confirm guard: pehle se CONFIRMED booking par wallet debit aur
-       * provider.confirmBooking() dobara NAHI — wahi record (same PNR) turant wapas. UI button
-       * disable hone par bharosa nahi (direct API retry bhi safe). Terminal FAILED/CANCELLED
-       * ka behaviour jaisa tha waisa hi hai. */
-      if (existing.status === "CONFIRMED") {
-        res.json({ booking: existing, wallet: getWallet() });
-        return;
-      }
-      /* Atomic in-flight claim: has() aur set() ke beech koi await nahi — ek hi tick me decide
-       * hota hai ki is booking ka confirmation kaun karega. Concurrent duplicate ko 409. */
-      if (confirmInFlight.has(req.params.id)) {
-        res.status(409).json({
-          error: "Confirmation already in progress.",
-          code: "CONFIRM_IN_PROGRESS",
-        });
-        return;
-      }
-      confirmInFlight.set(req.params.id, true);
-      try {
-        const wallet = getWallet();
-        if (wallet.balance < existing.fare.total) {
-          res.status(402).json({
-            error: "Insufficient wallet balance.",
-            code: "INSUFFICIENT_FUNDS",
-            wallet,
-            required: existing.fare.total,
-          });
-          return;
-        }
-        debit(existing.fare.total, `Booking ${existing.id}`);
-        try {
-          const booking = await provider.confirmBooking(req.params.id);
-          if (booking.status !== "CONFIRMED") {
-            credit(existing.fare.total, `Refund · ${existing.id} failed`);
-          }
-          res.json({ booking, wallet: getWallet() });
-        } catch (err) {
-          credit(existing.fare.total, `Refund · ${existing.id} error`);
-          throw err;
-        }
-      } finally {
-        confirmInFlight.delete(req.params.id);
-      }
-    } catch (err) {
-      next(err);
-    }
+  app.post("/api/bookings/:id/confirm", async (_req, res) => {
+    res.status(410).json({
+      error: "Mock booking band hai. Ticket ke liye IRCTC handoff use karein.",
+      code: "MOCK_BOOKING_DISABLED",
+      handoff: { officialUrl: "https://www.irctc.co.in/nget/train-search" },
+    });
   });
 
   app.get("/api/bookings", async (_req, res, next) => {

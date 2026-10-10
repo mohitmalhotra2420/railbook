@@ -232,57 +232,16 @@ export function BookingProvider({ children }: { children: ReactNode }) {
     }
   }, [state]);
 
+  /* MOCK BOOKING DISABLED: ab yeh koi DRAFT/MOCK booking nahi banata, wallet nahi katata, aur
+   * server ke /api/bookings* routes 410 dete hain. Real ticket ke liye user IRCTC handoff use kare. */
   const confirm = useCallback(async () => {
-    if (!state.selectedTrain || !state.selectedClass || !state.from || !state.to) return;
-    dispatch({ type: "SET_FLOW", flow: "PAYMENT_PENDING" });
-    try {
-      const fallbackBerth = BERTH_BY_CLASS[state.selectedClass.code]?.[0] ?? "Lower";
-      const seat =
-        !state.seatPreference || state.seatPreference === "No Preference"
-          ? fallbackBerth
-          : state.seatPreference;
-      const created = state.booking?.status === "DRAFT"
-        ? { booking: state.booking }
-        : await api.createBooking({
-            trainNumber: state.selectedTrain.number,
-            date: state.date,
-            from: state.from.code,
-            to: state.to.code,
-            classCode: state.selectedClass.code,
-            seatPreference: seat,
-            passengers: state.passengers.map((p) => ({
-              name: p.name.trim(),
-              age: Number(p.age),
-              gender: p.gender,
-              berthPreference:
-                !p.berthPreference || p.berthPreference === "No Preference"
-                  ? seat
-                  : p.berthPreference,
-            })),
-          });
-      dispatch({ type: "SET_BOOKING", booking: created.booking });
-      dispatch({ type: "SET_FLOW", flow: "BOOKING_PENDING" });
-      const confirmed = await api.confirmBooking(created.booking.id);
-      dispatch({ type: "SET_BOOKING", booking: confirmed.booking });
-      setWallet(confirmed.wallet);
-    } catch (err) {
-      const e = err as Error & { status?: number; code?: string };
-      if (e.code === "INSUFFICIENT_FUNDS" || e.status === 402) {
-        dispatch({ type: "SET_FLOW", flow: "FARE_REVIEW" });
-        dispatch({
-          type: "SET_ERROR",
-          error: "Insufficient wallet balance.",
-        });
-        api.wallet().then((r) => setWallet(r.wallet)).catch(() => undefined);
-        return;
-      }
-      dispatch({
-        type: "SET_ERROR",
-        error: e.message || "Booking failed.",
-      });
-      dispatch({ type: "SET_FLOW", flow: "FAILED" });
-    }
-  }, [state]);
+    dispatch({ type: "SET_FLOW", flow: "FARE_REVIEW" });
+    dispatch({
+      type: "SET_ERROR",
+      error:
+        "Mock booking band hai — koi ticket ya payment nahi hua. Ticket ke liye IRCTC handoff use karein (irctc.co.in).",
+    });
+  }, []);
 
   const refreshWallet = useCallback(async () => {
     const r = await api.wallet();

@@ -690,7 +690,7 @@ describe("Advance-plan payload mapping", () => {
     expect(res.body.schedule.stops[1].code).toBe("DDL");
   });
 
-  it("booking confirmation stays DEMO/MOCK", async () => {
+  it("mock booking is disabled on RailKit too (410, no booking, no debit)", async () => {
     process.env.RAILWAY_PROVIDER = "railkit";
     process.env.RAILKIT_API_KEY = "rk_test";
     setRailkitSdk(
@@ -709,11 +709,8 @@ describe("Advance-plan payload mapping", () => {
       seatPreference: "Window",
       passengers: [{ name: "Asha Kaur", age: 28, gender: "FEMALE", berthPreference: "Window" }],
     });
-    expect(created.status).toBe(201);
-    expect(created.body.booking.mock).toBe(true);
-    const confirmed = await request(app).post(`/api/bookings/${created.body.booking.id}/confirm`);
-    expect(confirmed.body.booking.mock).toBe(true);
-    expect(String(confirmed.body.booking.pnr)).toMatch(/^MOCK/);
+    expect(created.status).toBe(410);
+    expect(created.body.booking).toBeUndefined();
   });
 });
 

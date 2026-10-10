@@ -4,6 +4,8 @@ import { Bookings, Travellers, Wallet } from "./views/Account";
 import { AdminModels } from "./views/AdminModels";
 import { ClassSelect, SeatSelect } from "./views/ClassSeat";
 import { Concierge } from "./views/Concierge";
+import { Assistant } from "./views/Assistant";
+import { isAssistantHash } from "./assistant/route";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Passengers } from "./views/Passengers";
 import { FareReview, Status } from "./views/ReviewStatus";
@@ -17,12 +19,23 @@ function isAdminHash() {
 export function App() {
   const { state } = useBooking();
   const [admin, setAdmin] = useState(isAdminHash);
+  const [assistant, setAssistant] = useState(() => isAssistantHash(window.location.hash));
   useEffect(() => {
-    const onHash = () => setAdmin(isAdminHash());
+    const onHash = () => {
+      setAdmin(isAdminHash());
+      setAssistant(isAssistantHash(window.location.hash));
+    };
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
   if (admin) return <AdminModels />;
+  if (assistant) {
+    return (
+      <ErrorBoundary what="assistant">
+        <Assistant />
+      </ErrorBoundary>
+    );
+  }
   const overlay =
     state.screen === "bookings" ? (
       <Bookings />

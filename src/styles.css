@@ -2784,3 +2784,22 @@ button.rp-crow:active { transform: translateY(1px); }
 .aib-dock-log{display:grid;gap:4px;max-height:132px;overflow-y:auto;margin-bottom:8px}
 .aib-dock-msg{font-size:12px;line-height:1.4;padding:6px 9px;border-radius:10px;background:rgba(148,163,184,.1);color:#cbd5e1;white-space:pre-line}
 .aib-dock-msg.you{background:rgba(29,78,216,.35);color:#e2e8f0}
+
+/* ── Additive AI assistant (#/assistant) ───────────────────────────── */
+.asst-page { min-height: 100vh; display: flex; flex-direction: column; background: var(--bg, #f7f7f9); }
+.asst-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-bottom: 1px solid #e5e7eb; background: #fff; }
+.asst-head h1 { font-size: 18px; margin: 0; }
+.asst-tts { font-size: 13px; display: flex; gap: 6px; align-items: center; }
+.asst-chat { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+.asst-hint { color: #6b7280; font-size: 14px; }
+.asst-msg { max-width: 82%; padding: 10px 14px; border-radius: 14px; white-space: pre-wrap; line-height: 1.45; font-size: 15px; }
+.asst-user { align-self: flex-end; background: #1d4ed8; color: #fff; border-bottom-right-radius: 4px; }
+.asst-assistant { align-self: flex-start; background: #fff; border: 1px solid #e5e7eb; border-bottom-left-radius: 4px; }
+.asst-busy { color: #6b7280; font-style: italic; }
+.asst-error { color: #b91c1c; font-size: 14px; background: #fef2f2; border-radius: 8px; padding: 8px 12px; }
+.asst-composer { display: flex; gap: 8px; padding: 12px; border-top: 1px solid #e5e7eb; background: #fff; position: sticky; bottom: 0; }
+.asst-mic { padding: 10px 12px; border-radius: 10px; border: 1px solid #1d4ed8; background: #fff; color: #1d4ed8; font-weight: 600; white-space: nowrap; }
+.asst-mic.on { background: #dc2626; border-color: #dc2626; color: #fff; }
+.asst-input { flex: 1; min-width: 0; padding: 10px 12px; border-radius: 10px; border: 1px solid #d1d5db; font-size: 15px; }
+.asst-send { padding: 10px 14px; border-radius: 10px; border: 0; background: #111827; color: #fff; font-weight: 600; }
+.asst-send:disabled, .asst-mic:disabled { opacity: .5; }
