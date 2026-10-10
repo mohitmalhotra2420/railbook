@@ -27,7 +27,10 @@ beforeEach(() => {
   process.env.RAILCORE_API_KEY = "rk_live_test_secret";
   process.env.RAILKIT_API_KEY = "";
   process.env.NVIDIA_API_KEY = "nvapi_test_key_not_real";
-  process.env.NVIDIA_MODEL = "openai/gpt-oss-20b";
+  /* Production model chain: Muse primary + GPT-OSS fallback. Dono distinct hone chahiye —
+   * warna chain me 1 hi model bachta hai aur dedicated NEXT call ke 2 attempts nahi hote. */
+  process.env.NVIDIA_MODEL = "meta/muse-glimmer-30b";
+  process.env.NVIDIA_FALLBACK_MODEL = "openai/gpt-oss-20b";
   process.env.AI_REQUEST_TIMEOUT_MS = "2000";
   setProvider(null);
 });

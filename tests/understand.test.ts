@@ -18,6 +18,8 @@ describe("server AI understand layer", () => {
   beforeEach(() => {
     process.env.NVIDIA_API_KEY = "";
     process.env.NVIDIA_MODEL = "";
+    // NLU_MODEL local .env se aa sakta hai; test ka model sirf NVIDIA_MODEL se aana chahiye.
+    process.env.NLU_MODEL = "";
     process.env.NVIDIA_UNUSED_FALLBACK = "";
     process.env.NVIDIA_BASE_URL = "";
     process.env.AI_REQUEST_TIMEOUT_MS = "";
@@ -26,6 +28,7 @@ describe("server AI understand layer", () => {
   afterEach(() => {
     process.env.NVIDIA_API_KEY = "";
     process.env.NVIDIA_MODEL = "";
+    process.env.NLU_MODEL = "";
     process.env.NVIDIA_UNUSED_FALLBACK = "";
     process.env.NVIDIA_BASE_URL = "";
     process.env.AI_REQUEST_TIMEOUT_MS = "";

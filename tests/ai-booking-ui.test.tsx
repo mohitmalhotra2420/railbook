@@ -50,6 +50,17 @@ import { AiBooking } from "../src/views/AiBooking";
 import { BookingProvider } from "../src/booking/context";
 import type { TrainResult } from "../src/types";
 
+/* Clock pin: fixtures use "1 Oct" / "2 Oct" 2026 as FUTURE dates. The app rolls a past date
+ * forward to next year (1 Oct 2026 seen on 10 Oct 2026 → 2027-10-01), so the suite must not
+ * depend on the real calendar day. Only Date is faked; timers stay real so waitFor works. */
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-09-30T10:00:00+05:30"));
+});
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 const ASR = { code: "ASR", name: "Amritsar Junction", city: "Amritsar" };
 const LDH = { code: "LDH", name: "Ludhiana Junction", city: "Ludhiana" };
 

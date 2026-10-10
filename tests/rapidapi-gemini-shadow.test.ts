@@ -23,7 +23,17 @@ describe("RapidAPI Gemini is shadow-only", () => {
      * Dono hi case me "ek aur asli NVIDIA model chain me hai" yahi intent hai. */
     expect(env.nvidiaFallbackModel).toBe(process.env.NVIDIA_FALLBACK_MODEL || "openai/gpt-oss-20b");
     expect(env.nvidiaFallbackModel).toMatch(/muse-glimmer|gpt-oss|nemotron/);
-    expect(env.nluModel).toBe("openai/gpt-oss-20b");
+    /* NLU = NLU_MODEL env, warna primary (code default). Local .env par depend nahi — dono states explicit. */
+    const savedNlu = process.env.NLU_MODEL;
+    try {
+      delete process.env.NLU_MODEL;
+      expect(env.nluModel).toBe(env.nvidiaModel);
+      process.env.NLU_MODEL = "openai/gpt-oss-20b";
+      expect(env.nluModel).toBe("openai/gpt-oss-20b");
+    } finally {
+      if (savedNlu === undefined) delete process.env.NLU_MODEL;
+      else process.env.NLU_MODEL = savedNlu;
+    }
     expect(env.rapidapiGeminiShadow).toBe(false);
   });
 
