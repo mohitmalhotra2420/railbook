@@ -95,20 +95,23 @@ export function TrainClassBlock({
         <div className="sf-group-h">{head}</div>
       )}
       <div className="sf-group-c">
-        {rows.map((c) => (
-          <button
-            key={`${number}-${c.code}-${c.status}`}
-            type="button"
-            className={`sf-cchip${c.seat ? "" : " off"}${c.stale ? " stale" : ""}`}
-            onClick={onChip ? () => onChip(c) : undefined}
-            title={chipTitle ? chipTitle(c) : c.seat ? `${c.code}${c.fare ? ` · ${inr(c.fare)}` : ""}` : `${c.code} abhi bookable nahi`}
-          >
-            <span className="sf-cls">{c.code}</span>{" "}
-            <ClassChipBadge c={c} />
-            {c.fare ? <> <span className="sf-cfare">{inr(c.fare)}</span></> : null}
-            {c.tag && !/cancel|depart/i.test(c.tag) ? <span className="sf-ctag">{c.tag}</span> : null}
-          </button>
-        ))}
+        {rows.map((c) => {
+          const canBook = c.status === "AVAILABLE" || c.status === "RAC" || c.status === "WAITLIST" || c.status === "UNKNOWN";
+          return (
+            <button
+              key={`${number}-${c.code}-${c.status}`}
+              type="button"
+              className={`sf-cchip${c.seat ? "" : " off"}${c.stale ? " stale" : ""}${!canBook ? " off" : ""}`}
+              onClick={onChip ? () => onChip(c) : undefined}
+              title={chipTitle ? chipTitle(c) : canBook ? `${c.code}${c.fare ? ` · ${inr(c.fare)}` : ""} — tap karke booking` : `${c.code} not available — tap karke seat check`}
+            >
+              <span className="sf-cls">{c.code}</span>{" "}
+              <ClassChipBadge c={c} />
+              {c.fare ? <> <span className="sf-cfare">{inr(c.fare)}</span></> : null}
+              {c.tag && !/cancel|depart/i.test(c.tag) ? <span className="sf-ctag">{c.tag}</span> : null}
+            </button>
+          );
+        })}
         {fromText ? <span className="sf-cfrom">{fromText}</span> : null}
       </div>
     </div>

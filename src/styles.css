@@ -378,7 +378,7 @@ h2 { font-size: 17px; }
 }
 .chip.ok { background: var(--green-soft); color: var(--green); }
 .chip.rac { background: var(--green-soft); color: var(--green); } /* Round-18m-22: RAC = available (green) */
-.chip.wl { background: #e7eefc; color: #1d4ed8; } /* Round-18m-26: blue = WL */
+.chip.wl { background: #e0e7ff; color: #1d4ed8; } /* WL = blue (Round-18m-26) */
 .chip.stale { background: #f4ecdc; color: #6b5b3e; } /* Round-18m-26: tan = purana */
 .chip.no { background: #fdecec; color: #9b1c1c; } /* Round-18m-26: red = N/A/Regret */
 .chip.unk { background: #f3f1ed; color: #9aa1a9; }
@@ -1880,7 +1880,7 @@ table.traintable {
 /* Round-18m-26 colour scheme (user): green = available, tan = purana/stale, blue = WL, red = N-A/Regret. */
 .jx-seat-ok .jx-seat-main { background: #e6f6ec; color: #0d6b3a; }
 .jx-seat-stale .jx-seat-main { background: #f4ecdc; color: #6b5b3e; }
-.jx-seat-wl .jx-seat-main { background: #e7eefc; color: #1d4ed8; }
+.jx-seat-wl .jx-seat-main { background: #e0e7ff; color: #1d4ed8; }
 .jx-seat-warn .jx-seat-main { background: #fff7d6; color: #8a5a00; }
 .jx-seat-bad .jx-seat-main { background: #fdecec; color: #9b1c1c; }
 .jx-seat-muted .jx-seat-main { background: #eef1f6; color: #4b5563; }
@@ -1905,7 +1905,7 @@ table.traintable {
 /* Round-18m-19 (user): AVL = green, RAC = yellow, WL/Regret/N-A = red — har jagah same. */
 .jx-cchip-ok { background: #e6f6ec; color: #0d6b3a; border-color: #9fd6b0; }
 .jx-cchip-stale { background: #f4ecdc; color: #6b5b3e; border-color: #d9c9a3; } /* Round-18m-26: tan = purana data */
-.jx-cchip-wl { background: #e7eefc; color: #1d4ed8; border-color: #b7c9f5; } /* Round-18m-26: blue = WL */
+.jx-cchip-wl { background: #e0e7ff; color: #1d4ed8; border-color: #a5b4fc; } /* WL = blue (Round-18m-26) */
 .jx-cchip-warn { background: #fff7d6; color: #8a5a00; border-color: #f3d98a; }
 .jx-cchip-bad { background: #fdecec; color: #9b1c1c; border-color: #f2b8b8; }
 .jx-cchip-muted { background: #eef1f6; color: #4b5563; border-color: #d5dbe5; }
@@ -2189,10 +2189,10 @@ table.traintable {
 .ns-hint { font-size: 11px; margin-top: 6px; line-height: 1.4; }
 .sf-tag { border-radius: 999px; font-size: 10.5px; font-weight: 700; padding: 2px 8px; }
 .sf-tag.seat { background: var(--green-soft); color: var(--green); border: 1px solid #bfe3d1; }
-.sf-tag.wl { background: var(--amber-soft); color: var(--amber); border: 1px solid #f0d8b4; }
+.sf-tag.wl { background: var(--red-soft); color: var(--red); border: 1px solid #f2b8b8; }
 .sf-row { display: block; width: 100%; text-align: left; border: 1px solid var(--line); border-radius: 13px; padding: 9px 11px; margin: 0 0 8px; background: #fff; }
 .sf-row.seat { border-left: 4px solid var(--green); }
-.sf-row.wl { border-left: 4px solid var(--amber); background: #fffdf9; }
+.sf-row.wl { border-left: 4px solid var(--red); background: #fffdf9; }
 .sf-l1 { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
 .sf-l1 strong { font-size: 13px; }
 .sf-tname { font-size: 12.5px; color: var(--muted); }
@@ -2202,8 +2202,8 @@ table.traintable {
 .sf-cls { border: 1px solid var(--line); border-radius: 6px; padding: 0 5px; font-weight: 600; }
 .sf-badge { font-size: 11px; font-weight: 700; border-radius: 8px; padding: 2px 8px; }
 .sf-badge.avl { background: var(--green-soft); color: var(--green); }
-.sf-badge.rac { background: #e8f0ff; color: #1d4ed8; }
-.sf-badge.wl { background: var(--amber-soft); color: var(--amber); }
+.sf-badge.rac { background: var(--green-soft); color: var(--green); }
+.sf-badge.wl { background: var(--red-soft); color: var(--red); }
 .sf-badge.na { background: var(--red-soft); color: var(--red); }
 .sf-go { margin-left: auto; font-size: 11.5px; font-weight: 700; color: #fff; background: var(--saffron); border-radius: 9px; padding: 4px 10px; }
 .sf-more { font-size: 11.5px; font-weight: 600; color: var(--saffron); padding: 2px 0 8px; }
@@ -2274,7 +2274,7 @@ table.traintable {
  * saath chips me (upar wale journey card jaisa). Koi class chhupni nahi chahiye. */
 .sf-group { border: 1px solid var(--line); border-radius: 14px; padding: 9px 11px; margin: 0 0 9px; background: #fff; }
 .sf-group.seat { border-left: 4px solid var(--green); }
-.sf-group.wl { border-left: 4px solid var(--amber); background: #fffdf9; }
+.sf-group.wl { border-left: 4px solid var(--red); background: #fffdf9; }
 .sf-group.nodata { border-left: 4px solid #b91c1c; background: #fffafa; }
 .sf-group-h { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; flex-wrap: wrap; }
 .sf-group-t strong { font-size: 13px; }
@@ -2339,8 +2339,8 @@ table.traintable {
 .rp-cls { background: #f1f4f8; border-radius: 6px; padding: 1px 6px; font-weight: 800; color: #22304a; font-size: 11.5px; }
 .rp-st { font-size: 11px; font-weight: 700; border-radius: 8px; padding: 2px 8px; }
 .rp-st.ok { background: var(--green-soft); color: var(--green); }
-.rp-st.rac { background: #e8f0ff; color: #1d4ed8; }
-.rp-st.wl { background: var(--amber-soft); color: var(--amber); }
+.rp-st.rac { background: var(--green-soft); color: var(--green); }
+.rp-st.wl { background: var(--red-soft); color: var(--red); }
 .rp-st.bad { background: var(--red-soft); color: var(--red); }
 .rp-fare { font-weight: 700; color: #374151; }
 .rp-dep { color: var(--muted); }
@@ -2352,8 +2352,8 @@ table.traintable {
 
 /* Round-20: chat rows ka tone (AVL/RAC/WL/N-A) — left border se turant pata chale. */
 .rp-row.ok { border-left-color: var(--green); }
-.rp-row.rac { border-left-color: #1d4ed8; }
-.rp-row.wl { border-left-color: var(--amber); background: #fffdf9; }
+.rp-row.rac { border-left-color: var(--green); }
+.rp-row.wl { border-left-color: var(--red); background: #fffdf9; }
 .rp-row.bad { border-left-color: var(--red); background: #fffafa; }
 
 /* Round-29 (26 Sep, user: "same train ki classes alag alag cards me kyun"): ek train = ek card.
@@ -2367,3 +2367,420 @@ button.rp-crow:active { transform: translateY(1px); }
 .rp-crow.tappable:hover { border-color: var(--green); background: #f6fbf8; }
 .rp-crow .rp-go { margin-left: auto; font-size: 11px; font-weight: 800; color: #fff; background: #22304a; border-radius: 8px; padding: 3px 9px; }
 .rp-crow.tappable .rp-cls { background: #e8eef7; }
+
+/* ══ ROUND-47 (28 Sep 2026) — chat ki padhne-layak UI + naya header ══════════════════════════════════
+ * User (screenshot): "etna lamba chat padhna kitna mushkil ho rha, thoda attractive banao so that
+ * readable ho, clean UI ho — response ko clear cards, larger text, spacing, status chip aur timetable
+ * sections me divide kiya jaaye." + "header bhi better banao naye buttons rakho yeh purane htado,
+ * payment ka sign hta do". Sirf UI — AI/API/backend ko haath nahi lagaya. */
+
+/* ── 1. Header ───────────────────────────────────────────────────────────────────────────────────── */
+.topbar {
+  background: linear-gradient(180deg, #0e2647 0%, var(--navy) 100%);
+  padding: calc(9px + var(--safe-t)) 12px 10px;
+  gap: 8px;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.06) inset, 0 6px 18px rgba(11, 31, 58, 0.18);
+}
+.topbar .brand { font-size: 17px; letter-spacing: 0.01em; }
+.topbar .brand img { width: 30px; height: 30px; border-radius: 9px; box-shadow: 0 0 0 1px rgba(255,255,255,0.14); }
+.topbar .brand .build-tag {
+  background: rgba(255, 255, 255, 0.09);
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  color: rgba(255, 255, 255, 0.72);
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 10.5px;
+  letter-spacing: 0.05em;
+}
+.icon-btn {
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  transition: transform 0.12s ease, background 0.15s ease;
+}
+.icon-btn:hover { background: rgba(255, 255, 255, 0.14); }
+.icon-btn:active { transform: translateY(1px) scale(0.97); background: rgba(255, 255, 255, 0.2); }
+.icon-btn.accent { background: rgba(200, 150, 46, 0.22); border-color: rgba(243, 228, 188, 0.28); color: #f7ead0; }
+.icon-btn.accent:hover { background: rgba(200, 150, 46, 0.34); }
+.icon-btn svg { width: 21px; height: 21px; }
+
+/* Booking ka safar — dots + track (purane plain text tabs ki jagah) */
+.ai-progress {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--navy);
+  padding: 0 12px 11px;
+  font-size: 10.5px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+.ai-progress.idle { opacity: 0.45; }
+.ai-step {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: rgba(255, 255, 255, 0.42);
+  min-width: 0;
+}
+.ai-step .ai-dot {
+  flex: 0 0 auto;
+  width: 17px;
+  height: 17px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 700;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+}
+.ai-step b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-step.on { color: rgba(255, 255, 255, 0.86); }
+.ai-step.on .ai-dot { background: rgba(200, 150, 46, 0.28); border-color: rgba(243, 228, 188, 0.4); color: #f7ead0; }
+.ai-step.now b { color: var(--gold-soft); }
+
+/* ── 2. Chat bubbles — thoda bada text, zyada saans lene ki jagah ──────────────────────────────── */
+.thread { padding: 14px 14px 10px; }
+.msg { margin: 12px 0 18px; }
+.msg.user .msg-text { font-size: 15px; padding: 11px 15px; line-height: 1.5; border-radius: 18px 18px 5px 18px; box-shadow: 0 2px 10px rgba(11, 31, 58, 0.14); }
+.msg.assistant .msg-kicker { font-size: 10.5px; letter-spacing: 0.1em; margin-bottom: 6px; color: var(--faint); }
+.msg-note > summary { font-size: 12px; padding: 6px 12px; }
+
+/* ── 3. AnswerCard — lamba prose jawab sections me (AnswerCard.tsx) ─────────────────────────────── */
+.ac { display: flex; flex-direction: column; gap: 10px; }
+.ac-steps { display: flex; flex-wrap: wrap; gap: 6px; }
+.ac-stepchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #365b8a;
+  background: #f2f7ff;
+  border: 1px solid #dbe7f6;
+  border-radius: 999px;
+  padding: 4px 10px;
+}
+.ac-stepdot { font-size: 11px; }
+.ac-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.ac-chip {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  border-radius: 999px;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--muted);
+}
+.ac-chip.ok { background: var(--green-soft); border-color: #bfe3d1; color: var(--green); }
+.ac-chip.warn { background: var(--amber-soft); border-color: #f0d6a8; color: var(--amber); }
+.ac-chip.info { background: #eef4ff; border-color: #d3e0f7; color: #2c4f86; }
+.ac-chip.muted { background: #f2f2f0; border-color: #e2e0da; color: var(--muted); }
+
+.ac-head {
+  margin: 0;
+  font-size: 16.5px;
+  font-weight: 650;
+  line-height: 1.45;
+  color: var(--ink);
+  letter-spacing: -0.01em;
+}
+/* Timetable section — chhota departure board */
+.ac-board {
+  background: linear-gradient(180deg, #ffffff 0%, #fbfcff 100%);
+  border: 1px solid #e2e8f3;
+  border-radius: 15px;
+  padding: 11px 12px;
+  box-shadow: 0 1px 0 rgba(11, 31, 58, 0.03), 0 6px 18px rgba(11, 31, 58, 0.05);
+}
+.ac-board-top { display: flex; align-items: center; gap: 8px; margin-bottom: 9px; }
+.ac-board-code {
+  font-size: 12.5px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  background: var(--navy);
+  color: #fff;
+  border-radius: 8px;
+  padding: 3px 8px;
+}
+.ac-board-name { font-size: 13.5px; font-weight: 600; color: #22304a; }
+.ac-times { display: flex; gap: 10px; }
+.ac-time {
+  flex: 1;
+  border-radius: 12px;
+  padding: 8px 10px;
+  background: #f6f8fc;
+  border: 1px solid #e7ecf6;
+}
+.ac-time.arr { background: #f2f8f4; border-color: #dcebe1; }
+.ac-time.dep { background: #fdf6ec; border-color: #f1e2c8; }
+.ac-time-l { display: block; font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.ac-time-v {
+  display: block;
+  margin-top: 2px;
+  font-size: 22px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+  color: var(--navy);
+}
+.ac-body { display: flex; flex-direction: column; gap: 8px; }
+.ac-p { margin: 0; font-size: 15.5px; line-height: 1.62; color: #2a2f36; }
+.ac-hl {
+  font-weight: 700;
+  color: var(--navy);
+  background: linear-gradient(180deg, transparent 62%, rgba(200, 150, 46, 0.28) 62%);
+  border-radius: 3px;
+  padding: 0 1px;
+}
+.ac-src {
+  font-size: 11.5px;
+  color: var(--muted);
+  border-top: 1px dashed var(--line);
+  padding-top: 7px;
+  line-height: 1.45;
+}
+.ac-src-k { font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; font-size: 10px; color: var(--faint); margin-right: 4px; }
+
+/* Round-49: jo trains maangi hui destination tak nahi jaati, unka note (card me saaf, chhota). */
+.sf-note.drop {
+  color: var(--amber);
+  background: var(--amber-soft);
+  border: 1px solid #f0d6a8;
+  border-radius: 10px;
+  padding: 7px 10px;
+  margin-top: 8px;
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+/* Round-50: "JAT tak (aage ka safar khud)" wala alag section — saaf, main list se alag. */
+.sf-note.near {
+  color: #2c4f86;
+  background: #eef4ff;
+  border: 1px solid #d3e0f7;
+  border-radius: 10px;
+  padding: 7px 10px;
+  margin-top: 8px;
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+.sf-note.near > div + div { margin-top: 3px; color: var(--muted); }
+
+/* ══ Round-57 (29 Sep 2026): chat ke jawab AUTOMATIC table/bullet me + connecting page ka saaf
+ * layout + next-page entry points. Sab sirf presentation (data waisa hi rehta hai). ══ */
+
+/* (a) Seat comparison table — ChatGPT jaise columns, phone par horizontally scroll */
+.rp-view { display: flex; align-items: center; gap: 6px; margin: 2px 0 6px; }
+.rp-view-l { font-size: 11.5px; font-weight: 800; color: #7b8a9c; text-transform: uppercase; letter-spacing: .03em; }
+.rp-viewb { font: inherit; font-size: 12px; font-weight: 800; padding: 4px 10px; border-radius: 999px; border: 1px solid #dbe4ee; background: #fff; color: #40556e; cursor: pointer; }
+.rp-viewb.on { background: #0b3b66; border-color: #0b3b66; color: #fff; }
+.rp-tablewrap { overflow-x: auto; -webkit-overflow-scrolling: touch; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+.rp-table { width: 100%; border-collapse: collapse; font-size: 12.5px; min-width: 100%; }
+.rp-table thead th { position: sticky; top: 0; background: #f6f8fb; color: #5b6b7f; font-size: 11px; text-transform: uppercase; letter-spacing: .03em; text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.rp-table tbody td { padding: 8px; border-bottom: 1px solid #f0f2f6; vertical-align: middle; white-space: nowrap; }
+.rp-table tbody tr:last-child td { border-bottom: none; }
+.rp-td-train { white-space: normal; max-width: 150px; }
+.rp-tno { font-weight: 800; color: #0f172a; }
+.rp-tname { display: block; font-size: 11.5px; color: #6b7a8d; font-weight: 600; }
+.rp-td-st.ok { color: #0f7a3d; font-weight: 800; }
+.rp-td-st.rac { color: var(--green); font-weight: 800; }
+.rp-td-st.wl { color: var(--red); font-weight: 800; }
+.rp-td-st.bad { color: #b91c1c; font-weight: 700; }
+.rp-tr.tappable { cursor: pointer; }
+.rp-tr.tappable:active { background: #f2f8f4; }
+.rp-tr.ok { box-shadow: inset 3px 0 0 var(--green); }
+.rp-tr.rac { box-shadow: inset 3px 0 0 var(--green); }
+.rp-tr.wl { box-shadow: inset 3px 0 0 var(--red); }
+.rp-tr.bad { box-shadow: inset 3px 0 0 var(--red); }
+.rp-tablefoot { font-size: 11px; color: #7b8a9c; padding: 6px 8px 8px; }
+
+/* (b) Prose jawab → heading + bullets (pehle deewar jaisa paragraph tha) */
+.ac-bullets { display: grid; gap: 7px; margin: 2px 0 0; }
+.ac-bullets li { display: flex; gap: 8px; align-items: flex-start; font-size: 13.8px; line-height: 1.5; color: #1f2a37; }
+.ac-bullets li .ac-bdot { flex: none; margin-top: 6px; width: 6px; height: 6px; border-radius: 999px; background: #9bb3cc; }
+.ac-bullets li strong { color: #0f172a; }
+.ac-bulletlist { list-style: none; padding: 0; margin: 0; }
+
+/* (c) Seat board ke neeche next-page cards (connecting + alternate) */
+.sf-nextpages { display: grid; gap: 8px; margin-top: 10px; }
+.sf-np { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; padding: 10px 12px; border-radius: 13px; border: 1.5px solid #dbe4ee; background: linear-gradient(180deg, #fff, #f7fafd); font: inherit; cursor: pointer; }
+.sf-np:active { transform: scale(.996); }
+.sf-np-ic { flex: none; width: 32px; height: 32px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; background: #eaf2fb; color: #0b3b66; font-size: 15px; }
+.sf-np-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.sf-np-txt strong { font-size: 13.5px; color: #0f172a; }
+.sf-np-txt span { font-size: 11.5px; color: #6b7a8d; font-weight: 600; }
+.sf-np-go { flex: none; font-size: 12px; font-weight: 900; color: #0b3b66; white-space: nowrap; }
+.sf-np.connect { border-color: #cfe8d8; background: linear-gradient(135deg, #f4fbf6 0%, #eef8f1 60%, #fbfefc 100%); }
+.sf-np.alt { border-color: #f5d08a; background: linear-gradient(135deg, #fffaef 0%, #fff6e2 60%, #fffdf8 100%); }
+
+/* (d) Connecting page ka layout — leg cards saaf, "Book" button alag, layover line highlight */
+.jx-leg { position: relative; flex-wrap: wrap; }
+.jx-leg-book { flex: none; align-self: flex-end; margin-left: auto; font: inherit; font-size: 12px; font-weight: 900; padding: 6px 12px; border-radius: 999px; border: 1.5px solid #0f7a3d; background: #f2fbf5; color: #0f7a3d; cursor: pointer; }
+.jx-leg-book.wl { border-color: var(--red); background: var(--red-soft); color: var(--red); }
+.jx-leg-book:active { transform: scale(.98); }
+.jx-leg-hint { flex-basis: 100%; font-size: 11.5px; color: #6b7a8d; font-weight: 600; margin-top: 4px; }
+.jx-leg-change { display: flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 800; color: #0b3b66; background: #f2f7fd; border: 1px dashed #cbdcee; border-radius: 10px; padding: 6px 10px; margin: 7px 0; }
+.jx-conn { padding: 10px; }
+.jx-conn-foot { font-weight: 700; color: #5b6b7f; }
+.jx-lrow-book { grid-column: 1 / -1; display: flex; justify-content: flex-end; padding-top: 2px; }
+.jx-cchip-go { font-size: 10.5px; font-weight: 900; letter-spacing: .02em; color: inherit; opacity: .85; margin-left: 6px; position: relative; padding-left: 8px; }
+.jx-cchip-go::before { content: "·"; position: absolute; left: 0; opacity: .7; }
+/* R57: leg card ab div hai (button ke andar button invalid HTML thi) — dikhne me waisa hi rahe. */
+.jx-leg[role="button"]:focus-visible, .jx-lrow-leg[role="button"]:focus-visible { outline: 2px solid var(--navy); outline-offset: 2px; }
+/* R58: ErrorBoundary card — render error par khaali screen ke bajaye saaf card + retry. */
+.eb-card { background: #fff8ee; border: 1px solid #f0d3a8; border-left: 4px solid #b45309; border-radius: 12px; padding: 12px 14px; margin: 8px 0; }
+.eb-card.eb-compact { padding: 10px 12px; }
+.eb-title { font-weight: 800; color: #8a3f00; font-size: 14px; margin-bottom: 4px; }
+.eb-body { font-size: 13px; color: #6b4a1f; line-height: 1.5; }
+.eb-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.eb-btn { font: inherit; font-size: 13px; font-weight: 800; padding: 7px 14px; border-radius: 999px; border: 1.5px solid #b45309; background: #fff; color: #b45309; cursor: pointer; }
+.eb-btn:hover { background: #fff3e2; }
+.eb-btn.ghost { border-color: #cbd5e1; color: #475569; }
+.eb-hint { margin-top: 8px; font-size: 11px; color: #9a7b52; word-break: break-word; }
+/* Round-59: plan ka apna page (seat board ke Connecting/Alternative button se) — chat ke upar full-screen. */
+.planpage { position: fixed; inset: 0; z-index: 80; background: #f4f0e8; display: flex; flex-direction: column; }
+.planpage-top { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: var(--navy); color: #fff; position: sticky; top: 0; z-index: 2; }
+.planpage-back, .planpage-refresh { font: inherit; font-size: 13.5px; font-weight: 800; color: #fff; background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.28); border-radius: 999px; padding: 7px 13px; cursor: pointer; }
+.planpage-refresh { padding: 7px 11px; font-size: 15px; }
+.planpage-back:hover, .planpage-refresh:hover { background: rgba(255,255,255,.24); }
+.planpage-head { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.planpage-head strong { font-size: 14.5px; font-weight: 900; }
+.planpage-sub { font-size: 11.5px; opacity: .85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.planpage-body { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: auto; touch-action: pan-y; padding: 12px 12px 26px; -webkit-overflow-scrolling: touch; }
+.planpage-load { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 46px 18px; text-align: center; }
+.planpage-spin { width: 34px; height: 34px; border-radius: 50%; border: 3px solid #d8d2c6; border-top-color: var(--navy); animation: ppspin .9s linear infinite; }
+@keyframes ppspin { to { transform: rotate(360deg); } }
+.planpage-load-t { font-size: 15px; font-weight: 800; color: var(--navy); }
+.planpage-load-s { font-size: 12.5px; color: #6b7280; line-height: 1.6; max-width: 420px; }
+.planpage-note { margin: 10px 2px 0; font-size: 12.5px; color: #6b4a1f; background: #fff8ee; border: 1px solid #f0d3a8; border-radius: 10px; padding: 9px 12px; }
+.planpage-err { margin: 30px auto; max-width: 430px; background: #fff; border: 1px solid #e6e1d8; border-radius: 14px; padding: 16px; text-align: center; }
+.planpage-err-t { font-size: 15px; font-weight: 900; color: #8a3f00; margin-bottom: 6px; }
+.planpage-err-b { font-size: 13px; color: #5b6472; line-height: 1.6; }
+.planpage-err-a { display: flex; gap: 8px; justify-content: center; margin-top: 14px; flex-wrap: wrap; }
+.planpage-btn { font: inherit; font-size: 13px; font-weight: 800; padding: 8px 15px; border-radius: 999px; border: 1.5px solid var(--navy); background: var(--navy); color: #fff; cursor: pointer; }
+.planpage-btn.ghost { background: #fff; color: var(--navy); }
+/* Round-59: embedded page (PlanPageSheet ke andar) — fixed overlay ki jagah inline, aur bahar ka header hi kaafi. */
+/* Round-60 (user: "connecting trains page scroll nhi ho rha"): embed page par `overflow:auto` +
+ * `overscroll-behavior: contain` scroll ko APNE tak rok dete the — plan page ke andar touch karne par
+ * kuch bhi nahi hilta tha. Ab embed me ye dono reset: scroll seedha .planpage-body par jaata hai. */
+.jx-page-embed { position: static; inset: auto; background: transparent; animation: none; overflow: visible; overscroll-behavior: auto; }
+.jx-page-body-embed { padding: 0 0 18px; max-width: none; }
+
+/* Round-60 (user: "screenshot mein jo classes hai uska layout sahi krdo"): leg card me classes ab ek
+ * saaf grid me — pehli chip wahi leg ki seat ("Best"), baaki classes usi shakal me (status · fare · Book).
+ * Har chip button hai (tap = usi class ka passenger form), grid do columns me wrap karta hai. */
+.jx-classgrid { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+.jx-classgrid .jx-cchip { flex: 0 1 auto; }
+.jx-cchip-best { border-color: #0f7a3d; box-shadow: inset 0 0 0 1px rgba(15,122,61,.25); }
+.jx-cchip-best .jx-cchip-star { font-size: 10px; font-weight: 900; letter-spacing: .03em; color: #0f7a3d; }
+/* leg card me train + classes ka block: pill alag line par na gire, saaf rahe */
+.jx-leg .jx-lrow-train { flex-wrap: wrap; row-gap: 4px; }
+.jx-leg-body { gap: 6px; }
+.jx-cchip-cl { font-weight: 900; letter-spacing: .02em; }
+/* Round-60 (user: "classes ka layout sahi krdo"): leg-list (alternative/leg lists) me row ka area
+ * sirf 127px chaura tha — train naam 2 line me tootta tha aur classes chips container se bahar nikal kar
+ * seat-pill/chevron ke upar chadh jaate the (screenshot me "overlap"). Ab leg row ka apna stack:
+ *   [train + saari classes]  ← poori chaudai
+ *   [from→to + time] [seat pill] [chevron]
+ *   [Book]                    ← poori chaudai
+ */
+.jx-lrow.jx-lrow-leg {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas: "a a" "b c" "d chev";
+  row-gap: 8px;
+  align-items: start;
+}
+.jx-lrow-leg > * { min-width: 0; }
+.jx-lrow-leg .jx-lrow-a { grid-area: a; }
+.jx-lrow-leg .jx-lrow-train { font-size: 13.5px; }
+.jx-lrow-leg .jx-lrow-chips { margin-top: 7px; }
+.jx-lrow-leg .jx-lrow-b { grid-area: b; border-left: 0; padding-left: 0; }
+.jx-lrow-leg .jx-lrow-c { grid-area: c; border-left: 0; padding-left: 0; justify-content: flex-end; }
+.jx-lrow-leg .jx-lrow-d { grid-area: d; justify-self: start; }
+.jx-lrow-leg .jx-lrow-chev { grid-area: chev; align-self: center; justify-self: end; }
+.jx-lrow-leg .jx-classes-chips { gap: 6px; }
+/* chips kabhi card se bahar na nikle — lambe label par chip ke andar wrap ho jaaye */
+.jx-lrow-leg .jx-cchip { white-space: normal; }
+/* leg list row me ab alag seat pill nahi (grid me hi primary class hai) — uska area khali. */
+.jx-lrow-leg .jx-lrow-d-wrap { display: none; }
+
+/* ══ ROUND-62 — AI BOOKING (ADDITIVE) ═════════════════════════════════════════════════════════════════
+ * Naya overlay + dock + voice panel. Koi purani class badli nahi gayi — sab naye .aib-* naam. */
+.ai-book-entry{display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 12px;margin-right:4px;border:0;border-radius:999px;
+  background:linear-gradient(135deg,#f59e0b,#d97706);color:#1c1917;font-weight:800;font-size:13px;cursor:pointer;white-space:nowrap;
+  box-shadow:0 2px 8px rgba(217,119,6,.35)}
+.ai-book-entry:active{transform:translateY(1px)}
+.aib{position:fixed;inset:0;z-index:60;display:flex;flex-direction:column;background:#0b1220;color:#e2e8f0;padding-bottom:env(safe-area-inset-bottom)}
+.aib-head{display:flex;align-items:center;gap:8px;padding:12px 14px;background:#0f172a;border-bottom:1px solid rgba(148,163,184,.18)}
+.aib-title{display:flex;align-items:center;gap:8px;font-weight:800;font-size:16px;color:#f8fafc}
+.aib-mark{font-size:18px}
+.aib-stage{margin-left:4px;font-size:11px;font-weight:700;padding:3px 8px;border-radius:999px;background:rgba(56,189,248,.16);color:#7dd3fc}
+.aib-head-right{margin-left:auto;display:flex;align-items:center;gap:8px}
+.aib-provider{font-size:11px;color:#94a3b8;background:rgba(148,163,184,.12);padding:3px 8px;border-radius:999px}
+.aib-btn-ghost{background:rgba(148,163,184,.14);color:#e2e8f0;border:0;border-radius:999px;padding:7px 12px;font-size:12px;font-weight:700;cursor:pointer}
+.aib-stages{display:flex;gap:6px;overflow-x:auto;padding:8px 12px;scrollbar-width:none}
+.aib-stages::-webkit-scrollbar{display:none}
+.aib-stage-chip{flex:0 0 auto;font-size:11px;padding:4px 9px;border-radius:999px;background:rgba(148,163,184,.12);color:#94a3b8;white-space:nowrap}
+.aib-stage-chip.done{background:rgba(34,197,94,.16);color:#86efac}
+.aib-stage-chip.now{background:#38bdf8;color:#06263a;font-weight:800}
+.aib-thread{flex:1;overflow-y:auto;padding:8px 14px 4px;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
+.aib-msg{max-width:86%;margin:6px 0;padding:10px 13px;border-radius:14px;font-size:15px;line-height:1.45;white-space:pre-line;word-break:break-word}
+.aib-msg.ai{background:#16233c;color:#e2e8f0;border-top-left-radius:4px}
+.aib-msg.you{background:#1d4ed8;color:#fff;margin-left:auto;border-top-right-radius:4px}
+.aib-trains,.aib-classes{display:grid;gap:8px;margin:8px 0}
+.aib-classes{grid-auto-flow:column;grid-auto-columns:minmax(120px,1fr);overflow-x:auto;scrollbar-width:none}
+.aib-classes::-webkit-scrollbar{display:none}
+.aib-class{display:grid;gap:2px;text-align:left;background:#16233c;border:1px solid rgba(148,163,184,.22);border-radius:12px;padding:9px 12px;color:#e2e8f0;cursor:pointer}
+.aib-class.on{border-color:#38bdf8;box-shadow:0 0 0 1px #38bdf8 inset}
+.aib-class b{font-size:15px}
+.aib-class span{font-size:11px;color:#94a3b8}
+.aib-class em{font-size:11px;font-style:normal;color:#7dd3fc}
+.aib-passenger-note,.aib-summary{margin:8px 0;background:#16233c;border-radius:12px;padding:10px 12px;font-size:13px}
+.aib-summary pre{margin:6px 0 0;white-space:pre-wrap;font-family:inherit;font-size:13px;line-height:1.5;color:#e2e8f0}
+.aib-voice{display:flex;align-items:center;gap:10px;padding:8px 14px;background:#0f172a;border-top:1px solid rgba(148,163,184,.18);flex-wrap:wrap}
+.aib-voice-state{font-weight:800;font-size:12px;color:#fbbf24}
+.aib-voice.live .aib-voice-state{color:#ef4444}
+.aib-voice-text{flex:1;min-width:120px;font-size:13px;color:#cbd5e1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.aib-voice-actions{display:flex;gap:6px;flex-wrap:wrap}
+.aib-actions{display:flex;gap:8px;padding:8px 14px 0;flex-wrap:wrap}
+.aib-primary{flex:1;min-width:160px;border:0;border-radius:14px;padding:13px 16px;font-size:15px;font-weight:800;background:linear-gradient(135deg,#f59e0b,#d97706);color:#1c1917;cursor:pointer}
+.aib-btn{border:1px solid rgba(148,163,184,.3);background:transparent;color:#e2e8f0;border-radius:14px;padding:12px 16px;font-size:14px;font-weight:700;cursor:pointer}
+.aib-composer{display:flex;align-items:center;gap:8px;padding:10px 14px calc(12px + env(safe-area-inset-bottom))}
+.aib-composer input{flex:1;height:44px;border-radius:999px;border:1px solid rgba(148,163,184,.28);background:#16233c;color:#e2e8f0;padding:0 16px;font-size:15px;outline:none}
+.aib-composer input::placeholder{color:#7b8aa3}
+.aib-mic{width:44px;height:44px;border-radius:50%;border:0;background:#1d4ed8;color:#fff;font-size:19px;cursor:pointer}
+.aib-mic.live{background:#22c55e;color:#052e16;animation:aibPulse 1.1s infinite}
+.aib-send{width:44px;height:44px;border-radius:50%;border:0;background:#0f172a;color:#e2e8f0;font-size:18px;cursor:pointer}
+@keyframes aibPulse{0%{box-shadow:0 0 0 0 rgba(34,197,94,.55)}70%{box-shadow:0 0 0 14px rgba(34,197,94,0)}100%{box-shadow:0 0 0 0 rgba(34,197,94,0)}}
+.aib-dock{position:fixed;left:10px;right:10px;bottom:calc(10px + env(safe-area-inset-bottom));z-index:55;display:flex;align-items:center;gap:10px;
+  background:#0f172a;border:1px solid rgba(148,163,184,.25);border-radius:16px;padding:9px 12px;box-shadow:0 10px 28px rgba(2,6,23,.5);color:#e2e8f0}
+.aib-dock-line{display:flex;align-items:center;gap:8px;min-width:0;font-size:12px}
+.aib-dock-line b{white-space:nowrap;font-size:12px}
+.aib-dock-text{color:#cbd5e1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.aib-dock-actions{margin-left:auto;display:flex;gap:6px}
+.aib-mic-sm{width:36px;height:36px;border-radius:50%;border:0;background:#1d4ed8;color:#fff;font-size:16px;cursor:pointer}
+.aib-mic-sm.live{background:#22c55e;color:#052e16}
+.aib-dock-head{display:flex;align-items:center;gap:8px;font-size:12px;min-width:0}
+.aib-dock-head .aib-stage{font-size:10px;padding:2px 7px}
+.aib-dock-head .aib-dock-text{color:#cbd5e1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.aib-dock-row{display:flex;align-items:center;gap:8px;margin-top:8px}
+.aib-book-sm{flex:0 0 auto;min-width:0;padding:10px 14px;font-size:14px}
+.aib-form{display:flex;align-items:center;gap:8px;flex:1;min-width:0}
+.aib-form input{flex:1;min-width:0;height:40px;border-radius:999px;border:1px solid rgba(148,163,184,.28);background:#16233c;color:#e2e8f0;padding:0 14px;font-size:14px;outline:none}
+.aib-form input::placeholder{color:#7b8aa3}
+.aib-form .aib-mic,.aib-form .aib-send{width:40px;height:40px;font-size:17px}
+.aib-composer,.aib-form{margin:0}
+.aib .aib-form{padding:10px 14px calc(12px + env(safe-area-inset-bottom))}
+.aib-voice-actions{gap:6px}
+.aib-dock-log{display:grid;gap:4px;max-height:132px;overflow-y:auto;margin-bottom:8px}
+.aib-dock-msg{font-size:12px;line-height:1.4;padding:6px 9px;border-radius:10px;background:rgba(148,163,184,.1);color:#cbd5e1;white-space:pre-line}
+.aib-dock-msg.you{background:rgba(29,78,216,.35);color:#e2e8f0}
