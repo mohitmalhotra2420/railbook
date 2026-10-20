@@ -2983,9 +2983,12 @@ function agenticTransport(): AgenticTransport | null {
   // BENCHMARK-ONLY (AGENTIC_MODEL): single-model chain, sirf benchmark scripts set karte hain.
   // Prod kabhi set nahi karta — wahan [NVIDIA_MODEL (+fallback)] hi rehta hai.
   const benchOverride = env.agenticModelOverride;
+  /* AI_LLM_MODELS override: poori chain (primary → fallback → …) in order. Baaki (NVIDIA) path waisa hi. */
   const models = benchOverride
     ? [benchOverride]
-    : [env.nvidiaModel, ...(env.nvidiaFallbackModel && env.nvidiaFallbackModel !== env.nvidiaModel ? [env.nvidiaFallbackModel] : [])];
+    : env.aiLlmOverrideActive
+      ? env.aiLlmModels
+      : [env.nvidiaModel, ...(env.nvidiaFallbackModel && env.nvidiaFallbackModel !== env.nvidiaModel ? [env.nvidiaFallbackModel] : [])];
   /* Round-13b: HF (GLM) chain ke end mein — NIM drift par bhi agentic zinda
    * rahe (ai-ping prod: deepseek-v4-flash hang, llama/qwen/kimi 410/404).
    * Round-53: AI_LLM_* override (naya provider key) lagne par HF fallback band — user ki di hui
