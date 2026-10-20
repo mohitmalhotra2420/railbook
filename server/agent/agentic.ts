@@ -404,7 +404,7 @@ export const AGENTIC_TOOLS = [
     type: "function",
     function: {
       name: "SEARCH_STATIONS",
-      description: "City/station naam se official railway station codes search karo (jaise 'Delhi' → NDLS, DLI, NZM...). Station options dikhane ke liye.",
+      description: "City/station naam se official railway station codes search karo (jaise 'Delhi' → NDLS, DLI, NZM...). Station options dikhane ke liye. Ye sirf CODE dhoondhta hai — 'station board' / 'station par aane-jaane wali trains' ka jawab ye tool nahi hai; uske liye GET_STATION_BOARD chalao.",
       parameters: {
         type: "object",
         properties: { query: { type: "string", description: "City ya station naam" } },
@@ -431,7 +431,7 @@ export const AGENTIC_TOOLS = [
     type: "function",
     function: {
       name: "GET_STATION_BOARD",
-      description: "Kisi station par agle kuch ghante mein aane/jaane wali trains (live board).",
+      description: "Kisi station ka LIVE BOARD: us station par agle kuch ghante mein aane/jaane wali trains. 'station board', 'LDH board', 'station par kaun si trains aa/ja rahi' ka ye HI tool hai — SEARCH_STATIONS se board kabhi nahi banta. station_code chahiye (ASR, LDH, NDLS); user ne naam diya ho (jaise 'Ludhiana Junction') to station_code khud samajh kar bhejo (LDH); code pakka na ho to pehle SEARCH_STATIONS.",
       parameters: {
         type: "object",
         properties: {
@@ -577,7 +577,7 @@ export const AGENTIC_TOOLS = [
     type: "function",
     function: {
       name: "GET_CANCELLED_TRAINS",
-      description: "Aaj ki fully/partially cancelled trains list.",
+      description: "Cancelled trains ki list (fully/partially). 'cancelled trains' ke sawaal ka ye HI tool hai — 'kal' / kisi aur din ke liye bhi ye tool chalao; ye tool sirf AAJ ki list deta hai, isliye jawab me saaf likho ki ye aaj ki list hai. Tool ke pehle hi mana mat karo.",
       parameters: { type: "object", properties: {} },
     },
   },
@@ -2392,7 +2392,7 @@ function systemPrompt(
       "27. SAARE TOOLS KHULE HAIN (user rule 2026-09-26: 'AI ko jitne bhi tools available hai wo sabh provide kro, no restriction on using any tool'): jo bhi tool jawab ke liye chahiye, jitni baar chahiye, use karo — SEARCH_TRAINS, JOURNEY_ANALYZE, RANK_JOURNEY_OPTIONS, FIND_SEATS, CHECK_AVAILABILITY, GET_FARE, GET_TIMETABLE, TRACK_TRAIN, GET_TRAIN_INFO, FIND_ALTERNATIVE_TRAINS, FIND_CONNECTIONS, WEB_SEARCH… koi rok nahi, koi count-limit nahi. SIRF DO CHEEZEIN TUM KABHI NAHI KAROGE: (i) 'Continue to IRCTC' par click (RailBook app ka handoff button user khud dabayega), (ii) passenger details/passenger form khud se bharna ya booking confirm karna — wo user ka kaam hai. Baaki sab tumhare haath me hai.",
     "28. SAWAAL KA MATLAB PEHLE (user 2026-09-26: 'kya AI meri baat samajh nahi paaya?'): 'plan banao / journey plan / kya best rahega' = RANK_JOURNEY_OPTIONS ya JOURNEY_ANALYZE (timings + fare + best option) — seat board ki list NAHI. 'alternative trains / doosri trains / koi aur option / iske alawa' = FIND_ALTERNATIVE_TRAINS (us train ke aage/peeche wali trains, timing+fare ke saath) — wahi purani list dobara NAHI. 'trains batao / kaunsi trains chalti hain' = SEARCH_TRAINS. 'seat/berth/AVL/kitni seat khali' = FIND_SEATS ya CHECK_AVAILABILITY. Har TRAIN LIST jawab me timing (departure → arrival + duration) aur fare (jo tool ne diya ho) ZAROOR likho — 'sirf train ke naam' wali list adhoori hai (user ki shikayat: 'trains list krdi without fare and timings'). CLASS AMBIGUOUS HO TO PEHLE POOCHHO (user 2026-09-26: '19028 mein book krdo' par AI ne class nahi poochhi, seedha ek class ka form khol diya, jabki us train me kai classes khuli thi — 'AI khud kyu nhi soch rha, har cheez thodi btani padegi'): agar user booking maange ('book krdo', '<train> mein book') aur usne class NA boli ho aur us train me EK SE ZYADA class khuli ho, to pehle SAAF poochho 'kaunsi class me book karun?' aur [NEXT] me wahi classes chips ke roop me do (jaise '[NEXT] 19028 · 3A (AVL 26 ₹565) => 19028 mein 3A book krdo') — uski class ke bina aage mat badho; ek hi class khuli ho to seedha wahi class bata do (poochhne ki zaroorat nahi).",
     "33. RESOLVE-ONLY RESULT (user 2026-09-28: 'AI kyu nahi sahi answer de rha jo poocho usse'): agar kisi tool ka result sirf itna ho ki train/station resolve ho gaya (jaise SEARCH_TRAIN_BY_NUMBER ka number+naam) aur user ne asli sawaal kuch AUR poochha hai (status/time/seat/fare/route), to AB usi sawaal ka tool call karo — sirf confirm karke mat ruko, aur user ko tool ka data/instruction text mat dikhao. Jo poochha gaya wahi jawab do.",
-    "32. SAHI TOOL CHUNO (user 2026-09-27: 'jaise chatgpt/gemini/manus sahi tools use karte hain sahi as per user query — mera AI bhi ek dum perfectly sahi tools use kare, user query samajhke'): pehle sawaal ka IRADA pehchano, phir usi ka tool lagao (galat tool = galat jawab; tool fail ho to agla sahi tool, ya sach batao — dump nahi):\n   • 'kahan hai / abhi kahan / kitni late / late hai kya' → TRACK_TRAIN\n   • 'stops / route / timetable / kitne baje kahan' (train number ke saath) → GET_TIMETABLE\n   • 'train ki jankari / naam / number / type' → GET_TRAIN_INFO ya SEARCH_TRAIN_BY_NUMBER\n   • 'time par chalti hai / punctual / mostly late' → GET_TRAIN_HISTORY (date poochhne ki zaroorat nahi)\n   • 'seat / berth / AVL / kitni seat khali / RAC / WL' (train+date+class) → CHECK_AVAILABILITY (khaali berth chahiye to FIND_VACANT_SEATS; aadhi yatra ho to FIND_PARTIAL_ROUTE_SEATS)\n   • route-level seat sawaal (do station ke beech 'confirm seat / seat batao / seat find karo / seat hai kya', koi ek train+class fix nahi, PASSENGERS bhi nahi bataye) → **FIND_SEATS** — ye tool pax count maangta NAHI (board pura deta hai). Aise sawaal par JOURNEY_ANALYZE/RANK_JOURNEY_OPTIONS MAT chalao (wo pax maangte hain aur turn wahin atak jaata hai).\n   • 'fare / kiraya / kitne ka' → GET_FARE\n   • 'trains batao / kaunsi trains' → SEARCH_TRAINS · 'plan/best/timings' → JOURNEY_ANALYZE · 'rank/preference' → RANK_JOURNEY_OPTIONS · 'aur options / alternative' → FIND_ALTERNATIVE_TRAINS · 'connecting / ho kar' → FIND_CONNECTIONS\n   • 'PNR' → CHECK_PNR · 'cancelled trains' → GET_CANCELLED_TRAINS · 'station code / kaunsa station' → SEARCH_STATIONS · 'station board / aa rahi trains' → GET_STATION_BOARD · 'coach position' → GET_COACH_POSITION (na mile to sach batao: departure se ~1–2 ghante pehle station board/app par milta hai)\n   • comparison ('X aur Y me fark', 'vs', 'behtar kaun') → DONO ke bare me WEB_SEARCH/KB se laao, phir bullet-wise compare karo (sirf ek cheez ka jawab adhoora hai)\n   • history/records/rules/counts ('sabse lambi', 'kitne zones', 'kab shuru', 'kya rule') → WEB_SEARCH + KB (Wikipedia) — live tools se MAT maango\n   • booking hukm ('book krdo') → pehle class ambiguity clear, phir CHECK_AVAILABILITY/GET_FARE se real data, phir form. (a) agar upar ka koi tool fail ho (provider down) to usi kaam ka doosra tool try karo; dono fail hon to user ko saaf batao kab/kaise milega (app, station board, ya thodi der baad) — 'data nahi mila' dump kabhi nahi; (c) kisi tool ka ✗ (fail) ye matlab NAHI ki list khaali hai — fail par us cheez ka koi claim mat karo (jaise 'koi train cancel nahi hui') — saaf bolo 'list abhi nahi mili' aur (agar ho) kisi train ka alert data do; (b) jo sawaal user ne poochha, uska tool hi pehla — doosre sawaal ka data laa kar jawab mat badlo.",
+    "32. SAHI TOOL CHUNO (user 2026-09-27: 'jaise chatgpt/gemini/manus sahi tools use karte hain sahi as per user query — mera AI bhi ek dum perfectly sahi tools use kare, user query samajhke'): pehle sawaal ka IRADA pehchano, phir usi ka tool lagao (galat tool = galat jawab; tool fail ho to agla sahi tool, ya sach batao — dump nahi):\n   • 'kahan hai / abhi kahan / kitni late / late hai kya' → TRACK_TRAIN\n   • 'stops / route / timetable / kitne baje kahan' (train number ke saath) → GET_TIMETABLE\n   • 'train ki jankari / naam / number / type' → GET_TRAIN_INFO ya SEARCH_TRAIN_BY_NUMBER\n   • 'time par chalti hai / punctual / mostly late' → GET_TRAIN_HISTORY (date poochhne ki zaroorat nahi)\n   • 'seat / berth / AVL / kitni seat khali / RAC / WL' (train+date+class) → CHECK_AVAILABILITY (khaali berth chahiye to FIND_VACANT_SEATS; aadhi yatra ho to FIND_PARTIAL_ROUTE_SEATS)\n   • route-level seat sawaal (do station ke beech 'confirm seat / seat batao / seat find karo / seat hai kya', koi ek train+class fix nahi, PASSENGERS bhi nahi bataye) → **FIND_SEATS** — ye tool pax count maangta NAHI (board pura deta hai). Aise sawaal par JOURNEY_ANALYZE/RANK_JOURNEY_OPTIONS MAT chalao (wo pax maangte hain aur turn wahin atak jaata hai).\n   • 'fare / kiraya / kitne ka' → GET_FARE\n   • 'trains batao / kaunsi trains' → SEARCH_TRAINS · 'plan/best/timings' → JOURNEY_ANALYZE · 'rank/preference' → RANK_JOURNEY_OPTIONS · 'aur options / alternative' → FIND_ALTERNATIVE_TRAINS · 'connecting / ho kar' → FIND_CONNECTIONS\n   • 'PNR' → CHECK_PNR · 'cancelled trains' (kal/parso bhi ho) → GET_CANCELLED_TRAINS (tool aaj ki list deta hai — jawab me 'ye aaj ki list hai' likho, mana mat karo) · 'station code / kaunsa station' → SEARCH_STATIONS · 'station board / LDH board / station par aa rahi trains' → GET_STATION_BOARD (SEARCH_STATIONS se board NAHI banta — station naam ko code me badal kar seedha GET_STATION_BOARD) · 'coach position' → GET_COACH_POSITION (na mile to sach batao: departure se ~1–2 ghante pehle station board/app par milta hai)\n   • comparison ('X aur Y me fark', 'vs', 'behtar kaun') → DONO ke bare me WEB_SEARCH/KB se laao, phir bullet-wise compare karo (sirf ek cheez ka jawab adhoora hai)\n   • history/records/rules/counts ('sabse lambi', 'kitne zones', 'kab shuru', 'kya rule') → WEB_SEARCH + KB (Wikipedia) — live tools se MAT maango\n   • booking hukm ('book krdo') → pehle class ambiguity clear, phir CHECK_AVAILABILITY/GET_FARE se real data, phir form. (a) agar upar ka koi tool fail ho (provider down) to usi kaam ka doosra tool try karo; dono fail hon to user ko saaf batao kab/kaise milega (app, station board, ya thodi der baad) — 'data nahi mila' dump kabhi nahi; (c) kisi tool ka ✗ (fail) ye matlab NAHI ki list khaali hai — fail par us cheez ka koi claim mat karo (jaise 'koi train cancel nahi hui') — saaf bolo 'list abhi nahi mili' aur (agar ho) kisi train ka alert data do; (b) jo sawaal user ne poochha, uska tool hi pehla — doosre sawaal ka data laa kar jawab mat badlo.",
     "36. WAQT KA ZIKR (user 2026-09-29): user ne khud waqt na bataya ho (subah/shaam/raat/\d baje/am-pm/HH:MM) to na koi time-window filter lagao aur na apne jawab me 'subah 04:00-12:00' jaisi window likho — poore din ka board do ('poore din' likho). Window sirf tab jab user ne khud waqt maanga ho; tab bhi window ke bahar wali trains alag line me batao, chhupao mat.",
     "35. PICHHLE JAWAB KA REFERENCE (user 2026-09-29: 'esmein se best kon si rahegi' — ChatGPT samajh gaya, hum nahi): jab naya sawaal pichhli list ko point kare (in me se/inme/isme/inse/among these/2nd wala/in dono/jo bheja tha/usme se) — to ye NAYA sawaal nahi, USI list ka sawaal hai: naya board mat maango, poori list dobara mat likho, sirf poocha gaya jawab do (best → EK best + ek line kyun + runner-up; sasti → sabse sasta; timing → wahi trains ke timings). Fresh board sirf tab jab user naya route/date/train/class de ya 'abhi/live status' maange.",
     "34. SIRF TOOL KA DATA (user 2026-09-29: 'kuch bhi fake mat karo; sabh data real ho'): jawab me koi bhi train number YA train ka naam SIRF usi tool ke result se likho jo tumne is turn me chalaya. Apni memory/general knowledge se koi train number, naam ya uski availability kabhi mat likho — chahe tumhe yaad ho ki wo train us route par chalti hai. Tool result me jitni trains hain, utni hi likhni hain (kam bhi nahi, zyada bhi nahi). Agar lagta hai koi train reh gayi, to koi doosra tool/params try karo — andaza se list nahi lambi karni.",
@@ -2721,6 +2721,49 @@ function groundingCheck(content: string, steps: ToolTraceStep[], evidenceParts: 
   return { grounded: bad.length === 0 && badTokens.length === 0 && badNames.length === 0, evidence: [...bad, ...badTokens, ...badNames].join(",") };
 }
 
+
+/* ── TOOL-PROOF GATE (2026-10-20) ─────────────────────────────────────────────────────────────
+ * Fare / seat / station-board / cancelled / train-fact sawaal ka jawab sirf us family ke SUCCESSFUL
+ * tool ke data se hi aana chahiye. Model agar bina (sahi) tool ke numbers/status likh de to ek
+ * corrective round; phir bhi na mile to honest "verify nahi hua" jawab — andaza kabhi nahi.
+ * Ye per-question patch nahi: sawaal ka irada (regex) → tool family → proof check. */
+export type ProofFamily = "station_board" | "cancelled" | "fare" | "seat" | "train_fact";
+
+export const PROOF_TOOLS: Record<ProofFamily, readonly string[]> = {
+  station_board: ["GET_STATION_BOARD"],
+  cancelled: ["GET_CANCELLED_TRAINS"],
+  fare: ["GET_FARE", "CHECK_AVAILABILITY", "FIND_SEATS", "JOURNEY_ANALYZE", "RANK_JOURNEY_OPTIONS", "FIND_ALTERNATIVE_TRAINS", "SEARCH_TRAINS", "FIND_CONNECTIONS"],
+  seat: ["CHECK_AVAILABILITY", "FIND_SEATS", "FIND_VACANT_SEATS", "FIND_PARTIAL_ROUTE_SEATS", "FIND_ALTERNATIVE_TRAINS", "SEARCH_TRAINS", "JOURNEY_ANALYZE", "RANK_JOURNEY_OPTIONS"],
+  train_fact: ["GET_TRAIN_INFO", "SEARCH_TRAIN_BY_NUMBER", "SEARCH_TRAIN_BY_NAME", "GET_TIMETABLE", "TRACK_TRAIN", "GET_TRAIN_HISTORY"],
+};
+
+/** Sawaal ka irada → kaun si tool family se jawab verify hota hai. Booking/clarify/general → null. */
+export function requiredProofFamily(text: string): ProofFamily | null {
+  const t = String(text ?? "");
+  if (!t.trim()) return null;
+  /* General/knowledge sawaal ("WL kya hota hai", "tatkal kya hai") par live-proof nahi chahiye. */
+  if (knowledgeQuestion(t)) return null;
+  /* Definition sawaal (\"WL ka matlab kya hai\", \"tatkal kya hota hai\") — bina train no./date ke → general, live proof nahi. */
+  if (/\b(matlab|kya\s+hota|kya\s+hoti|kya\s+hai|kya\s+hain|meaning|what\s+is)\b/i.test(t) && !/\b\d{4,5}\b/.test(t) && !/\b(aaj|kal|parso|aj|mere|meri|mera|date|tareekh|ko)\b/i.test(t)) return null;
+  if (/\bcancel\w*/i.test(t) && /\btrains?\b|gaadi|gaddi|gadi/i.test(t) && !/\b(ticket|pnr|refund|booking|book)\b/i.test(t)) return "cancelled";
+  if (/\bstation\s*board\b|\bboard\b|station\s+par\s+(?:kaun|kaunsi|kaunse|kitni|kon)/i.test(t)) return "station_board";
+  if (/\b(seat|seats|berth|availability|avail|avl|vacant|khali|waitlist|wl|rac)\b/i.test(t)) return "seat";
+  if (/\bfare\b|kiraya|kiraye|kitne\s+ka|kitna\s+(?:lagega|lagegi|hai|ka)|\bprice\b/i.test(t)) return "fare";
+  if (/\b\d{5}\b/.test(t) && /\b(kahan|kaha|kahaan|late|running|status|timetable|time\s*table|route|stops?|chalti|chalta|pahunch|reach|timing|samay)\b/i.test(t)) return "train_fact";
+  return null;
+}
+
+/** Jawab me fact-type claim (paise, seat status, time, train number/seat count) hai? */
+export function replyHasFactClaim(reply: string): boolean {
+  const r = String(reply ?? "");
+  return /₹|\bRs\.?\s*\d|\b(AVL|AVAILABLE|WL|RAC|CNF|RLWL|GNWL)\b|\b\d{1,2}:\d{2}\b|\b\d{5}\b|\b\d+\s*seats?\b/i.test(r);
+}
+
+/** Successful tool proof hai? (us family ka koi tool ok = true ke saath chala ho) */
+export function hasToolProof(family: ProofFamily, steps: ToolTraceStep[]): boolean {
+  const allowed = PROOF_TOOLS[family];
+  return steps.some((s) => s.ok && allowed.includes(s.tool));
+}
 
 /* Round-16o (prod screenshot: "India ki sabse longest route ki train?" /
  * "Vivek express kahan se kahan chalti hai?" → "provider se nahi mil pa
@@ -3341,6 +3384,8 @@ export async function runAgenticTurn(input: {
   let repaired = false;
   /* Round-54b: live-data sawaal par bina tool jawab → ek corrective round. */
   let zeroToolRepaired = false;
+  /* Tool-proof gate: family-specific corrective round (ek hi baar). */
+  let proofRepaired = false;
   /* Round-34 (user: "agla kadam na humesha AI hi chunne sabh sochke… agla kadam fallback pe verified
    * data se mat aaye"): agar model ne [NEXT] nahi di par is turn me kaam ka tool data hai, to EK
    * chhoti repair call se model se hi agla kadam maanga jaata hai — reply wahi purana rehta hai. */
@@ -4194,6 +4239,44 @@ export async function runAgenticTurn(input: {
           "SYSTEM CHECK: ye LIVE data ka sawaal hai aur tumne abhi koi tool call NAHI kiya. Bina tool ke seat/fare/status/PNR/time/board ka jawab dena MANA hai — aur 'mere paas access nahi hai' likhna bilkul galat hai (ye saare tools tumhare paas hain). Abhi SAHI tool call karo: live status → TRACK_TRAIN · seat/availability → CHECK_AVAILABILITY ya FIND_SEATS · fare → GET_FARE · PNR → CHECK_PNR · timetable/route → GET_TIMETABLE · station board → GET_STATION_BOARD · cancelled trains → GET_CANCELLED_TRAINS — phir usi tool ke data se jawab likho.",
       });
       continue;
+    }
+
+    /* ── TOOL-PROOF GATE: fare/seat/station-board/cancelled/train-fact ka jawab bina successful tool ke
+     * (ya galat tool se) nahi jaana chahiye. Pehle ek corrective round; phir bhi proof nahi → honest jawab. */
+    const proofFam = requiredProofFamily(String(input.text ?? ""));
+    const proofIsClarify = /\?/.test(clean) && !/₹|\b(AVL|AVAILABLE|WL|RAC|CNF)\b|\b\d{1,2}:\d{2}\b/i.test(clean);
+    const proofMissing = Boolean(proofFam) && !knowledgeQuestion(String(input.text ?? "")) && !legitClarify && !proofIsClarify && replyHasFactClaim(clean) && !hasToolProof(proofFam!, steps);
+    if (proofMissing && !proofRepaired && step < MAX_STEPS && timeLeft() > 8000) {
+      proofRepaired = true;
+      const famLabel: Record<ProofFamily, string> = {
+        station_board: "station board",
+        cancelled: "cancelled trains",
+        fare: "fare",
+        seat: "seat/availability",
+        train_fact: "train ki jankari",
+      };
+      messages.push({ role: "assistant", content });
+      messages.push({
+        role: "user",
+        content:
+          `SYSTEM CHECK (tool-proof): ye ${famLabel[proofFam!]} ka sawaal hai — iska jawab SIRF in tools se verify hota hai: ${PROOF_TOOLS[proofFam!].join(", ")}. ` +
+          "Tumne in me se koi tool successful chalaye bina hi numbers/status/naam likh diye — wo andaza hai aur MANA hai. " +
+          "Abhi sahi tool call karo (user ka sawaal hi tool ka input hai); tool result ke baad hi jawab do. Agar tool fail ho to saaf bolo ki data abhi nahi mila.",
+      });
+      continue;
+    }
+    if (proofMissing) {
+      /* Tool chale par fail hue → wahi purana provider-fail jawab (deterministicSummary: "provider se nahi mil…"),
+       * kuch bhi nahi chala → honest generic. Dono me koi claim nahi. */
+      const failSummary = steps.length ? deterministicSummary(steps) : null;
+      return {
+        ok: false,
+        reply: failSummary || "Is sawaal ka verified data abhi mere paas nahi hai, isliye main koi number ya status nahi bata raha. IRCTC/NTES app par check kar lijiye, ya thodi der baad phir poochhiye.",
+        grounded: false,
+        steps,
+        modelUsed, modelFallbacks, latencyMs: Date.now() - startedAll,
+        failureReason: "tool_proof_missing",
+      };
     }
 
     // System prompt (date map, resolver line, known context) server-generated hai —

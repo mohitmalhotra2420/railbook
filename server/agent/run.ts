@@ -1491,7 +1491,7 @@ export function replyAdequateFor45(kind: AnswerKind45, reply: string, question: 
   const r = String(reply ?? "").trim();
   if (!r) return false;
   if (isEvasiveReply(r)) return false;
-  if (kind === "seat") return /availab|rac|waitlist|\bwl\b|₹|rs\.?\s*\d|n\/a/i.test(r);
+  if (kind === "seat") return /availab|\bavl\b|\bcnf\b|\brac\b|waitlist|\bwl\b|\b(?:rlwl|gnwl|tqwl|pqwl|rqwl)\b|₹|rs\.?\s*\d|n\/a|\d+\s*seats?/i.test(r);
   /* Round-55 (pick): chunne wale sawaal ka jawab = EK winner (naam/number) + "kyun" — poora dump nahi. */
   if (kind === "pick") {
     /* R56b: pehle gate sirf "best"-jaise shabd maangta tha — "inme se 2nd wala kaunsa hai" / "sasti kaunsi"
@@ -2791,8 +2791,9 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
       ? `${ctx.origin!.name ?? ctx.origin!.code} (${ctx.origin!.code}) se ${ctx.destination!.name ?? ctx.destination!.code} (${ctx.destination!.code}) ${ctx.date} ko ${ctx.passengers} passengers ke liye trains aur seat availability dhundo`
       : req.text;
     try {
-      const turn = await runAgenticTurn({
-        text: agenticText,
+      const runTurn = (text: string) =>
+        runAgenticTurn({
+          text,
         now: req.now,
         history: req.history,
         capture,
@@ -2811,7 +2812,9 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
           destinationAmbiguous: !ctx.destination ? (ctx.pendingDestinationChoice ?? det.unresolvedTo ?? null) : null,
           originAmbiguous: !ctx.origin ? (ctx.pendingOriginChoice ?? det.unresolvedFrom ?? null) : null,
         },
-      });
+        });
+      const startedTurnMs = Date.now();
+      let turn = await runTurn(agenticText);
       // Station-pick already resolve ho chuka hai (server-verified) par model
       // wahi station-options sawaal DOBARA pooch raha hai → model ka reply
       // discard, deterministic path real search ke saath jawab dega.
@@ -2860,6 +2863,20 @@ export async function runAgent(req: AgentRequest): Promise<AgentResponse> {
         const kind45: AnswerKind45 | null = isPickFollowup(String(req.text ?? ""), req.history)
           ? "pick"
           : answerKind45(String(req.text ?? ""));
+        if (kind45 && !replyAdequateFor45(kind45, String(turn.reply), String(req.text ?? ""))) {
+          /* LLM-first: deterministic rescue se pehle model ko EK corrective round do (tool data se
+           * dobara jawab). Time budget bacha ho tabhi — warna seedha rescue (purani behaviour). */
+          if (Date.now() - startedTurnMs < 50000) {
+            const retry45 = await runTurn(
+              `${agenticText}\n\n(System note: pichhla jawab is sawaal ka adequate jawab nahi tha. Tools se asli data laao ` +
+                `aur seat/fare/status ke saath (AVL/WL/RAC/₹ jaisa jo data ho) seedha jawab do; andaza mat karo.)`,
+            ).catch(() => null);
+            if (retry45 && retry45.reply && replyAdequateFor45(kind45, String(retry45.reply), String(req.text ?? "")) && !isEvasiveReply(String(retry45.reply))) {
+              console.log(JSON.stringify({ adequacyLlmRetry: kind45, ok: true }));
+              turn = retry45;
+            }
+          }
+        }
         if (kind45 && !replyAdequateFor45(kind45, String(turn.reply), String(req.text ?? ""))) {
           const resc45 = await deterministicRescue45(kind45, req, seeded);
           if (resc45) {

@@ -17,6 +17,8 @@ vi.mock("../server/railway/router.js", () => ({
   routedClassBoard: (...a: unknown[]) => classBoard(...a),
   routedStationSearch: (...a: unknown[]) => stationSearch(...a),
   routedLiveStatus: (...a: unknown[]) => liveStatus(...a),
+  /* TRACK_TRAIN pehle run-dates maangta hai — fixture me ek running run dena (tool ka data-path chale). */
+  routedLiveDates: async () => [{ date: "2026-09-29", runState: "running" }],
   routedTrainInfo: async () => ({ info: { trainName: "GURUMUKHI SF EXPRESS" } }),
   enrichTrainsFreshness: async () => 0,
 }));
@@ -40,7 +42,7 @@ describe("Round-54b · live sawaal par bina tool jawab → AI khud sudhare", () 
     process.env.NVIDIA_API_KEY = "nvapi-r54b";
     process.env.NVIDIA_MODEL = "openai/gpt-oss-20b";
     delete process.env.NVIDIA_FALLBACK_MODEL;
-    liveStatus.mockResolvedValue({ status: "Running late by 25 min", delayMinutes: 25, provider: "mock", source: "mock" });
+    liveStatus.mockResolvedValue({ live: true, status: "Running late by 25 min", delayMinutes: 25, provider: "mock", source: "mock" });
 
     const seen: string[] = [];
     let call = 0;
