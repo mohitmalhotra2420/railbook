@@ -39,7 +39,7 @@ import { runAutonomousAgent } from "./agent/autonomous.js";
 import { parseSeatIntent } from "./understand/seatIntent.js";
 import { missingSeatLines, seatFilterFor, seatSummaryLine, type SeatFilterResult } from "./agent/seatFilter.js";
 import { filterTrainsServingSegment, routeDropNote } from "./agent/routeSegment.js";
-import { reconcileNextActions } from "./agent/agentic.js";
+import { activeModelChain, reconcileNextActions } from "./agent/agentic.js";
 import { JOURNEY_CONFIG, findAlternativeTrains, findConnections, findPartialRouteSeats, findVacantSeats, planJourney } from "./journey/engine.js";
 import { pickTrains } from "./journey/trainpicker.js";
 import { publicCapabilityPayload } from "./providers/capabilities.js";
@@ -138,8 +138,12 @@ export function createApp() {
       commit: (process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT || "").slice(0, 7) || null,
       service: process.env.RENDER_SERVICE_NAME ?? null,
       startedAt: SERVER_STARTED_AT,
-      primaryModel: process.env.NVIDIA_MODEL ?? null,
-      fallbackModel: process.env.NVIDIA_FALLBACK_MODEL ?? null,
+      /* Ab wahi chain jo agentic orchestrator real me chalata hai (AI_LLM_MODELS override ya NVIDIA env).
+       * Pehle NVIDIA_MODEL env padha jaata tha — override active hone par wo stale (muse) value dikhati thi. */
+      provider: activeModelChain().provider,
+      primaryModel: activeModelChain().chain[0] ?? null,
+      fallbackModel: activeModelChain().chain[1] ?? null,
+      modelChain: activeModelChain().chain,
       node: process.version,
     });
   });

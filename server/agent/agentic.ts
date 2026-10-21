@@ -3009,6 +3009,12 @@ export function _clearModelHealth(): void {
   modelHealth.clear();
 }
 
+/** /api/version ke liye: jo chain SACH me chal rahi hai (AI_LLM_MODELS override ya NVIDIA env). Key kabhi nahi. */
+export function activeModelChain(): { provider: string | null; chain: string[] } {
+  const t = agenticTransport();
+  return t ? { provider: t.provider, chain: [...t.models] } : { provider: null, chain: [] };
+}
+
 function agenticTransport(): AgenticTransport | null {
   if (env.agenticProvider === "hf") {
   if (!env.hfToken || !env.hfModel) return null;
