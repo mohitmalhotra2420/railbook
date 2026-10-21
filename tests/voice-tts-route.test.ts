@@ -93,7 +93,7 @@ describe("maujooda endpoints wahi (additive change ka proof)", () => {
   it("wallet + trains + version jaise pehle chalte hain", async () => {
     expect((await request(app).get("/api/wallet")).status).toBe(200);
     expect((await request(app).get("/api/version")).status).toBe(200);
-    const trains = await request(app).get("/api/trains").query({ from: "ASR", to: "NDLS", date: "2026-10-20" });
+    const trains = await request(app).get("/api/trains").query({ from: "ASR", to: "NDLS", date: new Date(Date.now() + 5.5 * 3600 * 1000 + 86400000).toISOString().slice(0, 10) /* kal (IST) — hardcoded past date 400 deta tha */ });
     expect(trains.status).toBe(200);
     expect(Array.isArray(trains.body.trains)).toBe(true);
   });
